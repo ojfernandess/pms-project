@@ -1,0 +1,2396 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { 
+  Loader2, 
+  CheckCircle2, 
+  Mail, 
+  Calendar, 
+  MapPin, 
+  Key, 
+  Navigation, 
+  Home, 
+  LogOut, 
+  History, 
+  ArrowRight, 
+  User,
+  Clock,
+  Bed,
+  ChevronRight,
+  MessageCircle,
+  Settings,
+  Bell,
+  XCircle,
+  Ban,
+  AlertCircle,
+  CreditCard,
+  UserCheck,
+  UserX,
+  Lock,
+  FileText,
+  Phone
+} from "lucide-react";
+import { format, parseISO, isAfter, startOfDay } from "date-fns";
+import { useGuestAccount } from "@/hooks/useGuestAccount";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { GuestMenu } from "@/components/webcheckin/GuestMenu";
+import { GuestStayHistoryDialog } from "@/components/webcheckin/GuestStayHistoryDialog";
+import { GuestProfileDialog } from "@/components/webcheckin/GuestProfileDialog";
+import { MaintenanceTicketDialog } from "@/components/webcheckin/MaintenanceTicketDialog";
+import { PoliciesViewDialog } from "@/components/webcheckin/PoliciesViewDialog";
+import { FiscalDocumentRequest } from "@/components/webcheckin/FiscalDocumentRequest";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
+import { LanguageSelector } from "@/components/layout/LanguageSelector";
+import { useTranslation } from "react-i18next";
+import { useDateLocale } from "@/hooks/useDateLocale";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
+
+// Função helper para obter informações do status da reserva
+function getReservationStatusInfo(status: string | null | undefined, t: any) {
+  if (!status || typeof status !== 'string') {
+    return {
+      label: t("guestDashboard.status.unknown"),
+      color: "bg-slate-500",
+      textColor: "text-slate-700",
+      bgColor: "bg-slate-50",
+      borderColor: "border-slate-200",
+      icon: AlertCircle,
+      description: t("guestDashboard.status.unknownDescription")
+    };
+  }
+
+  const statusLower = status.toLowerCase().trim();
+  
+  switch (statusLower) {
+    case "pending":
+      return {
+        label: t("guestDashboard.status.pending"),
+        color: "bg-yellow-500",
+        textColor: "text-yellow-700",
+        bgColor: "bg-yellow-50",
+        borderColor: "border-yellow-200",
+        icon: Clock,
+        description: t("guestDashboard.status.pendingDescription")
+      };
+    case "unpaid":
+      return {
+        label: t("guestDashboard.status.unpaid"),
+        color: "bg-orange-500",
+        textColor: "text-orange-700",
+        bgColor: "bg-orange-50",
+        borderColor: "border-orange-200",
+        icon: CreditCard,
+        description: t("guestDashboard.status.unpaidDescription")
+      };
+    case "confirmed":
+      return {
+        label: t("guestDashboard.status.confirmed"),
+        color: "bg-blue-500",
+        textColor: "text-blue-700",
+        bgColor: "bg-blue-50",
+        borderColor: "border-blue-200",
+        icon: CheckCircle2,
+        description: t("guestDashboard.status.confirmedDescription")
+      };
+    case "checkedin":
+    case "checked_in":
+      return {
+        label: t("guestDashboard.status.checkedin"),
+        color: "bg-green-500",
+        textColor: "text-green-700",
+        bgColor: "bg-green-50",
+        borderColor: "border-green-200",
+        icon: UserCheck,
+        description: t("guestDashboard.status.checkedinDescription")
+      };
+    case "checkedout":
+    case "checked_out":
+      return {
+        label: t("guestDashboard.status.checkedout"),
+        color: "bg-indigo-500",
+        textColor: "text-indigo-700",
+        bgColor: "bg-indigo-50",
+        borderColor: "border-indigo-200",
+        icon: LogOut,
+        description: t("guestDashboard.status.checkedoutDescription")
+      };
+    case "cancelled":
+      return {
+        label: t("guestDashboard.status.cancelled"),
+        color: "bg-red-500",
+        textColor: "text-red-700",
+        bgColor: "bg-red-50",
+        borderColor: "border-red-200",
+        icon: XCircle,
+        description: t("guestDashboard.status.cancelledDescription")
+      };
+    case "noshow":
+      return {
+        label: t("guestDashboard.status.noshow"),
+        color: "bg-gray-500",
+        textColor: "text-gray-700",
+        bgColor: "bg-gray-50",
+        borderColor: "border-gray-200",
+        icon: UserX,
+        description: t("guestDashboard.status.noshowDescription")
+      };
+    case "blocked":
+      return {
+        label: t("guestDashboard.status.blocked"),
+        color: "bg-purple-500",
+        textColor: "text-purple-700",
+        bgColor: "bg-purple-50",
+        borderColor: "border-purple-200",
+        icon: Lock,
+        description: t("guestDashboard.status.blockedDescription")
+      };
+    case "preregistration":
+      return {
+        label: t("guestDashboard.status.preregistration"),
+        color: "bg-cyan-500",
+        textColor: "text-cyan-700",
+        bgColor: "bg-cyan-50",
+        borderColor: "border-cyan-200",
+        icon: User,
+        description: t("guestDashboard.status.preregistrationDescription")
+      };
+    default:
+      return {
+        label: status,
+        color: "bg-slate-500",
+        textColor: "text-slate-700",
+        bgColor: "bg-slate-50",
+        borderColor: "border-slate-200",
+        icon: AlertCircle,
+        description: `${t("common.status")}: ${status}`
+      };
+  }
+}
+
+// Componente ActionCard moderno
+function ActionCard({ 
+  icon, 
+  title, 
+  description, 
+  color, 
+  onClick 
+}: { 
+  icon: React.ReactNode; 
+  title: string; 
+  description: string; 
+  color: string;
+  onClick: () => void;
+}) {
+  return (
+    <button 
+      onClick={onClick}
+      className="group bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 text-left w-full"
+    >
+      <div className={`w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br ${color} rounded-xl flex items-center justify-center mb-3 sm:mb-4 group-hover:scale-110 transition-transform`}>
+        <div className="text-white">
+          {icon}
+        </div>
+      </div>
+      <h3 className="font-bold text-slate-800 mb-1 text-base sm:text-lg">{title}</h3>
+      <p className="text-xs sm:text-sm text-slate-500">{description}</p>
+      <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 mt-2 group-hover:translate-x-1 transition-transform" />
+    </button>
+  );
+}
+
+// Componente ServiceItem moderno
+function ServiceItem({ 
+  icon, 
+  title, 
+  description, 
+  onClick 
+}: { 
+  icon: React.ReactNode; 
+  title: string; 
+  description: string;
+  onClick?: () => void;
+}) {
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log("🔍 ServiceItem onClick chamado para:", title);
+    if (onClick) {
+      onClick();
+    }
+  };
+
+  return (
+    <div 
+      onClick={handleClick}
+      className="flex items-center gap-4 p-4 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer group"
+    >
+      <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center group-hover:bg-blue-100 transition-colors">
+        <div className="text-slate-600 group-hover:text-blue-600 transition-colors">
+          {icon}
+        </div>
+      </div>
+      <div className="flex-1">
+        <h4 className="font-semibold text-slate-800">{title}</h4>
+        <p className="text-sm text-slate-500">{description}</p>
+      </div>
+      <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
+    </div>
+  );
+}
+
+export default function GuestDashboard() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  const locale = useDateLocale();
+  const { getCurrentSession, logout: guestLogout, getStayHistory, getCurrentAccount } = useGuestAccount();
+  const session = getCurrentSession();
+  const accountId = session.accountId;
+  const [showHistoryDialog, setShowHistoryDialog] = useState(false);
+  const [showCurrentReservation, setShowCurrentReservation] = useState(false);
+  const [showProfileDialog, setShowProfileDialog] = useState(false);
+  const [showMaintenanceDialog, setShowMaintenanceDialog] = useState(false);
+  const [showReservationSelector, setShowReservationSelector] = useState(false);
+  const [selectedReservationForTicket, setSelectedReservationForTicket] = useState<any>(null);
+  const [showPoliciesDialog, setShowPoliciesDialog] = useState(false);
+  const [showAllCancelledReservations, setShowAllCancelledReservations] = useState(false);
+  const [selectedCancelledReservation, setSelectedCancelledReservation] = useState<any>(null);
+  const [showFiscalDocumentDialog, setShowFiscalDocumentDialog] = useState(false);
+  const [selectedReservationForFiscal, setSelectedReservationForFiscal] = useState<any>(null);
+  const [showFiscalReservationSelector, setShowFiscalReservationSelector] = useState(false);
+  
+  // Debug: monitorar mudanças no estado do diálogo fiscal
+  useEffect(() => {
+    console.log("🔍 Estado showFiscalReservationSelector mudou:", showFiscalReservationSelector);
+  }, [showFiscalReservationSelector]);
+  
+  // Buscar dados da conta do hóspede
+  const { data: accountData } = getCurrentAccount(accountId || "");
+  
+  // Buscar logo do PMS (site_settings)
+  const { settings: siteSettings } = useSiteSettings();
+
+  // Redirecionar se não estiver autenticado
+  useEffect(() => {
+    if (!accountId) {
+      navigate("/web-checkin");
+    }
+  }, [accountId, navigate]);
+
+  // Buscar histórico de estadas (com atualização automática)
+  const { data: stayHistory, isLoading: isLoadingHistory } = getStayHistory(accountId || "");
+  
+  // Invalidar queries periodicamente para atualizar status das reservas e garantir que sempre mostre a mais próxima
+  useEffect(() => {
+    if (!accountId) return;
+    
+    const interval = setInterval(() => {
+      // Invalidar queries para forçar atualização e buscar a reserva mais próxima
+      queryClient.invalidateQueries({ queryKey: ["current_guest_reservation", accountId] });
+      queryClient.invalidateQueries({ queryKey: ["all_guest_reservations", accountId] });
+      queryClient.invalidateQueries({ queryKey: ["current_web_checkin"] });
+    }, 30000); // A cada 30 segundos
+
+    return () => clearInterval(interval);
+  }, [accountId, queryClient]);
+
+  // Buscar todas as reservas do hóspede para seleção
+  const { data: allReservations, isLoading: isLoadingAllReservations } = useQuery({
+    queryKey: ["all_guest_reservations", accountId],
+    refetchInterval: 30000, // Refetch a cada 30 segundos para atualizar status
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      if (!accountId) return [];
+
+      // Buscar histórico para obter todas as reservation_ids
+      const { data: historyList } = await (supabase as any)
+        .from("guest_stay_history")
+        .select("reservation_id, checkin_date, checkout_date, status")
+        .eq("guest_account_id", accountId)
+        .order("checkin_date", { ascending: false });
+
+      if (!historyList || historyList.length === 0) return [];
+
+      // Buscar dados completos de cada reserva
+      const reservations = await Promise.all(
+        historyList.map(async (history: any) => {
+          const { data: reservation, error } = await supabase
+            .from("reservations")
+            .select(`
+              *,
+              rooms(room_number, name),
+              room_categories(name),
+              establishment:establishments(name)
+            `)
+            .eq("id", history.reservation_id)
+            .maybeSingle();
+
+          if (error || !reservation) return null;
+
+          return {
+            ...reservation,
+            history_status: history.status,
+            history_checkin_date: history.checkin_date,
+            history_checkout_date: history.checkout_date,
+          };
+        })
+      );
+
+      return reservations.filter((r) => r !== null);
+    },
+    enabled: !!accountId,
+  });
+
+  // Buscar reserva atual (com data de check-in mais próxima) - EXCLUINDO CANCELADAS
+  const { data: currentReservation, isLoading: isLoadingReservation } = useQuery({
+    queryKey: ["current_guest_reservation", accountId],
+    refetchInterval: 30000, // Refetch a cada 30 segundos para atualizar status
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      if (!accountId) return null;
+
+      // Buscar histórico para obter todas as reservation_ids
+      const { data: historyList } = await (supabase as any)
+        .from("guest_stay_history")
+        .select("reservation_id, checkin_date, checkout_date")
+        .eq("guest_account_id", accountId)
+        .order("checkin_date", { ascending: true }); // Ordenar por checkin_date ascendente para pegar a mais próxima
+
+      if (!historyList || historyList.length === 0) return null;
+
+      // Filtrar reservas que ainda não passaram do checkout e ordenar por data de check-in mais próxima
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      // Buscar todas as reservas válidas (que ainda não passaram do checkout e NÃO estão canceladas)
+      const validReservations = [];
+      
+      for (const history of historyList) {
+        const checkoutDate = new Date(history.checkout_date);
+        checkoutDate.setHours(0, 0, 0, 0);
+        
+        // Incluir reservas que ainda não passaram do checkout
+        if (checkoutDate >= today) {
+          // Buscar dados básicos da reserva primeiro (sem relacionamentos complexos)
+          const { data: reservation, error } = await supabase
+            .from("reservations")
+            .select(`
+              *,
+              rooms(room_number, name, fixed_password, authentication_type),
+              room_categories(name),
+              establishment:establishments(name)
+            `)
+            .eq("id", history.reservation_id)
+            .maybeSingle();
+
+          if (error) {
+            console.error("Erro ao buscar reserva:", error);
+            continue;
+          }
+          
+          if (!reservation) continue;
+
+          // FILTRAR RESERVAS CANCELADAS - não incluir na lista de reservas atuais
+          const reservationStatus = (reservation.status || "").toLowerCase();
+          if (reservationStatus === "cancelled") {
+            continue; // Pular reservas canceladas
+          }
+
+          // Buscar dados do hóspede separadamente
+          let guest = null;
+          if ((reservation as any).guest_id) {
+            const { data: guestData } = await supabase
+              .from("clients")
+              .select("full_name, email, phone")
+              .eq("id", (reservation as any).guest_id)
+              .maybeSingle();
+            guest = guestData;
+          }
+
+          // Buscar dados do responsável financeiro separadamente
+          let financialResponsible = null;
+          if (reservation.client_id) {
+            const { data: financialData } = await supabase
+              .from("clients")
+              .select("full_name, email, phone")
+              .eq("id", reservation.client_id)
+              .maybeSingle();
+            financialResponsible = financialData;
+          }
+
+          // Buscar dados do building separadamente (se category_id existir e tiver building_id)
+          let building = null;
+          if (reservation.category_id) {
+            const { data: categoryData } = await (supabase as any)
+              .from("room_categories")
+              .select("building_id")
+              .eq("id", reservation.category_id)
+              .maybeSingle();
+            
+            if ((categoryData as any)?.building_id) {
+              const { data: buildingData } = await (supabase as any)
+                .from("buildings")
+                .select("street, city, state, number, neighborhood, zip_code, name")
+                .eq("id", (categoryData as any).building_id)
+                .maybeSingle();
+              building = buildingData;
+            }
+          }
+
+          // Buscar endereço do estabelecimento de hotel_settings
+          let establishmentAddress = null;
+          if ((reservation as any).establishment_id) {
+            const { data: hotelSettings, error: hotelSettingsError } = await (supabase as any)
+              .from("hotel_settings")
+              .select("street, number, neighborhood, city, state, zip_code")
+              .eq("establishment_id", (reservation as any).establishment_id)
+              .maybeSingle();
+            
+            if (hotelSettingsError) {
+              console.warn("Erro ao buscar hotel_settings:", hotelSettingsError);
+            } else if (hotelSettings) {
+              establishmentAddress = {
+                ...(reservation.establishment as any),
+                ...hotelSettings,
+              };
+            }
+          }
+
+          // Garantir que usamos as datas da própria reserva (não do histórico)
+          // Se a reserva não tiver datas, usar as do histórico como fallback
+          const reservationCheckinDate = reservation.checkin_date || history.checkin_date;
+          const reservationCheckoutDate = reservation.checkout_date || history.checkout_date;
+
+          validReservations.push({
+            ...reservation,
+            checkin_date: reservationCheckinDate, // Garantir que sempre temos a data correta
+            checkout_date: reservationCheckoutDate, // Garantir que sempre temos a data correta
+            status: reservationStatus, // Garantir que sempre temos o status correto da reserva
+            guest,
+            financial_responsible: financialResponsible,
+            building,
+            establishment: establishmentAddress || reservation.establishment,
+            checkin_date_for_sort: reservationCheckinDate, // Usar para ordenação
+          } as any);
+        }
+      }
+
+      // Se não houver reservas válidas, retornar null
+      if (validReservations.length === 0) return null;
+
+      // Ordenar por data de check-in (mais próxima primeiro)
+      validReservations.sort((a, b) => {
+        const dateA = new Date(a.checkin_date_for_sort || a.checkin_date);
+        const dateB = new Date(b.checkin_date_for_sort || b.checkin_date);
+        return dateA.getTime() - dateB.getTime(); // Ascendente: mais próxima primeiro
+      });
+
+      // Retornar a reserva com check-in mais próximo
+      const closestReservation = validReservations[0];
+      // Remover campo auxiliar antes de retornar
+      delete closestReservation.checkin_date_for_sort;
+      
+      // Garantir que as datas estão presentes e formatadas corretamente
+      if (!closestReservation.checkin_date || !closestReservation.checkout_date) {
+        console.warn("Reserva sem datas de check-in/check-out:", closestReservation);
+      }
+      
+      return closestReservation;
+    },
+    enabled: !!accountId,
+  });
+
+  // Buscar reservas canceladas separadamente
+  const { data: cancelledReservations, isLoading: isLoadingCancelled } = useQuery({
+    queryKey: ["cancelled_guest_reservations", accountId],
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      if (!accountId) return [];
+
+      // Buscar histórico para obter todas as reservation_ids
+      const { data: historyList } = await (supabase as any)
+        .from("guest_stay_history")
+        .select("reservation_id, checkin_date, checkout_date, status")
+        .eq("guest_account_id", accountId)
+        .order("checkin_date", { ascending: false }); // Mais recentes primeiro
+
+      if (!historyList || historyList.length === 0) return [];
+
+      // Buscar apenas reservas canceladas
+      const cancelledReservations = [];
+      
+      for (const history of historyList) {
+        const { data: reservation, error } = await supabase
+          .from("reservations")
+          .select(`
+            *,
+            rooms(room_number, name),
+            room_categories(name),
+            establishment:establishments(name)
+          `)
+          .eq("id", history.reservation_id)
+          .maybeSingle();
+
+        if (error || !reservation) continue;
+
+        // Incluir apenas reservas canceladas
+        const reservationStatus = (reservation.status || "").toLowerCase();
+        if (reservationStatus === "cancelled") {
+          // Buscar dados de contato do hotel_settings
+          let contactInfo = {
+            phone: null as string | null,
+            whatsapp: null as string | null,
+          };
+
+          if ((reservation as any).establishment_id) {
+            const { data: hotelSettings } = await (supabase as any)
+              .from("hotel_settings")
+              .select("phone, whatsapp, phone_ddi, phone_number, whatsapp_ddi, whatsapp_number")
+              .eq("establishment_id", (reservation as any).establishment_id)
+              .maybeSingle();
+
+            if (hotelSettings) {
+              // Montar telefone: priorizar campo único 'phone', senão montar dos campos antigos
+              contactInfo.phone = hotelSettings.phone || 
+                (hotelSettings.phone_ddi && hotelSettings.phone_number 
+                  ? `${hotelSettings.phone_ddi} ${hotelSettings.phone_number}`.trim()
+                  : hotelSettings.phone_number || null);
+              
+              // Montar WhatsApp: priorizar campo único 'whatsapp', senão montar dos campos antigos
+              contactInfo.whatsapp = hotelSettings.whatsapp || 
+                (hotelSettings.whatsapp_ddi && hotelSettings.whatsapp_number 
+                  ? `${hotelSettings.whatsapp_ddi}${hotelSettings.whatsapp_number}`.trim()
+                  : hotelSettings.whatsapp_number || null);
+            }
+          }
+
+          cancelledReservations.push({
+            ...reservation,
+            checkin_date: reservation.checkin_date || history.checkin_date,
+            checkout_date: reservation.checkout_date || history.checkout_date,
+            history_status: history.status,
+            contact_phone: contactInfo.phone,
+            contact_whatsapp: contactInfo.whatsapp,
+          });
+        }
+      }
+
+      // Ordenar por data de check-in (mais recente primeiro)
+      cancelledReservations.sort((a, b) => {
+        const dateA = new Date(a.checkin_date);
+        const dateB = new Date(b.checkin_date);
+        return dateB.getTime() - dateA.getTime(); // Descendente: mais recente primeiro
+      });
+
+      return cancelledReservations;
+    },
+    enabled: !!accountId,
+  });
+
+  // Buscar web_checkin para obter token e locator
+  const { data: webCheckin, isLoading: isLoadingWebCheckin } = useQuery({
+    queryKey: ["current_web_checkin", currentReservation?.id],
+    queryFn: async () => {
+      if (!currentReservation?.id) return null;
+
+      const { data, error } = await (supabase as any)
+        .from("web_checkin")
+        .select(`
+          *,
+          reservation:reservations(*),
+          establishment:establishments(*)
+        `)
+        .eq("reservation_id", currentReservation.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        // Se não encontrar web_checkin, não é erro - apenas retorna null
+        if (error.code === 'PGRST116') {
+          return null;
+        }
+        throw error;
+      }
+      return data;
+    },
+    enabled: !!currentReservation?.id,
+    retry: false, // Não tentar novamente se não encontrar
+  });
+
+  // Buscar estabelecimento
+  const establishment = currentReservation?.establishment;
+
+  const handleLogout = () => {
+    guestLogout();
+    navigate("/web-checkin");
+  };
+
+  // Calcular número de noites
+  const calculateNights = (checkin: string, checkout: string) => {
+    if (!checkin || !checkout) return 0;
+    const checkinDate = new Date(checkin);
+    const checkoutDate = new Date(checkout);
+    const diffTime = Math.abs(checkoutDate.getTime() - checkinDate.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
+  if (!accountId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+        <Card className="p-8 max-w-md w-full">
+          <div className="text-center">
+            <p className="text-slate-600 mb-4">{t("guestDashboard.auth.needAuth")}</p>
+            <Button onClick={() => navigate("/web-checkin")}>{t("guestDashboard.auth.goToCheckin")}</Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (isLoadingReservation || isLoadingHistory || isLoadingCancelled) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
+          <p className="text-slate-600">{t("guestDashboard.auth.loadingInfo")}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Se não quiser mostrar a reserva atual, mostrar dashboard geral
+  if (!showCurrentReservation) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+        {/* Header Premium */}
+        <header className="bg-white/80 backdrop-blur-lg border-b border-slate-200/50 sticky top-0 z-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2 sm:gap-3">
+                  {siteSettings?.logo_url ? (
+                    <img 
+                      src={siteSettings.logo_url} 
+                      alt="Logo" 
+                    className="h-16 w-16 sm:h-20 sm:w-20 object-contain flex-shrink-0"
+                    />
+                  ) : (
+                  <Home className="w-6 h-6 sm:w-7 sm:h-7 text-slate-600" />
+                  )}
+            <div>
+                  <h1 className="text-lg sm:text-xl font-bold text-slate-800">{t("guestDashboard.hospitality")}</h1>
+                  <p className="text-xs text-slate-500 hidden sm:block">{t("guestDashboard.guestPortal")}</p>
+            </div>
+          </div>
+
+              <div className="flex items-center gap-2 sm:gap-4">
+                <LanguageSelector />
+                <button 
+                  onClick={handleLogout}
+                  className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 hover:bg-slate-100 rounded-full transition-colors"
+                >
+                  <LogOut className="w-4 h-4 text-slate-600" />
+                  <span className="text-xs sm:text-sm font-medium text-slate-700 hidden sm:inline">{t("guestDashboard.logout")}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          {/* Welcome Section */}
+          <div className="mb-8">
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 mb-2">
+              {t("guestDashboard.welcome", { name: (accountData as any)?.full_name?.split(" ")[0] || t("guestDashboard.guest") })}
+            </h2>
+            <p className="text-slate-600">{t("guestDashboard.welcomeBack")}</p>
+          </div>
+
+          {/* Current Reservation Card - Destaque */}
+            {currentReservation ? (
+            (() => {
+              try {
+                const statusInfo = getReservationStatusInfo(currentReservation?.status, t);
+                const StatusIcon = statusInfo?.icon || AlertCircle;
+                const statusLower = currentReservation?.status?.toLowerCase() || "";
+                const isCancelled = statusLower === "cancelled";
+                const isCheckedOut = statusLower === "checkedout" || statusLower === "checked_out";
+                
+                // Mapear cores para classes completas do Tailwind
+                const getIconBgClass = (color: string) => {
+                  const colorMap: Record<string, string> = {
+                    "bg-yellow-500": "bg-gradient-to-br from-yellow-500 to-yellow-600",
+                    "bg-orange-500": "bg-gradient-to-br from-orange-500 to-orange-600",
+                    "bg-blue-500": "bg-gradient-to-br from-blue-500 to-blue-600",
+                    "bg-green-500": "bg-gradient-to-br from-green-500 to-green-600",
+                    "bg-indigo-500": "bg-gradient-to-br from-indigo-500 to-indigo-600",
+                    "bg-red-500": "bg-gradient-to-br from-red-500 to-red-600",
+                    "bg-gray-500": "bg-gradient-to-br from-gray-500 to-gray-600",
+                    "bg-purple-500": "bg-gradient-to-br from-purple-500 to-purple-600",
+                    "bg-cyan-500": "bg-gradient-to-br from-cyan-500 to-cyan-600",
+                    "bg-slate-500": "bg-gradient-to-br from-slate-500 to-slate-600",
+                  };
+                  return colorMap[color] || "bg-gradient-to-br from-slate-500 to-slate-600";
+                };
+              
+              // Reservas canceladas não devem aparecer aqui - serão mostradas em seção separada
+              // Esta função só renderiza reservas não canceladas
+              
+              // Verificar se precisa mostrar alerta de check-in pendente
+              // Verificar se status é "confirmed" (case insensitive) e não está checked in ou checked out
+              const isConfirmed = statusLower === "confirmed" || statusLower === "confirmada";
+              const isCheckedIn = statusLower === "checkedin" || statusLower === "checked_in";
+              
+              // Verificar se o webCheckin foi COMPLETADO
+              // IMPORTANTE: web_checkin pode existir com status "pending" ou "in_progress" sem estar completo
+              // Só considerar como check-in feito se o status for "completed"
+              const webCheckinStatus = webCheckin?.status?.toLowerCase() || "";
+              const isWebCheckinCompleted = !isLoadingWebCheckin && webCheckin && webCheckinStatus === "completed";
+              const showPendingCheckinAlert = isConfirmed && !isCheckedIn && !isCheckedOut && !isWebCheckinCompleted;
+              
+              // Debug log - sempre mostrar para debug
+              console.log("🔍 Verificação de alerta de check-in:", {
+                status: currentReservation?.status,
+                statusLower,
+                isConfirmed,
+                isCheckedIn,
+                isCheckedOut,
+                isLoadingWebCheckin,
+                webCheckinExists: !!webCheckin,
+                webCheckinStatus: webCheckinStatus || "NÃO EXISTE",
+                isWebCheckinCompleted,
+                showAlert: showPendingCheckinAlert,
+                reservationCode: currentReservation?.reservation_code,
+                reservationId: currentReservation?.id,
+                "CONDIÇÃO FINAL": `isConfirmed(${isConfirmed}) && !isCheckedIn(${!isCheckedIn}) && !isCheckedOut(${!isCheckedOut}) && !isWebCheckinCompleted(${!isWebCheckinCompleted}) = ${showPendingCheckinAlert}`
+              });
+              
+              return (
+                <div className={`mb-6 sm:mb-8 bg-gradient-to-br ${isCheckedOut ? 'from-indigo-600 to-purple-700' : 'from-blue-600 to-indigo-700'} rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-8 text-white shadow-2xl hover:shadow-blue-500/20 transition-all duration-300`}>
+                  <div className="flex items-start justify-between mb-4 sm:mb-6">
+                      <div className="flex-1 min-w-0">
+                      <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-2 sm:px-3 py-1 rounded-full mb-2 sm:mb-3">
+                        <StatusIcon className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+                        <span className="text-xs sm:text-sm font-medium">{statusInfo?.label}</span>
+                      </div>
+                      <h3 className="text-xl sm:text-2xl font-bold mb-1">
+                        {isCheckedOut ? t("guestDashboard.reservation.completedStay") : t("guestDashboard.reservation.currentStay")}
+                      </h3>
+                      <p className="text-blue-100 text-sm sm:text-base">
+                        {currentReservation?.reservation_code && `${t("guestDashboard.reservation.locatorLabel")} ${currentReservation.reservation_code}`}
+                        {currentReservation?.identification_number && (
+                          <span className="ml-2 text-blue-200">• #{currentReservation.identification_number}</span>
+                        )}
+                      </p>
+                    </div>
+                    <Bed className="w-8 h-8 sm:w-12 sm:h-12 text-white/30 flex-shrink-0 ml-2" />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-4 sm:mb-6">
+                    <div>
+                      <div className="flex items-center gap-2 text-blue-100 mb-1">
+                        <Calendar className="w-4 h-4" />
+                        <span className="text-xs sm:text-sm">{t("guestDashboard.reservation.checkin")}</span>
+                      </div>
+                      <p className="text-lg sm:text-xl font-bold">
+                        {currentReservation.checkin_date ? format(parseISO(currentReservation.checkin_date), "dd/MM/yyyy", { locale }) : t("guestDashboard.reservation.dateNotAvailable")}
+                      </p>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 text-blue-100 mb-1">
+                        <Calendar className="w-4 h-4" />
+                        <span className="text-xs sm:text-sm">{t("guestDashboard.reservation.checkout")}</span>
+                      </div>
+                      <p className="text-lg sm:text-xl font-bold">
+                        {currentReservation.checkout_date ? format(parseISO(currentReservation.checkout_date), "dd/MM/yyyy", { locale }) : t("guestDashboard.reservation.dateNotAvailable")}
+                      </p>
+                    </div>
+                  </div>
+
+                  {currentReservation.checkin_date && currentReservation.checkout_date && (
+                    <div className="flex items-center gap-2 text-blue-100 mb-6">
+                      <Clock className="w-4 h-4" />
+                      <span className="text-sm">
+                        {calculateNights(currentReservation.checkin_date, currentReservation.checkout_date)} {t("guestDashboard.reservation.nights")}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Alerta para reserva confirmada pendente de check-in */}
+                  {(() => {
+                    // Re-verificar condições aqui para garantir que está correto no momento da renderização
+                    const statusLowerCheck = (currentReservation?.status || "").toLowerCase();
+                    const isConfirmedCheck = statusLowerCheck === "confirmed" || statusLowerCheck === "confirmada";
+                    const isCheckedInCheck = statusLowerCheck === "checkedin" || statusLowerCheck === "checked_in";
+                    const isCheckedOutCheck = statusLowerCheck === "checkedout" || statusLowerCheck === "checked_out";
+                    
+                    // Verificar se o webCheckin foi COMPLETADO (não apenas se existe)
+                    const webCheckinStatusCheck = webCheckin?.status?.toLowerCase() || "";
+                    const isWebCheckinCompletedCheck = !isLoadingWebCheckin && webCheckin && webCheckinStatusCheck === "completed";
+                    const shouldShowAlert = isConfirmedCheck && !isCheckedInCheck && !isCheckedOutCheck && !isWebCheckinCompletedCheck;
+                    
+                    // Log adicional para debug
+                    if (isConfirmedCheck && !isCheckedInCheck && !isCheckedOutCheck) {
+                      console.log("🚨 ALERTA DE CHECK-IN - Verificação no JSX:", {
+                        shouldShowAlert,
+                        isWebCheckinCompletedCheck,
+                        webCheckinStatus: webCheckinStatusCheck || "NÃO EXISTE",
+                        isLoadingWebCheckin,
+                        webCheckin: webCheckin ? "existe" : "null"
+                      });
+                    }
+                    
+                    if (!shouldShowAlert) return null;
+                    
+                    return (
+                      <div className="mb-6 bg-white/20 backdrop-blur-sm border border-white/30 rounded-xl p-4">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="w-5 h-5 text-yellow-300 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-white mb-2">
+                              {t("guestDashboard.reservation.pendingCheckinAlert")}
+                            </p>
+                            <p className="text-xs text-blue-100 mb-3">
+                              {t("guestDashboard.reservation.pendingCheckinMessage")}
+                            </p>
+                            <button
+                              onClick={() => {
+                                console.log("✅ Navegando para check-in:", currentReservation.reservation_code);
+                                navigate(`/web-checkin/${currentReservation.reservation_code}`);
+                              }}
+                              className="w-full bg-yellow-400 text-slate-900 font-semibold py-2.5 px-4 rounded-lg hover:bg-yellow-300 transition-all transform hover:scale-[1.02] shadow-lg text-sm"
+                            >
+                              {t("guestDashboard.reservation.startCheckinNow")}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <button 
+                    onClick={() => setShowCurrentReservation(true)}
+                    className="w-full bg-white text-blue-600 font-semibold py-4 rounded-2xl hover:bg-blue-50 transition-all transform hover:scale-[1.02] shadow-xl"
+                  >
+                    {t("guestDashboard.reservation.viewDetails")}
+                  </button>
+                </div>
+              );
+              } catch (error) {
+                console.error("Erro ao renderizar card de reserva:", error);
+                return (
+                  <div className="mb-8 bg-gradient-to-br from-slate-500 to-slate-600 rounded-3xl p-8 text-white shadow-2xl">
+                    <p className="text-center">{t("guestDashboard.messages.errorLoadingReservation")}</p>
+                  </div>
+                );
+              }
+            })()
+          ) : (
+            <div className="mb-6 sm:mb-8 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-8 text-white shadow-2xl hover:shadow-emerald-500/20 transition-all duration-300">
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-xl sm:text-2xl font-bold mb-1 sm:mb-2">{t("guestDashboard.reservation.noReservation")}</h3>
+                  <p className="text-emerald-100 text-sm sm:text-base">{t("guestDashboard.reservation.noReservationText")}</p>
+                </div>
+                <CheckCircle2 className="w-8 h-8 sm:w-12 sm:h-12 text-white/30 flex-shrink-0 ml-2" />
+              </div>
+              <button 
+                onClick={() => navigate("/web-checkin")}
+                className="w-full bg-white text-emerald-600 font-semibold py-3 sm:py-4 rounded-xl sm:rounded-2xl hover:bg-emerald-50 transition-all transform hover:scale-[1.02] shadow-xl text-sm sm:text-base"
+              >
+                {t("guestDashboard.reservation.startCheckin")}
+              </button>
+            </div>
+          )}
+
+          {/* Seção de Reserva Cancelada Mais Recente */}
+          {cancelledReservations && cancelledReservations.length > 0 && (
+            <div className="mb-6 sm:mb-8">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
+                <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
+                  <Ban className="w-4 h-4 sm:w-5 sm:h-5 text-red-500" />
+                  {t("guestDashboard.cancelledReservations.title_one")}
+                </h3>
+                {cancelledReservations.length > 1 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      console.log("Abrindo dialog de reservas canceladas", cancelledReservations.length);
+                      setShowAllCancelledReservations(true);
+                    }}
+                    className="text-red-600 border-red-200 hover:bg-red-50 text-xs sm:text-sm"
+                  >
+                    <History className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+                    {t("guestDashboard.cancelledReservations.viewAll").replace("{{count}}", cancelledReservations.length.toString())}
+                  </Button>
+                )}
+              </div>
+              
+              {/* Mostrar apenas a mais recente */}
+              {(() => {
+                const mostRecentCancelled = cancelledReservations[0]; // Já está ordenada por mais recente
+                const statusInfo = getReservationStatusInfo(mostRecentCancelled?.status, t);
+                const StatusIcon = statusInfo?.icon || Ban;
+                
+                return (
+                  <div className="bg-gradient-to-br from-red-50 to-rose-50 border-2 border-red-200 rounded-xl sm:rounded-2xl p-4 sm:p-6 hover:shadow-lg transition-all">
+                    <div className="flex items-start justify-between mb-3 sm:mb-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="inline-flex items-center gap-2 bg-red-100 px-2 sm:px-3 py-1 rounded-full mb-2">
+                          <StatusIcon className="w-3 h-3 sm:w-4 sm:h-4 text-red-600" />
+                          <span className="text-xs sm:text-sm font-medium text-red-700">{statusInfo?.label}</span>
+                        </div>
+                        <h4 className="text-base sm:text-lg font-bold text-slate-800 mb-1 break-words">
+                          {mostRecentCancelled.reservation_code && `${t("guestDashboard.reservation.locatorLabel")} ${mostRecentCancelled.reservation_code}`}
+                          {mostRecentCancelled.identification_number && (
+                            <span className="ml-2 text-slate-600 font-normal">• #{mostRecentCancelled.identification_number}</span>
+                          )}
+                        </h4>
+                        <p className="text-xs sm:text-sm text-slate-600 mb-3 sm:mb-4">
+                          {t("guestDashboard.reservation.cancelledMessage")}
+                        </p>
+                      </div>
+                      <Ban className="w-6 h-6 sm:w-8 sm:h-8 text-red-300 flex-shrink-0 ml-2" />
+                    </div>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
+                      <div>
+                        <div className="flex items-center gap-2 text-slate-600 mb-1">
+                          <Calendar className="w-3 h-3 sm:w-4 sm:h-4" />
+                          <span className="text-xs sm:text-sm font-medium">{t("guestDashboard.reservation.checkin")}</span>
+                        </div>
+                        <p className="text-sm sm:text-base font-semibold text-slate-800">
+                          {mostRecentCancelled.checkin_date ? format(parseISO(mostRecentCancelled.checkin_date), "dd/MM/yyyy", { locale }) : "-"}
+                        </p>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 text-slate-600 mb-1">
+                          <Calendar className="w-3 h-3 sm:w-4 sm:h-4" />
+                          <span className="text-xs sm:text-sm font-medium">{t("guestDashboard.reservation.checkout")}</span>
+                        </div>
+                        <p className="text-sm sm:text-base font-semibold text-slate-800">
+                          {mostRecentCancelled.checkout_date ? format(parseISO(mostRecentCancelled.checkout_date), "dd/MM/yyyy", { locale }) : "-"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {mostRecentCancelled.establishment && (
+                      <div className="mb-4">
+                        <div className="flex items-center gap-2 text-slate-600 mb-1">
+                          <MapPin className="w-4 h-4" />
+                          <span className="text-sm font-medium">{t("guestDashboard.reservation.establishment")}</span>
+                        </div>
+                        <p className="text-sm text-slate-700">
+                          {(mostRecentCancelled.establishment as any)?.name || "-"}
+                        </p>
+                      </div>
+                    )}
+
+                  <div className="bg-white/60 rounded-xl p-3 border border-red-200 mb-4">
+                    <p className="text-xs text-slate-600 text-center mb-3">
+                      {t("guestDashboard.cancelledReservations.contactMessage")}
+                    </p>
+                    {(() => {
+                      const phone = mostRecentCancelled.contact_phone;
+                      const whatsapp = mostRecentCancelled.contact_whatsapp;
+                      const whatsappUrl = whatsapp ? `https://wa.me/${whatsapp.replace(/\D/g, '')}` : null;
+                      const phoneUrl = phone ? `tel:${phone.replace(/\D/g, '')}` : null;
+                      
+                      if (!phone && !whatsapp) return null;
+                      
+                      return (
+                        <div className="flex flex-col gap-2 mt-3">
+                          {phone && (
+                            <a
+                              href={phoneUrl || '#'}
+                              className="flex items-center justify-center gap-2 text-xs text-red-700 hover:text-red-800 hover:underline"
+                            >
+                              <Phone className="w-3 h-3" />
+                              {phone}
+                            </a>
+                          )}
+                          {whatsapp && (
+                            <a
+                              href={whatsappUrl || '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center justify-center gap-2 text-xs text-green-700 hover:text-green-800 hover:underline"
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              WhatsApp: {whatsapp}
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedCancelledReservation(mostRecentCancelled);
+                      setShowCurrentReservation(true);
+                    }}
+                    className="w-full text-red-600 border-red-300 hover:bg-red-50 hover:border-red-400"
+                  >
+                    <FileText className="w-4 h-4 mr-2" />
+                    {t("guestDashboard.reservation.viewDetails")}
+                  </Button>
+                </div>
+              );
+            })()}
+            </div>
+          )}
+
+          {/* Quick Actions Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
+            <ActionCard
+              icon={<CheckCircle2 className="w-6 h-6" />}
+              title={t("guestDashboard.actions.newCheckin")}
+              description={t("guestDashboard.actions.newCheckinDescription")}
+              color="from-emerald-500 to-teal-600"
+              onClick={() => navigate("/web-checkin")}
+            />
+            <ActionCard
+              icon={<History className="w-6 h-6" />}
+              title={t("guestDashboard.actions.history")}
+              description={t("guestDashboard.actions.historyDescription")}
+              color="from-purple-500 to-pink-600"
+              onClick={() => setShowHistoryDialog(true)}
+            />
+            <ActionCard
+              icon={<MessageCircle className="w-6 h-6" />}
+              title={t("guestDashboard.actions.support")}
+              description={t("guestDashboard.actions.supportDescription")}
+              color="from-orange-500 to-red-600"
+              onClick={() => {
+                if (!allReservations || allReservations.length === 0) {
+                  toast.info(t("guestDashboard.messages.needReservationForTicket"));
+                  return;
+                }
+
+                // Se houver apenas uma reserva, abrir diretamente
+                if (allReservations.length === 1) {
+                  setSelectedReservationForTicket(allReservations[0]);
+                  setShowMaintenanceDialog(true);
+                } else {
+                  // Se houver múltiplas, mostrar seletor
+                  setShowReservationSelector(true);
+                }
+              }}
+            />
+            <ActionCard
+              icon={<User className="w-6 h-6" />}
+              title={t("guestDashboard.actions.profile")}
+              description={t("guestDashboard.actions.profileDescription")}
+              color="from-blue-500 to-cyan-600"
+              onClick={() => setShowProfileDialog(true)}
+            />
+          </div>
+
+          {/* Services Section */}
+          <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-8 shadow-lg hover:shadow-xl transition-shadow">
+            <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mb-4 sm:mb-6">{t("guestDashboard.services.title")}</h3>
+            
+            <div className="space-y-4">
+              <ServiceItem
+                icon={<MapPin className="w-5 h-5" />}
+                title={t("guestDashboard.services.hotelInfo")}
+                description={t("guestDashboard.services.hotelInfoDescription")}
+                onClick={() => {
+                  if (currentReservation) {
+                    setShowCurrentReservation(true);
+                  }
+                }}
+              />
+              <ServiceItem
+                icon={<Bell className="w-5 h-5" />}
+                title={t("guestDashboard.services.specialRequests")}
+                description={t("guestDashboard.services.specialRequestsDescription")}
+                onClick={() => {
+                  if (currentReservation) {
+                    setShowCurrentReservation(true);
+                  }
+                }}
+              />
+              {/* Solicitar Documento Fiscal - Substitui o botão de Perfil */}
+              <ServiceItem
+                icon={<FileText className="w-5 h-5" />}
+                title="Solicitar Documento Fiscal"
+                description="Recibo ou Nota Fiscal"
+                onClick={() => {
+                  setShowFiscalReservationSelector(true);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+          {/* Dialog de Histórico de Estadas */}
+          {showHistoryDialog && (
+            <GuestStayHistoryDialog
+              open={showHistoryDialog}
+              onOpenChange={setShowHistoryDialog}
+              webCheckin={webCheckin || {
+                reservation: currentReservation,
+                establishment: currentReservation?.establishment,
+                locator: currentReservation?.reservation_code || "",
+                status: "completed",
+              }}
+              token={webCheckin?.token || ""}
+            />
+          )}
+
+        {/* Dialog de Editar Perfil */}
+        {showProfileDialog && accountId && (
+          <GuestProfileDialog
+            open={showProfileDialog}
+            onOpenChange={setShowProfileDialog}
+            accountId={accountId}
+          />
+        )}
+
+        {/* Dialog de Seleção de Reserva para Chamado */}
+        <Dialog open={showReservationSelector} onOpenChange={setShowReservationSelector}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>{t("guestDashboard.dialogs.selectReservation")}</DialogTitle>
+              <DialogDescription>
+                {t("guestDashboard.dialogs.selectReservationDescription")}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-4 max-h-[400px] overflow-y-auto">
+              {isLoadingAllReservations ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+        </div>
+              ) : allReservations && allReservations.length > 0 ? (
+                allReservations.map((reservation: any) => (
+                  <button
+                    key={reservation.id}
+                    onClick={() => {
+                      setSelectedReservationForTicket(reservation);
+                      setShowReservationSelector(false);
+                      setShowMaintenanceDialog(true);
+                    }}
+                    className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50 transition-all group"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <h4 className="font-semibold text-slate-900">
+                            {reservation.reservation_code || t("guestDashboard.dialogs.reservationWithoutCode")}
+                          </h4>
+                        </div>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm text-slate-600 mb-2">
+                          <div className="flex items-center gap-1">
+                            <Calendar className="w-3 h-3 sm:w-4 sm:h-4" />
+                            <span>
+                              {reservation.checkin_date && format(parseISO(reservation.checkin_date), "dd/MM/yyyy", { locale })}
+                            </span>
+                          </div>
+                          <span className="hidden sm:inline">→</span>
+                          <div className="flex items-center gap-1">
+                            <Calendar className="w-3 h-3 sm:w-4 sm:h-4" />
+                            <span>
+                              {reservation.checkout_date && format(parseISO(reservation.checkout_date), "dd/MM/yyyy", { locale })}
+                            </span>
+                          </div>
+                          {reservation.rooms && ((reservation.rooms as any).room_number || (reservation.rooms as any).name) && (
+                            <>
+                              <span className="text-slate-300 hidden sm:inline">•</span>
+                              <div className="flex items-center gap-1">
+                                <Bed className="w-3 h-3 sm:w-4 sm:h-4" />
+                                <span className="font-medium text-slate-700">
+                                  {t("guestDashboard.reservation.room")} {(reservation.rooms as any).room_number || (reservation.rooms as any).name}
+                                </span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        {reservation.establishment && (
+                          <p className="text-xs text-slate-500 mt-1">
+                            {(reservation.establishment as any).name || ""}
+                          </p>
+                        )}
+              </div>
+                      <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
+            </div>
+                  </button>
+                ))
+              ) : (
+                <p className="text-center text-slate-500 py-8">
+                  {t("guestDashboard.dialogs.noReservations")}
+                </p>
+              )}
+        </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog de Chamado de Manutenção */}
+        {showMaintenanceDialog && selectedReservationForTicket && (
+          <MaintenanceTicketDialog
+            open={showMaintenanceDialog}
+            onOpenChange={(open) => {
+              setShowMaintenanceDialog(open);
+              if (!open) {
+                setSelectedReservationForTicket(null);
+              }
+            }}
+            reservation={selectedReservationForTicket}
+            webCheckin={{
+              reservation: selectedReservationForTicket,
+              establishment: selectedReservationForTicket.establishment,
+              locator: selectedReservationForTicket.reservation_code || "",
+              status: "completed",
+            }}
+            token={webCheckin?.token || crypto.randomUUID()}
+            onSuccess={() => {
+              setShowMaintenanceDialog(false);
+              setSelectedReservationForTicket(null);
+            }}
+          />
+        )}
+
+        {/* Dialog de Todas as Reservas Canceladas */}
+        <CancelledReservationsDialog
+          open={showAllCancelledReservations}
+          onOpenChange={setShowAllCancelledReservations}
+          cancelledReservations={cancelledReservations}
+          isLoadingCancelled={isLoadingCancelled}
+        />
+
+        {/* Dialog de Seleção de Reserva para Documento Fiscal */}
+        <Dialog open={showFiscalReservationSelector} onOpenChange={(open) => {
+          console.log("🔍 Dialog onOpenChange chamado:", open);
+          setShowFiscalReservationSelector(open);
+        }}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Selecionar Estadia para Documento Fiscal</DialogTitle>
+              <DialogDescription>
+                Escolha qual estadia você deseja solicitar o documento fiscal (Recibo ou Nota Fiscal)
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-4 max-h-[400px] overflow-y-auto">
+              {isLoadingAllReservations ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                </div>
+              ) : allReservations && allReservations.length > 0 ? (
+                (() => {
+                  // Filtrar apenas reservas que já tiveram check-out
+                  const checkedOutReservations = allReservations.filter((res: any) => {
+                    const status = res?.status?.toLowerCase();
+                    const checkoutDate = res?.checkout_date;
+                    
+                    // Verificar por status
+                    if (status === "checkedout" || status === "checked_out") {
+                      return true;
+                    }
+                    
+                    // Verificar se a data de check-out já passou
+                    if (checkoutDate) {
+                      try {
+                        const checkout = startOfDay(new Date(checkoutDate));
+                        const today = startOfDay(new Date());
+                        return isAfter(today, checkout) || checkout.getTime() === today.getTime();
+                      } catch (error) {
+                        console.error("Erro ao verificar data de check-out:", error);
+                        return false;
+                      }
+                    }
+                    
+                    return false;
+                  });
+
+                  if (checkedOutReservations.length === 0) {
+                    return (
+                      <div className="text-center py-8">
+                        <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
+                        <p className="text-slate-600">
+                          Você ainda não possui reservas com check-out concluído.
+                        </p>
+                        <p className="text-sm text-slate-500 mt-2">
+                          A solicitação de documentos fiscais só pode ser feita após o check-out das reservas.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return checkedOutReservations.map((reservation: any) => (
+                    <button
+                      key={reservation.id}
+                      onClick={() => {
+                        setSelectedReservationForFiscal(reservation);
+                        setShowFiscalReservationSelector(false);
+                        setShowFiscalDocumentDialog(true);
+                      }}
+                      className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-amber-500 hover:bg-amber-50 transition-all group"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <h4 className="font-semibold text-slate-900">
+                              {reservation.reservation_code || "Reserva sem código"}
+                            </h4>
+                            {(() => {
+                              const statusInfo = getReservationStatusInfo(reservation.status, t);
+                              const StatusIcon = statusInfo.icon;
+                              return (
+                                <Badge variant="outline" className={`${statusInfo.textColor} ${statusInfo.borderColor} border text-xs`}>
+                                  <StatusIcon className="w-3 h-3 mr-1" />
+                                  {statusInfo.label}
+                                </Badge>
+                              );
+                            })()}
+                          </div>
+                          <div className="flex items-center gap-4 text-sm text-slate-600 mb-2">
+                            <div className="flex items-center gap-1">
+                              <Calendar className="w-4 h-4" />
+                              <span>
+                                {reservation.checkin_date && format(parseISO(reservation.checkin_date), "dd/MM/yyyy", { locale })}
+                              </span>
+                            </div>
+                            <span>→</span>
+                            <div className="flex items-center gap-1">
+                              <Calendar className="w-4 h-4" />
+                              <span>
+                                {reservation.checkout_date && format(parseISO(reservation.checkout_date), "dd/MM/yyyy", { locale })}
+                              </span>
+                            </div>
+                          </div>
+                          {reservation.rooms && (
+                            <div className="text-sm text-slate-500">
+                              <Bed className="w-4 h-4 inline mr-1" />
+                              {(reservation.rooms as any).room_number || (reservation.rooms as any).name || "Quarto não informado"}
+                            </div>
+                          )}
+                          {reservation.paid_amount && (
+                            <div className="text-sm font-semibold text-slate-900 mt-1">
+                              Valor: {new Intl.NumberFormat("pt-BR", {
+                                style: "currency",
+                                currency: "BRL",
+                              }).format(reservation.paid_amount)}
+                            </div>
+                          )}
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-amber-600 transition-colors" />
+                      </div>
+                    </button>
+                  ));
+                })()
+              ) : (
+                <div className="text-center py-8">
+                  <AlertCircle className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                  <p className="text-slate-600">Nenhuma reserva encontrada.</p>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog de Solicitar Documento Fiscal */}
+        {showFiscalDocumentDialog && selectedReservationForFiscal && (
+          <Dialog open={showFiscalDocumentDialog} onOpenChange={setShowFiscalDocumentDialog}>
+            <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Solicitar Documento Fiscal</DialogTitle>
+                <DialogDescription>
+                  Solicite um recibo ou nota fiscal para sua reserva
+                </DialogDescription>
+              </DialogHeader>
+              <FiscalDocumentRequest
+                reservation={selectedReservationForFiscal}
+                establishment={establishment}
+                onSuccess={() => {
+                  setShowFiscalDocumentDialog(false);
+                  setSelectedReservationForFiscal(null);
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+    );
+  }
+
+  // Visualização de detalhes da reserva
+  // Se houver uma reserva cancelada selecionada, usar ela; caso contrário, usar currentReservation
+  const reservation = selectedCancelledReservation || currentReservation;
+  const building = reservation?.building;
+  
+  // Se não houver reserva, não renderizar nada
+  if (!reservation) {
+    return null;
+  }
+
+  return (
+    <>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+        {/* Header Premium */}
+        <header className="bg-white/80 backdrop-blur-lg border-b border-slate-200/50 sticky top-0 z-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2 sm:gap-3">
+                  {siteSettings?.logo_url ? (
+                    <img 
+                      src={siteSettings.logo_url} 
+                      alt="Logo" 
+                    className="h-16 w-16 sm:h-20 sm:w-20 object-contain flex-shrink-0"
+                    />
+                  ) : (
+                  <Home className="w-6 h-6 sm:w-7 sm:h-7 text-slate-600" />
+                  )}
+            <div>
+                  <h1 className="text-lg sm:text-xl font-bold text-slate-800">{t("guestDashboard.hospitality")}</h1>
+                  <p className="text-xs text-slate-500 hidden sm:block">{t("guestDashboard.guestPortal")}</p>
+            </div>
+          </div>
+
+              <div className="flex items-center gap-2 sm:gap-4">
+                <LanguageSelector />
+                <button 
+                  onClick={handleLogout}
+                  className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 hover:bg-slate-100 rounded-full transition-colors"
+                >
+                  <LogOut className="w-4 h-4 text-slate-600" />
+                  <span className="text-xs sm:text-sm font-medium text-slate-700 hidden sm:inline">{t("guestDashboard.logout")}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+          {/* Botão Voltar */}
+          <Button
+            variant="ghost"
+            onClick={() => setShowCurrentReservation(false)}
+            className="mb-4 sm:mb-6 flex items-center gap-2"
+          >
+            <ChevronRight className="w-4 h-4 rotate-180" />
+            {t("guestDashboard.messages.backToDashboard")}
+          </Button>
+
+          {/* Conteúdo da Reserva */}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
+        {/* Status Card Moderno - Mostrar status real da reserva */}
+        {(() => {
+          const statusInfo = getReservationStatusInfo(reservation?.status, t);
+          const StatusIcon = statusInfo.icon;
+          const isCancelled = reservation?.status?.toLowerCase() === "cancelled";
+          const isCheckedIn = reservation?.status?.toLowerCase() === "checkedin" || reservation?.status?.toLowerCase() === "checked_in";
+          const isCheckedOut = reservation?.status?.toLowerCase() === "checkedout" || reservation?.status?.toLowerCase() === "checked_out";
+          
+          // Mapear cores para classes completas do Tailwind
+          const getIconBgClass = (color: string) => {
+            const colorMap: Record<string, string> = {
+              "bg-yellow-500": "bg-gradient-to-br from-yellow-500 to-yellow-600",
+              "bg-orange-500": "bg-gradient-to-br from-orange-500 to-orange-600",
+              "bg-blue-500": "bg-gradient-to-br from-blue-500 to-blue-600",
+              "bg-green-500": "bg-gradient-to-br from-green-500 to-green-600",
+              "bg-indigo-500": "bg-gradient-to-br from-indigo-500 to-indigo-600",
+              "bg-red-500": "bg-gradient-to-br from-red-500 to-red-600",
+              "bg-gray-500": "bg-gradient-to-br from-gray-500 to-gray-600",
+              "bg-purple-500": "bg-gradient-to-br from-purple-500 to-purple-600",
+              "bg-cyan-500": "bg-gradient-to-br from-cyan-500 to-cyan-600",
+              "bg-slate-500": "bg-gradient-to-br from-slate-500 to-slate-600",
+            };
+            return colorMap[color] || "bg-gradient-to-br from-slate-500 to-slate-600";
+          };
+          
+          return (
+            <Card className={`p-4 sm:p-6 lg:p-8 bg-gradient-to-br ${statusInfo.bgColor} ${statusInfo.borderColor} border shadow-lg mb-6 sm:mb-8`}>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6">
+                <div className={`inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-2xl ${getIconBgClass(statusInfo.color)} shadow-lg flex-shrink-0`}>
+                  <StatusIcon className="h-8 w-8 sm:h-10 sm:w-10 text-white" style={{ color: 'white' }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 mb-2">
+                    <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
+                      {statusInfo.label}
+                    </h2>
+                    <Badge variant="outline" className={`${statusInfo.textColor} ${statusInfo.borderColor} border text-xs`}>
+                      {reservation?.status}
+                    </Badge>
+                  </div>
+                  <p className="text-slate-700 text-sm sm:text-base">
+                    {statusInfo.description}
+                    {isCancelled && ` ${t("guestDashboard.reservation.cancelledMessage")}`}
+                    {isCheckedIn && ` ${t("guestDashboard.reservation.confirmedMessage")}`}
+                    {isCheckedOut && ` ${t("guestDashboard.reservation.completedMessage")}`}
+                  </p>
+                </div>
+                {(webCheckin as any)?.locator && (
+                  <div className={`text-center sm:text-right bg-white/60 backdrop-blur-sm rounded-xl p-3 sm:p-4 ${statusInfo.borderColor} border shadow-sm w-full sm:w-auto`}>
+                    <p className="text-xs text-slate-600 mb-1 sm:mb-2 font-medium uppercase tracking-wide">{t("guestDashboard.reservation.locator")}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${statusInfo.textColor} font-mono tracking-wider break-all`}>{(webCheckin as any).locator}</p>
+                  </div>
+                )}
+              </div>
+            </Card>
+          );
+        })()}
+
+        {/* Informações da Reserva */}
+        <Card className="p-4 sm:p-6 lg:p-8 shadow-lg border-slate-200/50 mb-6 sm:mb-8">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6 pb-3 sm:pb-4 border-b border-slate-200">
+            <h3 className="text-xl sm:text-2xl font-bold text-slate-900">{t("guestDashboard.reservation.information")}</h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowPoliciesDialog(true)}
+              className="flex items-center gap-2 text-xs sm:text-sm"
+            >
+              <FileText className="h-3 w-3 sm:h-4 sm:w-4" />
+              {t("guestDashboard.reservation.viewPolicies")}
+            </Button>
+          </div>
+          <div className="space-y-4 sm:space-y-6">
+            <div className="flex items-start gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl bg-blue-50/50 border border-blue-100">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 sm:w-12 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                <Mail className="h-6 w-6 text-blue-600" />
+              </div>
+              <div>
+                <p className="font-semibold text-slate-900 mb-1">{t("guestDashboard.reservation.confirmationEmail")}</p>
+                <p className="text-sm text-slate-600">
+                  {t("guestDashboard.reservation.confirmationEmailText")}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl bg-indigo-50/50 border border-indigo-100">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                <Calendar className="h-5 w-5 sm:h-6 sm:w-6 text-indigo-600" />
+              </div>
+              <div>
+                <p className="font-semibold text-slate-900 mb-2">{t("guestDashboard.reservation.stayDates")}</p>
+                <div className="space-y-1">
+                <p className="text-sm text-slate-600">
+                  {t("guestDashboard.reservation.checkin")}:{" "}
+                    <span className="font-semibold text-slate-900">
+                    {reservation?.checkin_date ? format(parseISO(reservation.checkin_date), "dd/MM/yyyy", { locale }) : t("guestDashboard.reservation.dateNotAvailable")}
+                      {reservation?.checkin_time && ` às ${(reservation as any).checkin_time.substring(0, 5)}`}
+                    </span>
+                </p>
+                <p className="text-sm text-slate-600">
+                  {t("guestDashboard.reservation.checkout")}:{" "}
+                    <span className="font-semibold text-slate-900">
+                    {reservation?.checkout_date ? format(parseISO(reservation.checkout_date), "dd/MM/yyyy", { locale }) : t("guestDashboard.reservation.dateNotAvailable")}
+                      {reservation?.checkout_time && ` às ${(reservation as any).checkout_time.substring(0, 5)}`}
+                    </span>
+                </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Acomodação e Senha do Quarto */}
+            {/* Mostrar apenas após check-in completo */}
+            {(() => {
+              // Verificar se o web_checkin foi completado
+              const webCheckinStatus = webCheckin?.status?.toLowerCase() || "";
+              const isCheckinCompleted = webCheckinStatus === "completed";
+              const hasRoomInfo = (reservation?.rooms as any)?.room_number || (reservation?.rooms as any)?.name;
+              const hasRoomPassword = (reservation?.rooms as any)?.fixed_password && (reservation?.rooms as any)?.authentication_type === 'fixed_password';
+              
+              // Se o check-in foi completado e há informações do quarto, mostrar
+              if (isCheckinCompleted && hasRoomInfo) {
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                    {/* Card de Acomodação */}
+                    <Card className="p-4 sm:p-6 border-0 shadow-md bg-gradient-to-br from-slate-50 to-white hover:shadow-lg transition-shadow">
+                      <div className="flex items-start gap-3 sm:gap-4">
+                        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0 shadow-md">
+                          <Home className="h-6 w-6 sm:h-7 sm:w-7 text-white" strokeWidth={2} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3 sm:mb-4">
+                            {t("guestDashboard.reservation.accommodation")}
+                          </p>
+                          <div className="space-y-3 sm:space-y-4">
+                            <div>
+                              <p className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight break-words">
+                                {(reservation?.rooms as any)?.room_number || (reservation?.rooms as any)?.name}
+                              </p>
+                            </div>
+                            {reservation?.room_categories?.name && (
+                              <div className="pt-3 border-t border-slate-200">
+                                <p className="text-sm font-medium text-slate-600">
+                                  {reservation.room_categories.name}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+
+                    {/* Card de Senha do Quarto */}
+                    {hasRoomPassword && (
+                      <Card className="p-4 sm:p-6 border-0 shadow-md bg-gradient-to-br from-amber-50 to-orange-50 hover:shadow-lg transition-shadow">
+                        <div className="flex items-start gap-3 sm:gap-4">
+                          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center flex-shrink-0 shadow-md">
+                            <Key className="h-6 w-6 sm:h-7 sm:w-7 text-white" strokeWidth={2} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3 sm:mb-4">
+                              {t("guestDashboard.reservation.roomPassword")}
+                            </p>
+                            <div className="space-y-2 sm:space-y-3">
+                              <div className="py-3 sm:py-4 px-4 sm:px-6 bg-white border-2 border-amber-200 rounded-xl shadow-inner">
+                                <p className="text-2xl sm:text-3xl font-mono font-bold text-slate-900 tracking-wider text-center break-all">
+                                  {(reservation?.rooms as any)?.fixed_password}
+                                </p>
+                              </div>
+                              <p className="text-xs text-slate-500 text-center font-medium">
+                                {t("guestDashboard.reservation.roomPasswordText")}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    )}
+                  </div>
+                );
+              }
+              
+              // Se o check-in não foi completado, mostrar mensagem informativa
+              return (
+                <div className="grid grid-cols-1 gap-4 sm:gap-6">
+                  <Card className="p-4 sm:p-6 border-0 shadow-md bg-gradient-to-br from-slate-50 to-white hover:shadow-lg transition-shadow">
+                    <div className="flex items-start gap-3 sm:gap-4">
+                      <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0 shadow-md">
+                        <Home className="h-6 w-6 sm:h-7 sm:w-7 text-white" strokeWidth={2} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3 sm:mb-4">
+                          {t("guestDashboard.reservation.accommodation")}
+                        </p>
+                        <p className="text-xs sm:text-sm text-slate-500">{t("guestDashboard.reservation.willBeInformed")}</p>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+              );
+            })()}
+
+            {/* Como Chegar */}
+            {(() => {
+              const hasBuildingAddress = building && (building.street || building.city || building.state);
+              const addressSource = hasBuildingAddress ? building : establishment;
+              
+              const buildAddress = (source: any): string | null => {
+                if (!source) return null;
+                
+                if (source.address && typeof source.address === 'string') {
+                  return source.address;
+                }
+                
+                const parts = [];
+                if (source.street) {
+                  parts.push(source.street);
+                  if (source.number) {
+                    parts[parts.length - 1] += `, ${source.number}`;
+                  }
+                }
+                if (source.neighborhood) {
+                  parts.push(source.neighborhood);
+                }
+                return parts.length > 0 ? parts.join(", ") : null;
+              };
+              
+              const fullAddress = buildAddress(addressSource);
+              const hasAddress = fullAddress || addressSource?.city || addressSource?.state;
+              
+              return hasAddress && (
+                <Card className="p-4 sm:p-6 border-0 shadow-md bg-gradient-to-br from-teal-50 to-cyan-50 hover:shadow-lg transition-shadow">
+                  <div className="flex items-start gap-3 sm:gap-4">
+                    <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center flex-shrink-0 shadow-md">
+                      <Navigation className="h-6 w-6 sm:h-7 sm:w-7 text-white" strokeWidth={2} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3 sm:mb-4">
+                        {t("guestDashboard.reservation.howToGet")}
+                        {building && (
+                          <span className="ml-2 text-xs font-normal text-slate-400">
+                            ({building.name || t("guestDashboard.reservation.building")})
+                          </span>
+                        )}
+                      </p>
+                      <div className="space-y-2 text-xs sm:text-sm text-slate-700 mb-3 sm:mb-4">
+                        {fullAddress && (
+                          <p className="font-semibold text-sm sm:text-base break-words">{fullAddress}</p>
+                        )}
+                        {(addressSource?.city || addressSource?.state || addressSource?.zip_code) && (
+                          <p className="text-slate-600">
+                            {addressSource.city && addressSource.city}
+                            {addressSource.city && addressSource.state && ", "}
+                            {addressSource.state && addressSource.state}
+                            {addressSource.zip_code && ` - ${addressSource.zip_code}`}
+                          </p>
+                        )}
+                      </div>
+                      {fullAddress && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const address = `${fullAddress || ""} ${addressSource?.city || ""} ${addressSource?.state || ""}`.trim();
+                              const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+                              window.open(googleMapsUrl, '_blank');
+                            }}
+                          className="border-teal-300 text-teal-700 hover:bg-teal-50 hover:border-teal-400 shadow-sm hover:shadow-md transition-all"
+                          >
+                          <Navigation className="h-4 w-4 mr-2" strokeWidth={2} />
+                            {t("guestDashboard.reservation.openGoogleMaps")}
+                          </Button>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })()}
+          </div>
+        </Card>
+
+        {/* Menu de Funcionalidades - Não mostrar se reserva estiver cancelada ou check-out realizado */}
+        {reservation && reservation.status?.toLowerCase() !== "cancelled" && reservation.status?.toLowerCase() !== "checkedout" && reservation.status?.toLowerCase() !== "checked_out" && (
+          (webCheckin && (webCheckin as any).token) ? (
+            <GuestMenu 
+              webCheckin={{
+                ...webCheckin,
+                reservation: (webCheckin as any).reservation || reservation,
+                establishment: (webCheckin as any).establishment || establishment,
+                locator: (webCheckin as any).locator || reservation.reservation_code,
+                status: (webCheckin as any).status || "completed",
+              }} 
+              token={(webCheckin as any).token} 
+              isLastStep={true} 
+            />
+          ) : (
+            <Card className="p-4 sm:p-6 mt-4 sm:mt-6">
+              <div className="text-center mb-4 sm:mb-6">
+                <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">
+                  {t("guestDashboard.messages.whatWouldYouLike")}
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 mb-3 sm:mb-4">
+                  {t("guestDashboard.messages.needCheckinText")}
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center">
+                  <Button onClick={() => navigate(`/web-checkin/${reservation.reservation_code}`)} className="w-full sm:w-auto">
+                    {t("guestDashboard.messages.doCheckin")}
+                  </Button>
+                  <Button 
+                    onClick={() => setShowHistoryDialog(true)} 
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                  >
+                    {t("guestDashboard.messages.viewHistory")}
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )
+        )}
+
+        {/* Mensagem se reserva estiver cancelada ou check-out realizado */}
+        {reservation && (reservation.status?.toLowerCase() === "cancelled" || reservation.status?.toLowerCase() === "checkedout" || reservation.status?.toLowerCase() === "checked_out") && (
+          <Card className="p-4 sm:p-6 mt-4 sm:mt-6 bg-red-50 border-red-200">
+            <div className="text-center">
+              <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-red-100 mb-3 sm:mb-4">
+                <XCircle className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
+              </div>
+              <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">
+                {t("guestDashboard.messages.reservationCancelled")}
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-600 mb-3 sm:mb-4">
+                {t("guestDashboard.messages.reservationCancelledText")}
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center">
+                <Button 
+                  onClick={() => setShowHistoryDialog(true)} 
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                >
+                  {t("guestDashboard.messages.viewHistory")}
+                </Button>
+                <Button 
+                  onClick={() => {
+                    setShowCurrentReservation(false);
+                    setSelectedCancelledReservation(null); // Limpar reserva cancelada selecionada ao voltar
+                  }} 
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                >
+                  {t("guestDashboard.messages.backToDashboard")}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* Ações Rápidas */}
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center pt-4 sm:pt-6">
+          <Button
+            onClick={() => window.print()}
+            variant="outline"
+            className="shadow-sm hover:shadow-md transition-all border-slate-200 hover:border-slate-300 w-full sm:w-auto"
+          >
+            {t("guestDashboard.messages.printConfirmation")}
+          </Button>
+          <Button
+            onClick={() => {
+              const email = reservation.guest?.email || reservation.financial_responsible?.email;
+              if (email) {
+                window.location.href = `mailto:${email}`;
+              } else {
+                toast.error(t("guestDashboard.messages.emailNotAvailable"));
+              }
+            }}
+            variant="outline"
+            className="shadow-sm hover:shadow-md transition-all border-slate-200 hover:border-slate-300"
+          >
+            {t("guestDashboard.messages.sendEmail")}
+          </Button>
+          {accountId && (
+            <Button
+              onClick={() => setShowProfileDialog(true)}
+              variant="outline"
+              className="shadow-sm hover:shadow-md transition-all border-slate-200 hover:border-slate-300"
+            >
+              <User className="h-4 w-4 mr-2" />
+              {t("guestDashboard.messages.editProfile")}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      </div>
+
+      {/* Dialogs que dependem de variáveis do conteúdo principal */}
+      {/* Dialog de Histórico de Estadas */}
+      {showHistoryDialog && (
+        <GuestStayHistoryDialog
+          open={showHistoryDialog}
+          onOpenChange={setShowHistoryDialog}
+          webCheckin={webCheckin || {
+            reservation: reservation,
+            establishment: establishment,
+            locator: reservation.reservation_code,
+            status: "completed",
+          }}
+          token={(webCheckin as any)?.token || ""}
+        />
+      )}
+
+      {/* Dialog de Editar Perfil */}
+      {showProfileDialog && accountId && (
+        <GuestProfileDialog
+          open={showProfileDialog}
+          onOpenChange={setShowProfileDialog}
+          accountId={accountId}
+        />
+      )}
+
+      {/* Dialog de Seleção de Reserva para Chamado */}
+      <Dialog open={showReservationSelector} onOpenChange={setShowReservationSelector}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>{t("guestDashboard.dialogs.selectReservation")}</DialogTitle>
+            <DialogDescription>
+              {t("guestDashboard.dialogs.selectReservationDescription")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-4 max-h-[400px] overflow-y-auto">
+            {isLoadingAllReservations ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+              </div>
+            ) : allReservations && allReservations.length > 0 ? (
+              allReservations.map((reservation: any) => (
+                <button
+                  key={reservation.id}
+                  onClick={() => {
+                    // Não permitir selecionar reserva cancelada para chamado
+                    if (reservation.status === "cancelled") {
+                      toast.error(t("guestDashboard.messages.cannotOpenTicketCancelled"));
+                      return;
+                    }
+                    setSelectedReservationForTicket(reservation);
+                    setShowReservationSelector(false);
+                    setShowMaintenanceDialog(true);
+                  }}
+                  disabled={reservation.status === "cancelled"}
+                  className={`w-full text-left p-4 rounded-xl border transition-all group ${
+                    reservation.status === "cancelled"
+                      ? "border-red-200 bg-red-50 opacity-60 cursor-not-allowed"
+                      : "border-slate-200 hover:border-blue-500 hover:bg-blue-50"
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <h4 className="font-semibold text-slate-900">
+                            {reservation.reservation_code || t("guestDashboard.dialogs.reservationWithoutCode")}
+                          </h4>
+                          {(() => {
+                            const statusInfo = getReservationStatusInfo(reservation.status, t);
+                            const StatusIcon = statusInfo.icon;
+                            return (
+                              <Badge variant="outline" className={`${statusInfo.textColor} ${statusInfo.borderColor} border text-xs`}>
+                                <StatusIcon className="w-3 h-3 mr-1" />
+                                {statusInfo.label}
+                              </Badge>
+                            );
+                          })()}
+                        </div>
+                      <div className="flex items-center gap-4 text-sm text-slate-600 mb-2">
+                        <div className="flex items-center gap-1">
+                          <Calendar className="w-4 h-4" />
+                          <span>
+                            {reservation.checkin_date && format(parseISO(reservation.checkin_date), "dd/MM/yyyy", { locale })}
+                          </span>
+                        </div>
+                        <span>→</span>
+                        <div className="flex items-center gap-1">
+                          <Calendar className="w-4 h-4" />
+                          <span>
+                            {reservation.checkout_date && format(parseISO(reservation.checkout_date), "dd/MM/yyyy", { locale })}
+                          </span>
+                        </div>
+                        {reservation.rooms && ((reservation.rooms as any).room_number || (reservation.rooms as any).name) && (
+                          <>
+                            <span className="text-slate-300">•</span>
+                            <div className="flex items-center gap-1">
+                              <Bed className="w-4 h-4" />
+                              <span className="font-medium text-slate-700">
+                                {t("guestDashboard.reservation.room")} {(reservation.rooms as any).room_number || (reservation.rooms as any).name}
+                              </span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      {reservation.establishment && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          {(reservation.establishment as any).name || ""}
+                        </p>
+                      )}
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
+                  </div>
+                </button>
+              ))
+            ) : (
+              <p className="text-center text-slate-500 py-8">
+                {t("guestDashboard.dialogs.noReservations")}
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Chamado de Manutenção */}
+      {showMaintenanceDialog && selectedReservationForTicket && (
+        <MaintenanceTicketDialog
+          open={showMaintenanceDialog}
+          onOpenChange={(open) => {
+            setShowMaintenanceDialog(open);
+            if (!open) {
+              setSelectedReservationForTicket(null);
+            }
+          }}
+          reservation={selectedReservationForTicket}
+          webCheckin={{
+            reservation: selectedReservationForTicket,
+            establishment: selectedReservationForTicket.establishment,
+            locator: selectedReservationForTicket.reservation_code || "",
+            status: "completed",
+          }}
+          token={(webCheckin as any)?.token || crypto.randomUUID()}
+          onSuccess={() => {
+            setShowMaintenanceDialog(false);
+            setSelectedReservationForTicket(null);
+          }}
+        />
+      )}
+
+      {/* Dialog de Políticas */}
+      <PoliciesViewDialog
+        open={showPoliciesDialog}
+        onOpenChange={setShowPoliciesDialog}
+        establishmentId={currentReservation?.establishment_id || (currentReservation?.establishment as any)?.id}
+        categoryId={currentReservation?.category_id}
+      />
+
+      {/* Dialog de Todas as Reservas Canceladas */}
+      <CancelledReservationsDialog
+        open={showAllCancelledReservations}
+        onOpenChange={(open) => {
+          setShowAllCancelledReservations(open);
+          if (!open) {
+            setSelectedCancelledReservation(null);
+          }
+        }}
+        cancelledReservations={cancelledReservations}
+        isLoadingCancelled={isLoadingCancelled}
+        onViewDetails={(reservation) => {
+          setSelectedCancelledReservation(reservation);
+          setShowAllCancelledReservations(false);
+          setShowCurrentReservation(true);
+        }}
+      />
+
+      {/* Dialog de Seleção de Reserva para Documento Fiscal */}
+      <Dialog open={showFiscalReservationSelector} onOpenChange={(open) => {
+        console.log("🔍 Dialog onOpenChange chamado:", open);
+        setShowFiscalReservationSelector(open);
+      }}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Selecionar Estadia para Documento Fiscal</DialogTitle>
+            <DialogDescription>
+              Escolha qual estadia você deseja solicitar o documento fiscal (Recibo ou Nota Fiscal)
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-4 max-h-[400px] overflow-y-auto">
+            {isLoadingAllReservations ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+              </div>
+            ) : allReservations && allReservations.length > 0 ? (
+              (() => {
+                // Filtrar apenas reservas que já tiveram check-out
+                const checkedOutReservations = allReservations.filter((res: any) => {
+                  const status = res?.status?.toLowerCase();
+                  const checkoutDate = res?.checkout_date;
+                  
+                  // Verificar por status
+                  if (status === "checkedout" || status === "checked_out") {
+                    return true;
+                  }
+                  
+                  // Verificar se a data de check-out já passou
+                  if (checkoutDate) {
+                    try {
+                      const checkout = startOfDay(new Date(checkoutDate));
+                      const today = startOfDay(new Date());
+                      return isAfter(today, checkout) || checkout.getTime() === today.getTime();
+                    } catch (error) {
+                      console.error("Erro ao verificar data de check-out:", error);
+                      return false;
+                    }
+                  }
+                  
+                  return false;
+                });
+
+                if (checkedOutReservations.length === 0) {
+                  return (
+                    <div className="text-center py-8">
+                      <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
+                      <p className="text-slate-600">
+                        Você ainda não possui reservas com check-out concluído.
+                      </p>
+                      <p className="text-sm text-slate-500 mt-2">
+                        A solicitação de documentos fiscais só pode ser feita após o check-out das reservas.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return checkedOutReservations.map((reservation: any) => (
+                  <button
+                    key={reservation.id}
+                    onClick={() => {
+                      setSelectedReservationForFiscal(reservation);
+                      setShowFiscalReservationSelector(false);
+                      setShowFiscalDocumentDialog(true);
+                    }}
+                    className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-amber-500 hover:bg-amber-50 transition-all group"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <h4 className="font-semibold text-slate-900">
+                            {reservation.reservation_code || "Reserva sem código"}
+                          </h4>
+                          {(() => {
+                            const statusInfo = getReservationStatusInfo(reservation.status, t);
+                            const StatusIcon = statusInfo.icon;
+                            return (
+                              <Badge variant="outline" className={`${statusInfo.textColor} ${statusInfo.borderColor} border text-xs`}>
+                                <StatusIcon className="w-3 h-3 mr-1" />
+                                {statusInfo.label}
+                              </Badge>
+                            );
+                          })()}
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-slate-600 mb-2">
+                          <div className="flex items-center gap-1">
+                            <Calendar className="w-4 h-4" />
+                            <span>
+                              {reservation.checkin_date && format(parseISO(reservation.checkin_date), "dd/MM/yyyy", { locale })}
+                            </span>
+                          </div>
+                          <span>→</span>
+                          <div className="flex items-center gap-1">
+                            <Calendar className="w-4 h-4" />
+                            <span>
+                              {reservation.checkout_date && format(parseISO(reservation.checkout_date), "dd/MM/yyyy", { locale })}
+                            </span>
+                          </div>
+                        </div>
+                        {reservation.rooms && (
+                          <div className="text-sm text-slate-500">
+                            <Bed className="w-4 h-4 inline mr-1" />
+                            {(reservation.rooms as any).room_number || (reservation.rooms as any).name || "Quarto não informado"}
+                          </div>
+                        )}
+                        {reservation.paid_amount && (
+                          <div className="text-sm font-semibold text-slate-900 mt-1">
+                            Valor: {new Intl.NumberFormat("pt-BR", {
+                              style: "currency",
+                              currency: "BRL",
+                            }).format(reservation.paid_amount)}
+                          </div>
+                        )}
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-amber-600 transition-colors" />
+                    </div>
+                  </button>
+                ));
+              })()
+            ) : (
+              <div className="text-center py-8">
+                <AlertCircle className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                <p className="text-slate-600">Nenhuma reserva encontrada.</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Solicitar Documento Fiscal */}
+      {showFiscalDocumentDialog && selectedReservationForFiscal && (
+        <Dialog open={showFiscalDocumentDialog} onOpenChange={setShowFiscalDocumentDialog}>
+          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Solicitar Documento Fiscal</DialogTitle>
+              <DialogDescription>
+                Solicite um recibo ou nota fiscal para sua reserva
+              </DialogDescription>
+            </DialogHeader>
+            <FiscalDocumentRequest
+              reservation={selectedReservationForFiscal}
+              establishment={establishment}
+              onSuccess={() => {
+                setShowFiscalDocumentDialog(false);
+                setSelectedReservationForFiscal(null);
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+      </div>
+    </>
+  );
+}
+
+// Dialog de Todas as Reservas Canceladas - Renderizado fora dos blocos condicionais
+function CancelledReservationsDialog({ 
+  open, 
+  onOpenChange, 
+  cancelledReservations, 
+  isLoadingCancelled,
+  onViewDetails
+}: { 
+  open: boolean; 
+  onOpenChange: (open: boolean) => void; 
+  cancelledReservations: any[] | undefined; 
+  isLoadingCancelled: boolean;
+  onViewDetails?: (reservation: any) => void;
+}) {
+  const { t } = useTranslation();
+  const locale = useDateLocale();
+  
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Ban className="w-5 h-5 text-red-500" />
+            {t("guestDashboard.cancelledReservations.title_other").replace("{{count}}", (cancelledReservations?.length || 0).toString())}
+          </DialogTitle>
+          <DialogDescription>
+            {t("guestDashboard.cancelledReservations.dialogDescription")}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          {isLoadingCancelled ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-red-600" />
+            </div>
+          ) : cancelledReservations && cancelledReservations.length > 0 ? (
+            cancelledReservations.map((reservation: any) => {
+              const statusInfo = getReservationStatusInfo(reservation?.status, t);
+              const StatusIcon = statusInfo?.icon || Ban;
+              
+              return (
+                <div 
+                  key={reservation.id}
+                  className="bg-gradient-to-br from-red-50 to-rose-50 border-2 border-red-200 rounded-xl p-5 hover:shadow-md transition-all"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1">
+                      <div className="inline-flex items-center gap-2 bg-red-100 px-3 py-1 rounded-full mb-2">
+                        <StatusIcon className="w-4 h-4 text-red-600" />
+                        <span className="text-sm font-medium text-red-700">{statusInfo?.label}</span>
+                      </div>
+                      <h4 className="text-lg font-bold text-slate-800 mb-1">
+                        {reservation.reservation_code && `${t("guestDashboard.reservation.locatorLabel")} ${reservation.reservation_code}`}
+                      </h4>
+                    </div>
+                    <Ban className="w-6 h-6 text-red-300 flex-shrink-0" />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <div className="flex items-center gap-2 text-slate-600 mb-1">
+                        <Calendar className="w-4 h-4" />
+                        <span className="text-sm font-medium">{t("guestDashboard.reservation.checkin")}</span>
+                      </div>
+                      <p className="text-base font-semibold text-slate-800">
+                        {reservation.checkin_date ? format(parseISO(reservation.checkin_date), "dd/MM/yyyy", { locale }) : "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 text-slate-600 mb-1">
+                        <Calendar className="w-4 h-4" />
+                        <span className="text-sm font-medium">{t("guestDashboard.reservation.checkout")}</span>
+                      </div>
+                      <p className="text-base font-semibold text-slate-800">
+                        {reservation.checkout_date ? format(parseISO(reservation.checkout_date), "dd/MM/yyyy", { locale }) : "-"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {reservation.establishment && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 text-slate-600 mb-1">
+                        <MapPin className="w-4 h-4" />
+                        <span className="text-sm font-medium">{t("guestDashboard.reservation.establishment")}</span>
+                      </div>
+                      <p className="text-sm text-slate-700">
+                        {(reservation.establishment as any)?.name || "-"}
+                      </p>
+                    </div>
+                  )}
+
+                  {reservation.rooms && ((reservation.rooms as any).room_number || (reservation.rooms as any).name) && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 text-slate-600 mb-1">
+                        <Bed className="w-4 h-4" />
+                        <span className="text-sm font-medium">{t("guestDashboard.reservation.room")}</span>
+                      </div>
+                      <p className="text-sm text-slate-700">
+                        {(reservation.rooms as any).room_number || (reservation.rooms as any).name || "-"}
+                      </p>
+                    </div>
+                  )}
+
+                  {reservation.total_amount && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 text-slate-600 mb-1">
+                        <CreditCard className="w-4 h-4" />
+                        <span className="text-sm font-medium">{t("guestDashboard.reservation.totalAmount")}</span>
+                      </div>
+                      <p className="text-sm font-semibold text-slate-800">
+                        R$ {Number(reservation.total_amount).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="bg-white/60 rounded-xl p-3 border border-red-200 mb-4">
+                    <p className="text-xs text-slate-600 text-center mb-3">
+                      {t("guestDashboard.cancelledReservations.contactMessage")}
+                    </p>
+                    {(() => {
+                      const phone = reservation.contact_phone;
+                      const whatsapp = reservation.contact_whatsapp;
+                      const whatsappUrl = whatsapp ? `https://wa.me/${whatsapp.replace(/\D/g, '')}` : null;
+                      const phoneUrl = phone ? `tel:${phone.replace(/\D/g, '')}` : null;
+                      
+                      if (!phone && !whatsapp) return null;
+                      
+                      return (
+                        <div className="flex flex-col gap-2 mt-3">
+                          {phone && (
+                            <a
+                              href={phoneUrl || '#'}
+                              className="flex items-center justify-center gap-2 text-xs text-red-700 hover:text-red-800 hover:underline"
+                            >
+                              <Phone className="w-3 h-3" />
+                              {phone}
+                            </a>
+                          )}
+                          {whatsapp && (
+                            <a
+                              href={whatsappUrl || '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center justify-center gap-2 text-xs text-green-700 hover:text-green-800 hover:underline"
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              WhatsApp: {whatsapp}
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {onViewDetails && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onViewDetails(reservation)}
+                      className="w-full text-red-600 border-red-300 hover:bg-red-50 hover:border-red-400"
+                    >
+                      <FileText className="w-4 h-4 mr-2" />
+                      {t("guestDashboard.reservation.viewDetails")}
+                    </Button>
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            <div className="text-center py-8">
+              <Ban className="w-12 h-12 text-red-300 mx-auto mb-3" />
+              <p className="text-slate-600">{t("guestDashboard.cancelledReservations.noCancelledReservations")}</p>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

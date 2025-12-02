@@ -1,0 +1,514 @@
+[
+  {
+    "id": "TC001",
+    "title": "Successful login with valid credentials",
+    "description": "Verify that users can log in successfully using valid credentials through Supabase Auth and are redirected appropriately based on their role.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the login page"
+      },
+      {
+        "type": "action",
+        "description": "Enter valid username/email and password"
+      },
+      {
+        "type": "action",
+        "description": "Click on the login button"
+      },
+      {
+        "type": "assertion",
+        "description": "User is authenticated and redirected based on role with access to permitted routes"
+      }
+    ]
+  },
+  {
+    "id": "TC002",
+    "title": "Prevent login with invalid credentials",
+    "description": "Ensure login fails when users provide incorrect username/email or password and that appropriate error messages are displayed.",
+    "category": "error handling",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the login page"
+      },
+      {
+        "type": "action",
+        "description": "Enter invalid username/email or password"
+      },
+      {
+        "type": "action",
+        "description": "Click on the login button"
+      },
+      {
+        "type": "assertion",
+        "description": "Login is rejected and error message about invalid credentials is shown"
+      }
+    ]
+  },
+  {
+    "id": "TC003",
+    "title": "Role-based route protection enforcement",
+    "description": "Confirm users cannot access routes outside their role permissions and that unauthorized access is blocked.",
+    "category": "security",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as a user with restricted role"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to navigate directly to a route not permitted for this role"
+      },
+      {
+        "type": "assertion",
+        "description": "Route access is denied and user is redirected to an error or home page"
+      }
+    ]
+  },
+  {
+    "id": "TC004",
+    "title": "Multi-tenant data isolation between establishments",
+    "description": "Validate that users only see data for establishments assigned within their company context and no access to other entities' data.",
+    "category": "security",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login as user assigned to Establishment A"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to view data related to Establishment B"
+      },
+      {
+        "type": "assertion",
+        "description": "Data from Establishment B is not visible and errors or empty states are shown"
+      }
+    ]
+  },
+  {
+    "id": "TC005",
+    "title": "Create reservation with valid availability and client data",
+    "description": "Verify users can create reservations when the selected room is available, dates are valid, and client info is complete and validated.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to reservation creation form"
+      },
+      {
+        "type": "action",
+        "description": "Select valid date range within availability"
+      },
+      {
+        "type": "action",
+        "description": "Select an available room"
+      },
+      {
+        "type": "action",
+        "description": "Enter valid client information"
+      },
+      {
+        "type": "action",
+        "description": "Submit reservation form"
+      },
+      {
+        "type": "assertion",
+        "description": "Reservation is successfully created and reflected on calendar and occupancy map with correct pricing"
+      }
+    ]
+  },
+  {
+    "id": "TC006",
+    "title": "Reservation creation fails with invalid date ranges",
+    "description": "Ensure validation prevents reservation creation when end date is before start date or dates are in the past.",
+    "category": "error handling",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Open reservation creation form"
+      },
+      {
+        "type": "action",
+        "description": "Input an end date earlier than start date"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to submit the form"
+      },
+      {
+        "type": "assertion",
+        "description": "Validation error is displayed and form cannot be submitted"
+      }
+    ]
+  },
+  {
+    "id": "TC007",
+    "title": "Reservation creation blocked when room unavailable",
+    "description": "Verify that users cannot create a reservation for a room that is already reserved or marked unavailable in the selected date range.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Select a room that is already booked in the desired date range"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to create a reservation for that date range"
+      },
+      {
+        "type": "assertion",
+        "description": "System shows error about room unavailability and prevents submission"
+      }
+    ]
+  },
+  {
+    "id": "TC008",
+    "title": "Dynamic pricing calculation with seasons and promotions",
+    "description": "Check that the reservation pricing dynamically updates based on date changes, season pricing plans, and applicable promotions matching backend logic.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Create or edit a reservation"
+      },
+      {
+        "type": "action",
+        "description": "Change reservation dates to fall under different pricing seasons"
+      },
+      {
+        "type": "assertion",
+        "description": "Pricing is recalculated accordingly and displayed to user"
+      },
+      {
+        "type": "action",
+        "description": "Apply valid promotion codes"
+      },
+      {
+        "type": "assertion",
+        "description": "Pricing reflects discounts from promotions correctly"
+      }
+    ]
+  },
+  {
+    "id": "TC009",
+    "title": "Edit and cancel reservation workflows",
+    "description": "Validate users can successfully edit and cancel existing reservations, and changes reflect immediately on calendars and occupancy maps.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Open existing reservation details"
+      },
+      {
+        "type": "action",
+        "description": "Modify reservation details such as dates, room, or client info"
+      },
+      {
+        "type": "action",
+        "description": "Save changes and verify updates on calendar"
+      },
+      {
+        "type": "action",
+        "description": "Cancel the reservation"
+      },
+      {
+        "type": "assertion",
+        "description": "Reservation status updated to cancelled, removed from active calendar and occupancy views"
+      }
+    ]
+  },
+  {
+    "id": "TC010",
+    "title": "Maintenance ticket creation and room status integration",
+    "description": "Ensure maintenance tickets can be created, assigned with priority and status changes update corresponding room status preventing new reservations for that room if applicable.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Create a maintenance ticket for a specific room"
+      },
+      {
+        "type": "action",
+        "description": "Assign priority and technician"
+      },
+      {
+        "type": "action",
+        "description": "Change maintenance ticket status to 'in progress'"
+      },
+      {
+        "type": "assertion",
+        "description": "Room status updates to unavailable and blocks new reservations"
+      }
+    ]
+  },
+  {
+    "id": "TC011",
+    "title": "Maintenance ticket prevents conflicting reservations",
+    "description": "Validate that rooms under active maintenance tickets cannot be reserved until maintenance is resolved or status change permits availability.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Log maintenance ticket with status active on a room"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to create a reservation for that room during the maintenance period"
+      },
+      {
+        "type": "assertion",
+        "description": "System disallows reservation and displays appropriate message"
+      }
+    ]
+  },
+  {
+    "id": "TC012",
+    "title": "Channel manager OTA data synchronization",
+    "description": "Test that availability and pricing data synchronize correctly between the system and connected OTAs (Booking, Airbnb, Expedia), ensuring data consistency and imports of reservations function as expected.",
+    "category": "integration",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Configure OTA channel with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Trigger manual synchronization"
+      },
+      {
+        "type": "assertion",
+        "description": "Availability and pricing data on OTA and system match after sync"
+      },
+      {
+        "type": "action",
+        "description": "Import new reservations from OTA"
+      },
+      {
+        "type": "assertion",
+        "description": "Imported reservations appear correctly in the reservation system with appropriate statuses"
+      }
+    ]
+  },
+  {
+    "id": "TC013",
+    "title": "Financial reports display accurate aggregated data",
+    "description": "Verify financial reports show correct revenue, payment methods, cash flow, and channel comparisons with interactive charts matching data fetched from Supabase backend.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to financial reports dashboard"
+      },
+      {
+        "type": "assertion",
+        "description": "Reports accurately reflect revenue, payment methods, and channel data consistent with backend"
+      },
+      {
+        "type": "action",
+        "description": "Export reports to supported formats"
+      },
+      {
+        "type": "assertion",
+        "description": "Exported reports match on-screen data and are properly formatted"
+      }
+    ]
+  },
+  {
+    "id": "TC014",
+    "title": "User CRUD operations for client management",
+    "description": "Ensure users can create, read, update, and delete client records including personal and document information correctly with validations.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Create a new client with valid personal and document data"
+      },
+      {
+        "type": "assertion",
+        "description": "Client is saved and visible in client list"
+      },
+      {
+        "type": "action",
+        "description": "Edit client information and save changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Changes are reflected correctly without data loss"
+      },
+      {
+        "type": "action",
+        "description": "Delete a client record"
+      },
+      {
+        "type": "assertion",
+        "description": "Client is removed from the system and list updated"
+      }
+    ]
+  },
+  {
+    "id": "TC015",
+    "title": "Room inventory management with status updates",
+    "description": "Verify managing room details including categories, buildings, status updates, and availability functions correctly reflecting in usage and booking capabilities.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Create a new room category and assign it to a room"
+      },
+      {
+        "type": "action",
+        "description": "Update room status to maintenance or unavailable"
+      },
+      {
+        "type": "assertion",
+        "description": "Room status updated and availability on calendars reflects status changes"
+      }
+    ]
+  },
+  {
+    "id": "TC016",
+    "title": "Dashboard displays real-time occupancy and reservation data",
+    "description": "Confirm dashboard shows up-to-date occupancy metrics, recent reservation info, and financial summaries consistent with system data.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Login and navigate to main dashboard"
+      },
+      {
+        "type": "assertion",
+        "description": "Occupancy charts and metrics correspond to current reservations and room statuses"
+      },
+      {
+        "type": "assertion",
+        "description": "Financial summaries show correct aggregated data"
+      }
+    ]
+  },
+  {
+    "id": "TC017",
+    "title": "User profile updates with validation and authentication",
+    "description": "Validate that users can update personal data, change email and password securely with necessary validations and confirmation mechanisms.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to user profile page"
+      },
+      {
+        "type": "action",
+        "description": "Modify personal information fields with valid data"
+      },
+      {
+        "type": "action",
+        "description": "Change email and/or password with correct current password verification"
+      },
+      {
+        "type": "assertion",
+        "description": "Updates are saved successfully, and changes are reflected on next login"
+      }
+    ]
+  },
+  {
+    "id": "TC018",
+    "title": "Role-based user and employee management flows",
+    "description": "Ensure admins can add, edit, and remove employees with proper role assignments and that corresponding access control is enforced.",
+    "category": "functional",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "As admin, create a new employee user and assign roles"
+      },
+      {
+        "type": "assertion",
+        "description": "New user can log in and access permitted features only"
+      },
+      {
+        "type": "action",
+        "description": "Modify roles of existing employees"
+      },
+      {
+        "type": "assertion",
+        "description": "Access restrictions apply immediately according to updated roles"
+      },
+      {
+        "type": "action",
+        "description": "Delete an employee user"
+      },
+      {
+        "type": "assertion",
+        "description": "Deleted user no longer has access and data is removed or archived appropriately"
+      }
+    ]
+  },
+  {
+    "id": "TC019",
+    "title": "Error handling and loading state presence",
+    "description": "Verify consistent display of loading indicators and error messages across all major features including reservations, financial reports, and channel management.",
+    "category": "ui",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Trigger features requiring data loads, e.g., open reservations or financial reports with slow network"
+      },
+      {
+        "type": "assertion",
+        "description": "Loading spinners or placeholders are shown during data fetching"
+      },
+      {
+        "type": "action",
+        "description": "Simulate backend errors or network failures"
+      },
+      {
+        "type": "assertion",
+        "description": "Appropriate error messages and recovery options are displayed to the user"
+      }
+    ]
+  },
+  {
+    "id": "TC020",
+    "title": "Settings module hotel and API integration updates",
+    "description": "Test that hotel information, schedules, payment methods, and API integration settings can be modified correctly and persist across sessions.",
+    "category": "functional",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to settings page"
+      },
+      {
+        "type": "action",
+        "description": "Update hotel information and save"
+      },
+      {
+        "type": "action",
+        "description": "Modify API integration credentials and test connection"
+      },
+      {
+        "type": "assertion",
+        "description": "Changes are saved and persist after page reload with successful API connection test"
+      }
+    ]
+  }
+]

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reserva Criada - {{reservation_code}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 28px;">✅ Reserva Criada!</h1>
+            </td>
+          </tr>
+
+          <!-- Conteúdo Principal -->
+          <tr>
+            <td style="padding: 30px;">
+              <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                Olá <strong style="color: #667eea;">{{guest_name}}</strong>,
+              </p>
+              
+              <p style="color: #666666; font-size: 16px; line-height: 1.6; margin: 0 0 30px 0;">
+                Sua reserva <strong style="color: #333333;">{{reservation_code}}</strong> foi criada com sucesso! 
+                Abaixo estão os detalhes da sua reserva.
+              </p>
+
+              <!-- Detalhes da Reserva -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; border-radius: 8px; padding: 20px; margin-bottom: 30px;">
+                <tr>
+                  <td>
+                    <h2 style="color: #333333; font-size: 20px; margin: 0 0 15px 0; border-bottom: 2px solid #667eea; padding-bottom: 10px;">
+                      📋 Detalhes da Reserva
+                    </h2>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 0;">
+                    <table width="100%" cellpadding="5" cellspacing="0">
+                      <tr>
+                        <td style="color: #666666; width: 40%;">Código da Reserva:</td>
+                        <td style="color: #333333; font-weight: bold;">{{reservation_code}}</td>
+                      </tr>
+                      <tr>
+                        <td style="color: #666666;">Check-in:</td>
+                        <td style="color: #333333;">{{checkin_date}} às {{checkin_time}}</td>
+                      </tr>
+                      <tr>
+                        <td style="color: #666666;">Check-out:</td>
+                        <td style="color: #333333;">{{checkout_date}} às {{checkout_time}}</td>
+                      </tr>
+                      <tr>
+                        <td style="color: #666666;">Categoria:</td>
+                        <td style="color: #333333;">{{category_name}}</td>
+                      </tr>
+                      {{#if room_number}}
+                      <tr>
+                        <td style="color: #666666;">Quarto:</td>
+                        <td style="color: #333333;">{{room_number}}</td>
+                      </tr>
+                      {{/if}}
+                      <tr>
+                        <td style="color: #666666;">Hóspedes:</td>
+                        <td style="color: #333333;">{{adults}} adulto(s){{#if children}}, {{children}} criança(s){{/if}}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Informações de Pagamento -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 20px; margin-bottom: 30px;">
+                <tr>
+                  <td>
+                    <h3 style="color: #856404; font-size: 18px; margin: 0 0 10px 0;">
+                      💳 Informações de Pagamento
+                    </h3>
+                    <p style="color: #856404; margin: 5px 0;">
+                      <strong>Valor Total:</strong> R$ {{total_amount}}
+                    </p>
+                    <p style="color: #856404; margin: 5px 0;">
+                      <strong>Valor Pago:</strong> R$ {{paid_amount}}
+                    </p>
+                    <p style="color: #856404; margin: 5px 0;">
+                      <strong>Status:</strong> {{payment_status}}
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Link de Pagamento -->
+              {{#if payment_link}}
+              <table width="100%" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); border-radius: 8px; padding: 30px; margin-bottom: 30px; text-align: center;">
+                <tr>
+                  <td>
+                    <h2 style="color: #ffffff; font-size: 24px; margin: 0 0 15px 0;">
+                      ⚠️ Pagamento Pendente
+                    </h2>
+                    <p style="color: #ffffff; font-size: 16px; margin: 0 0 25px 0; line-height: 1.6;">
+                      Para confirmar sua reserva, realize o pagamento de<br>
+                      <strong style="font-size: 28px;">R$ {{total_amount}}</strong>
+                    </p>
+                    <a href="{{payment_link}}" 
+                       style="background-color: #ffffff; 
+                              color: #28a745; 
+                              padding: 15px 40px; 
+                              text-decoration: none; 
+                              border-radius: 5px; 
+                              display: inline-block;
+                              font-size: 18px;
+                              font-weight: bold;
+                              box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                              transition: all 0.3s ease;">
+                      💳 Pagar Agora
+                    </a>
+                    <p style="color: rgba(255,255,255,0.9); font-size: 12px; margin: 20px 0 0 0;">
+                      🔒 Pagamento seguro via Stripe<br>
+                      Este link é válido por tempo indeterminado
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              {{else}}
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #d4edda; border: 2px solid #28a745; border-radius: 8px; padding: 20px; margin-bottom: 30px;">
+                <tr>
+                  <td style="text-align: center;">
+                    <p style="color: #155724; margin: 0; font-size: 18px; font-weight: bold;">
+                      ✅ Pagamento Confirmado!
+                    </p>
+                    <p style="color: #155724; margin: 10px 0 0 0; font-size: 14px;">
+                      Sua reserva está garantida e confirmada.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              {{/if}}
+
+              <!-- Informações do Hotel -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="border-top: 1px solid #e0e0e0; padding-top: 20px; margin-top: 30px;">
+                <tr>
+                  <td>
+                    <h3 style="color: #333333; font-size: 18px; margin: 0 0 15px 0;">
+                      🏨 Informações do Hotel
+                    </h3>
+                    <p style="color: #666666; margin: 5px 0; font-size: 14px;">
+                      <strong>{{hotel_name}}</strong>
+                    </p>
+                    {{#if hotel_address}}
+                    <p style="color: #666666; margin: 5px 0; font-size: 14px;">
+                      📍 {{hotel_address}}
+                    </p>
+                    {{/if}}
+                    {{#if hotel_phone}}
+                    <p style="color: #666666; margin: 5px 0; font-size: 14px;">
+                      📞 {{hotel_phone}}
+                    </p>
+                    {{/if}}
+                    {{#if hotel_email}}
+                    <p style="color: #666666; margin: 5px 0; font-size: 14px;">
+                      ✉️ {{hotel_email}}
+                    </p>
+                    {{/if}}
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Links Úteis -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                <tr>
+                  <td>
+                    {{#if web_checkin_link}}
+                    <a href="{{web_checkin_link}}" 
+                       style="display: inline-block; 
+                              background-color: #667eea; 
+                              color: #ffffff; 
+                              padding: 12px 25px; 
+                              text-decoration: none; 
+                              border-radius: 5px; 
+                              margin-right: 10px;
+                              font-size: 14px;">
+                      📱 Fazer Check-in Online
+                    </a>
+                    {{/if}}
+                    
+                    {{#if policies_link}}
+                    <a href="{{policies_link}}" 
+                       style="display: inline-block; 
+                              background-color: #6c757d; 
+                              color: #ffffff; 
+                              padding: 12px 25px; 
+                              text-decoration: none; 
+                              border-radius: 5px; 
+                              font-size: 14px;">
+                      📄 Políticas do Hotel
+                    </a>
+                    {{/if}}
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0;">
+              <p style="color: #999999; font-size: 12px; margin: 0;">
+                Este é um email automático. Por favor, não responda.<br>
+                Em caso de dúvidas, entre em contato com o hotel através dos canais oficiais.
+              </p>
+              {{#if hotel_website}}
+              <p style="color: #999999; font-size: 12px; margin: 10px 0 0 0;">
+                <a href="{{hotel_website}}" style="color: #667eea; text-decoration: none;">Visite nosso site</a>
+              </p>
+              {{/if}}
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+

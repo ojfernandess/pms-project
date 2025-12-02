@@ -1,0 +1,131 @@
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AppLayout } from "./components/layout/AppLayout";
+import { ProtectedRoute } from "./components/layout/ProtectedRoute";
+import { SuperAdminRoute } from "./components/layout/SuperAdminRoute";
+import { EstablishmentRoute } from "./components/layout/EstablishmentRoute";
+import Dashboard from "./pages/Dashboard";
+import OccupancyMap from "./pages/OccupancyMap";
+import Reservations from "./pages/Reservations";
+import PendingReservations from "./pages/PendingReservations";
+import ActivityLogs from "./pages/ActivityLogs";
+import ReservationDetails from "./pages/ReservationDetails";
+import WebCheckin from "./pages/WebCheckin";
+import GuestDashboard from "./pages/GuestDashboard";
+import GuestResetPassword from "./pages/GuestResetPassword";
+import PublicPolicies from "./pages/PublicPolicies";
+import Clients from "./pages/Clients";
+import ClientDeduplication from "./pages/ClientDeduplication";
+import Units from "./pages/Units";
+import Financial from "./pages/Financial";
+import Maintenance from "./pages/Maintenance";
+import Pricing from "./pages/Pricing";
+import PMSRateSystem from "./pages/PMSRateSystem";
+import ChannelManager from "./pages/ChannelManager";
+import Settings from "./pages/Settings";
+import Profile from "./pages/Profile";
+import Employees from "./pages/Employees";
+import SuperAdmin from "./pages/SuperAdmin";
+import UserDashboard from "./pages/UserDashboard";
+import EstablishmentDashboard from "./pages/EstablishmentDashboard";
+import Auth from "./pages/Auth";
+import ResetPassword from "./pages/ResetPassword";
+import NotFound from "./pages/NotFound";
+import PaymentPage from "./pages/PaymentPage";
+import PaymentSuccess from "./pages/PaymentSuccess";
+import Documentation from "./pages/Documentation";
+import { EstablishmentProvider } from "./contexts/EstablishmentContext";
+import { StripeProvider } from "./components/stripe/StripeProvider";
+import { useSiteMeta } from "./hooks/useSiteMeta";
+import "./i18n/config";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000, // 5 minutos
+    },
+  },
+});
+
+const AppContent = () => {
+  useSiteMeta(); // Atualizar título e meta tags dinamicamente
+  
+  return (
+    <BrowserRouter>
+          <Routes>
+            <Route path="/auth" element={<Auth />} />
+            <Route path="/auth/reset-password" element={<ResetPassword />} />
+            <Route path="/login" element={<Navigate to="/auth" replace />} />
+            <Route path="/logout" element={<Navigate to="/auth" replace />} />
+            <Route path="/admin-dashboard" element={<SuperAdminRoute><AppLayout><SuperAdmin /></AppLayout></SuperAdminRoute>} />
+            <Route path="/super-admin" element={<SuperAdminRoute><AppLayout><SuperAdmin /></AppLayout></SuperAdminRoute>} />
+            <Route path="/user-dashboard" element={<ProtectedRoute><AppLayout><UserDashboard /></AppLayout></ProtectedRoute>} />
+            <Route path="/establishments" element={<ProtectedRoute><AppLayout><EstablishmentDashboard /></AppLayout></ProtectedRoute>} />
+            {/* Rotas com establishmentId */}
+            <Route path="/:establishmentId" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Dashboard /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/ocupacao" element={<ProtectedRoute><EstablishmentRoute><AppLayout><OccupancyMap /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/occupancy-map" element={<ProtectedRoute><EstablishmentRoute><AppLayout><OccupancyMap /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/reservas" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Reservations /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/reservas/pendencias" element={<ProtectedRoute><EstablishmentRoute><AppLayout><PendingReservations /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/reservas/:reservationCode" element={<ProtectedRoute><EstablishmentRoute><AppLayout><ReservationDetails /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/logs" element={<ProtectedRoute><EstablishmentRoute><AppLayout><ActivityLogs /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/web-checkin/:locator" element={<WebCheckin />} />
+            <Route path="/web-checkin/reset-password" element={<GuestResetPassword />} />
+            <Route path="/web-checkin" element={<WebCheckin />} />
+            <Route path="/guest-dashboard" element={<GuestDashboard />} />
+            <Route path="/payment/:paymentIntentId" element={<PaymentPage />} />
+            <Route path="/payment/success/:paymentIntentId" element={<PaymentSuccess />} />
+            <Route path="/payment/return" element={<PaymentSuccess />} />
+            <Route path="/policies/:token" element={<PublicPolicies />} />
+            <Route path="/documentation" element={<ProtectedRoute><AppLayout><Documentation /></AppLayout></ProtectedRoute>} />
+            <Route path="/:establishmentId/clientes" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Clients /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/clientes/centralizacao" element={<ProtectedRoute><EstablishmentRoute><AppLayout><ClientDeduplication /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/unidades" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Units /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/financeiro" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Financial /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/tarifario" element={<ProtectedRoute><EstablishmentRoute><AppLayout><PMSRateSystem /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/tarifario-legado" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Pricing /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/manutencao" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Maintenance /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/channel-manager" element={<ProtectedRoute><EstablishmentRoute><AppLayout><ChannelManager /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/configuracoes" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Settings /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/perfil" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Profile /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/funcionarios" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Employees /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            {/* Rotas legadas (redirecionar para user-dashboard se não tiver establishmentId) */}
+            <Route path="/" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/ocupacao" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/occupancy-map" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/reservas" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/clientes" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/unidades" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/financeiro" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/tarifario" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/manutencao" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/channel-manager" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/configuracoes" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/perfil" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/funcionarios" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+  );
+};
+
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <EstablishmentProvider>
+        <StripeProvider>
+        <AppContent />
+        </StripeProvider>
+      </EstablishmentProvider>
+    </TooltipProvider>
+  </QueryClientProvider>
+);
+
+export default App;

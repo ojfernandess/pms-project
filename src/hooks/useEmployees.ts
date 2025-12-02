@@ -1,0 +1,272 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
+
+export interface EmployeeRole {
+  id: string;
+  name: string;
+  code: string;
+  description: string | null;
+  permissions: any;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Employee {
+  id: string;
+  user_id: string;
+  establishment_id: string;
+  role_id: string;
+  full_name: string;
+  cpf: string | null;
+  phone: string | null;
+  email: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  employee_roles?: EmployeeRole;
+  users?: {
+    id: string;
+    email: string;
+    full_name: string | null;
+  };
+}
+
+export interface CreateEmployeeData {
+  user_id: string;
+  establishment_id: string;
+  role_id: string;
+  full_name: string;
+  cpf?: string;
+  phone?: string;
+  email?: string;
+}
+
+export const useEmployeeRoles = () => {
+  const rolesQuery = useQuery({
+    queryKey: ["employee_roles"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("employee_roles")
+        .select("*")
+        .order("name");
+
+      if (error) throw error;
+      return data as EmployeeRole[];
+    },
+  });
+
+  return {
+    roles: rolesQuery.data || [],
+    isLoading: rolesQuery.isLoading,
+    refetch: rolesQuery.refetch,
+  };
+};
+
+export const useEmployees = () => {
+  const queryClient = useQueryClient();
+  // Usar o contexto do estabelecimento em vez de ler do localStorage diretamente
+  const { selectedEstablishment } = useEstablishment();
+  const establishmentId = selectedEstablishment?.id || null;
+
+  const employeesQuery = useQuery({
+    queryKey: ["employees", establishmentId],
+    queryFn: async () => {
+      if (!establishmentId) return [];
+
+      // Buscar funcionários com roles
+      const { data: employeesData, error: employeesError } = await supabase
+        .from("employees")
+        .select(`
+          *,
+          employee_roles (*)
+        `)
+        .eq("establishment_id", establishmentId)
+        .order("full_name");
+
+      if (employeesError) throw employeesError;
+      if (!employeesData) return [];
+
+      // Buscar dados dos usuários separadamente
+      const userIds = [...new Set(employeesData.map((emp: any) => emp.user_id).filter(Boolean))];
+      
+      let usersMap: Record<string, { id: string; email: string; full_name: string | null }> = {};
+      
+      if (userIds.length > 0) {
+        const { data: usersData, error: usersError } = await supabase
+          .from("users")
+          .select("id, email, full_name")
+          .in("id", userIds);
+
+        if (usersError) {
+          console.warn("Erro ao buscar dados dos usuários:", usersError);
+        } else if (usersData) {
+          usersMap = usersData.reduce((acc, user) => {
+            acc[user.id] = user;
+            return acc;
+          }, {} as Record<string, { id: string; email: string; full_name: string | null }>);
+        }
+      }
+
+      // Combinar dados
+      const employees = employeesData.map((emp: any) => ({
+        ...emp,
+        users: usersMap[emp.user_id] || null,
+      }));
+
+      return employees as Employee[];
+    },
+    enabled: !!establishmentId,
+  });
+
+  const createEmployee = useMutation({
+    mutationFn: async (employeeData: CreateEmployeeData) => {
+      const { data: employee, error } = await supabase
+        .from("employees")
+        .insert([employeeData])
+        .select(`
+          *,
+          employee_roles (*)
+        `)
+        .single();
+
+      if (error) throw error;
+
+      // Buscar dados do usuário separadamente
+      let userData = null;
+      if (employee.user_id) {
+        const { data: user } = await supabase
+          .from("users")
+          .select("id, email, full_name")
+          .eq("id", employee.user_id)
+          .single();
+        userData = user;
+      }
+
+      return {
+        ...employee,
+        users: userData,
+      } as Employee;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      toast.success("Funcionário criado com sucesso!");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao criar funcionário");
+    },
+  });
+
+  const updateEmployee = useMutation({
+    mutationFn: async ({ id, ...updateData }: { id: string; role_id?: string; full_name?: string; cpf?: string; phone?: string; email?: string; is_active?: boolean }) => {
+      const { data: employee, error } = await supabase
+        .from("employees")
+        .update(updateData)
+        .eq("id", id)
+        .select(`
+          *,
+          employee_roles (*)
+        `)
+        .single();
+
+      if (error) throw error;
+
+      // Buscar dados do usuário separadamente
+      let userData = null;
+      if (employee.user_id) {
+        const { data: user } = await supabase
+          .from("users")
+          .select("id, email, full_name")
+          .eq("id", employee.user_id)
+          .single();
+        userData = user;
+      }
+
+      return {
+        ...employee,
+        users: userData,
+      } as Employee;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      toast.success("Funcionário atualizado com sucesso!");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao atualizar funcionário");
+    },
+  });
+
+  const deleteEmployee = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("employees")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      toast.success("Funcionário excluído com sucesso!");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao excluir funcionário");
+    },
+  });
+
+  return {
+    employees: employeesQuery.data || [],
+    isLoading: employeesQuery.isLoading,
+    refetch: employeesQuery.refetch,
+    createEmployee: createEmployee.mutateAsync,
+    updateEmployee: updateEmployee.mutateAsync,
+    deleteEmployee: deleteEmployee.mutateAsync,
+    isCreating: createEmployee.isPending,
+  };
+};
+
+// Hook para obter o role do usuário atual no estabelecimento
+export const useCurrentEmployeeRole = () => {
+  // Usar o contexto do estabelecimento em vez de ler do localStorage diretamente
+  // Isso garante que a query seja refetchada quando o estabelecimento mudar
+  const { selectedEstablishment } = useEstablishment();
+  const establishmentId = selectedEstablishment?.id || null;
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["current_employee_role", establishmentId],
+    queryFn: async () => {
+      if (!establishmentId) return null;
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+
+      const { data: employee, error } = await supabase
+        .from("employees")
+        .select(`
+          *,
+          employee_roles (*)
+        `)
+        .eq("user_id", user.id)
+        .eq("establishment_id", establishmentId)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Erro ao buscar role do funcionário:", error);
+        return null;
+      }
+
+      return employee as (Employee & { employee_roles: EmployeeRole }) | null;
+    },
+    enabled: !!establishmentId,
+  });
+
+  return {
+    employee: data || null,
+    role: data?.employee_roles || null,
+    isLoading,
+  };
+};
+

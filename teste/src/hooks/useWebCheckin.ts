@@ -1,0 +1,1276 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { triggerEmail } from "@/lib/emailService";
+import { logActivity } from "@/lib/activityLogger";
+
+export const useWebCheckin = () => {
+  const queryClient = useQueryClient();
+
+  // Buscar informações do web check-in por localizador
+  // SEGURANÇA: requireAuth - se true, só busca dados se o usuário estiver autenticado
+  const getWebCheckinByLocator = (locator: string, requireAuth: boolean = false) => {
+    return useQuery({
+      queryKey: ["web_checkin", locator],
+      refetchOnMount: true, // Sempre refazer quando o componente montar
+      refetchOnWindowFocus: true, // Refazer quando a janela receber foco
+      staleTime: 0, // Considerar dados stale imediatamente para forçar refetch quando invalidado
+      refetchInterval: (query) => {
+        // Refazer a cada 5 segundos se a query estiver ativa e a página estiver visível
+        return query.state.isInvalidated ? 0 : 5000;
+      },
+      refetchIntervalInBackground: false, // Não refazer quando a página estiver em background
+      enabled: !!locator && locator.trim() !== "" && (!requireAuth || (requireAuth && !!localStorage.getItem("guest_account_id"))), // SEGURANÇA: Só habilitar se tiver locator e (não requerer auth ou requerer e estiver autenticado)
+      queryFn: async () => {
+        if (!locator || locator.trim() === "") return null;
+        
+        // SEGURANÇA: Se requireAuth for true, não buscar dados sem autenticação
+        if (requireAuth) {
+          // Verificar se há sessão de hóspede
+          const guestAccountId = localStorage.getItem("guest_account_id");
+          if (!guestAccountId) {
+            throw new Error("Autenticação necessária para acessar dados da reserva");
+          }
+        }
+        
+        // Primeiro buscar o web_checkin básico pelo locator
+        let webCheckinData = null;
+        const { data: webCheckinByLocator, error: webCheckinError } = await supabase
+          .from("web_checkin")
+          .select("*")
+          .eq("locator", locator.trim())
+          .maybeSingle();
+
+        if (webCheckinError) {
+          console.error("Erro ao buscar web_checkin pelo locator:", webCheckinError);
+        } else if (webCheckinByLocator) {
+          webCheckinData = webCheckinByLocator;
+        }
+
+        // Se não encontrou pelo locator, tentar buscar pela reserva usando o reservation_code
+        if (!webCheckinData) {
+          const { data: reservationData, error: reservationError } = await supabase
+            .from("reservations")
+            .select("id, reservation_code")
+            .eq("reservation_code", locator.trim())
+            .maybeSingle();
+
+          if (!reservationError && reservationData) {
+            // Buscar web_checkin pelo reservation_id
+            const { data: webCheckinByReservation, error: webCheckinReservationError } = await supabase
+              .from("web_checkin")
+              .select("*")
+              .eq("reservation_id", reservationData.id)
+              .maybeSingle();
+
+            if (!webCheckinReservationError && webCheckinByReservation) {
+              webCheckinData = webCheckinByReservation;
+              // Atualizar o locator se estiver diferente
+              if (webCheckinData.locator !== locator.trim()) {
+                await supabase
+                  .from("web_checkin")
+                  .update({ locator: locator.trim() })
+                  .eq("id", webCheckinData.id);
+                webCheckinData.locator = locator.trim();
+              }
+            } else if (!webCheckinReservationError && !webCheckinByReservation) {
+              // Se não existe web_checkin, criar um novo
+              const { locatorService } = await import("@/lib/locatorService");
+              const token = locatorService.generateWebCheckinToken(
+                reservationData.id,
+                reservationData.reservation_code
+              );
+
+              // Buscar establishment_id da reserva
+              const { data: reservationFull } = await supabase
+                .from("reservations")
+                .select("establishment_id, checkin_date")
+                .eq("id", reservationData.id)
+                .single();
+
+              const checkinDate = reservationFull?.checkin_date ? new Date(reservationFull.checkin_date) : new Date();
+              const expiresAt = new Date();
+              expiresAt.setDate(expiresAt.getDate() + 7);
+              if (checkinDate < expiresAt) {
+                expiresAt.setTime(checkinDate.getTime());
+              }
+
+              const { data: newWebCheckin, error: createError } = await supabase
+                .from("web_checkin")
+                .insert({
+                  reservation_id: reservationData.id,
+                  establishment_id: reservationFull?.establishment_id || null,
+                  token: token,
+                  locator: locator.trim(),
+                  expires_at: expiresAt.toISOString(),
+                  status: "pending",
+                })
+                .select()
+                .single();
+
+              if (!createError && newWebCheckin) {
+                webCheckinData = newWebCheckin;
+                console.log("✅ Web check-in criado automaticamente para localizador:", locator);
+              }
+            }
+          }
+        }
+
+        if (!webCheckinData) return null;
+
+        // Depois buscar os dados da reserva separadamente
+        const { data: reservationFullData, error: reservationError } = await supabase
+          .from("reservations")
+          .select(`
+            id,
+            reservation_code,
+            identification_number,
+            checkin_date,
+            checkout_date,
+            checkin_time,
+            checkout_time,
+            total_amount,
+            status,
+            guest_id,
+            client_id,
+            room_id,
+            category_id
+          `)
+          .eq("id", webCheckinData.reservation_id)
+          .maybeSingle();
+
+        // VALIDAÇÃO DE SEGURANÇA: Verificar se a reserva está vinculada a outra conta
+        // Esta validação será feita no componente WebCheckin usando o accountId do usuário logado
+        // Retornamos um flag para indicar que precisa verificação
+        const reservationId = reservationFullData?.id;
+
+        if (reservationError) {
+          console.error("Erro ao buscar reserva:", reservationError);
+          return { ...webCheckinData, reservation: null };
+        }
+
+        if (!reservationFullData) {
+          console.warn("Reserva não encontrada ou sem acesso:", webCheckinData.reservation_id);
+          return { ...webCheckinData, reservation: null };
+        }
+
+        // Buscar dados do hóspede
+        let guest = null;
+        if (reservationFullData.guest_id) {
+          const { data: guestData } = await supabase
+            .from("clients")
+            .select("full_name, email, phone")
+            .eq("id", reservationFullData.guest_id)
+            .single();
+          guest = guestData;
+        }
+
+        // Buscar dados do responsável financeiro
+        let financialResponsible = null;
+        if (reservationFullData.client_id) {
+          const { data: financialData } = await supabase
+            .from("clients")
+            .select("full_name, email, phone")
+            .eq("id", reservationFullData.client_id)
+            .single();
+          financialResponsible = financialData;
+        }
+
+        // Buscar dados do quarto
+        let rooms = null;
+        if (reservationFullData.room_id) {
+          const { data: roomData } = await supabase
+            .from("rooms")
+            .select("room_number, name, fixed_password, authentication_type")
+            .eq("id", reservationFullData.room_id)
+            .single();
+          rooms = roomData;
+        }
+
+        // Buscar dados da categoria (incluindo capacidade e building_id)
+        let roomCategories = null;
+        let building = null;
+        if (reservationFullData.category_id) {
+          const { data: categoryData } = await supabase
+            .from("room_categories")
+            .select("name, capacity_adults, capacity_children, building_id")
+            .eq("id", reservationFullData.category_id)
+            .single();
+          roomCategories = categoryData;
+          
+          // Se a categoria tem um prédio associado, buscar dados do prédio
+          if (categoryData?.building_id) {
+            try {
+              const { data: buildingData, error: buildingError } = await supabase
+                .from("buildings")
+                .select("id, name, street, number, neighborhood, city, state, zip_code")
+                .eq("id", categoryData.building_id)
+                .single();
+              
+              if (buildingError) {
+                console.error("Erro ao buscar dados do prédio:", buildingError);
+                // Continuar sem os dados do prédio se houver erro
+              } else {
+                building = buildingData;
+              }
+            } catch (error) {
+              console.error("Erro ao buscar dados do prédio:", error);
+              // Continuar sem os dados do prédio se houver erro
+            }
+          }
+        }
+
+        // Buscar dados do estabelecimento
+        let establishment = null;
+        let establishmentIdToUse = webCheckinData.establishment_id;
+        
+        // Se não tiver establishment_id no web_checkin, buscar pela reserva
+        if (!establishmentIdToUse && reservationFullData) {
+          const { data: reservationWithEstablishment } = await supabase
+            .from("reservations")
+            .select("establishment_id")
+            .eq("id", reservationFullData.id)
+            .single();
+          establishmentIdToUse = reservationWithEstablishment?.establishment_id;
+        }
+        
+        if (establishmentIdToUse) {
+          try {
+            // Buscar dados básicos do estabelecimento
+            const { data: establishmentData, error: establishmentError } = await supabase
+              .from("establishments")
+              .select("id, name")
+              .eq("id", establishmentIdToUse)
+              .single();
+            
+            if (!establishmentError && establishmentData) {
+              establishment = establishmentData;
+              
+              // Buscar endereço do hotel_settings
+              // hotel_settings usa establishment_id (UUID), não numeric_id
+              let hotelSettingsData = null;
+              let hotelSettingsError = null;
+              
+              // Primeiro tenta buscar pelo establishment_id (UUID)
+              const { data: hotelSettingsByEstablishment, error: errorByEstablishment } = await supabase
+                .from("hotel_settings")
+                .select("street, number, neighborhood, city, state, zip_code, whatsapp_ddi, whatsapp_number, whatsapp, phone, email")
+                .eq("establishment_id", establishmentIdToUse)
+                .maybeSingle();
+              
+              if (errorByEstablishment) {
+                console.error("Erro ao buscar hotel_settings por establishment_id:", errorByEstablishment);
+                hotelSettingsError = errorByEstablishment;
+              } else if (hotelSettingsByEstablishment) {
+                hotelSettingsData = hotelSettingsByEstablishment;
+              } else {
+                // Se não encontrou, tenta buscar um registro genérico (sem establishment_id)
+                // Isso pode acontecer se o hotel_settings não foi vinculado ao establishment ainda
+                console.warn("⚠️ Nenhum hotel_settings encontrado para establishment_id:", establishmentIdToUse);
+                console.log("🔄 Tentando buscar hotel_settings genérico...");
+                
+                const { data: hotelSettingsGeneric, error: errorGeneric } = await supabase
+                  .from("hotel_settings")
+                  .select("street, number, neighborhood, city, state, zip_code, whatsapp_ddi, whatsapp_number, whatsapp, phone, email")
+                  .is("establishment_id", null)
+                  .maybeSingle();
+                
+                if (errorGeneric) {
+                  console.error("Erro ao buscar hotel_settings genérico:", errorGeneric);
+                } else if (hotelSettingsGeneric) {
+                  console.log("✅ Hotel_settings genérico encontrado");
+                  hotelSettingsData = hotelSettingsGeneric;
+                } else {
+                  // Último recurso: buscar qualquer registro
+                  const { data: hotelSettingsAny, error: errorAny } = await supabase
+                    .from("hotel_settings")
+                    .select("street, number, neighborhood, city, state, zip_code, whatsapp_ddi, whatsapp_number, whatsapp, phone, email")
+                    .limit(1)
+                    .maybeSingle();
+                  
+                  if (!errorAny && hotelSettingsAny) {
+                    console.log("✅ Hotel_settings encontrado (qualquer registro)");
+                    hotelSettingsData = hotelSettingsAny;
+                  } else {
+                    console.warn("⚠️ Nenhum hotel_settings encontrado em nenhuma tentativa");
+                  }
+                }
+              }
+              
+              if (hotelSettingsData) {
+                console.log("📋 Dados do hotel_settings encontrados:", hotelSettingsData);
+                // Montar endereço completo
+                const addressParts = [];
+                if (hotelSettingsData.street) {
+                  addressParts.push(hotelSettingsData.street);
+                  if (hotelSettingsData.number) {
+                    addressParts[addressParts.length - 1] += `, ${hotelSettingsData.number}`;
+                  }
+                }
+                if (hotelSettingsData.neighborhood) {
+                  addressParts.push(hotelSettingsData.neighborhood);
+                }
+                
+                establishment.address = addressParts.length > 0 ? addressParts.join(", ") : null;
+                establishment.city = hotelSettingsData.city || null;
+                establishment.state = hotelSettingsData.state || null;
+                establishment.zip_code = hotelSettingsData.zip_code || null;
+                // Se não tiver whatsapp_ddi e whatsapp_number separados, tentar extrair do campo whatsapp
+                if (hotelSettingsData.whatsapp_ddi && hotelSettingsData.whatsapp_number) {
+                  establishment.whatsapp_ddi = hotelSettingsData.whatsapp_ddi;
+                  establishment.whatsapp_number = hotelSettingsData.whatsapp_number;
+                } else if (hotelSettingsData.whatsapp) {
+                  // Tentar extrair DDI e número do campo whatsapp completo
+                  const whatsappClean = hotelSettingsData.whatsapp.replace(/\D/g, "");
+                  if (whatsappClean.startsWith("55") && whatsappClean.length > 10) {
+                    establishment.whatsapp_ddi = "+55";
+                    establishment.whatsapp_number = whatsappClean.substring(2);
+                  } else if (whatsappClean.length > 0) {
+                    establishment.whatsapp_number = whatsappClean;
+                  }
+                } else {
+                  establishment.whatsapp_ddi = hotelSettingsData.whatsapp_ddi || null;
+                  establishment.whatsapp_number = hotelSettingsData.whatsapp_number || null;
+                }
+                establishment.phone = hotelSettingsData.phone || null;
+                establishment.email = hotelSettingsData.email || null;
+                
+                console.log("🏢 Establishment com endereço:", establishment);
+              } else {
+                console.warn("⚠️ Nenhum hotel_settings encontrado em nenhuma tentativa");
+              }
+            } else if (establishmentError) {
+              console.error("Erro ao buscar estabelecimento:", establishmentError);
+            }
+          } catch (error) {
+            console.error("Erro ao buscar estabelecimento:", error);
+          }
+        }
+
+        return {
+          ...webCheckinData,
+          reservation: {
+            ...reservationFullData,
+            guest,
+            financial_responsible: financialResponsible,
+            rooms,
+            room_categories: roomCategories,
+            building: building, // Adicionar dados do prédio
+          },
+          establishment,
+        };
+      },
+    });
+  };
+
+  // Buscar web check-in por token
+  // SEGURANÇA: requireAuth - se true, só busca dados se o usuário estiver autenticado
+  const getWebCheckinByToken = (token: string, requireAuth: boolean = false) => {
+    return useQuery({
+      queryKey: ["web_checkin", "token", token],
+      refetchOnMount: true, // Sempre refazer quando o componente montar
+      refetchOnWindowFocus: true, // Refazer quando a janela receber foco
+      staleTime: 0, // Considerar dados stale imediatamente para forçar refetch quando invalidado
+      refetchInterval: (query) => {
+        // Refazer a cada 5 segundos se a query estiver ativa e a página estiver visível
+        return query.state.isInvalidated ? 0 : 5000;
+      },
+      refetchIntervalInBackground: false, // Não refazer quando a página estiver em background
+      enabled: !!token && (!requireAuth || requireAuth), // SEGURANÇA: Só habilitar se tiver token e (não requerer auth ou requerer e estiver autenticado)
+      queryFn: async () => {
+        // SEGURANÇA: Se requireAuth for true, não buscar dados sem autenticação
+        if (requireAuth) {
+          // Verificar se há sessão de hóspede
+          const guestAccountId = localStorage.getItem("guest_account_id");
+          if (!guestAccountId) {
+            throw new Error("Autenticação necessária para acessar dados da reserva");
+          }
+        }
+        
+        // Primeiro buscar o web_checkin básico
+        const { data: webCheckinData, error: webCheckinError } = await supabase
+          .from("web_checkin")
+          .select("*")
+          .eq("token", token)
+          .maybeSingle(); // Usar maybeSingle ao invés de single
+
+        if (webCheckinError) {
+          console.error("Erro ao buscar web_checkin por token:", webCheckinError);
+          throw webCheckinError;
+        }
+        if (!webCheckinData) return null;
+
+        // Buscar documentos
+        const { data: documents } = await supabase
+          .from("web_checkin_documents")
+          .select("*")
+          .eq("web_checkin_id", webCheckinData.id);
+
+        // Buscar hóspedes
+        const { data: guests } = await supabase
+          .from("web_checkin_guests")
+          .select("*")
+          .eq("web_checkin_id", webCheckinData.id)
+          .order("order", { ascending: true });
+
+        // Buscar dados da reserva separadamente (incluindo paid_amount e payment_status)
+        const { data: reservationData, error: reservationError } = await supabase
+          .from("reservations")
+          .select(`
+            id,
+            reservation_code,
+            identification_number,
+            checkin_date,
+            checkout_date,
+            checkin_time,
+            checkout_time,
+            total_amount,
+            paid_amount,
+            payment_status,
+            status,
+            guest_id,
+            client_id,
+            room_id,
+            category_id
+          `)
+          .eq("id", webCheckinData.reservation_id)
+          .maybeSingle();
+
+        if (reservationError) {
+          console.error("Erro ao buscar reserva:", reservationError);
+          return {
+            ...webCheckinData,
+            reservation: null,
+            documents: documents || [],
+            guests: guests || [],
+          };
+        }
+
+        if (!reservationData) {
+          console.warn("Reserva não encontrada ou sem acesso:", webCheckinData.reservation_id);
+          return {
+            ...webCheckinData,
+            reservation: null,
+            documents: documents || [],
+            guests: guests || [],
+          };
+        }
+
+        // Buscar dados do hóspede
+        let guest = null;
+        if (reservationData.guest_id) {
+          const { data: guestData } = await supabase
+            .from("clients")
+            .select("full_name, email, phone")
+            .eq("id", reservationData.guest_id)
+            .single();
+          guest = guestData;
+        }
+
+        // Buscar dados do responsável financeiro
+        let financialResponsible = null;
+        if (reservationData.client_id) {
+          const { data: financialData } = await supabase
+            .from("clients")
+            .select("full_name, email, phone")
+            .eq("id", reservationData.client_id)
+            .single();
+          financialResponsible = financialData;
+        }
+
+        // Buscar dados do quarto
+        let rooms = null;
+        if (reservationData.room_id) {
+          const { data: roomData } = await supabase
+            .from("rooms")
+            .select("room_number, name, fixed_password, authentication_type")
+            .eq("id", reservationData.room_id)
+            .single();
+          rooms = roomData;
+        }
+
+        // Buscar pagamentos da reserva
+        const { data: paymentsData } = await supabase
+          .from("payments")
+          .select("id, amount, payment_date, notes")
+          .eq("reservation_id", reservationData.id)
+          .order("payment_date", { ascending: false });
+
+        // Buscar taxas extras da reserva
+        const { data: serviceFeesData } = await supabase
+          .from("reservation_service_fees")
+          .select(`
+            *,
+            service_fees!service_fee_id(name, description)
+          `)
+          .eq("reservation_id", reservationData.id);
+
+        // Buscar dados da categoria (incluindo capacidade e building_id)
+        let roomCategories = null;
+        let building = null;
+        if (reservationData.category_id) {
+          const { data: categoryData } = await supabase
+            .from("room_categories")
+            .select("name, capacity_adults, capacity_children, building_id")
+            .eq("id", reservationData.category_id)
+            .single();
+          roomCategories = categoryData;
+          
+          // Se a categoria tem um prédio associado, buscar dados do prédio
+          if (categoryData?.building_id) {
+            try {
+              const { data: buildingData, error: buildingError } = await supabase
+                .from("buildings")
+                .select("id, name, street, number, neighborhood, city, state, zip_code")
+                .eq("id", categoryData.building_id)
+                .single();
+              
+              if (buildingError) {
+                console.error("Erro ao buscar dados do prédio:", buildingError);
+                // Continuar sem os dados do prédio se houver erro
+              } else {
+                building = buildingData;
+              }
+            } catch (error) {
+              console.error("Erro ao buscar dados do prédio:", error);
+              // Continuar sem os dados do prédio se houver erro
+            }
+          }
+        }
+
+        // Buscar dados do estabelecimento
+        let establishment = null;
+        let establishmentIdToUse = webCheckinData.establishment_id;
+        
+        // Se não tiver establishment_id no web_checkin, buscar pela reserva
+        if (!establishmentIdToUse && reservationData) {
+          const { data: reservationWithEstablishment } = await supabase
+            .from("reservations")
+            .select("establishment_id")
+            .eq("id", reservationData.id)
+            .single();
+          establishmentIdToUse = reservationWithEstablishment?.establishment_id;
+        }
+        
+        if (establishmentIdToUse) {
+          try {
+            // Buscar dados básicos do estabelecimento
+            const { data: establishmentData, error: establishmentError } = await supabase
+              .from("establishments")
+              .select("id, name")
+              .eq("id", establishmentIdToUse)
+              .single();
+            
+            if (!establishmentError && establishmentData) {
+              establishment = establishmentData;
+              
+              // Buscar endereço do hotel_settings
+              // hotel_settings usa establishment_id (UUID), não numeric_id
+              let hotelSettingsData = null;
+              let hotelSettingsError = null;
+              
+              // Primeiro tenta buscar pelo establishment_id (UUID)
+              const { data: hotelSettingsByEstablishment, error: errorByEstablishment } = await supabase
+                .from("hotel_settings")
+                .select("street, number, neighborhood, city, state, zip_code, whatsapp_ddi, whatsapp_number, whatsapp, phone, email")
+                .eq("establishment_id", establishmentIdToUse)
+                .maybeSingle();
+              
+              if (errorByEstablishment) {
+                console.error("Erro ao buscar hotel_settings por establishment_id:", errorByEstablishment);
+                hotelSettingsError = errorByEstablishment;
+              } else if (hotelSettingsByEstablishment) {
+                hotelSettingsData = hotelSettingsByEstablishment;
+              } else {
+                // Se não encontrou, tenta buscar um registro genérico (sem establishment_id)
+                // Isso pode acontecer se o hotel_settings não foi vinculado ao establishment ainda
+                console.warn("⚠️ Nenhum hotel_settings encontrado para establishment_id:", establishmentIdToUse);
+                console.log("🔄 Tentando buscar hotel_settings genérico...");
+                
+                const { data: hotelSettingsGeneric, error: errorGeneric } = await supabase
+                  .from("hotel_settings")
+                  .select("street, number, neighborhood, city, state, zip_code, whatsapp_ddi, whatsapp_number, whatsapp, phone, email")
+                  .is("establishment_id", null)
+                  .maybeSingle();
+                
+                if (errorGeneric) {
+                  console.error("Erro ao buscar hotel_settings genérico:", errorGeneric);
+                } else if (hotelSettingsGeneric) {
+                  console.log("✅ Hotel_settings genérico encontrado");
+                  hotelSettingsData = hotelSettingsGeneric;
+                } else {
+                  // Último recurso: buscar qualquer registro
+                  const { data: hotelSettingsAny, error: errorAny } = await supabase
+                    .from("hotel_settings")
+                    .select("street, number, neighborhood, city, state, zip_code, whatsapp_ddi, whatsapp_number, whatsapp, phone, email")
+                    .limit(1)
+                    .maybeSingle();
+                  
+                  if (!errorAny && hotelSettingsAny) {
+                    console.log("✅ Hotel_settings encontrado (qualquer registro)");
+                    hotelSettingsData = hotelSettingsAny;
+                  } else {
+                    console.warn("⚠️ Nenhum hotel_settings encontrado em nenhuma tentativa");
+                  }
+                }
+              }
+              
+              if (hotelSettingsData) {
+                console.log("📋 Dados do hotel_settings encontrados:", hotelSettingsData);
+                // Montar endereço completo
+                const addressParts = [];
+                if (hotelSettingsData.street) {
+                  addressParts.push(hotelSettingsData.street);
+                  if (hotelSettingsData.number) {
+                    addressParts[addressParts.length - 1] += `, ${hotelSettingsData.number}`;
+                  }
+                }
+                if (hotelSettingsData.neighborhood) {
+                  addressParts.push(hotelSettingsData.neighborhood);
+                }
+                
+                establishment.address = addressParts.length > 0 ? addressParts.join(", ") : null;
+                establishment.city = hotelSettingsData.city || null;
+                establishment.state = hotelSettingsData.state || null;
+                establishment.zip_code = hotelSettingsData.zip_code || null;
+                // Se não tiver whatsapp_ddi e whatsapp_number separados, tentar extrair do campo whatsapp
+                if (hotelSettingsData.whatsapp_ddi && hotelSettingsData.whatsapp_number) {
+                  establishment.whatsapp_ddi = hotelSettingsData.whatsapp_ddi;
+                  establishment.whatsapp_number = hotelSettingsData.whatsapp_number;
+                } else if (hotelSettingsData.whatsapp) {
+                  // Tentar extrair DDI e número do campo whatsapp completo
+                  const whatsappClean = hotelSettingsData.whatsapp.replace(/\D/g, "");
+                  if (whatsappClean.startsWith("55") && whatsappClean.length > 10) {
+                    establishment.whatsapp_ddi = "+55";
+                    establishment.whatsapp_number = whatsappClean.substring(2);
+                  } else if (whatsappClean.length > 0) {
+                    establishment.whatsapp_number = whatsappClean;
+                  }
+                } else {
+                  establishment.whatsapp_ddi = hotelSettingsData.whatsapp_ddi || null;
+                  establishment.whatsapp_number = hotelSettingsData.whatsapp_number || null;
+                }
+                establishment.phone = hotelSettingsData.phone || null;
+                establishment.email = hotelSettingsData.email || null;
+                
+                console.log("🏢 Establishment com endereço:", establishment);
+              } else {
+                console.warn("⚠️ Nenhum hotel_settings encontrado em nenhuma tentativa");
+              }
+            } else if (establishmentError) {
+              console.error("Erro ao buscar estabelecimento:", establishmentError);
+            }
+          } catch (error) {
+            console.error("Erro ao buscar estabelecimento:", error);
+          }
+        }
+
+        return {
+          ...webCheckinData,
+          reservation: {
+            ...reservationData,
+            guest,
+            financial_responsible: financialResponsible,
+            rooms,
+            room_categories: roomCategories,
+            building: building, // Adicionar dados do prédio
+            payments: paymentsData || [],
+            reservation_service_fees: serviceFeesData || [],
+          },
+          documents: documents || [],
+          guests: guests || [],
+          establishment,
+        };
+      },
+    });
+  };
+
+  // Iniciar web check-in
+  const startWebCheckin = useMutation({
+    mutationFn: async ({ locator, ipAddress, userAgent }: { locator: string; ipAddress?: string; userAgent?: string }) => {
+      // Buscar web check-in existente
+      const { data: existing, error: fetchError } = await supabase
+        .from("web_checkin")
+        .select("*")
+        .eq("locator", locator)
+        .single();
+
+      if (fetchError) {
+        console.error("Erro ao buscar web check-in:", fetchError);
+        throw new Error("Localizador não encontrado");
+      }
+
+      if (!existing) {
+        throw new Error("Localizador não encontrado");
+      }
+
+      if (existing.status === "completed") {
+        // Se já está completo, retornar os dados existentes
+        return existing;
+      }
+
+      if (existing.status === "expired") {
+        throw new Error("Link de check-in expirado");
+      }
+
+      // Se já está in_progress, retornar os dados existentes
+      if (existing.status === "in_progress") {
+        return existing;
+      }
+
+      // Atualizar status para in_progress apenas se estiver pending
+      const { data, error } = await supabase
+        .from("web_checkin")
+        .update({
+          status: "in_progress",
+          started_at: new Date().toISOString(),
+          ip_address: ipAddress || null,
+          user_agent: userAgent || null,
+        })
+        .eq("id", existing.id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Erro ao atualizar web check-in:", error);
+        // Se falhar a atualização, retornar os dados existentes
+        return existing;
+      }
+      
+      return data || existing;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+    },
+  });
+
+  // Salvar dados dos hóspedes
+  const saveGuests = useMutation({
+    mutationFn: async ({ token, guests }: { token: string; guests: any[] }) => {
+      const { data: webCheckin } = await supabase
+        .from("web_checkin")
+        .select("id")
+        .eq("token", token)
+        .single();
+
+      if (!webCheckin) throw new Error("Web check-in não encontrado");
+
+      // Deletar hóspedes existentes
+      await supabase
+        .from("web_checkin_guests")
+        .delete()
+        .eq("web_checkin_id", webCheckin.id);
+
+      // Inserir novos hóspedes
+      const guestsToInsert = guests
+        .filter((guest) => guest.name && guest.name.trim() !== "") // Filtrar hóspedes sem nome
+        .map((guest, index) => {
+          const guestData: Record<string, any> = {
+            web_checkin_id: webCheckin.id,
+            name: guest.name?.trim() || "",
+            is_main_guest: guest.is_main_guest || index === 0,
+            "order": index, // Usar aspas porque "order" é palavra reservada em SQL
+          };
+
+          // Adicionar campos opcionais apenas se tiverem valor
+          if (guest.cpf?.trim()) guestData.cpf = guest.cpf.trim();
+          if (guest.birth_date) guestData.birth_date = guest.birth_date;
+          if (guest.email?.trim()) guestData.email = guest.email.trim();
+          if (guest.phone?.trim()) guestData.phone = guest.phone.trim();
+          if (guest.document_type) guestData.document_type = guest.document_type;
+          if (guest.document_number?.trim()) guestData.document_number = guest.document_number.trim();
+          if (guest.document_url) guestData.document_url = guest.document_url;
+          
+          // Adicionar campos de endereço
+          if (guest.zip_code?.trim()) guestData.zip_code = guest.zip_code.trim();
+          if (guest.postal_code?.trim()) guestData.postal_code = guest.postal_code.trim();
+          if (guest.street?.trim()) guestData.street = guest.street.trim();
+          if (guest.number?.trim()) guestData.number = guest.number.trim();
+          if (guest.complement?.trim()) guestData.complement = guest.complement.trim();
+          if (guest.neighborhood?.trim()) guestData.neighborhood = guest.neighborhood.trim();
+          if (guest.city?.trim()) guestData.city = guest.city.trim();
+          if (guest.state?.trim()) guestData.state = guest.state.trim();
+          // Sempre salvar country e nationality, mesmo que vazios (para garantir que sejam atualizados)
+          if (guest.country) {
+            guestData.country = guest.country.trim();
+          } else if (guest.nationality) {
+            // Se country não estiver definido, usar nationality como fallback
+            guestData.country = guest.nationality.trim();
+          }
+          if (guest.nationality) {
+            guestData.nationality = guest.nationality.trim();
+          } else if (guest.country) {
+            // Se nationality não estiver definido, usar country como fallback
+            guestData.nationality = guest.country.trim();
+          }
+
+          return guestData;
+        });
+
+      if (guestsToInsert.length === 0) {
+        throw new Error("É necessário ter pelo menos um hóspede com nome preenchido");
+      }
+
+      const { data, error } = await supabase
+        .from("web_checkin_guests")
+        .insert(guestsToInsert)
+        .select();
+
+      if (error) {
+        console.error("Erro ao inserir hóspedes:", error);
+        console.error("Dados que tentaram ser inseridos:", guestsToInsert);
+        throw error;
+      }
+
+      // Atualizar guest_data no web_checkin
+      await supabase
+        .from("web_checkin")
+        .update({ guest_data: { guests } })
+        .eq("id", webCheckin.id);
+
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+      toast.success("Dados dos hóspedes salvos com sucesso!", {
+        dismissible: true,
+        duration: 4000,
+      });
+    },
+  });
+
+  // Salvar documentos
+  const saveDocuments = useMutation({
+    mutationFn: async ({ token, documents }: { token: string; documents: any[] }) => {
+      const { data: webCheckin } = await supabase
+        .from("web_checkin")
+        .select("id")
+        .eq("token", token)
+        .single();
+
+      if (!webCheckin) throw new Error("Web check-in não encontrado");
+
+      // Deletar documentos existentes
+      await supabase
+        .from("web_checkin_documents")
+        .delete()
+        .eq("web_checkin_id", webCheckin.id);
+
+      // Inserir novos documentos - filtrar apenas documentos válidos (com guest_name e URLs)
+      const documentsToInsert = documents
+        .filter((doc) => doc && doc.guest_name && doc.guest_name.trim() !== "" && (doc.document_front_url || doc.selfie_url))
+        .map((doc) => ({
+          web_checkin_id: webCheckin.id,
+          guest_name: doc.guest_name.trim(),
+          document_type: doc.document_type || "cpf",
+          document_number: doc.document_number || "",
+          document_front_url: doc.document_front_url || null,
+          document_back_url: doc.document_back_url || null,
+          selfie_url: doc.selfie_url || null,
+          is_main_guest: doc.is_main_guest || false,
+          "order": doc.order !== undefined ? doc.order : (doc.is_main_guest ? 0 : 1), // Usar aspas porque "order" é palavra reservada
+        }));
+
+      const { data, error } = await supabase
+        .from("web_checkin_documents")
+        .insert(documentsToInsert)
+        .select();
+
+      if (error) throw error;
+
+      // Atualizar documents no web_checkin
+      await supabase
+        .from("web_checkin")
+        .update({ documents })
+        .eq("id", webCheckin.id);
+
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+      toast.success("Documentos enviados com sucesso!", {
+        dismissible: true,
+        duration: 4000,
+      });
+    },
+  });
+
+  // Salvar preferências
+  const savePreferences = useMutation({
+    mutationFn: async ({ token, preferences }: { token: string; preferences: any }) => {
+      const { data: webCheckin } = await supabase
+        .from("web_checkin")
+        .select("id")
+        .eq("token", token)
+        .single();
+
+      if (!webCheckin) throw new Error("Web check-in não encontrado");
+
+      const { data, error } = await supabase
+        .from("web_checkin")
+        .update({ preferences })
+        .eq("id", webCheckin.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+      toast.success("Preferências salvas!", {
+        dismissible: true,
+        duration: 4000,
+      });
+    },
+  });
+
+  // Aceitar termos
+  const acceptTerms = useMutation({
+    mutationFn: async (token: string) => {
+      const { data, error } = await supabase
+        .from("web_checkin")
+        .update({
+          terms_accepted: true,
+          terms_accepted_at: new Date().toISOString(),
+        })
+        .eq("token", token)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+    },
+  });
+
+  // Completar web check-in
+  const completeWebCheckin = useMutation({
+    mutationFn: async (token: string) => {
+      const { data: webCheckin } = await supabase
+        .from("web_checkin")
+        .select(`
+          *,
+          reservation:reservations(
+            id,
+            reservation_code,
+            guest:clients!guest_id(id, full_name),
+            financial_responsible:clients!client_id(id, full_name)
+          )
+        `)
+        .eq("token", token)
+        .single();
+
+      if (!webCheckin) throw new Error("Web check-in não encontrado");
+
+      const reservation = webCheckin.reservation as any;
+      const reservationId = reservation?.id;
+      const reservationCode = reservation?.reservation_code;
+      const guestName = reservation?.guest?.full_name || reservation?.financial_responsible?.full_name || "Hóspede";
+
+      // Buscar nome do hóspede principal do web check-in
+      let mainGuestName = guestName;
+      try {
+        const { data: mainGuest } = await supabase
+          .from("web_checkin_guests")
+          .select("name")
+          .eq("web_checkin_id", webCheckin.id)
+          .eq("is_main_guest", true)
+          .maybeSingle();
+        
+        if (mainGuest?.name) {
+          mainGuestName = mainGuest.name;
+        }
+      } catch (error) {
+        console.warn("⚠️ Erro ao buscar nome do hóspede principal:", error);
+      }
+
+      // Atualizar status do web check-in
+      const { data, error } = await supabase
+        .from("web_checkin")
+        .update({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", webCheckin.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Atualizar status da reserva para "confirmed" se ainda estiver pendente
+      if (reservationId) {
+        await supabase
+          .from("reservations")
+          .update({ status: "confirmed" })
+          .eq("id", reservationId)
+          .in("status", ["pending", "preregistration"]);
+      }
+
+      // Registrar log de atividade
+      if (reservationId) {
+        try {
+          await logActivity({
+            actionType: "checked_in",
+            entityType: "reservation",
+            entityId: reservationId,
+            entityCode: reservationCode,
+            description: `Check-in web concluído${reservationCode ? ` para reserva ${reservationCode}` : ""} - Realizado pelo hóspede: ${mainGuestName}`,
+            newValues: {
+              status: "confirmed",
+              checkin_method: "web",
+              web_checkin_id: webCheckin.id,
+              completed_at: new Date().toISOString(),
+              performed_by: mainGuestName,
+              performed_by_type: "guest",
+            },
+            metadata: {
+              web_checkin_id: webCheckin.id,
+              locator: webCheckin.locator,
+              ip_address: webCheckin.ip_address,
+              user_agent: webCheckin.user_agent,
+              guest_name: mainGuestName,
+              performed_by: "guest",
+            },
+          });
+        } catch (logError) {
+          console.error("❌ Erro ao registrar log de atividade do web check-in:", logError);
+          // Não lançar erro para não interromper o fluxo principal
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      return data;
+    },
+    onSuccess: async (data) => {
+      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+      
+      // Disparar email de confirmação automaticamente após concluir o check-in
+      try {
+        if (data?.reservation_id) {
+          // Buscar dados completos da reserva para o email
+          const { data: reservation, error: reservationError } = await supabase
+            .from("reservations")
+            .select(`
+              *,
+              guest:clients!guest_id(*),
+              financial_responsible:clients!client_id(*),
+              rooms(id, room_number, name, fixed_password, authentication_type),
+              room_categories(id, name, description, building_id)
+            `)
+            .eq("id", data.reservation_id)
+            .single();
+
+          if (!reservationError && reservation) {
+            // Disparar email de check-in confirmado
+            const emailQueueId = await triggerEmail('checkin.confirmed', reservation);
+            
+            if (emailQueueId) {
+              console.log('✅ Email de confirmação de check-in enviado automaticamente:', { queueId: emailQueueId });
+            } else {
+              console.warn('⚠️ Email de confirmação não foi enviado. Verifique se o template está configurado e as configurações de e-mail estão ativas.');
+            }
+          } else {
+            console.warn('⚠️ Não foi possível buscar dados da reserva para enviar o email:', reservationError);
+          }
+        }
+      } catch (emailError) {
+        // Não bloquear o sucesso do check-in se o email falhar
+        console.error('❌ Erro ao enviar email de confirmação:', emailError);
+      }
+      
+      toast.success("Check-in concluído com sucesso!", {
+        dismissible: true,
+        duration: 5000,
+      });
+    },
+  });
+
+  // Criar web check-in para uma reserva
+  const createWebCheckin = useMutation({
+    mutationFn: async ({ reservationId, establishmentId }: { reservationId: string; establishmentId?: string }) => {
+      const { locatorService } = await import("@/lib/locatorService");
+      
+      // Buscar reserva
+      const { data: reservation } = await supabase
+        .from("reservations")
+        .select("checkin_date, reservation_code")
+        .eq("id", reservationId)
+        .single();
+
+      if (!reservation) throw new Error("Reserva não encontrada");
+
+      // Gerar localizador único
+      const locator = await locatorService.ensureUniqueLocator();
+      
+      // Gerar token
+      const token = locatorService.generateWebCheckinToken(reservationId, locator);
+
+      // Calcular data de expiração (7 dias antes do check-in ou 30 dias, o que for menor)
+      const checkinDate = new Date(reservation.checkin_date);
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
+      
+      if (checkinDate < expiresAt) {
+        expiresAt.setTime(checkinDate.getTime());
+      }
+
+      const { data, error } = await supabase
+        .from("web_checkin")
+        .insert({
+          reservation_id: reservationId,
+          establishment_id: establishmentId,
+          token,
+          locator,
+          expires_at: expiresAt.toISOString(),
+          status: "pending",
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+    },
+  });
+
+  // Buscar dados de check-ins anteriores do hóspede
+  // Pode buscar por guestAccountId (para web check-in) ou por email/CPF (para check-in manual)
+  const getPreviousCheckinData = (
+    guestAccountId: string | null, 
+    currentReservationId?: string,
+    guestEmail?: string | null,
+    guestCpf?: string | null
+  ) => {
+    return useQuery({
+      queryKey: ["previous_checkin_data", guestAccountId, currentReservationId, guestEmail, guestCpf],
+      queryFn: async () => {
+        // Se não tem guestAccountId nem email/CPF, não buscar
+        if (!guestAccountId && !guestEmail && !guestCpf) return null;
+
+        let reservationIds: string[] = [];
+
+        // Buscar por guestAccountId (web check-in)
+        if (guestAccountId) {
+          const { data: stayHistory, error: historyError } = await supabase
+            .from("guest_stay_history")
+            .select("reservation_id")
+            .eq("guest_account_id", guestAccountId)
+            .order("created_at", { ascending: false })
+            .limit(10);
+
+          if (historyError) {
+            console.error("Erro ao buscar histórico:", historyError);
+          } else if (stayHistory) {
+            reservationIds = stayHistory
+              .map((h) => h.reservation_id)
+              .filter((id) => id !== currentReservationId);
+          }
+        }
+
+        // Buscar por email ou CPF do hóspede (check-in manual)
+        if ((guestEmail || guestCpf) && reservationIds.length === 0) {
+          // Buscar check-ins anteriores onde o hóspede principal tem mesmo email ou CPF
+          const { data: previousGuests, error: guestsError } = await supabase
+            .from("web_checkin_guests")
+            .select("web_checkin_id, web_checkin:web_checkin(reservation_id)")
+            .or(
+              guestEmail && guestCpf
+                ? `email.eq.${guestEmail},cpf.eq.${guestCpf}`
+                : guestEmail
+                ? `email.eq.${guestEmail}`
+                : `cpf.eq.${guestCpf}`
+            )
+            .eq("is_main_guest", true)
+            .limit(10);
+
+          if (guestsError) {
+            console.error("Erro ao buscar hóspedes anteriores:", guestsError);
+          } else if (previousGuests) {
+            reservationIds = previousGuests
+              .map((g: any) => g.web_checkin?.reservation_id)
+              .filter((id: string) => id && id !== currentReservationId);
+          }
+        }
+
+        if (reservationIds.length === 0) return null;
+
+        const { data: previousCheckins, error: checkinError } = await supabase
+          .from("web_checkin")
+          .select(`
+            id,
+            reservation_id,
+            status,
+            completed_at,
+            guests:web_checkin_guests(*),
+            documents:web_checkin_documents(*),
+            preferences,
+            reservation:reservations(
+              reservation_code,
+              checkin_date,
+              checkout_date
+            )
+          `)
+          .in("reservation_id", reservationIds)
+          .eq("status", "completed")
+          .order("completed_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (checkinError) {
+          console.error("Erro ao buscar check-ins anteriores:", checkinError);
+          return null;
+        }
+
+        if (!previousCheckins || !previousCheckins.guests || previousCheckins.guests.length === 0) {
+          return null;
+        }
+
+        // Formatar dados para reutilização
+        const previousGuests = (previousCheckins.guests as any[]).map((g) => ({
+          name: g.name || "",
+          email: g.email || "",
+          phone: g.phone || "",
+          cpf: g.cpf || "",
+          birth_date: g.birth_date || "",
+          document_type: g.document_type || "cpf",
+          document_number: g.document_number || "",
+          is_main_guest: g.is_main_guest || false,
+        }));
+
+        const previousDocuments = (previousCheckins.documents as any[]) || [];
+        const previousPreferences = previousCheckins.preferences || {};
+
+        return {
+          guests: previousGuests,
+          documents: previousDocuments,
+          preferences: previousPreferences,
+          reservationCode: (previousCheckins.reservation as any)?.reservation_code,
+          checkinDate: (previousCheckins.reservation as any)?.checkin_date,
+          completedAt: previousCheckins.completed_at,
+        };
+      },
+      enabled: !!(guestAccountId || guestEmail || guestCpf),
+      staleTime: 0, // Não usar cache para garantir busca sempre atualizada
+      refetchOnMount: true,
+    });
+  };
+
+  return {
+    getWebCheckinByLocator,
+    getWebCheckinByToken,
+    startWebCheckin,
+    saveGuests,
+    saveDocuments,
+    savePreferences,
+    acceptTerms,
+    completeWebCheckin,
+    createWebCheckin,
+    getPreviousCheckinData,
+  };
+};
+

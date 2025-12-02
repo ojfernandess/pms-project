@@ -1,0 +1,480 @@
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { format, parseISO, isAfter, isBefore, eachDayOfInterval, startOfDay } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { logActivity } from "@/lib/activityLogger";
+import { triggerEmail } from "@/lib/emailService";
+
+export interface Overbooking {
+  reservation: any;
+  conflictingReservations: any[];
+  conflictDates: string[];
+  availableRooms: any[];
+  categoryRooms: any[];
+}
+
+export const usePendingReservations = () => {
+  const queryClient = useQueryClient();
+  const { selectedEstablishment } = useEstablishment();
+
+  const getEstablishmentId = (): string | null => {
+    if (selectedEstablishment?.id) {
+      localStorage.setItem("selectedEstablishmentId", selectedEstablishment.id);
+      return selectedEstablishment.id;
+    }
+    return getSelectedEstablishmentId();
+  };
+
+  // Buscar novas reservas de OTA/Channel Manager (últimas 7 dias)
+  const newOTAReservationsQuery = useQuery({
+    queryKey: ["pending", "new-ota-reservations", selectedEstablishment?.id],
+    queryFn: async () => {
+      const establishmentId = getEstablishmentId();
+      if (!establishmentId) return [];
+
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      // Buscar todas as reservas dos últimos 7 dias
+      const { data: allReservations, error } = await supabase
+        .from("reservations")
+        .select(`
+          *,
+          financial_responsible:clients!client_id(*),
+          guest:clients!guest_id(*),
+          rooms (*),
+          room_categories (*)
+        `)
+        .eq("establishment_id", establishmentId)
+        .in("status", ["pending", "confirmed", "preregistration"])
+        .gte("created_at", sevenDaysAgo.toISOString())
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Erro ao buscar novas reservas de OTA:", error);
+        return [];
+      }
+
+      // Filtrar apenas reservas de OTA (channel != 'direct' E created_by é null) E não resolvidas
+      const otaReservations = (allReservations || []).filter((reservation: any) => {
+        return reservation.channel !== "direct" && 
+               reservation.created_by === null &&
+               reservation.pending_resolved_at === null;
+      });
+
+      return otaReservations;
+    },
+  });
+
+  // Buscar novas reservas de balcão (últimas 7 dias)
+  const newCounterReservationsQuery = useQuery({
+    queryKey: ["pending", "new-counter-reservations", selectedEstablishment?.id],
+    queryFn: async () => {
+      const establishmentId = getEstablishmentId();
+      if (!establishmentId) return [];
+
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      // Buscar todas as reservas dos últimos 7 dias
+      const { data: allReservations, error } = await supabase
+        .from("reservations")
+        .select(`
+          *,
+          financial_responsible:clients!client_id(*),
+          guest:clients!guest_id(*),
+          rooms (*),
+          room_categories (*)
+        `)
+        .eq("establishment_id", establishmentId)
+        .in("status", ["pending", "confirmed", "preregistration"])
+        .gte("created_at", sevenDaysAgo.toISOString())
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Erro ao buscar novas reservas de balcão:", error);
+        return [];
+      }
+
+      // Filtrar apenas reservas de balcão (channel = 'direct' OU created_by não é null) E não resolvidas
+      const counterReservations = (allReservations || []).filter((reservation: any) => {
+        return (reservation.channel === "direct" || reservation.created_by !== null) &&
+               reservation.pending_resolved_at === null;
+      });
+
+      return counterReservations;
+    },
+  });
+
+  // Buscar hóspedes sem check-in (check-in hoje ou passado, status confirmed/pending)
+  const noCheckInQuery = useQuery({
+    queryKey: ["pending", "no-checkin", selectedEstablishment?.id],
+    queryFn: async () => {
+      const establishmentId = getEstablishmentId();
+      if (!establishmentId) return [];
+
+      const today = format(new Date(), "yyyy-MM-dd");
+
+      const { data, error } = await supabase
+        .from("reservations")
+        .select(`
+          *,
+          financial_responsible:clients!client_id(*),
+          guest:clients!guest_id(*),
+          rooms (*),
+          room_categories (*)
+        `)
+        .eq("establishment_id", establishmentId)
+        .in("status", ["confirmed", "pending"])
+        .lte("checkin_date", today)
+        .neq("status", "checkedin")
+        .is("pending_resolved_at", null)
+        .order("checkin_date", { ascending: true });
+
+      if (error) {
+        console.error("Erro ao buscar hóspedes sem check-in:", error);
+        return [];
+      }
+
+      return data || [];
+    },
+  });
+
+  // Detectar overbookings
+  const overbookingsQuery = useQuery({
+    queryKey: ["pending", "overbookings", selectedEstablishment?.id],
+    queryFn: async () => {
+      const establishmentId = getEstablishmentId();
+      if (!establishmentId) return [];
+
+      // Buscar todas as reservas ativas
+      const { data: reservations, error: reservationsError } = await supabase
+        .from("reservations")
+        .select(`
+          *,
+          financial_responsible:clients!client_id(*),
+          guest:clients!guest_id(*),
+          rooms (*),
+          room_categories (*)
+        `)
+        .eq("establishment_id", establishmentId)
+        .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"]);
+
+      if (reservationsError) {
+        console.error("Erro ao buscar reservas:", reservationsError);
+        return [];
+      }
+
+      if (!reservations || reservations.length === 0) return [];
+
+      const overbookings: Overbooking[] = [];
+
+      // Agrupar reservas por quarto
+      const reservationsByRoom = new Map<string, any[]>();
+      reservations.forEach((reservation: any) => {
+        if (!reservation.room_id) return;
+        if (!reservationsByRoom.has(reservation.room_id)) {
+          reservationsByRoom.set(reservation.room_id, []);
+        }
+        reservationsByRoom.get(reservation.room_id)!.push(reservation);
+      });
+
+      // Verificar conflitos por quarto
+      for (const [roomId, roomReservations] of reservationsByRoom.entries()) {
+        if (roomReservations.length < 2) continue; // Precisa de pelo menos 2 reservas para ter conflito
+
+        // Ordenar por data de check-in
+        roomReservations.sort((a, b) => {
+          const dateA = parseISO(a.checkin_date);
+          const dateB = parseISO(b.checkin_date);
+          return dateA.getTime() - dateB.getTime();
+        });
+
+        // Verificar conflitos entre reservas
+        for (let i = 0; i < roomReservations.length; i++) {
+          const reservation = roomReservations[i];
+          const conflictingReservations: any[] = [];
+          const conflictDates: string[] = [];
+
+          const checkin = parseISO(reservation.checkin_date);
+          const checkout = parseISO(reservation.checkout_date);
+
+          for (let j = 0; j < roomReservations.length; j++) {
+            if (i === j) continue;
+
+            const otherReservation = roomReservations[j];
+            const otherCheckin = parseISO(otherReservation.checkin_date);
+            const otherCheckout = parseISO(otherReservation.checkout_date);
+
+            // Verificar se há sobreposição
+            // Conflito se: (checkin < otherCheckout) && (checkout > otherCheckin)
+            if (
+              isBefore(checkin, otherCheckout) &&
+              isAfter(checkout, otherCheckin)
+            ) {
+              conflictingReservations.push(otherReservation);
+
+              // Calcular datas de conflito
+              const conflictStart = isAfter(checkin, otherCheckin) ? checkin : otherCheckin;
+              const conflictEnd = isBefore(checkout, otherCheckout) ? checkout : otherCheckout;
+              
+              const dates = eachDayOfInterval({
+                start: startOfDay(conflictStart),
+                end: startOfDay(conflictEnd),
+              });
+
+              dates.forEach((date) => {
+                const dateStr = format(date, "yyyy-MM-dd");
+                if (!conflictDates.includes(dateStr)) {
+                  conflictDates.push(dateStr);
+                }
+              });
+            }
+          }
+
+          if (conflictingReservations.length > 0) {
+            // Buscar quartos disponíveis na mesma categoria
+            const categoryId = reservation.category_id || reservation.room_categories?.id;
+            if (!categoryId) continue;
+
+            const { data: categoryRooms } = await supabase
+              .from("rooms")
+              .select("*")
+              .eq("category_id", categoryId)
+              .eq("establishment_id", establishmentId)
+              .in("status", ["available", "cleaning"]);
+
+            // Filtrar quartos que não têm conflito no período
+            const availableRooms = (categoryRooms || []).filter((room: any) => {
+              if (room.id === roomId) return false; // Não incluir o quarto atual
+
+              // Verificar se o quarto tem conflitos no período
+              const hasConflict = reservations.some((r: any) => {
+                if (r.room_id !== room.id) return false;
+                if (r.id === reservation.id) return false;
+                if (r.status === "cancelled") return false;
+
+                const rCheckin = parseISO(r.checkin_date);
+                const rCheckout = parseISO(r.checkout_date);
+
+                return (
+                  isBefore(rCheckin, checkout) &&
+                  isAfter(rCheckout, checkin)
+                );
+              });
+
+              return !hasConflict;
+            });
+
+            overbookings.push({
+              reservation,
+              conflictingReservations,
+              conflictDates,
+              availableRooms,
+              categoryRooms: categoryRooms || [],
+            });
+          }
+        }
+      }
+
+      // Remover duplicatas e filtrar reservas não resolvidas
+      const uniqueOverbookings = new Map<string, Overbooking>();
+      overbookings.forEach((overbooking) => {
+        if (!uniqueOverbookings.has(overbooking.reservation.id) &&
+            overbooking.reservation.pending_resolved_at === null) {
+          uniqueOverbookings.set(overbooking.reservation.id, overbooking);
+        }
+      });
+
+      const finalOverbookings = Array.from(uniqueOverbookings.values());
+
+      // Criar notificações e enviar e-mails para overbookings detectados
+      if (finalOverbookings.length > 0 && establishmentId) {
+        try {
+          // Verificar quais overbookings já têm notificações criadas
+          const { data: existingNotifications } = await supabase
+            .from("notifications")
+            .select("metadata")
+            .eq("establishment_id", establishmentId)
+            .eq("type", "overbooking")
+            .eq("is_read", false);
+
+          // Verificar quais overbookings já receberam e-mail (consultar email_logs)
+          const reservationIds = finalOverbookings.map((o: Overbooking) => o.reservation.id);
+          let emailedReservationIds = new Set<string>();
+          
+          if (reservationIds.length > 0) {
+            try {
+              const { data: existingEmails } = await supabase
+                .from("email_logs")
+                .select("reservation_id")
+                .eq("event_type", "reservation.overbooking")
+                .in("reservation_id", reservationIds)
+                .eq("status", "sent");
+
+              emailedReservationIds = new Set(
+                (existingEmails || [])
+                  .map((e: any) => e.reservation_id)
+                  .filter(Boolean)
+              );
+            } catch (emailLogError) {
+              console.warn("⚠️ Erro ao verificar e-mails enviados de overbooking:", emailLogError);
+              // Continuar mesmo se a verificação falhar
+            }
+          }
+
+          const notifiedReservationIds = new Set(
+            (existingNotifications || [])
+              .map((n: any) => n.metadata?.reservation_id)
+              .filter(Boolean)
+          );
+
+          // Criar notificações e enviar e-mails apenas para novos overbookings
+          for (const overbooking of finalOverbookings) {
+            const reservationId = overbooking.reservation.id;
+            
+            // Se já existe notificação não lida para esta reserva, pular criação de notificação
+            // Mas ainda verificar se precisa enviar e-mail
+            const shouldCreateNotification = !notifiedReservationIds.has(reservationId);
+            const shouldSendEmail = !emailedReservationIds.has(reservationId);
+
+            const reservationCode = overbooking.reservation.reservation_code || "N/A";
+            const guestName = overbooking.reservation.guest?.full_name || 
+                             overbooking.reservation.financial_responsible?.full_name || 
+                             "Hóspede";
+            const roomName = overbooking.reservation.rooms?.name || 
+                           overbooking.reservation.rooms?.room_number || 
+                           "Quarto";
+            const conflictCount = overbooking.conflictingReservations.length;
+            const conflictDates = overbooking.conflictDates
+              .map((date: string) => format(parseISO(date), "dd/MM/yyyy", { locale: ptBR }))
+              .join(", ");
+
+            // Criar notificação para todos os usuários do estabelecimento
+            if (shouldCreateNotification) {
+              const { error: notificationError } = await supabase.rpc(
+                "create_notification_for_establishment",
+                {
+                  p_establishment_id: establishmentId,
+                  p_type: "overbooking",
+                  p_title: `Overbooking Detectado - Reserva ${reservationCode}`,
+                  p_message: `A reserva ${reservationCode} (${guestName}) no quarto ${roomName} está em conflito com ${conflictCount} outra(s) reserva(s). Datas de conflito: ${conflictDates}.`,
+                  p_priority: "urgent",
+                  p_metadata: {
+                    reservation_id: reservationId,
+                    reservation_code: reservationCode,
+                    room_id: overbooking.reservation.room_id,
+                    room_name: roomName,
+                    conflict_count: conflictCount,
+                    conflict_dates: overbooking.conflictDates,
+                    conflicting_reservation_ids: overbooking.conflictingReservations.map((r: any) => r.id),
+                  },
+                }
+              );
+
+              if (notificationError) {
+                console.error("Erro ao criar notificação de overbooking:", notificationError);
+              } else {
+                console.log(`✅ Notificação de overbooking criada para reserva ${reservationCode}`);
+              }
+            }
+
+            // Enviar e-mail para o hóspede
+            if (shouldSendEmail) {
+              try {
+                // Verificar se há e-mail do hóspede ou responsável financeiro
+                const guestEmail = overbooking.reservation.guest?.email || 
+                                  overbooking.reservation.financial_responsible?.email;
+                
+                if (!guestEmail) {
+                  console.warn(`⚠️ Não foi possível enviar e-mail de overbooking para reserva ${reservationCode}: nenhum e-mail encontrado`);
+                } else {
+                  await triggerEmail('reservation.overbooking', overbooking.reservation);
+                  console.log(`✅ E-mail de overbooking enviado para reserva ${reservationCode} (${guestEmail})`);
+                }
+              } catch (emailError) {
+                console.error(`❌ Erro ao enviar e-mail de overbooking para reserva ${reservationCode}:`, emailError);
+                // Não bloquear o processamento se o e-mail falhar
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Erro ao criar notificações e enviar e-mails de overbooking:", error);
+          // Não bloquear o retorno dos overbookings se a notificação/e-mail falhar
+        }
+      }
+
+      return finalOverbookings;
+    },
+  });
+
+  // Função para marcar pendência como resolvida
+  const markPendingAsResolved = useMutation({
+    mutationFn: async (reservationId: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Buscar dados da reserva antes de atualizar
+      const { data: reservation } = await supabase
+        .from("reservations")
+        .select("reservation_code")
+        .eq("id", reservationId)
+        .single();
+      
+      const { error } = await supabase
+        .from("reservations")
+        .update({
+          pending_resolved_at: new Date().toISOString(),
+          pending_resolved_by: user?.id || null,
+        })
+        .eq("id", reservationId);
+
+      if (error) throw error;
+      
+      // Registrar log de resolução
+      if (reservation) {
+        try {
+          await logActivity({
+            actionType: "resolved",
+            entityType: "pending",
+            entityId: reservationId,
+            entityCode: reservation.reservation_code,
+            description: `Pendência da reserva ${reservation.reservation_code} resolvida`,
+          });
+        } catch (logError) {
+          console.error("Erro ao registrar log de resolução:", logError);
+        }
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pending"] });
+      toast.success("Pendência marcada como resolvida");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao marcar pendência como resolvida");
+    },
+  });
+
+  return {
+    newOTAReservations: newOTAReservationsQuery.data || [],
+    newCounterReservations: newCounterReservationsQuery.data || [],
+    noCheckIn: noCheckInQuery.data || [],
+    overbookings: overbookingsQuery.data || [],
+    isLoading:
+      newOTAReservationsQuery.isLoading ||
+      newCounterReservationsQuery.isLoading ||
+      noCheckInQuery.isLoading ||
+      overbookingsQuery.isLoading,
+    markPendingAsResolved: markPendingAsResolved.mutate,
+    isMarkingResolved: markPendingAsResolved.isPending,
+    refetch: () => {
+      newOTAReservationsQuery.refetch();
+      newCounterReservationsQuery.refetch();
+      noCheckInQuery.refetch();
+      overbookingsQuery.refetch();
+    },
+  };
+};
+

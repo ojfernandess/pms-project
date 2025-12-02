@@ -1,0 +1,240 @@
+{
+  "meta": {
+    "project": "Innvator Core Hotel Management System",
+    "date": "2025-11-12",
+    "prepared_by": "Software Development Manager"
+  },
+  "product_overview": "Innvator Core is a comprehensive, multi-tenant hotel management system designed to streamline operations including reservations, dynamic pricing, maintenance, financial reporting, and channel management through OTA integrations. It delivers a rich dashboard with real-time occupancy and detailed analytics to optimize hotel performance.",
+  "core_goals": [
+    "Provide a robust reservation system with real-time availability and flexible pricing.",
+    "Enable dynamic pricing with seasons, promotions, and pricing rules.",
+    "Offer a full maintenance ticket system with prioritization and room status integration.",
+    "Deliver interactive and detailed financial reports for revenue, payments, and OTA performance.",
+    "Implement a channel manager to synchronize availability and rates across OTAs.",
+    "Ensure multi-tenant support with strict data isolation by establishment.",
+    "Implement role-based access control to secure and tailor user operations."
+  ],
+  "key_features": [
+    "Authentication system with Supabase Auth including role and route protection.",
+    "Multi-tenant architecture managing companies, establishments, and isolation per establishment.",
+    "Reservation management with creation, editing, check-in/out, cancellation, and advanced calendar views.",
+    "Room management covering rooms, categories, buildings with status and availability.",
+    "Client management with full CRUD of guest information and documents.",
+    "Real-time occupancy map showing room and reservation statuses.",
+    "Dynamic pricing engine managing seasons, pricing plans, rules, and promotions.",
+    "Channel manager with OTA integrations for Booking, Airbnb, Expedia including synchronization and channel-specific pricing.",
+    "Comprehensive financial reports showing revenue, payment methods, cash flow, and channel comparisons.",
+    "Maintenance management system with ticket creation, status tracking, priority, and assignment.",
+    "User and employee management with granular role-based permissions and access controls.",
+    "Settings module for hotel info, schedules, payment methods, and API integrations.",
+    "User profile management for personal data, email, and password updates."
+  ],
+  "user_flow_summary": [
+    "User logs in via authentication system with role-based route protection.",
+    "User selects an establishment within their company context due to multi-tenancy.",
+    "User creates or edits reservations using a validated form that checks room availability and calculates dynamic pricing including any applied promotions.",
+    "User manages room inventory including categories and building information to ensure correct availability.",
+    "Maintenance staff or managers log, assign, and update maintenance tickets that integrate with room statuses, preventing conflicts with reservations.",
+    "Finance managers view interactive dashboards and reports that detail revenue, payments, and OTA channel performance with export options.",
+    "Admins configure pricing seasons, rules, and promotions to influence reservation pricing dynamically.",
+    "Channel manager users configure OTA channels, synchronize availability, import reservations and adjust channel pricing.",
+    "Users access dashboards presenting key hotel metrics including occupancy, recent reservations, and financial summaries.",
+    "User and employee management flows ensure proper role assignments and access control.",
+    "Users update their profile information securely with validation and authentication."
+  ],
+  "validation_criteria": [
+    "Reservation forms validate date ranges, room availability, and client data before submission.",
+    "Pricing calculations dynamically update on date changes and promotion applications, matching backend logic.",
+    "Maintenance tickets correctly update room statuses and prevent reservation conflicts.",
+    "Financial reports display accurate data fetched from Supabase with interactive charts and exportable reports.",
+    "Channel manager syncs OTA data correctly and maintains consistent pricing and availability.",
+    "Role-based controls restrict access to features and navigation per user permission levels.",
+    "Multi-tenant data isolation guarantees data privacy between companies and establishments.",
+    "Dashboard metrics correspond to real-time data, displaying consistent occupancy and revenue info.",
+    "Error handling and loading states are present across features for reliable UX.",
+    "All user inputs are validated on frontend and backend for security and data integrity."
+  ],
+  "code_summary": {
+    "tech_stack": [
+      "TypeScript",
+      "React",
+      "Vite",
+      "React Router",
+      "TanStack Query",
+      "Supabase (PostgreSQL)",
+      "Tailwind CSS",
+      "shadcn/ui",
+      "date-fns",
+      "Recharts"
+    ],
+    "features": [
+      {
+        "name": "Authentication",
+        "description": "Sistema de autenticação com Supabase Auth, incluindo login, logout e proteção de rotas",
+        "files": [
+          "src/pages/Auth.tsx",
+          "src/hooks/useAuth.tsx",
+          "src/components/layout/ProtectedRoute.tsx",
+          "src/components/layout/SuperAdminRoute.tsx",
+          "src/components/layout/RoleProtectedRoute.tsx"
+        ]
+      },
+      {
+        "name": "Multi-tenant System",
+        "description": "Sistema multi-tenant com empresas, estabelecimentos e isolamento de dados por estabelecimento",
+        "files": [
+          "src/contexts/EstablishmentContext.tsx",
+          "src/hooks/useCompanies.ts",
+          "src/hooks/useEstablishments.ts",
+          "src/hooks/useUserCompanies.ts",
+          "src/lib/establishmentUtils.ts",
+          "src/pages/SuperAdmin.tsx",
+          "src/pages/UserDashboard.tsx",
+          "src/pages/EstablishmentDashboard.tsx"
+        ]
+      },
+      {
+        "name": "Reservation Management",
+        "description": "Gerenciamento completo de reservas com criação, edição, check-in, check-out, cancelamento e visualização em calendário",
+        "files": [
+          "src/pages/Reservations.tsx",
+          "src/components/reservations/ReservationDialog.tsx",
+          "src/components/reservations/ReservationCalendarMap.tsx",
+          "src/components/reservations/ReservationTimeline.tsx",
+          "src/components/reservations/QuickReservationDialog.tsx",
+          "src/components/reservations/BlockRoomDialog.tsx",
+          "src/components/reservations/BlockViewDialog.tsx",
+          "src/hooks/useReservations.ts",
+          "src/lib/reservationUtils.ts"
+        ]
+      },
+      {
+        "name": "Room Management",
+        "description": "Gerenciamento de quartos, categorias e prédios com status e disponibilidade",
+        "files": [
+          "src/pages/Units.tsx",
+          "src/components/units/RoomDialog.tsx",
+          "src/components/units/CategoryDialog.tsx",
+          "src/components/units/CategoryCard.tsx",
+          "src/components/units/BuildingDialog.tsx",
+          "src/components/units/RoomCard.tsx",
+          "src/hooks/useBuildings.ts"
+        ]
+      },
+      {
+        "name": "Client Management",
+        "description": "CRUD completo de clientes/hóspedes com informações pessoais e documentos",
+        "files": [
+          "src/pages/Clients.tsx",
+          "src/components/clients/ClientDialog.tsx"
+        ]
+      },
+      {
+        "name": "Occupancy Map",
+        "description": "Mapa de ocupação em tempo real mostrando status dos quartos e reservas ativas",
+        "files": [
+          "src/pages/OccupancyMap.tsx",
+          "src/hooks/useOccupancyMap.ts"
+        ]
+      },
+      {
+        "name": "Dynamic Pricing",
+        "description": "Sistema de tarifário dinâmico com planos, estações, regras e promoções",
+        "files": [
+          "src/pages/Pricing.tsx",
+          "src/components/pricing/PricingPlanDialog.tsx",
+          "src/components/pricing/SeasonDialog.tsx",
+          "src/components/pricing/PricingRuleDialog.tsx",
+          "src/components/pricing/PromotionDialog.tsx",
+          "src/components/pricing/SimplePricingCalendar.tsx",
+          "src/hooks/usePricing.ts",
+          "src/hooks/usePricingPlans.ts"
+        ]
+      },
+      {
+        "name": "Channel Manager",
+        "description": "Gerenciamento de canais OTA (Booking, Airbnb, etc.) com sincronização e tarifas por canal",
+        "files": [
+          "src/pages/ChannelManager.tsx",
+          "src/components/channels/OTADialog.tsx",
+          "src/components/channels/ChannelPricingDialog.tsx",
+          "src/components/channels/SyncStatusCard.tsx",
+          "src/hooks/useChannelManager.ts"
+        ]
+      },
+      {
+        "name": "Financial Reports",
+        "description": "Relatórios financeiros com receita, pagamentos, fluxo de caixa e comparações por canal",
+        "files": [
+          "src/pages/Financial.tsx",
+          "src/components/financial/CashFlowChart.tsx",
+          "src/components/financial/ChannelComparisonChart.tsx",
+          "src/components/financial/PaymentMethodChart.tsx",
+          "src/components/financial/PaymentCarrierDialog.tsx",
+          "src/components/financial/PaymentTypeDialog.tsx",
+          "src/hooks/useFinancialReports.ts",
+          "src/hooks/usePaymentCarriers.ts",
+          "src/lib/financialUtils.ts"
+        ]
+      },
+      {
+        "name": "Maintenance Management",
+        "description": "Sistema de tickets de manutenção com prioridades, status e atribuição",
+        "files": [
+          "src/pages/Maintenance.tsx",
+          "src/components/maintenance/MaintenanceTicketDialog.tsx",
+          "src/hooks/useMaintenance.ts"
+        ]
+      },
+      {
+        "name": "Dashboard",
+        "description": "Dashboard principal com métricas, gráficos de receita, ocupação e reservas recentes",
+        "files": [
+          "src/pages/Dashboard.tsx",
+          "src/components/dashboard/StatsCard.tsx",
+          "src/components/dashboard/RevenueChart.tsx",
+          "src/components/dashboard/OccupancyChart.tsx",
+          "src/components/dashboard/RecentReservations.tsx",
+          "src/hooks/useDashboard.ts"
+        ]
+      },
+      {
+        "name": "Settings",
+        "description": "Configurações do hotel incluindo informações básicas, horários, pagamentos e integrações API",
+        "files": [
+          "src/pages/Settings.tsx",
+          "src/hooks/useHotelSettings.ts",
+          "src/hooks/useApiSettings.ts"
+        ]
+      },
+      {
+        "name": "Employee Management",
+        "description": "Gerenciamento de funcionários com controle de acesso baseado em roles e permissões",
+        "files": [
+          "src/pages/Employees.tsx",
+          "src/hooks/useEmployees.ts",
+          "src/hooks/usePermissions.ts",
+          "src/lib/permissions.ts"
+        ]
+      },
+      {
+        "name": "User Profile",
+        "description": "Gerenciamento de perfil do usuário com informações pessoais, email e senha",
+        "files": [
+          "src/pages/Profile.tsx",
+          "src/hooks/useProfile.ts"
+        ]
+      },
+      {
+        "name": "Role-Based Access Control",
+        "description": "Sistema de controle de acesso baseado em roles com permissões granulares",
+        "files": [
+          "src/lib/permissions.ts",
+          "src/hooks/usePermissions.ts",
+          "src/components/layout/RoleProtectedRoute.tsx",
+          "src/components/layout/Sidebar.tsx"
+        ]
+      }
+    ]
+  }
+}

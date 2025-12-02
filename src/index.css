@@ -1,0 +1,173 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 215 25% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 15%;
+
+    --primary: 210 85% 45%;
+    --primary-foreground: 0 0% 100%;
+    
+    --primary-light: 210 85% 55%;
+    --primary-dark: 210 85% 35%;
+
+    --secondary: 190 75% 45%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 210 15% 95%;
+    --muted-foreground: 215 15% 45%;
+
+    --accent: 45 90% 55%;
+    --accent-foreground: 215 25% 15%;
+
+    --success: 145 65% 45%;
+    --success-foreground: 0 0% 100%;
+    
+    --warning: 45 90% 55%;
+    --warning-foreground: 215 25% 15%;
+
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --occupied: 0 75% 55%;
+    --available: 145 65% 45%;
+    --cleaning: 45 90% 55%;
+    --maintenance: 210 85% 45%;
+    --blocked: 215 10% 60%;
+
+    --border: 210 20% 90%;
+    --input: 210 20% 95%;
+    --ring: 210 85% 45%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 215 30% 12%;
+    --sidebar-foreground: 210 15% 85%;
+    --sidebar-primary: 210 85% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 25% 18%;
+    --sidebar-accent-foreground: 210 15% 95%;
+    --sidebar-border: 215 25% 20%;
+    --sidebar-ring: 210 85% 45%;
+    
+    --gradient-primary: linear-gradient(135deg, hsl(210 85% 45%), hsl(190 75% 45%));
+    --shadow-soft: 0 2px 8px hsl(215 25% 15% / 0.08);
+    --shadow-medium: 0 4px 16px hsl(215 25% 15% / 0.12);
+    --shadow-strong: 0 8px 32px hsl(215 25% 15% / 0.16);
+  }
+
+  .dark {
+    --background: 215 30% 10%;
+    --foreground: 210 15% 95%;
+
+    --card: 215 25% 14%;
+    --card-foreground: 210 15% 95%;
+
+    --popover: 215 25% 14%;
+    --popover-foreground: 210 15% 95%;
+
+    --primary: 210 85% 55%;
+    --primary-foreground: 0 0% 100%;
+    
+    --primary-light: 210 85% 65%;
+    --primary-dark: 210 85% 45%;
+
+    --secondary: 190 75% 50%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 215 20% 18%;
+    --muted-foreground: 210 15% 65%;
+
+    --accent: 45 85% 60%;
+    --accent-foreground: 215 25% 15%;
+
+    --success: 145 60% 50%;
+    --success-foreground: 0 0% 100%;
+    
+    --warning: 45 85% 60%;
+    --warning-foreground: 215 25% 15%;
+
+    --destructive: 0 70% 60%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --occupied: 0 70% 60%;
+    --available: 145 60% 50%;
+    --cleaning: 45 85% 60%;
+    --maintenance: 210 85% 55%;
+    --blocked: 215 10% 50%;
+
+    --border: 215 20% 22%;
+    --input: 215 20% 18%;
+    --ring: 210 85% 55%;
+
+    --sidebar-background: 215 30% 8%;
+    --sidebar-foreground: 210 15% 85%;
+    --sidebar-primary: 210 85% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 25% 14%;
+    --sidebar-accent-foreground: 210 15% 95%;
+    --sidebar-border: 215 25% 16%;
+    --sidebar-ring: 210 85% 55%;
+    
+    --gradient-primary: linear-gradient(135deg, hsl(210 85% 55%), hsl(190 75% 50%));
+    --shadow-soft: 0 2px 8px hsl(0 0% 0% / 0.3);
+    --shadow-medium: 0 4px 16px hsl(0 0% 0% / 0.4);
+    --shadow-strong: 0 8px 32px hsl(0 0% 0% / 0.5);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Animações personalizadas para o mapa de reservas */
+  @keyframes drag-preview-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 0.9;
+    }
+    100% {
+      transform: scale(1.02);
+      opacity: 1;
+    }
+  }
+
+  @keyframes cell-highlight {
+    0% {
+      box-shadow: inset 0 0 0 1px currentColor;
+    }
+    100% {
+      box-shadow: inset 0 0 0 2px currentColor;
+    }
+  }
+
+  @keyframes blink {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.3;
+    }
+  }
+
+  .animate-blink {
+    animation: blink 1.5s ease-in-out infinite;
+  }
+}

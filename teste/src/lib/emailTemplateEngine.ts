@@ -1,0 +1,674 @@
+/**
+ * Template Engine para processar templates de e-mail com variáveis dinâmicas
+ */
+
+export interface TemplateVariables {
+  [key: string]: string | number | null | undefined;
+}
+
+/**
+ * Detecta a URL base do site automaticamente
+ * Prioriza: window.location.origin > variáveis de ambiente > inferência do Supabase > localhost
+ */
+function detectBaseUrl(): string {
+  // No cliente (browser)
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  
+  // No servidor (Node.js/Edge Function)
+  if (typeof process !== 'undefined' && process.env) {
+    // Priorizar variáveis de ambiente explícitas
+    const envUrl = process.env.VITE_APP_URL || 
+                   process.env.NEXT_PUBLIC_APP_URL || 
+                   process.env.SITE_URL ||
+                   process.env.APP_URL;
+    
+    if (envUrl) {
+      return envUrl;
+    }
+    
+    // Tentar inferir do Supabase URL (não ideal, mas melhor que nada)
+    const supabaseUrl = process.env.SUPABASE_URL || '';
+    if (supabaseUrl) {
+      // Tentar extrair domínio do Supabase (ex: spxxx.supabase.co -> app.seudominio.com)
+      // Isso é uma heurística e pode não funcionar sempre
+      try {
+        const url = new URL(supabaseUrl);
+        // Se o Supabase URL contém um domínio customizado, tentar inferir
+        // Caso contrário, usar localhost como fallback
+      } catch {
+        // URL inválida, continuar
+      }
+    }
+  }
+  
+  // Último recurso: localhost (apenas para desenvolvimento)
+  return 'http://localhost:8080';
+}
+
+/**
+ * Processa um template HTML substituindo variáveis no formato {{variable_name}}
+ * e processando condicionais no formato {{#if variable_name}}...{{/if}}
+ */
+export function processTemplate(template: string, variables: TemplateVariables): string {
+  let processed = template;
+
+  // Primeiro, processar condicionais {{#if variable}}...{{/if}}
+  // Suporta condicionais aninhados
+  processed = processConditionals(processed, variables);
+
+  // Depois, substituir variáveis no formato {{variable_name}}
+  // Usar replace com função para garantir que valores null/undefined sejam tratados como string vazia
+  Object.keys(variables).forEach((key) => {
+    const value = variables[key];
+    // Converter para string, tratando null/undefined como string vazia
+    const stringValue = value !== null && value !== undefined ? String(value) : '';
+    const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+    processed = processed.replace(regex, stringValue);
+  });
+  
+  // Log de debug para variáveis não substituídas (apenas em desenvolvimento)
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    const remainingVars = processed.match(/\{\{[\w]+\}\}/g);
+    if (remainingVars && remainingVars.length > 0) {
+      console.log('⚠️ Variáveis não substituídas no template:', remainingVars);
+    }
+  }
+
+  // Remover variáveis não substituídas (opcional - pode ser útil para debug)
+  // processed = processed.replace(/\{\{[\w]+\}\}/g, '');
+
+  return processed;
+}
+
+/**
+ * Processa condicionais no formato {{#if variable}}...{{/if}}
+ * Remove blocos onde a variável é falsy (null, undefined, '', 0, false)
+ * Suporta condicionais aninhados
+ */
+function processConditionals(template: string, variables: TemplateVariables): string {
+  let processed = template;
+  
+  // Encontrar todos os blocos condicionais, lidando com aninhamento
+  // Usar uma abordagem iterativa que processa de dentro para fora
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = 100; // Prevenir loop infinito
+  
+  while (changed && iterations < maxIterations) {
+    iterations++;
+    changed = false;
+    
+    // Regex para encontrar blocos {{#if variable}}...{{/if}}
+    // Procura pelo primeiro bloco que não contém outros blocos {{#if}} dentro dele
+    const ifRegex = /\{\{#if\s+(\w+)\}\}/g;
+    let match;
+    let lastIndex = 0;
+    
+    while ((match = ifRegex.exec(processed)) !== null) {
+      const startIndex = match.index;
+      const variableName = match[1];
+      const startTag = match[0];
+      
+      // Encontrar o {{/if}} correspondente, contando aninhamentos
+      let depth = 1;
+      let searchIndex = startIndex + startTag.length;
+      
+      while (depth > 0 && searchIndex < processed.length) {
+        const nextIf = processed.indexOf('{{#if', searchIndex);
+        const nextEndIf = processed.indexOf('{{/if}}', searchIndex);
+        
+        if (nextEndIf === -1) {
+          // Não encontrou fechamento, sair
+          break;
+        }
+        
+        if (nextIf !== -1 && nextIf < nextEndIf) {
+          // Encontrou um {{#if}} antes do {{/if}}, incrementar profundidade
+          depth++;
+          searchIndex = nextIf + 5; // Avançar após {{#if
+        } else {
+          // Encontrou um {{/if}}
+          depth--;
+          if (depth === 0) {
+            // Este é o {{/if}} correspondente
+            const endIndex = nextEndIf + 7; // {{/if}} tem 7 caracteres
+            const fullMatch = processed.substring(startIndex, endIndex);
+            const content = processed.substring(startIndex + startTag.length, nextEndIf);
+            
+            // Verificar se há um {{else}} dentro do conteúdo
+            const elseIndex = content.indexOf('{{else}}');
+            let ifContent = content;
+            let elseContent = '';
+            
+            if (elseIndex !== -1) {
+              // Separar conteúdo do if e do else
+              ifContent = content.substring(0, elseIndex);
+              elseContent = content.substring(elseIndex + 8); // {{else}} tem 8 caracteres
+            }
+            
+            // Verificar se a variável existe e é truthy
+            const value = variables[variableName];
+            const isTruthy = value !== null && 
+                             value !== undefined && 
+                             value !== '' && 
+                             value !== 0 && 
+                             value !== false &&
+                             (typeof value === 'string' ? value.trim() !== '' : true);
+            
+            if (isTruthy) {
+              // Variável é truthy: manter o conteúdo do if, remover apenas as tags
+              processed = processed.replace(fullMatch, ifContent);
+            } else {
+              // Variável é falsy: manter o conteúdo do else (se existir), remover apenas as tags
+              if (elseContent) {
+                processed = processed.replace(fullMatch, elseContent);
+              } else {
+                // Sem else: remover todo o bloco
+                processed = processed.replace(fullMatch, '');
+              }
+            }
+            
+            changed = true;
+            break; // Processar um bloco por vez
+          } else {
+            searchIndex = nextEndIf + 7;
+          }
+        }
+      }
+      
+      if (changed) {
+        break; // Reiniciar busca após processar um bloco
+      }
+    }
+  }
+  
+  return processed;
+}
+
+/**
+ * Extrai todas as variáveis de um template
+ */
+export function extractVariables(template: string): string[] {
+  const regex = /\{\{(\w+)\}\}/g;
+  const variables: string[] = [];
+  let match;
+
+  while ((match = regex.exec(template)) !== null) {
+    if (!variables.includes(match[1])) {
+      variables.push(match[1]);
+    }
+  }
+
+  return variables;
+}
+
+/**
+ * Valida se todas as variáveis necessárias estão presentes
+ */
+export function validateTemplate(template: string, variables: TemplateVariables): {
+  valid: boolean;
+  missing: string[];
+} {
+  const required = extractVariables(template);
+  const provided = Object.keys(variables);
+  const missing = required.filter((v) => !provided.includes(v));
+
+  return {
+    valid: missing.length === 0,
+    missing,
+  };
+}
+
+/**
+ * Gera variáveis padrão para uma reserva
+ */
+/**
+ * Formata uma data no formato YYYY-MM-DD para DD/MM/YYYY
+ * Evita problemas de timezone usando apenas manipulação de string
+ */
+export function formatDate(dateString: string | null | undefined): string {
+  if (!dateString) return '';
+  
+  // Se já estiver no formato correto, retornar como está
+  if (dateString.includes('/')) return dateString;
+  
+  // Formato esperado: YYYY-MM-DD ou YYYY-MM-DDTHH:mm:ss.sssZ
+  const dateOnly = dateString.split('T')[0]; // Pegar apenas a parte da data
+  const parts = dateOnly.split('-');
+  
+  if (parts.length === 3) {
+    // Formato: YYYY-MM-DD -> DD/MM/YYYY
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  
+  // Fallback: tentar usar Date se não conseguir parsear
+  try {
+    // Usar UTC para evitar problemas de timezone
+    const date = new Date(dateString + 'T12:00:00Z'); // Meio-dia UTC para evitar problemas de timezone
+    return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+  } catch {
+    return dateString;
+  }
+}
+
+export async function generateReservationVariables(
+  reservation: any,
+  client?: any,
+  guest?: any,
+  hotelSettings?: any
+): Promise<TemplateVariables> {
+  const checkinDate = formatDate(reservation.checkin_date);
+  const checkoutDate = formatDate(reservation.checkout_date);
+  // Para extensões, new_checkout_date será a nova data de check-out (que já está em checkout_date após a atualização)
+  // Se a reserva tiver uma propriedade new_checkout_date ou checkout_date foi atualizado, usar isso
+  const newCheckoutDate = formatDate(reservation.new_checkout_date || reservation.checkout_date);
+  
+  // Importar supabase para buscar web_checkin
+  const { supabase } = await import('@/integrations/supabase/client');
+
+  // Construir endereço completo do hotel a partir dos campos separados
+  const addressParts: string[] = [];
+  if (hotelSettings?.street) {
+    let streetLine = hotelSettings.street;
+    if (hotelSettings.number) {
+      streetLine += `, ${hotelSettings.number}`;
+    }
+    addressParts.push(streetLine);
+  }
+  if (hotelSettings?.neighborhood) {
+    addressParts.push(hotelSettings.neighborhood);
+  }
+  if (hotelSettings?.city) {
+    let cityLine = hotelSettings.city;
+    if (hotelSettings.state) {
+      cityLine += ` - ${hotelSettings.state}`;
+    }
+    if (hotelSettings.zip_code) {
+      cityLine += ` - CEP: ${hotelSettings.zip_code}`;
+    }
+    addressParts.push(cityLine);
+  }
+  if (hotelSettings?.country && hotelSettings.country !== 'Brasil') {
+    addressParts.push(hotelSettings.country);
+  }
+  const hotelAddress = addressParts.length > 0 ? addressParts.join(', ') : '';
+
+  // Construir telefone completo (priorizar campo único 'phone', senão montar dos campos antigos)
+  const hotelPhone = hotelSettings?.phone 
+    || (hotelSettings?.phone_ddi && hotelSettings?.phone_number
+      ? `${hotelSettings.phone_ddi} ${hotelSettings.phone_number}`
+      : hotelSettings?.phone_number || '');
+
+  // Construir WhatsApp completo (priorizar campo único 'whatsapp', senão montar dos campos antigos)
+  const hotelWhatsApp = hotelSettings?.whatsapp 
+    || (hotelSettings?.whatsapp_ddi && hotelSettings?.whatsapp_number
+      ? `${hotelSettings.whatsapp_ddi} ${hotelSettings.whatsapp_number}`
+      : hotelSettings?.whatsapp_number || '');
+
+  // Obter building_id através do room_categories se disponível
+  // O building_id já vem no relacionamento room_categories quando buscado no emailService
+  const buildingId = reservation.room_categories?.building_id || null;
+
+  // Gerar link para políticas públicas (priorizar prédio, senão estabelecimento)
+  const generatePoliciesLink = (type: 'establishment' | 'building', id: string | null | undefined): string => {
+    if (!id) return '';
+    try {
+      // Codificar o tipo e ID em base64 para criar um token
+      // Formato: "type:id" (ex: "building:uuid" ou "establishment:uuid")
+      const tokenData = `${type}:${id}`;
+      const token = btoa(tokenData);
+      // Detectar URL base automaticamente
+      const baseUrl = detectBaseUrl();
+      return `${baseUrl}/policies/${token}`;
+    } catch (error) {
+      console.error('Erro ao gerar link de políticas:', error);
+      return '';
+    }
+  };
+
+  // Priorizar políticas do prédio, senão usar do estabelecimento
+  const establishmentId = reservation.establishment_id || hotelSettings?.establishment_id;
+  const policiesLink = buildingId 
+    ? generatePoliciesLink('building', buildingId)
+    : generatePoliciesLink('establishment', establishmentId);
+
+  // Gerar link do web check-in
+  const generateWebCheckinLink = async (): Promise<string> => {
+    try {
+      // Buscar web_checkin existente para a reserva
+      let webCheckin = null;
+      const { data: existingWebCheckin, error: webCheckinError } = await supabase
+        .from('web_checkin')
+        .select('locator')
+        .eq('reservation_id', reservation.id)
+        .maybeSingle();
+
+      if (!webCheckinError && existingWebCheckin?.locator) {
+        webCheckin = existingWebCheckin;
+      } else {
+        // Se não existe, tentar criar um novo web_checkin
+        // Usar o reservation_code como locator se disponível
+        const locator = reservation.reservation_code || '';
+        
+        if (locator) {
+          const { locatorService } = await import('@/lib/locatorService');
+          const token = locatorService.generateWebCheckinToken(reservation.id, locator);
+          
+          // Calcular data de expiração
+          const checkinDateObj = reservation.checkin_date ? new Date(reservation.checkin_date) : new Date();
+          const expiresAt = new Date();
+          expiresAt.setDate(expiresAt.getDate() + 7);
+          if (checkinDateObj < expiresAt) {
+            expiresAt.setTime(checkinDateObj.getTime());
+          }
+
+          // Tentar criar web_checkin
+          const { data: newWebCheckin, error: createError } = await supabase
+            .from('web_checkin')
+            .insert({
+              reservation_id: reservation.id,
+              establishment_id: establishmentId,
+              token,
+              locator,
+              expires_at: expiresAt.toISOString(),
+              status: 'pending',
+            })
+            .select('locator')
+            .single();
+
+          if (!createError && newWebCheckin) {
+            webCheckin = newWebCheckin;
+          }
+        }
+      }
+
+      // Se temos um locator, gerar o link
+      if (webCheckin?.locator) {
+        // Detectar URL base automaticamente
+        const baseUrl = detectBaseUrl();
+        return `${baseUrl}/web-checkin/${webCheckin.locator}`;
+      }
+
+      return '';
+    } catch (error) {
+      console.error('Erro ao gerar link do web check-in:', error);
+      return '';
+    }
+  };
+
+  const webCheckinLink = await generateWebCheckinLink();
+
+  // Gerar link de pagamento se a reserva não estiver paga
+  const generatePaymentLink = async (): Promise<string> => {
+    try {
+      // Verificar se establishmentId está disponível
+      if (!establishmentId) {
+        console.warn('[Stripe] Establishment ID não encontrado');
+        return '';
+      }
+      
+      // Verificar se há pagamento pendente
+      const paymentStatus = reservation.payment_status || 'pending';
+      const totalAmount = Number(reservation.total_amount) || 0;
+      const paidAmount = Number(reservation.paid_amount) || 0;
+      const pendingAmount = totalAmount - paidAmount;
+      
+      console.log('[Stripe] Verificando necessidade de pagamento:', {
+        reservation_id: reservation.id,
+        establishment_id: establishmentId,
+        payment_status: paymentStatus,
+        total_amount: totalAmount,
+        paid_amount: paidAmount,
+        pending_amount: pendingAmount
+      });
+      
+      // Verificar se precisa de pagamento
+      // Se não tem total_amount ou já está pago, não precisa
+      if (totalAmount <= 0) {
+        console.log('[Stripe] Valor total é zero ou negativo');
+        return '';
+      }
+      
+      if (paidAmount >= totalAmount) {
+        console.log('[Stripe] Reserva já está totalmente paga');
+        return '';
+      }
+      
+      // Se tem valor pendente, precisa de pagamento
+      const needsPayment = pendingAmount > 0;
+
+      if (!needsPayment) {
+        console.log('[Stripe] Não precisa de pagamento');
+        return '';
+      }
+      
+      console.log('[Stripe] Pagamento necessário:', { pendingAmount });
+
+      // Verificar se Stripe está habilitado globalmente
+      console.log('[Stripe] Verificando configuração global...');
+      const { data: globalConfig, error: globalError } = await supabase
+        .from('stripe_global_config')
+        .select('is_enabled')
+        .maybeSingle();
+
+      if (globalError) {
+        console.error('[Stripe] ❌ Erro ao verificar config global:', globalError);
+        console.error('[Stripe] Código do erro:', globalError.code, 'Mensagem:', globalError.message);
+        return '';
+      }
+
+      console.log('[Stripe] Config global encontrada:', { is_enabled: globalConfig?.is_enabled });
+
+      if (!globalConfig?.is_enabled) {
+        console.warn('[Stripe] ⚠️ Stripe não está habilitado globalmente. Configure em Super Admin > Stripe');
+        return '';
+      }
+
+      // Verificar se Stripe está habilitado para o estabelecimento
+      console.log('[Stripe] Verificando configuração do estabelecimento...', { establishment_id: establishmentId });
+      
+      // Verificar autenticação primeiro
+      const { data: { user } } = await supabase.auth.getUser();
+      console.log('[Stripe] Usuário autenticado:', { user_id: user?.id, email: user?.email });
+      
+      // Buscar TODAS as configurações para debug
+      const { data: allConfigs, error: allConfigsError } = await supabase
+        .from('stripe_establishment_config')
+        .select('id, establishment_id, is_enabled')
+        .limit(10);
+      
+      console.log('[Stripe] Todas as configurações encontradas no banco:', allConfigs);
+      
+      // Buscar configuração específica
+      const { data: establishmentConfig, error: establishmentError } = await supabase
+        .from('stripe_establishment_config')
+        .select('id, establishment_id, is_enabled, test_publishable_key, live_publishable_key')
+        .eq('establishment_id', establishmentId)
+        .maybeSingle();
+
+      if (establishmentError) {
+        console.error('[Stripe] ❌ Erro ao verificar config do estabelecimento:', establishmentError);
+        console.error('[Stripe] Código do erro:', establishmentError.code, 'Mensagem:', establishmentError.message);
+        console.error('[Stripe] Detalhes completos:', JSON.stringify(establishmentError, null, 2));
+        return '';
+      }
+
+      console.log('[Stripe] Config do estabelecimento encontrada:', { 
+        id: establishmentConfig?.id,
+        establishment_id: establishmentConfig?.establishment_id,
+        is_enabled: establishmentConfig?.is_enabled,
+        has_config: !!establishmentConfig,
+        has_test_key: !!establishmentConfig?.test_publishable_key,
+        has_live_key: !!establishmentConfig?.live_publishable_key
+      });
+
+      if (!establishmentConfig) {
+        console.warn('[Stripe] ⚠️ Configuração do estabelecimento não encontrada.');
+        console.warn('[Stripe] 📋 Para habilitar o pagamento por Stripe:');
+        console.warn('[Stripe]    1. Vá em Configurações > Integrações > Stripe');
+        console.warn('[Stripe]    2. Configure as chaves do Stripe (publishable key e secret key)');
+        console.warn('[Stripe]    3. Ative "Stripe Habilitado"');
+        console.warn('[Stripe]    4. Salve a configuração');
+        return '';
+      }
+
+      if (!establishmentConfig?.is_enabled) {
+        console.warn('[Stripe] ⚠️ Stripe não está habilitado para o estabelecimento:', establishmentId);
+        console.warn('[Stripe] 📋 Para habilitar:');
+        console.warn('[Stripe]    1. Vá em Configurações > Integrações > Stripe');
+        console.warn('[Stripe]    2. Ative "Stripe Habilitado"');
+        console.warn('[Stripe]    3. Salve a configuração');
+        return '';
+      }
+      
+      console.log('[Stripe] ✅ Stripe está habilitado globalmente e para o estabelecimento');
+
+      // Obter guest_id (pode estar em reservation.guest_id, reservation.client_id, ou guest/client.id)
+      const guestId = reservation.guest_id || reservation.client_id || guest?.id || client?.id;
+      
+      if (!guestId) {
+        console.warn('[Stripe] Guest/Client ID não encontrado para a reserva:', {
+          reservation_id: reservation.id,
+          reservation_guest_id: reservation.guest_id,
+          reservation_client_id: reservation.client_id,
+          guest_id: guest?.id,
+          client_id: client?.id
+        });
+        return '';
+      }
+
+      // Criar Payment Intent
+      // Usar fetch direto para evitar problemas com autenticação automática do cliente Supabase
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      
+      if (!supabaseUrl || !supabaseAnonKey) {
+        console.error('[Stripe] ❌ Variáveis de ambiente do Supabase não encontradas');
+        return '';
+      }
+
+      const requestBody = {
+        establishment_id: establishmentId,
+        amount: pendingAmount,
+        currency: 'BRL',
+        payment_type: 'reservation_payment',
+        reservation_id: reservation.id,
+        guest_id: guestId,
+        description: `Pagamento da reserva #${reservation.reservation_code || reservation.id}`,
+      };
+
+      console.log('[Stripe] Chamando Edge Function stripe-payment com:', requestBody);
+      
+      // Fazer chamada direta via fetch sem headers de autorização
+      const response = await fetch(`${supabaseUrl}/functions/v1/stripe-payment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Não incluir Authorization header - a função deve aceitar requisições anônimas
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { message: errorText };
+        }
+        
+        console.error('[Stripe] ❌ Erro ao criar Payment Intent:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        
+        // Se for erro 401, fornecer instruções específicas
+        if (response.status === 401) {
+          console.error('[Stripe] ⚠️ ERRO 401: A função stripe-payment está exigindo autenticação.');
+          console.error('[Stripe] 📋 SOLUÇÃO: Acesse o Supabase Dashboard > Edge Functions > stripe-payment > Settings');
+          console.error('[Stripe] 📋 Desative "Require Authorization" ou "Verify JWT"');
+          console.error('[Stripe] 📋 Ou execute: supabase functions deploy stripe-payment --no-verify-jwt');
+        }
+        
+        return '';
+      }
+
+      const paymentData = await response.json();
+
+      if (!paymentData?.payment_intent_id) {
+        console.error('[Stripe] ❌ Payment Intent criado mas sem payment_intent_id:', paymentData);
+        return '';
+      }
+      
+      console.log('[Stripe] ✅ Payment Intent criado com sucesso:', paymentData.payment_intent_id);
+
+      // Gerar URL do link de pagamento
+      const baseUrl = detectBaseUrl();
+
+      const paymentUrl = `${baseUrl}/payment/${paymentData.payment_intent_id}`;
+      console.log('[Stripe] ✅ Link de pagamento gerado com sucesso:', paymentUrl);
+      
+      return paymentUrl;
+    } catch (error) {
+      console.error('[Stripe] ❌ Erro ao gerar link de pagamento:', error);
+      return '';
+    }
+  };
+
+  const paymentLink = await generatePaymentLink();
+  
+  if (!paymentLink) {
+    console.warn('[Stripe] ⚠️ Payment Link não foi gerado. Verifique os logs acima para identificar o problema.');
+  } else {
+    console.log('[Stripe] ✅ Payment Link final gerado:', paymentLink);
+  }
+
+  return {
+    guest_name: guest?.full_name || client?.full_name || 'Hóspede',
+    reservation_code: reservation.reservation_code || '',
+    identification_number: reservation.identification_number ? `#${reservation.identification_number}` : '',
+    checkin_date: checkinDate,
+    checkout_date: checkoutDate,
+    new_checkout_date: newCheckoutDate, // Nova data de check-out após extensão
+    checkin_time: reservation.checkin_time || hotelSettings?.checkin_time?.substring(0, 5) || hotelSettings?.default_checkin_time || '14:00',
+    checkout_time: reservation.checkout_time || hotelSettings?.checkout_time?.substring(0, 5) || hotelSettings?.default_checkout_time || '12:00',
+    total_amount: reservation.total_amount?.toFixed(2).replace('.', ',') || '0,00',
+    paid_amount: reservation.paid_amount?.toFixed(2).replace('.', ',') || '0,00',
+    payment_status: getPaymentStatusLabel(reservation.payment_status),
+    room_number: reservation.rooms?.room_number || '',
+    room_name: reservation.rooms?.name || reservation.rooms?.room_number || '',
+    room_password: reservation.rooms?.fixed_password || '',
+    category_name: reservation.room_categories?.name || '',
+    room_category: reservation.room_categories?.name || '', // Alias para category_name
+    adults: reservation.adults?.toString() || '1',
+    children: reservation.children?.toString() || '0',
+    hotel_name: hotelSettings?.name || 'Hotel',
+    hotel_address: hotelAddress,
+    hotel_contact: hotelPhone || hotelWhatsApp || hotelSettings?.email || '',
+    hotel_policies: hotelSettings?.policies || hotelSettings?.description || 'Consulte as políticas do hotel na recepção.',
+    hotel_email: hotelSettings?.email || '',
+    hotel_phone: hotelPhone,
+    hotel_whatsapp: hotelWhatsApp,
+    hotel_website: hotelSettings?.website || '',
+    hotel_logo: hotelSettings?.logo_url || '', // URL do logo do estabelecimento
+    logo_url: hotelSettings?.logo_url || '', // Alias para hotel_logo
+    policies_link: policiesLink, // Link para página pública de políticas
+    web_checkin_link: webCheckinLink, // Link para web check-in com localizador
+    payment_link: paymentLink, // Link para pagamento da reserva (se necessário)
+  };
+}
+
+function getPaymentStatusLabel(status: string): string {
+  const labels: { [key: string]: string } = {
+    pending: 'Pendente',
+    partial: 'Parcial',
+    paid: 'Pago',
+    refunded: 'Reembolsado',
+  };
+  return labels[status] || status;
+}
+

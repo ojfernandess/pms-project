@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Título e meta tags serão atualizados dinamicamente via useSiteMeta -->
+    <title>Carregando...</title>
+    <meta name="description" content="" />
+    <meta name="author" content="" />
+
+    <meta property="og:title" content="" />
+    <meta property="og:description" content="" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="" />
+    <meta name="twitter:image" content="" />
+    
+    <style>
+      /* Loading inicial para evitar flash de conteúdo não estilizado */
+      #root:empty::before {
+        content: "";
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        background: #f8f9fa;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="root">
+      <!-- Loading inicial -->
+      <div style="display: flex; align-items: center; justify-content: center; height: 100vh; background: #f8f9fa;">
+        <div style="text-align: center;">
+          <div style="width: 48px; height: 48px; border: 4px solid #e5e7eb; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px;"></div>
+          <p style="color: #6b7280; font-size: 14px;">Carregando...</p>
+        </div>
+      </div>
+    </div>
+    <script>
+      // Adicionar animação de spin inline
+      const style = document.createElement('style');
+      style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+      document.head.appendChild(style);
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

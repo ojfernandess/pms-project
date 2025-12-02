@@ -1,0 +1,18 @@
+{
+  "status": "commited",
+  "type": "frontend",
+  "scope": "codebase",
+  "localEndpoint": "http://localhost:8080",
+  "loginUser": "odairjosfernandess@ymail.com",
+  "loginPassword": "odair10",
+  "executionArgs": {
+    "projectName": "pms-project-main",
+    "projectPath": "C:\\Users\\bonma\\Downloads\\pms-project-main",
+    "testIds": [],
+    "additionalInstruction": "",
+    "envs": {
+      "API_KEY": "sk-user-tYjk9IudtF-j53yIvbEE64YcHIRGZAGkEoM1mlBW-eP2w6t7vHVOhG9Yi_5TuJDp1aIHhi7gAuH2wXQl7qV1tL13M6gmVzkR1GilIV2TrDU8sjhoXVXh7vyP8iQABVNg2tY"
+    }
+  },
+  "proxy": "http://e7647f6a-3c7a-4baf-9349-8a34b799ffc8:G7Ea3To9tHIEikkO8HEkankTi0SGmjAV@tun.testsprite.com:8080"
+}
