@@ -65,17 +65,71 @@ export const useSiteMeta = () => {
       meta.setAttribute("content", content || "");
     };
 
+    // Função para garantir URL absoluta
+    const ensureAbsoluteUrl = (url: string | null | undefined): string | null => {
+      if (!url) return null;
+      
+      // Se já é uma URL absoluta (começa com http:// ou https://), retornar como está
+      if (url.startsWith("http://") || url.startsWith("https://")) {
+        return url;
+      }
+      
+      // Se é data URL (data:image/...), não funciona para Open Graph, retornar null
+      if (url.startsWith("data:")) {
+        console.warn("Data URLs não são suportadas para Open Graph. Use uma URL absoluta.");
+        return null;
+      }
+      
+      // Se é uma URL relativa, converter para absoluta usando window.location.origin
+      if (url.startsWith("/")) {
+        return `${window.location.origin}${url}`;
+      }
+      
+      // Se começa com //, adicionar o protocolo
+      if (url.startsWith("//")) {
+        return `${window.location.protocol}${url}`;
+      }
+      
+      // Para outros casos, assumir que é relativa e adicionar origin
+      return `${window.location.origin}/${url}`;
+    };
+
+    // Obter URL base do site
+    const siteUrl = window.location.origin;
+
     // Atualizar Open Graph tags
     updateMetaTag("og:title", settings.og_title || settings.site_title || "");
     updateMetaTag("og:description", settings.og_description || settings.site_description || "");
-    if (settings.og_image) {
-      updateMetaTag("og:image", settings.og_image);
+    updateMetaTag("og:type", "website");
+    updateMetaTag("og:url", siteUrl);
+    
+    // Atualizar og:image apenas se houver imagem válida (não data URL)
+    const ogImageUrl = ensureAbsoluteUrl(settings.og_image);
+    if (ogImageUrl) {
+      updateMetaTag("og:image", ogImageUrl);
+      updateMetaTag("og:image:width", "1200");
+      updateMetaTag("og:image:height", "630");
+      updateMetaTag("og:image:type", "image/png");
+    } else {
+      // Remover og:image se não houver imagem válida
+      const existingOgImage = document.querySelector('meta[property="og:image"]');
+      if (existingOgImage) {
+        existingOgImage.remove();
+      }
     }
 
     // Atualizar Twitter Card tags
-    updateMetaTag("twitter:site", settings.site_title || "", true);
-    if (settings.og_image) {
-      updateMetaTag("twitter:image", settings.og_image, true);
+    updateMetaTag("twitter:card", "summary_large_image", true);
+    updateMetaTag("twitter:title", settings.og_title || settings.site_title || "", true);
+    updateMetaTag("twitter:description", settings.og_description || settings.site_description || "", true);
+    if (ogImageUrl) {
+      updateMetaTag("twitter:image", ogImageUrl, true);
+    } else {
+      // Remover twitter:image se não houver imagem válida
+      const existingTwitterImage = document.querySelector('meta[name="twitter:image"]');
+      if (existingTwitterImage) {
+        existingTwitterImage.remove();
+      }
     }
   }, [settings]);
 };

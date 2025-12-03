@@ -342,6 +342,32 @@ const SiteSettingsManager = () => {
             Informações exibidas quando o site é compartilhado em redes sociais
           </p>
           
+          {/* Aviso sobre cache */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800">
+              <strong>Importante:</strong> Após alterar as configurações, as redes sociais podem levar alguns minutos para atualizar o cache. 
+              Use ferramentas como{" "}
+              <a 
+                href="https://developers.facebook.com/tools/debug/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="underline font-medium"
+              >
+                Facebook Debugger
+              </a>
+              {" "}ou{" "}
+              <a 
+                href="https://cards-dev.twitter.com/validator" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="underline font-medium"
+              >
+                Twitter Card Validator
+              </a>
+              {" "}para forçar a atualização.
+            </p>
+          </div>
+          
           <div className="space-y-4">
             <div>
               <Label htmlFor="og_title">Título OG *</Label>
@@ -352,6 +378,9 @@ const SiteSettingsManager = () => {
                 placeholder="Hotel PMS - Sistema de Gerenciamento Hoteleiro"
                 required
               />
+              <p className="text-xs text-muted-foreground mt-1">
+                Recomendado: 60-90 caracteres
+              </p>
             </div>
 
             <div>
@@ -364,16 +393,22 @@ const SiteSettingsManager = () => {
                 rows={3}
                 required
               />
+              <p className="text-xs text-muted-foreground mt-1">
+                Recomendado: 150-200 caracteres
+              </p>
             </div>
 
             <div>
-              <Label>Imagem OG</Label>
+              <Label>Imagem OG *</Label>
               <p className="text-sm text-muted-foreground mb-2">
-                Imagem exibida ao compartilhar (recomendado: 1200x630px)
+                Imagem exibida ao compartilhar (recomendado: 1200x630px, formato PNG ou JPG)
+              </p>
+              <p className="text-xs text-amber-600 mb-2">
+                ⚠️ A imagem deve ser uma URL absoluta (não data URL). Use o upload para garantir que funcione corretamente.
               </p>
               <div className="space-y-2">
                 {ogImagePreview && (
-                  <div className="relative w-64 h-32 border rounded-lg overflow-hidden">
+                  <div className="relative w-64 h-32 border rounded-lg overflow-hidden bg-gray-100">
                     <img
                       src={ogImagePreview}
                       alt="OG Image preview"
@@ -384,7 +419,7 @@ const SiteSettingsManager = () => {
                 <div>
                   <Input
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/jpeg,image/jpg,image/webp"
                     onChange={handleOgImageUpload}
                     className="hidden"
                     id="og-image-upload"
@@ -397,6 +432,11 @@ const SiteSettingsManager = () => {
                     {ogImagePreview ? "Alterar Imagem" : "Enviar Imagem"}
                   </Label>
                 </div>
+                {ogImagePreview && ogImagePreview.startsWith("data:") && (
+                  <p className="text-xs text-red-600">
+                    ⚠️ Data URL detectada. Faça upload da imagem para obter uma URL absoluta que funcione com Open Graph.
+                  </p>
+                )}
               </div>
             </div>
           </div>

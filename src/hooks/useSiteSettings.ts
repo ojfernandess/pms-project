@@ -120,10 +120,17 @@ export const useSiteSettings = () => {
             `- DELETE: bucket_id = 'hotel-assets' (authenticated)\n\n` +
             `Veja o arquivo APLICAR_MIGRATION_STORAGE_BUCKET_HOTEL_ASSETS.md para mais detalhes.`;
           
+          // Para imagens OG, não usar data URL como fallback (não funciona com Open Graph)
+          if (type === "og_image") {
+            toast.error("Bucket não encontrado. A imagem OG precisa ser hospedada em uma URL pública. Configure o bucket 'hotel-assets' no Supabase.");
+            console.error("Bucket não encontrado para imagem OG:", uploadError);
+            return null;
+          }
+          
           toast.error("Bucket não encontrado. Usando data URL como fallback temporário.");
           console.warn("Bucket não encontrado, usando data URL:", uploadError);
           
-          // Usar data URL como fallback temporário
+          // Usar data URL como fallback temporário apenas para favicon e logo
           return new Promise((resolve) => {
             const reader = new FileReader();
             reader.onloadend = () => {
@@ -140,10 +147,21 @@ export const useSiteSettings = () => {
       }
 
       const { data } = supabase.storage.from(bucketName).getPublicUrl(filePath);
-      return data.publicUrl;
+      // Garantir que a URL seja absoluta
+      const publicUrl = data.publicUrl;
+      if (publicUrl && !publicUrl.startsWith("http://") && !publicUrl.startsWith("https://")) {
+        // Se a URL não começar com http, adicionar o protocolo
+        return `https:${publicUrl}`;
+      }
+      return publicUrl;
     } catch (error: any) {
       console.error("Erro ao fazer upload:", error);
-      // Em caso de erro, retornar data URL como fallback
+      // Para imagens OG, não usar data URL como fallback (não funciona com Open Graph)
+      if (type === "og_image") {
+        toast.error("Erro ao fazer upload da imagem OG. A imagem precisa ser hospedada em uma URL pública.");
+        return null;
+      }
+      // Em caso de erro, retornar data URL como fallback apenas para favicon e logo
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => {
