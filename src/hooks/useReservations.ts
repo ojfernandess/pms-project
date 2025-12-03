@@ -500,6 +500,10 @@ export const useReservations = () => {
       // Invalidar cache de web_checkin sempre que a reserva for atualizada
       // Isso garante que datas, quarto, categoria e outros dados sejam atualizados no check-in web
       queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+      // Invalidar também o mapa de ocupação para refletir mudanças imediatamente
+      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+      // Invalidar reservas para atualizar listas
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
       
       return data;
     },

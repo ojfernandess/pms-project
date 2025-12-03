@@ -61,6 +61,10 @@ export interface RoomOccupancyData {
   floor?: string;
   view?: string;
   bed_type?: string;
+  
+  // Flags para indicar se check-in/check-out ocorreram na data selecionada
+  checkin_occurred_today?: boolean;
+  checkout_occurred_today?: boolean;
 }
 
 export const useOccupancyMap = (selectedDate?: Date) => {
@@ -106,7 +110,8 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           room_categories (*)
         `)
         .or(`and(checkin_date.lte.${dateStr},checkout_date.gte.${dateStr}),checkin_date.gte.${dateStr}`)
-        .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"]);
+        .in("status", ["pending", "confirmed", "checkedin", "checkedout", "blocked", "preregistration"])
+        .neq("status", "cancelled"); // Excluir explicitamente reservas canceladas
       
       if (establishmentId) {
         reservationsQuery = reservationsQuery.eq("establishment_id", establishmentId);
@@ -119,8 +124,8 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         throw reservationsError;
       }
 
-      // Buscar reservas de check-out hoje (para determinar status "dirty")
-      const todayStr = format(new Date(), "yyyy-MM-dd");
+      // Buscar reservas de check-out na data selecionada (para determinar status "dirty" e identificar check-outs)
+      // IMPORTANTE: Buscar check-outs que já ocorreram (status checkedout) e check-ins que estão saindo na data selecionada
       let checkoutReservationsQuery = supabase
         .from("reservations")
         .select(`
@@ -128,8 +133,9 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           financial_responsible:clients!client_id(*),
           guest:clients!guest_id(*)
         `)
-        .eq("checkout_date", todayStr)
-        .in("status", ["checkedin", "checkedout"]);
+        .eq("checkout_date", dateStr)
+        .in("status", ["checkedin", "checkedout"])
+        .neq("status", "cancelled"); // Excluir canceladas
       
       if (establishmentId) {
         checkoutReservationsQuery = checkoutReservationsQuery.eq("establishment_id", establishmentId);
@@ -141,8 +147,31 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         console.error("Erro ao buscar check-outs:", checkoutError);
       }
 
+      // Buscar reservas de check-in na data selecionada (para identificar check-ins que ocorreram)
+      let checkinReservationsQuery = supabase
+        .from("reservations")
+        .select(`
+          *,
+          financial_responsible:clients!client_id(*),
+          guest:clients!guest_id(*)
+        `)
+        .eq("checkin_date", dateStr)
+        .in("status", ["checkedin", "checkedout"])
+        .neq("status", "cancelled"); // Excluir canceladas
+      
+      if (establishmentId) {
+        checkinReservationsQuery = checkinReservationsQuery.eq("establishment_id", establishmentId);
+      }
+      
+      const { data: checkinReservations, error: checkinError } = await checkinReservationsQuery;
+      
+      if (checkinError) {
+        console.error("Erro ao buscar check-ins:", checkinError);
+      }
+
       // Buscar reservas futuras (próximos hóspedes) para cada quarto
       // Buscar reservas com check-in futuro (após a data selecionada)
+      // IMPORTANTE: Excluir canceladas
       let futureReservationsQuery = supabase
         .from("reservations")
         .select(`
@@ -152,6 +181,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         `)
         .gt("checkin_date", dateStr)
         .in("status", ["pending", "confirmed", "preregistration"])
+        .neq("status", "cancelled") // Excluir canceladas
         .order("checkin_date", { ascending: true });
       
       if (establishmentId) {
@@ -165,6 +195,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
       }
 
       // Buscar reservas recentes de check-out (últimos 3 dias) para mostrar hóspede anterior
+      // IMPORTANTE: Excluir canceladas e buscar apenas check-outs que realmente ocorreram
       const threeDaysAgo = format(subDays(new Date(), 3), "yyyy-MM-dd");
       let recentCheckoutQuery = supabase
         .from("reservations")
@@ -175,7 +206,8 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         `)
         .gte("checkout_date", threeDaysAgo)
         .lte("checkout_date", dateStr)
-        .in("status", ["checkedout", "cancelled"])
+        .in("status", ["checkedout"]) // Apenas check-outs que realmente ocorreram
+        .neq("status", "cancelled") // Excluir canceladas
         .order("checkout_date", { ascending: false });
       
       if (establishmentId) {
@@ -207,16 +239,27 @@ export const useOccupancyMap = (selectedDate?: Date) => {
       // Mapear reservas por quarto
       const reservationsByRoom: Record<string, any> = {};
       reservations?.forEach((reservation) => {
-        if (reservation.room_id) {
+        // Ignorar reservas canceladas
+        if (reservation.room_id && reservation.status !== "cancelled") {
           reservationsByRoom[reservation.room_id] = reservation;
         }
       });
 
-      // Mapear check-outs de hoje por quarto
+      // Mapear check-outs na data selecionada por quarto
       const checkoutsByRoom: Record<string, any> = {};
       checkoutReservations?.forEach((reservation) => {
-        if (reservation.room_id) {
+        // Apenas check-outs que realmente ocorreram ou estão ocorrendo hoje
+        if (reservation.room_id && reservation.status !== "cancelled") {
           checkoutsByRoom[reservation.room_id] = reservation;
+        }
+      });
+
+      // Mapear check-ins na data selecionada por quarto
+      const checkinsByRoom: Record<string, any> = {};
+      checkinReservations?.forEach((reservation) => {
+        // Apenas check-ins que realmente ocorreram
+        if (reservation.room_id && reservation.status !== "cancelled") {
+          checkinsByRoom[reservation.room_id] = reservation;
         }
       });
 
@@ -252,6 +295,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
       return roomsData?.map((room): RoomOccupancyData => {
         const reservation = reservationsByRoom[room.id];
         const checkoutToday = checkoutsByRoom[room.id];
+        const checkinToday = checkinsByRoom[room.id];
         const maintenance = maintenanceByRoom[room.id];
         const nextReservation = nextReservationsByRoom[room.id];
         const previousGuest = previousGuestsByRoom[room.id];
@@ -310,10 +354,13 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           }
         }
         
-        // Prioridade 4: Check-in realizado (ocupado) - só se não passou do check-out
+        // Prioridade 4: Check-in realizado (ocupado) - verificar se check-in ocorreu na data selecionada
         if (status === "available" && reservation?.status === "checkedin") {
-          status = "occupied";
-          reservationData = reservation;
+          // Se check-in é hoje ou passado e status é checkedin, considerar ocupado
+          if (reservation.checkin_date <= dateStr) {
+            status = "occupied";
+            reservationData = reservation;
+          }
         }
         
         // Se ainda não definiu status e há check-out hoje (fallback)
@@ -456,10 +503,21 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           next_checkin_date: nextCheckinDate,
           next_reservation_code: nextReservationCode,
           next_checkin_time: nextCheckinTime,
+          // Flag para indicar se check-in ocorreu hoje
+          checkin_occurred_today: checkinToday?.id === reservationData?.id && dateStr === format(new Date(), "yyyy-MM-dd"),
+          // Flag para indicar se check-out ocorreu hoje
+          checkout_occurred_today: checkoutToday?.id === reservationData?.id && dateStr === format(new Date(), "yyyy-MM-dd"),
           // Informações de limpeza/manutenção
           maintenance_ticket_id: maintenance?.id,
           maintenance_priority: maintenance?.priority,
-          cleaning_priority: checkoutToday && reservation?.checkin_date === todayStr ? "urgent" : "normal",
+          cleaning_priority: checkoutToday && reservation?.checkin_date === dateStr ? "urgent" : "normal",
+          // Flags para indicar se check-in/check-out ocorreram na data selecionada
+          // Check-in ocorreu se há check-in na data selecionada e status é checkedin
+          checkin_occurred_today: checkinToday?.id === reservationData?.id || 
+                                  (reservationData?.checkin_date === dateStr && reservationData?.status === "checkedin"),
+          // Check-out ocorreu se há check-out na data selecionada e status é checkedout
+          checkout_occurred_today: checkoutToday?.id === reservationData?.id || 
+                                   (reservationData?.checkout_date === dateStr && reservationData?.status === "checkedout"),
         };
       }) || [];
     },

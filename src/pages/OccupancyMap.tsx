@@ -736,17 +736,23 @@ const OccupancyMap = () => {
                                 const config = statusConfig[room.status];
             const Icon = config.icon;
                                 
-                                // Verificar se checkout ocorreu hoje
-                                // Checkout do hóspede atual ou anterior que está saindo hoje
-                                const todayStr = format(new Date(), "yyyy-MM-dd");
+                                // Verificar se checkout ocorreu na data selecionada
+                                // Verificar se a reserva atual tem checkout na data selecionada e status checkedout
+                                // OU se há hóspede anterior com checkout na data selecionada
+                                const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
                                 const checkoutOccurred = 
-                                  (room.checkout_date === todayStr && room.reservation_status === "checkedout") ||
-                                  (room.previous_checkout_date === todayStr);
+                                  (room.checkout_date === selectedDateStr && room.reservation_status === "checkedout") ||
+                                  (room.previous_checkout_date === selectedDateStr);
                                 
-                                // Verificar se checkin ocorreu hoje (para próximo hóspede)
-                                const checkinOccurred = room.next_checkin_date === todayStr && 
-                                  room.next_guest_name && 
-                                  room.reservation_status === "checkedin";
+                                // Verificar se checkin ocorreu na data selecionada
+                                // Verificar se há próximo hóspede com checkin na data selecionada E status checkedin
+                                // OU se a reserva atual tem checkin na data selecionada E status checkedin
+                                const checkinOccurred = 
+                                  (room.next_checkin_date === selectedDateStr && 
+                                   room.next_guest_name && 
+                                   room.next_reservation_code) ||
+                                  (room.checkin_date === selectedDateStr && 
+                                   room.reservation_status === "checkedin");
                                 
                                 // Determinar texto do status do quarto
                                 let roomStatusText = config.label;
