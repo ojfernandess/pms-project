@@ -83,7 +83,7 @@ export const useAuth = () => {
     // Limpar todas as queries do React Query
     queryClient.clear();
     await supabase.auth.signOut();
-    navigate("/auth");
+    navigate("/login");
   };
 
   return { user, session, loading, signOut };

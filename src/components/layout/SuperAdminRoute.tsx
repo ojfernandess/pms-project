@@ -16,7 +16,7 @@ export const SuperAdminRoute = ({ children }: SuperAdminRouteProps) => {
   useEffect(() => {
     // Se não estiver carregando e não houver usuário, redirecionar para login
     if (!authLoading && !user) {
-      navigate("/auth");
+      navigate("/login");
       return;
     }
 

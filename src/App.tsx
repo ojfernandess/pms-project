@@ -58,10 +58,11 @@ const AppContent = () => {
   return (
     <BrowserRouter>
           <Routes>
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/auth/reset-password" element={<ResetPassword />} />
-            <Route path="/login" element={<Navigate to="/auth" replace />} />
-            <Route path="/logout" element={<Navigate to="/auth" replace />} />
+            <Route path="/login" element={<Auth />} />
+            <Route path="/login/reset-password" element={<ResetPassword />} />
+            <Route path="/auth" element={<Navigate to="/login" replace />} />
+            <Route path="/auth/reset-password" element={<Navigate to="/login/reset-password" replace />} />
+            <Route path="/logout" element={<Navigate to="/login" replace />} />
             <Route path="/admin-dashboard" element={<SuperAdminRoute><AppLayout><SuperAdmin /></AppLayout></SuperAdminRoute>} />
             <Route path="/super-admin" element={<SuperAdminRoute><AppLayout><SuperAdmin /></AppLayout></SuperAdminRoute>} />
             <Route path="/user-dashboard" element={<ProtectedRoute><AppLayout><UserDashboard /></AppLayout></ProtectedRoute>} />

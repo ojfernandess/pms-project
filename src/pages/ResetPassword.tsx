@@ -110,7 +110,7 @@ const ResetPassword = () => {
       }
 
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${window.location.origin}/auth/reset-password`,
+        redirectTo: `${window.location.origin}/login/reset-password`,
       });
 
       if (error) throw error;
@@ -156,7 +156,7 @@ const ResetPassword = () => {
 
       toast.success("Senha alterada com sucesso! Redirecionando para login...");
       setTimeout(() => {
-        navigate("/auth");
+        navigate("/login");
       }, 2000);
     } catch (error: any) {
       console.error("Erro ao resetar senha:", error);
@@ -345,7 +345,7 @@ const ResetPassword = () => {
               <div className="text-center pt-4 border-t border-gray-200 dark:border-gray-700">
                 <button
                   type="button"
-                  onClick={() => navigate("/auth")}
+                  onClick={() => navigate("/login")}
                   className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium transition-colors inline-flex items-center gap-1"
                 >
                   <ArrowLeft className="h-4 w-4" />

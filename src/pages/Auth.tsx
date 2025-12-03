@@ -244,7 +244,7 @@ const Auth = () => {
                 </Label>
                 <button
                   type="button"
-                  onClick={() => navigate("/auth/reset-password")}
+                  onClick={() => navigate("/login/reset-password")}
                   className="text-sm text-blue-600 hover:text-blue-700 transition-colors font-medium"
                 >
                   {t("auth.form.forgotPassword")}

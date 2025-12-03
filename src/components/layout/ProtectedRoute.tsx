@@ -17,7 +17,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     if (!loading && !user && !hasRedirected.current) {
       hasRedirected.current = true;
       // Salvar a rota atual para redirecionar após login
-      navigate("/auth", { state: { from: location.pathname }, replace: true });
+      navigate("/login", { state: { from: location.pathname }, replace: true });
     }
     
     // Resetar o flag se o usuário fizer login

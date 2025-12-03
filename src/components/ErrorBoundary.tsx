@@ -60,7 +60,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </Button>
               <Button
                 variant="outline"
-                onClick={() => window.location.href = "/auth"}
+                onClick={() => window.location.href = "/login"}
                 className="flex-1"
               >
                 Ir para Login

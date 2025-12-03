@@ -623,27 +623,28 @@ const Documentation = () => {
                     <div className="space-y-3">
                       <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
                         <div className="flex items-center gap-2 mb-2">
-                          <code className="text-sm font-mono">/auth</code>
+                          <code className="text-sm font-mono">/login</code>
                           <Badge variant="outline" className="text-xs">Pública</Badge>
                         </div>
-                        <p className="text-sm font-semibold text-slate-800 mb-1">Página de Autenticação</p>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Página de Login</p>
                         <p className="text-xs text-slate-600 mb-2">Componente: <code>Auth</code></p>
                         <div className="text-xs text-slate-700 space-y-1">
                           <p><strong>Funcionalidade:</strong> Login e registro de usuários admin/user via Supabase Auth.</p>
-                          <p><strong>Redirecionamentos:</strong> <code>/login</code> e <code>/logout</code> redirecionam para esta rota.</p>
+                          <p><strong>Redirecionamentos:</strong> <code>/auth</code> e <code>/logout</code> redirecionam para esta rota (mantém compatibilidade com links antigos).</p>
                           <p><strong>Após login:</strong> Redireciona para <code>/user-dashboard</code> ou <code>/super-admin</code> baseado no role do usuário.</p>
                         </div>
                       </div>
 
                       <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
                         <div className="flex items-center gap-2 mb-2">
-                          <code className="text-sm font-mono">/auth/reset-password</code>
+                          <code className="text-sm font-mono">/login/reset-password</code>
                           <Badge variant="outline" className="text-xs">Pública</Badge>
                         </div>
                         <p className="text-sm font-semibold text-slate-800 mb-1">Redefinição de Senha (Admin/User)</p>
                         <p className="text-xs text-slate-600 mb-2">Componente: <code>ResetPassword</code></p>
                         <div className="text-xs text-slate-700 space-y-1">
                           <p><strong>Funcionalidade:</strong> Permite redefinir senha de usuários admin/user usando token de recuperação.</p>
+                          <p><strong>Redirecionamento:</strong> <code>/auth/reset-password</code> redireciona para esta rota (mantém compatibilidade).</p>
                         </div>
                       </div>
 
@@ -1118,7 +1119,7 @@ const Documentation = () => {
                         <p className="text-xs text-slate-600 mt-1 mb-2">Localização: <code>src/components/layout/ProtectedRoute.tsx</code></p>
                         <div className="text-xs text-slate-700 space-y-1">
                           <p><strong>Funcionalidade:</strong> Verifica se o usuário está autenticado via <code>useAuth()</code> hook.</p>
-                          <p><strong>Comportamento:</strong> Se não autenticado, redireciona para <code>/auth</code> salvando a rota original em <code>state.from</code>.</p>
+                          <p><strong>Comportamento:</strong> Se não autenticado, redireciona para <code>/login</code> salvando a rota original em <code>state.from</code>.</p>
                           <p><strong>Loading:</strong> Exibe spinner durante verificação de autenticação.</p>
                           <p><strong>Validação:</strong> Verifica sessão do Supabase Auth via <code>supabase.auth.getSession()</code>.</p>
                         </div>

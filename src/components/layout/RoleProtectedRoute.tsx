@@ -22,7 +22,7 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
 
     // Se não estiver autenticado, redirecionar para login
     if (!user) {
-      navigate("/auth");
+      navigate("/login");
       return;
     }
 

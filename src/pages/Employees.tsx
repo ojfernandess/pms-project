@@ -124,7 +124,7 @@ const Employees = () => {
               email: formData.email,
               password: formData.password,
               options: {
-                emailRedirectTo: `${window.location.origin}/auth`,
+                emailRedirectTo: `${window.location.origin}/login`,
                 data: {
                   full_name: formData.full_name || undefined,
                 },
