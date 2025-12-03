@@ -760,7 +760,7 @@ export default function WebCheckin() {
                   <img
                     src={settings.logo_url}
                     alt="Logo"
-                    className="h-40 w-auto max-w-[500px] object-contain"
+                    className="w-[200px] h-auto object-contain"
                   />
                 ) : settings?.site_title ? (
                   <div className="flex items-center gap-3">
@@ -991,7 +991,7 @@ export default function WebCheckin() {
                   <img
                     src={settings.logo_url}
                     alt="Logo"
-                    className="h-40 w-auto max-w-[500px] object-contain"
+                    className="w-[200px] h-auto object-contain"
                   />
                 ) : settings?.site_title ? (
                   <div className="flex items-center gap-3">

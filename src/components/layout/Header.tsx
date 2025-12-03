@@ -1,6 +1,5 @@
-import { Menu, Search, User, Settings, LogOut, UserCircle } from "lucide-react";
+import { Menu, User, Settings, LogOut, UserCircle, Building2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,11 +24,20 @@ export const Header = ({ onMenuClick }: HeaderProps) => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const { establishmentId } = useParams<{ establishmentId?: string }>();
-  const { selectedEstablishment } = useEstablishment();
+  const { selectedEstablishment, establishments, setSelectedEstablishment } = useEstablishment();
   const { t } = useTranslation();
   
   // Usar establishmentId da URL ou do contexto (numeric_id)
   const currentEstablishmentId = establishmentId || (selectedEstablishment?.numeric_id?.toString());
+  
+  // Handler para trocar de estabelecimento
+  const handleEstablishmentChange = (establishment: typeof selectedEstablishment) => {
+    if (establishment) {
+      setSelectedEstablishment(establishment);
+      // Navegar para o dashboard do novo estabelecimento
+      navigate(`/${establishment.numeric_id}`);
+    }
+  };
   
   // Extrair nome do usuário do email ou metadata
   const getUserName = () => {
@@ -79,13 +87,40 @@ export const Header = ({ onMenuClick }: HeaderProps) => {
         <Button variant="ghost" size="icon" onClick={onMenuClick}>
           <Menu className="h-5 w-5" />
         </Button>
-        <div className="relative max-w-md w-full">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder={t("header.searchPlaceholder")} 
-            className="pl-10"
-          />
-        </div>
+        
+        {/* Seletor de Estabelecimento */}
+        {selectedEstablishment && establishments.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="flex items-center gap-2 h-9">
+                <Building2 className="h-4 w-4" />
+                <span className="font-medium">{selectedEstablishment.name}</span>
+                <ChevronDown className="h-4 w-4 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuLabel>
+                {t("header.selectEstablishment") || "Selecionar Estabelecimento"}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {establishments.map((establishment) => (
+                <DropdownMenuItem
+                  key={establishment.id}
+                  onSelect={() => handleEstablishmentChange(establishment)}
+                  className={selectedEstablishment.id === establishment.id ? "bg-accent" : ""}
+                >
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4" />
+                    <span>{establishment.name}</span>
+                    {selectedEstablishment.id === establishment.id && (
+                      <span className="ml-auto text-xs text-muted-foreground">✓</span>
+                    )}
+                  </div>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
       
       <div className="flex items-center gap-2">

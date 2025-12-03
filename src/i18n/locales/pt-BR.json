@@ -36,7 +36,8 @@
     "settings": "Configurações",
     "logout": "Sair",
     "noEmail": "Sem e-mail",
-    "user": "Usuário"
+    "user": "Usuário",
+    "selectEstablishment": "Selecionar Estabelecimento"
   },
   "sidebar": {
     "dashboard": "Dashboard",

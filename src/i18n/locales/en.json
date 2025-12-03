@@ -36,7 +36,8 @@
     "settings": "Settings",
     "logout": "Logout",
     "noEmail": "No email",
-    "user": "User"
+    "user": "User",
+    "selectEstablishment": "Select Establishment"
   },
   "sidebar": {
     "dashboard": "Dashboard",

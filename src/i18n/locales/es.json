@@ -36,7 +36,8 @@
     "settings": "Configuración",
     "logout": "Salir",
     "noEmail": "Sin correo",
-    "user": "Usuario"
+    "user": "Usuario",
+    "selectEstablishment": "Seleccionar Establecimiento"
   },
   "sidebar": {
     "dashboard": "Panel",
