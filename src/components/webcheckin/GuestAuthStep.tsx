@@ -182,41 +182,41 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
         
         {/* Conteúdo sobre a imagem */}
         <div className="relative z-10 flex flex-col justify-center items-center h-full p-12 text-white">
-          <div className="max-w-xl mx-auto text-center space-y-8">
+          <div className="w-full max-w-2xl mx-auto text-center space-y-8">
             <div className="space-y-4">
-              <h2 className="text-5xl md:text-6xl font-light tracking-tight text-white drop-shadow-2xl">
+              <h2 className="text-5xl md:text-6xl font-light tracking-tight text-white drop-shadow-2xl mx-auto">
                 Check-in Rápido
               </h2>
               <div className="w-24 h-px bg-white/50 mx-auto"></div>
-              <p className="text-lg md:text-xl text-white/95 font-light leading-relaxed max-w-md mx-auto drop-shadow-lg">
+              <p className="text-lg md:text-xl text-white/95 font-light leading-relaxed max-w-lg mx-auto drop-shadow-lg">
                 Complete seu check-in em minutos, sem filas e de onde estiver
               </p>
             </div>
             
             <div className="pt-8 border-t border-white/30">
-              <div className="flex flex-wrap justify-center gap-6 mb-4">
-                <div className="text-center">
+              <div className="flex flex-wrap justify-center items-center gap-6 mb-4">
+                <div className="text-center flex-shrink-0">
                   <p className="text-sm text-white font-light uppercase tracking-wider mb-1 drop-shadow-md">Digital</p>
                   <p className="text-xs text-white/90 drop-shadow-sm">100% Online</p>
                 </div>
-                <div className="w-px h-8 bg-white/30"></div>
-                <div className="text-center">
+                <div className="w-px h-8 bg-white/30 flex-shrink-0"></div>
+                <div className="text-center flex-shrink-0">
                   <p className="text-sm text-white font-light uppercase tracking-wider mb-1 drop-shadow-md">Rápido</p>
                   <p className="text-xs text-white/90 drop-shadow-sm">Em Minutos</p>
                 </div>
-                <div className="w-px h-8 bg-white/30"></div>
-                <div className="text-center">
+                <div className="w-px h-8 bg-white/30 flex-shrink-0"></div>
+                <div className="text-center flex-shrink-0">
                   <p className="text-sm text-white font-light uppercase tracking-wider mb-1 drop-shadow-md">Seguro</p>
                   <p className="text-xs text-white/90 drop-shadow-sm">Dados Protegidos</p>
                 </div>
               </div>
-              <div className="flex flex-wrap justify-center gap-6">
-                <div className="text-center">
+              <div className="flex flex-wrap justify-center items-center gap-6">
+                <div className="text-center flex-shrink-0">
                   <p className="text-sm text-white font-light uppercase tracking-wider mb-1 drop-shadow-md">Recibo & NF</p>
                   <p className="text-xs text-white/90 drop-shadow-sm">Geração Rápida</p>
                 </div>
-                <div className="w-px h-8 bg-white/30"></div>
-                <div className="text-center">
+                <div className="w-px h-8 bg-white/30 flex-shrink-0"></div>
+                <div className="text-center flex-shrink-0">
                   <p className="text-sm text-white font-light uppercase tracking-wider mb-1 drop-shadow-md">Extensão</p>
                   <p className="text-xs text-white/90 drop-shadow-sm">Solicite Online</p>
                 </div>
@@ -241,14 +241,14 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
                 <img
                   src={settings.logo_url}
                   alt="Logo"
-                  className="h-24 w-auto max-w-[300px] object-contain"
+                  className="h-40 w-auto max-w-[500px] object-contain"
                 />
               ) : settings?.site_title ? (
                 <div className="flex items-center gap-3">
-                  <div className="h-16 w-16 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg">
-                    <Building2 className="h-8 w-8 text-white" />
+                  <div className="h-24 w-24 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg">
+                    <Building2 className="h-12 w-12 text-white" />
                   </div>
-                  <h1 className="text-3xl font-bold text-gray-900">
+                  <h1 className="text-4xl font-bold text-gray-900">
                     {settings.site_title}
                   </h1>
                 </div>

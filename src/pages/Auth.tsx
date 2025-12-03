@@ -190,14 +190,14 @@ const Auth = () => {
                 <img
                   src={settings.logo_url}
                   alt="Logo"
-                  className="h-24 w-auto max-w-[300px] object-contain"
+                  className="h-40 w-auto max-w-[500px] object-contain"
                 />
               ) : settings?.site_title ? (
                 <div className="flex items-center gap-3">
-                  <div className="h-16 w-16 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg">
-                    <Building2 className="h-8 w-8 text-white" />
+                  <div className="h-24 w-24 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg">
+                    <Building2 className="h-12 w-12 text-white" />
                   </div>
-                  <h1 className="text-3xl font-bold text-gray-900">
+                  <h1 className="text-4xl font-bold text-gray-900">
                     {settings.site_title}
                   </h1>
                 </div>

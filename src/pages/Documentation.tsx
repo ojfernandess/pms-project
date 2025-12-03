@@ -92,6 +92,41 @@ const STRIPE_REFUND_RESPONSE = String.raw`{
   "amount": 50000
 }`;
 
+const GET_RESERVATION_BODY = String.raw`{
+  "identifier": "123456",
+  "locator": "RSV742516",
+  "reservation_code": "RSV742516",
+  "guest_account_id": "uuid"
+}`;
+
+const GET_RESERVATION_RESPONSE = String.raw`{
+  "success": true,
+  "reservation": {
+    "id": "uuid",
+    "reservation_code": "RSV742516",
+    "identification_number": "123456",
+    "checkin_date": "2024-01-15",
+    "checkout_date": "2024-01-20",
+    "total_amount": 1000.00,
+    "paid_amount": 500.00,
+    "payment_status": "partial",
+    "status": "confirmed",
+    "guest": {
+      "id": "uuid",
+      "full_name": "João Silva",
+      "email": "joao@example.com",
+      "phone": "+5511999999999"
+    },
+    "room": {
+      "id": "uuid",
+      "room_number": "101",
+      "name": "Quarto 101"
+    },
+    "payments": [...],
+    "web_checkin": {...}
+  }
+}`;
+
 const RESERVATION_BODY_EXAMPLE = String.raw`{
   "reservation_code": "RSV123456",
   "checkin_date": "2024-12-01",
@@ -468,6 +503,72 @@ const Documentation = () => {
 
             <Card className="p-6">
               <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
+                <Code className="h-6 w-6 text-primary" />
+                APIs Disponíveis
+              </h2>
+              <div className="space-y-3 text-slate-700">
+                <p>
+                  O sistema oferece diversas APIs através de Edge Functions do Supabase:
+                </p>
+                <div className="grid md:grid-cols-2 gap-4 mt-4">
+                  <div className="p-4 bg-slate-50 rounded-lg">
+                    <h3 className="font-semibold mb-2 flex items-center gap-2">
+                      <Route className="h-4 w-4 text-indigo-600" />
+                      Get Reservation API
+                    </h3>
+                    <p className="text-sm text-slate-600 mb-2">
+                      Buscar informações completas de reserva por identificador, localizador ou reservation_code.
+                    </p>
+                    <ul className="space-y-1 text-xs text-slate-600">
+                      <li>• Suporta GET e POST</li>
+                      <li>• Autenticação obrigatória</li>
+                      <li>• Busca flexível por múltiplos identificadores</li>
+                      <li>• Retorna dados completos da reserva</li>
+                    </ul>
+                    <code className="text-xs mt-2 block">/functions/v1/get-reservation</code>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-lg">
+                    <h3 className="font-semibold mb-2 flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-blue-600" />
+                      Email APIs
+                    </h3>
+                    <p className="text-sm text-slate-600 mb-2">
+                      Envio de emails via SMTP ou Resend API.
+                    </p>
+                    <ul className="space-y-1 text-xs text-slate-600">
+                      <li>• SMTP configurável</li>
+                      <li>• Integração com Resend</li>
+                      <li>• Templates personalizáveis</li>
+                    </ul>
+                    <code className="text-xs mt-2 block">/functions/v1/send-email-*</code>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-lg">
+                    <h3 className="font-semibold mb-2 flex items-center gap-2">
+                      <CreditCard className="h-4 w-4 text-green-600" />
+                      Stripe Integration
+                    </h3>
+                    <p className="text-sm text-slate-600 mb-2">
+                      Processamento de pagamentos, webhooks e reembolsos.
+                    </p>
+                    <ul className="space-y-1 text-xs text-slate-600">
+                      <li>• Payment Intents</li>
+                      <li>• Webhooks automáticos</li>
+                      <li>• Reembolsos</li>
+                    </ul>
+                    <code className="text-xs mt-2 block">/functions/v1/stripe-*</code>
+                  </div>
+                </div>
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-blue-800">
+                    <strong>💡 Dica:</strong> Consulte a aba "APIs" para documentação detalhada de cada endpoint,
+                    incluindo exemplos de uso, parâmetros e respostas.
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-6">
+              <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
                 <Shield className="h-6 w-6 text-primary" />
                 Segurança
               </h2>
@@ -481,6 +582,7 @@ const Documentation = () => {
                   <li><strong>Proteção de Rotas:</strong> Middleware de autenticação e autorização</li>
                   <li><strong>Chaves Sensíveis:</strong> Armazenadas apenas no servidor (Edge Functions)</li>
                   <li><strong>HTTPS:</strong> Todas as comunicações são criptografadas</li>
+                  <li><strong>Controle de Acesso:</strong> Hóspedes só acessam suas próprias reservas</li>
                 </ul>
                 <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
                   <p className="text-sm text-amber-800">
@@ -500,31 +602,154 @@ const Documentation = () => {
                 <Route className="h-6 w-6 text-primary" />
                 Rotas da Aplicação
               </h2>
+              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <strong>📋 Sobre o Sistema de Rotas:</strong> A aplicação utiliza React Router v6 com roteamento baseado em componentes.
+                  Todas as rotas são definidas em <code className="bg-blue-100 px-1 rounded">src/App.tsx</code> e utilizam componentes de proteção
+                  (<code>ProtectedRoute</code>, <code>EstablishmentRoute</code>, <code>SuperAdminRoute</code>) para controle de acesso.
+                </p>
+              </div>
               <div className="h-[600px] overflow-y-auto pr-4">
                 <div className="space-y-6">
                   {/* Rotas Públicas */}
                   <div>
-                    <h3 className="text-lg font-semibold mb-3 text-slate-800">Rotas Públicas</h3>
-                    <div className="space-y-2">
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-blue-500">
-                        <code className="text-sm font-mono">/auth</code>
-                        <p className="text-sm text-slate-600 mt-1">Página de autenticação</p>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Globe className="h-5 w-5" />
+                      Rotas Públicas
+                    </h3>
+                    <p className="text-sm text-slate-600 mb-3">
+                      Rotas acessíveis sem autenticação. Não utilizam componentes de proteção.
+                    </p>
+                    <div className="space-y-3">
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/auth</code>
+                          <Badge variant="outline" className="text-xs">Pública</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Página de Autenticação</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Auth</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Login e registro de usuários admin/user via Supabase Auth.</p>
+                          <p><strong>Redirecionamentos:</strong> <code>/login</code> e <code>/logout</code> redirecionam para esta rota.</p>
+                          <p><strong>Após login:</strong> Redireciona para <code>/user-dashboard</code> ou <code>/super-admin</code> baseado no role do usuário.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-blue-500">
-                        <code className="text-sm font-mono">/web-checkin/:locator</code>
-                        <p className="text-sm text-slate-600 mt-1">Web check-in do hóspede</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/auth/reset-password</code>
+                          <Badge variant="outline" className="text-xs">Pública</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Redefinição de Senha (Admin/User)</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>ResetPassword</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Permite redefinir senha de usuários admin/user usando token de recuperação.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-blue-500">
-                        <code className="text-sm font-mono">/guest-dashboard</code>
-                        <p className="text-sm text-slate-600 mt-1">Dashboard do hóspede</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/web-checkin</code>
+                          <Badge variant="outline" className="text-xs">Pública</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Web Check-in (Inicial)</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>WebCheckin</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Tela inicial do web check-in. Redireciona para autenticação de hóspede se necessário.</p>
+                          <p><strong>Estado:</strong> Se hóspede não autenticado, exibe <code>GuestAuthStep</code> para login/cadastro.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-blue-500">
-                        <code className="text-sm font-mono">/payment/:paymentIntentId</code>
-                        <p className="text-sm text-slate-600 mt-1">Página de pagamento</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/web-checkin/:locator</code>
+                          <Badge variant="outline" className="text-xs">Pública</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Web Check-in com Localizador</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>WebCheckin</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Parâmetros:</strong> <code>:locator</code> (string) - Código do localizador da reserva (ex: RSV742516)</p>
+                          <p><strong>Funcionalidade:</strong> Inicia processo de web check-in com localizador pré-definido na URL.</p>
+                          <p><strong>Fluxo:</strong> Se não autenticado, passa o localizador para <code>GuestAuthStep</code> para vincular após login.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-blue-500">
-                        <code className="text-sm font-mono">/policies/:token</code>
-                        <p className="text-sm text-slate-600 mt-1">Políticas públicas</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/web-checkin/reset-password</code>
+                          <Badge variant="outline" className="text-xs">Pública</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Redefinição de Senha (Hóspede)</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>GuestResetPassword</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Permite hóspedes redefinirem senha usando token de recuperação.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/guest-dashboard</code>
+                          <Badge variant="outline" className="text-xs">Pública (Auth Interna)</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Dashboard do Hóspede</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>GuestDashboard</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Painel do hóspede autenticado. Exibe reservas vinculadas, histórico e permite iniciar web check-in.</p>
+                          <p><strong>Autenticação:</strong> Verifica <code>guest_account_id</code> no localStorage. Se não autenticado, redireciona para <code>/web-checkin</code>.</p>
+                          <p><strong>Dados:</strong> Busca reservas vinculadas via <code>guest_stay_history</code> usando <code>guest_account_id</code>.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/payment/:paymentIntentId</code>
+                          <Badge variant="outline" className="text-xs">Pública</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Página de Pagamento (Stripe)</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>PaymentPage</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Parâmetros:</strong> <code>:paymentIntentId</code> (string) - ID do Payment Intent do Stripe (ex: pi_xxx)</p>
+                          <p><strong>Funcionalidade:</strong> Página pública para processar pagamentos via Stripe. Integra com Stripe Elements.</p>
+                          <p><strong>Segurança:</strong> Payment Intent é validado no backend antes de exibir formulário de pagamento.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/payment/success/:paymentIntentId</code>
+                          <Badge variant="outline" className="text-xs">Pública</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Página de Sucesso do Pagamento</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>PaymentSuccess</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Parâmetros:</strong> <code>:paymentIntentId</code> (string) - ID do Payment Intent confirmado</p>
+                          <p><strong>Funcionalidade:</strong> Exibe confirmação de pagamento bem-sucedido e atualiza status da reserva.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/payment/return</code>
+                          <Badge variant="outline" className="text-xs">Pública</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Retorno de Pagamento (Alternativo)</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>PaymentSuccess</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Rota alternativa para retorno de pagamento quando paymentIntentId não está na URL.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/policies/:token</code>
+                          <Badge variant="outline" className="text-xs">Pública</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Políticas Públicas</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>PublicPolicies</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Parâmetros:</strong> <code>:token</code> (string) - Token de acesso às políticas (gerado pelo sistema)</p>
+                          <p><strong>Funcionalidade:</strong> Exibe políticas do estabelecimento (termos, regras, etc.) de forma pública.</p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -533,51 +758,239 @@ const Documentation = () => {
 
                   {/* Rotas Protegidas - Estabelecimento */}
                   <div>
-                    <h3 className="text-lg font-semibold mb-3 text-slate-800">Rotas Protegidas (Estabelecimento)</h3>
-                    <p className="text-sm text-slate-600 mb-3">
-                      Todas as rotas abaixo requerem autenticação e acesso ao estabelecimento específico.
-                      Substitua <code className="bg-slate-200 px-1 rounded">:establishmentId</code> pelo ID numérico do estabelecimento.
-                    </p>
-                    <div className="space-y-2">
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-green-500">
-                        <code className="text-sm font-mono">/:establishmentId</code>
-                        <p className="text-sm text-slate-600 mt-1">Dashboard principal</p>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Shield className="h-5 w-5" />
+                      Rotas Protegidas (Estabelecimento)
+                    </h3>
+                    <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <p className="text-xs text-amber-800">
+                        <strong>🔒 Proteção:</strong> Todas estas rotas utilizam <code>ProtectedRoute</code> (verifica autenticação) e 
+                        <code>EstablishmentRoute</code> (valida acesso ao estabelecimento). O <code>:establishmentId</code> deve ser o 
+                        <code>numeric_id</code> do estabelecimento (número inteiro).
+                      </p>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Dashboard Principal</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Dashboard</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Parâmetros:</strong> <code>:establishmentId</code> (number) - ID numérico do estabelecimento</p>
+                          <p><strong>Funcionalidade:</strong> Dashboard principal com visão geral: reservas recentes, ocupação, receitas, estatísticas.</p>
+                          <p><strong>Dados:</strong> Busca dados via React Query com cache de 5 minutos. Atualiza em tempo real.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-green-500">
-                        <code className="text-sm font-mono">/:establishmentId/ocupacao</code>
-                        <p className="text-sm text-slate-600 mt-1">Mapa de ocupação</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/ocupacao</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Mapa de Ocupação</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>OccupancyMap</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Alias:</strong> <code>/occupancy-map</code> também funciona (redireciona internamente)</p>
+                          <p><strong>Funcionalidade:</strong> Visualização gráfica da ocupação por quarto, drag & drop de reservas, filtros por data.</p>
+                          <p><strong>Tecnologia:</strong> Utiliza React DnD para drag & drop, atualizações otimistas com React Query.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-green-500">
-                        <code className="text-sm font-mono">/:establishmentId/reservas</code>
-                        <p className="text-sm text-slate-600 mt-1">Lista de reservas</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/reservas</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Lista de Reservas</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Reservations</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Listagem completa de reservas com filtros, busca, ordenação e paginação.</p>
+                          <p><strong>Filtros:</strong> Status, datas, hóspede, código, quarto. Suporta múltiplos filtros simultâneos.</p>
+                          <p><strong>Performance:</strong> Paginação server-side, busca debounced, cache inteligente.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-green-500">
-                        <code className="text-sm font-mono">/:establishmentId/reservas/:reservationCode</code>
-                        <p className="text-sm text-slate-600 mt-1">Detalhes da reserva</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/reservas/pendencias</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Reservas Pendentes</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>PendingReservations</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Lista reservas com status "pending" ou "preregistration" que requerem atenção.</p>
+                          <p><strong>Filtros:</strong> Apenas reservas pendentes do estabelecimento atual.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-green-500">
-                        <code className="text-sm font-mono">/:establishmentId/clientes</code>
-                        <p className="text-sm text-slate-600 mt-1">Gestão de clientes</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/reservas/:reservationCode</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Detalhes da Reserva</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>ReservationDetails</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Parâmetros:</strong> <code>:reservationCode</code> (string) - Código da reserva (ex: RSV742516)</p>
+                          <p><strong>Funcionalidade:</strong> Visualização completa da reserva: dados do hóspede, pagamentos, web check-in, logs de atividade.</p>
+                          <p><strong>Dados:</strong> Busca dados completos incluindo relacionamentos (guest, room, category, payments, web_checkin).</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-green-500">
-                        <code className="text-sm font-mono">/:establishmentId/unidades</code>
-                        <p className="text-sm text-slate-600 mt-1">Gestão de unidades/quartos</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/logs</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Logs de Atividade</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>ActivityLogs</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Histórico completo de atividades do sistema: criações, atualizações, check-ins, pagamentos.</p>
+                          <p><strong>Filtros:</strong> Por tipo de ação, entidade, usuário, data. Suporta busca textual.</p>
+                          <p><strong>Permissões:</strong> Requer role "manager" ou superior para acessar.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-green-500">
-                        <code className="text-sm font-mono">/:establishmentId/financeiro</code>
-                        <p className="text-sm text-slate-600 mt-1">Relatórios financeiros</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/clientes</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Gestão de Clientes</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Clients</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> CRUD completo de clientes/hóspedes: criar, editar, buscar, visualizar histórico.</p>
+                          <p><strong>Busca:</strong> Por nome, email, CPF, telefone. Suporta busca fuzzy e deduplicação.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-green-500">
-                        <code className="text-sm font-mono">/:establishmentId/tarifario</code>
-                        <p className="text-sm text-slate-600 mt-1">Sistema de tarifas</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/clientes/centralizacao</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Centralização de Clientes</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>ClientDeduplication</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Ferramenta para identificar e mesclar clientes duplicados baseado em CPF, email ou telefone.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-green-500">
-                        <code className="text-sm font-mono">/:establishmentId/manutencao</code>
-                        <p className="text-sm text-slate-600 mt-1">Gestão de manutenção</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/unidades</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Gestão de Unidades/Quartos</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Units</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Gerenciamento de quartos: criar, editar, categorias, status (disponível, ocupado, manutenção).</p>
+                          <p><strong>Recursos:</strong> Gestão de categorias, prédios, senhas de WiFi, tipos de autenticação.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-green-500">
-                        <code className="text-sm font-mono">/:establishmentId/configuracoes</code>
-                        <p className="text-sm text-slate-600 mt-1">Configurações do estabelecimento</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/financeiro</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Relatórios Financeiros</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Financial</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Relatórios financeiros: receitas, despesas, fechamento de caixa, histórico de pagamentos.</p>
+                          <p><strong>Filtros:</strong> Por período, método de pagamento, status. Exportação para CSV/PDF.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/tarifario</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Sistema de Tarifas (Novo)</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>PMSRateSystem</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Sistema moderno de gestão de tarifas com planos de preços, períodos, regras dinâmicas.</p>
+                          <p><strong>Recursos:</strong> Múltiplos planos, períodos sazonais, regras de precificação baseadas em ocupação, integração com OTAs.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/tarifario-legado</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Sistema de Tarifas (Legado)</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Pricing</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Sistema legado de precificação. Mantido para compatibilidade.</p>
+                          <p><strong>Nota:</strong> Recomenda-se migrar para o novo sistema em <code>/tarifario</code>.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/manutencao</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Gestão de Manutenção</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Maintenance</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Gestão de tickets de manutenção: criar, atribuir, acompanhar, fechar.</p>
+                          <p><strong>Recursos:</strong> Prioridades, status, histórico, notificações.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/channel-manager</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Channel Manager</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>ChannelManager</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Integração com OTAs (Booking.com, Airbnb, etc.): sincronização de disponibilidade e tarifas.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/configuracoes</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Configurações do Estabelecimento</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Settings</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Configurações gerais: dados do hotel, políticas, integrações, emails, Stripe.</p>
+                          <p><strong>Seções:</strong> Informações básicas, políticas, integrações, emails, pagamentos, personalização.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/perfil</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Perfil do Usuário</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Profile</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Gerenciamento do perfil do usuário logado: dados pessoais, senha, preferências.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/:establishmentId/funcionarios</code>
+                          <Badge variant="outline" className="text-xs bg-green-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Gestão de Funcionários</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Employees</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> CRUD de funcionários: criar, editar, atribuir roles, gerenciar permissões.</p>
+                          <p><strong>Roles:</strong> owner, manager, employee. Cada role tem permissões específicas.</p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -586,20 +999,151 @@ const Documentation = () => {
 
                   {/* Rotas Administrativas */}
                   <div>
-                    <h3 className="text-lg font-semibold mb-3 text-slate-800">Rotas Administrativas</h3>
-                    <div className="space-y-2">
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-purple-500">
-                        <code className="text-sm font-mono">/super-admin</code>
-                        <p className="text-sm text-slate-600 mt-1">Painel do super administrador</p>
-                        <Badge variant="outline" className="mt-2">Requer permissão de Super Admin</Badge>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Shield className="h-5 w-5" />
+                      Rotas Administrativas
+                    </h3>
+                    <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                      <p className="text-xs text-purple-800">
+                        <strong>🔐 Proteção:</strong> Estas rotas utilizam <code>ProtectedRoute</code> e componentes específicos 
+                        (<code>SuperAdminRoute</code>) para validação de permissões.
+                      </p>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-purple-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/super-admin</code>
+                          <Badge variant="outline" className="text-xs bg-purple-100">Super Admin</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Painel do Super Administrador</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>SuperAdmin</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Alias:</strong> <code>/admin-dashboard</code> também funciona (redireciona internamente)</p>
+                          <p><strong>Proteção:</strong> <code>SuperAdminRoute</code> verifica <code>is_super_admin = true</code> na tabela <code>admin_users</code>.</p>
+                          <p><strong>Funcionalidade:</strong> Gestão completa do sistema: empresas, estabelecimentos, usuários, configurações globais.</p>
+                          <p><strong>Permissões:</strong> Acesso total ao sistema, sem restrições de estabelecimento.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-purple-500">
-                        <code className="text-sm font-mono">/user-dashboard</code>
-                        <p className="text-sm text-slate-600 mt-1">Dashboard do usuário</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-purple-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/user-dashboard</code>
+                          <Badge variant="outline" className="text-xs bg-purple-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Dashboard do Usuário</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>UserDashboard</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Hub central para usuários autenticados. Lista estabelecimentos disponíveis e permite seleção.</p>
+                          <p><strong>Fluxo:</strong> Após selecionar estabelecimento, redireciona para <code>/:establishmentId</code>.</p>
+                          <p><strong>Dados:</strong> Busca estabelecimentos vinculados via <code>user_companies</code> e <code>establishments</code>.</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded border-l-4 border-purple-500">
-                        <code className="text-sm font-mono">/establishments</code>
-                        <p className="text-sm text-slate-600 mt-1">Gestão de estabelecimentos</p>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-purple-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/establishments</code>
+                          <Badge variant="outline" className="text-xs bg-purple-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Gestão de Estabelecimentos</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>EstablishmentDashboard</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Gerenciamento de estabelecimentos para usuários com múltiplos estabelecimentos.</p>
+                          <p><strong>Permissões:</strong> Usuários podem ver apenas estabelecimentos vinculados às suas empresas.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-purple-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="text-sm font-mono">/documentation</code>
+                          <Badge variant="outline" className="text-xs bg-purple-100">Protegida</Badge>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Documentação do Sistema</p>
+                        <p className="text-xs text-slate-600 mb-2">Componente: <code>Documentation</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Esta página! Documentação técnica completa de APIs, rotas, funcionalidades e integrações.</p>
+                          <p><strong>Acesso:</strong> Requer autenticação de usuário admin/user.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Rotas Legadas e Redirecionamentos */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Route className="h-5 w-5" />
+                      Rotas Legadas e Redirecionamentos
+                    </h3>
+                    <div className="mb-4 p-3 bg-slate-100 border border-slate-300 rounded-lg">
+                      <p className="text-xs text-slate-700">
+                        <strong>🔄 Redirecionamentos:</strong> Rotas legadas sem <code>:establishmentId</code> redirecionam automaticamente 
+                        para <code>/user-dashboard</code> para manter compatibilidade com links antigos.
+                      </p>
+                    </div>
+                    <div className="space-y-2 text-xs text-slate-600">
+                      <p><code>/</code> → <code>/user-dashboard</code></p>
+                      <p><code>/ocupacao</code> → <code>/user-dashboard</code></p>
+                      <p><code>/occupancy-map</code> → <code>/user-dashboard</code></p>
+                      <p><code>/reservas</code> → <code>/user-dashboard</code></p>
+                      <p><code>/clientes</code> → <code>/user-dashboard</code></p>
+                      <p><code>/unidades</code> → <code>/user-dashboard</code></p>
+                      <p><code>/financeiro</code> → <code>/user-dashboard</code></p>
+                      <p><code>/tarifario</code> → <code>/user-dashboard</code></p>
+                      <p><code>/manutencao</code> → <code>/user-dashboard</code></p>
+                      <p><code>/channel-manager</code> → <code>/user-dashboard</code></p>
+                      <p><code>/configuracoes</code> → <code>/user-dashboard</code></p>
+                      <p><code>/perfil</code> → <code>/user-dashboard</code></p>
+                      <p><code>/funcionarios</code> → <code>/user-dashboard</code></p>
+                    </div>
+                    <div className="mt-4 p-3 bg-slate-50 rounded">
+                      <p className="text-xs text-slate-700">
+                        <strong>Nota Técnica:</strong> Redirecionamentos utilizam <code>Navigate</code> com <code>replace: true</code> 
+                        para não adicionar entrada no histórico do navegador.
+                      </p>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Componentes de Proteção */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Lock className="h-5 w-5" />
+                      Componentes de Proteção de Rotas
+                    </h3>
+                    <div className="space-y-3">
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-indigo-500">
+                        <code className="text-sm font-mono">ProtectedRoute</code>
+                        <p className="text-xs text-slate-600 mt-1 mb-2">Localização: <code>src/components/layout/ProtectedRoute.tsx</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Verifica se o usuário está autenticado via <code>useAuth()</code> hook.</p>
+                          <p><strong>Comportamento:</strong> Se não autenticado, redireciona para <code>/auth</code> salvando a rota original em <code>state.from</code>.</p>
+                          <p><strong>Loading:</strong> Exibe spinner durante verificação de autenticação.</p>
+                          <p><strong>Validação:</strong> Verifica sessão do Supabase Auth via <code>supabase.auth.getSession()</code>.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-indigo-500">
+                        <code className="text-sm font-mono">EstablishmentRoute</code>
+                        <p className="text-xs text-slate-600 mt-1 mb-2">Localização: <code>src/components/layout/EstablishmentRoute.tsx</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Valida acesso ao estabelecimento específico via <code>EstablishmentContext</code>.</p>
+                          <p><strong>Parâmetros:</strong> Extrai <code>:establishmentId</code> da URL e converte para <code>numeric_id</code>.</p>
+                          <p><strong>Validação:</strong> Verifica se o estabelecimento existe e está na lista de estabelecimentos do usuário.</p>
+                          <p><strong>Comportamento:</strong> Se inválido, redireciona para <code>/user-dashboard</code>. Atualiza contexto global.</p>
+                          <p><strong>Loading:</strong> Exibe spinner durante carregamento de estabelecimentos.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-indigo-500">
+                        <code className="text-sm font-mono">SuperAdminRoute</code>
+                        <p className="text-xs text-slate-600 mt-1 mb-2">Localização: <code>src/components/layout/SuperAdminRoute.tsx</code></p>
+                        <div className="text-xs text-slate-700 space-y-1">
+                          <p><strong>Funcionalidade:</strong> Verifica se o usuário tem permissão de Super Admin.</p>
+                          <p><strong>Validação:</strong> Consulta tabela <code>admin_users</code> verificando <code>is_super_admin = true</code>.</p>
+                          <p><strong>Comportamento:</strong> Se não for Super Admin, redireciona para <code>/user-dashboard</code>.</p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -992,6 +1536,92 @@ content-type: application/json`}
                           <p className="text-slate-600 mt-1">
                             Configure a URL do webhook no Stripe Dashboard: <code>{`{SUPABASE_URL}/functions/v1/stripe-webhook`}</code>
                           </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* get-reservation */}
+                    <div className="p-4 bg-slate-50 rounded border-l-4 border-indigo-500 mb-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Badge variant="outline" className="bg-indigo-100">GET/POST</Badge>
+                        <code className="text-sm font-mono">/functions/v1/get-reservation</code>
+                      </div>
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Descrição:</strong> Buscar informações completas de reserva por identificador, localizador ou reservation_code
+                      </p>
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <strong>Autenticação:</strong>
+                          <p className="text-slate-600 mt-1">
+                            <strong>Obrigatória.</strong> Aceita:
+                          </p>
+                          <ul className="list-disc list-inside mt-1 text-slate-600 ml-2">
+                            <li>Token de usuário admin/user (Bearer token no header Authorization)</li>
+                            <li><code>guest_account_id</code> para hóspedes autenticados (no body ou query params)</li>
+                          </ul>
+                        </div>
+                        <div>
+                          <strong>Parâmetros de busca (pelo menos um obrigatório):</strong>
+                          <ul className="list-disc list-inside mt-1 text-slate-600 ml-2">
+                            <li><code>identifier</code>: identification_number da reserva</li>
+                            <li><code>locator</code>: reservation_code ou locator do web_checkin</li>
+                            <li><code>reservation_code</code>: reservation_code da reserva</li>
+                          </ul>
+                        </div>
+                        <div>
+                          <strong>Request Body (POST):</strong>
+                          <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto">
+{GET_RESERVATION_BODY}
+                          </pre>
+                        </div>
+                        <div>
+                          <strong>Query Parameters (GET):</strong>
+                          <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto">
+{`?identifier=123456&locator=RSV742516&guest_account_id=uuid`}
+                          </pre>
+                        </div>
+                        <div>
+                          <strong>Response (200 OK):</strong>
+                          <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto">
+{GET_RESERVATION_RESPONSE}
+                          </pre>
+                        </div>
+                        <div>
+                          <strong>Dados retornados:</strong>
+                          <ul className="list-disc list-inside mt-1 text-slate-600 ml-2">
+                            <li>Informações básicas da reserva (código, datas, valores, status)</li>
+                            <li>Dados do hóspede e responsável financeiro</li>
+                            <li>Informações do quarto e categoria</li>
+                            <li>Dados do estabelecimento</li>
+                            <li>Histórico de pagamentos</li>
+                            <li>Status do web check-in</li>
+                          </ul>
+                        </div>
+                        <div>
+                          <strong>Controle de acesso:</strong>
+                          <ul className="list-disc list-inside mt-1 text-slate-600 ml-2">
+                            <li><strong>Usuários admin/user:</strong> Podem acessar todas as reservas</li>
+                            <li><strong>Hóspedes:</strong> Podem acessar apenas reservas vinculadas à sua conta (guest_stay_history)</li>
+                          </ul>
+                        </div>
+                        <div>
+                          <strong>Erros comuns:</strong>
+                          <ul className="list-disc list-inside mt-1 text-slate-600">
+                            <li><code>400</code>: Identificador não fornecido</li>
+                            <li><code>401</code>: Autenticação necessária</li>
+                            <li><code>403</code>: Acesso negado (reserva não vinculada à conta do hóspede)</li>
+                            <li><code>404</code>: Reserva não encontrada</li>
+                            <li><code>500</code>: Erro interno do servidor</li>
+                          </ul>
+                        </div>
+                        <div>
+                          <strong>Exemplo de uso no frontend:</strong>
+                          <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto">
+{`import { useReservationApi } from "@/hooks/useReservationApi";
+
+const { useGetReservationByLocator } = useReservationApi();
+const { data, isLoading, error } = useGetReservationByLocator("RSV742516");`}
+                          </pre>
                         </div>
                       </div>
                     </div>
@@ -1945,6 +2575,15 @@ content-type: application/json`}
                           <li><code>stripe-payment-status</code>: Verifica status atual do pagamento</li>
                           <li><code>stripe-refund</code>: Processa reembolsos parciais ou totais</li>
                           <li><code>stripe-webhook</code>: Recebe eventos do Stripe (succeeded, failed, refunded)</li>
+                        </ul>
+                      </div>
+                      
+                      <div className="mt-4">
+                        <strong className="text-slate-800">Outras Edge Functions:</strong>
+                        <ul className="list-disc list-inside mt-1 text-slate-600 space-y-1">
+                          <li><code>get-reservation</code>: Busca informações completas de reserva por identificador/localizador</li>
+                          <li><code>send-email-smtp</code>: Envio de emails via SMTP</li>
+                          <li><code>send-email-resend</code>: Envio de emails via Resend API</li>
                         </ul>
                       </div>
                       
