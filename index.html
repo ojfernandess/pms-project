@@ -64,10 +64,31 @@
           return window.location.origin + '/' + url;
         }
         
-        // Buscar configurações do site via Edge Function
+        // Buscar configurações do site via API route ou Edge Function
         // Tentar obter URL do Supabase de várias fontes
         const fetchSettings = async () => {
           try {
+            // Estratégia 1: Tentar usar API route local primeiro (mais confiável)
+            try {
+              const apiResponse = await fetch('/api/get-site-settings', {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                signal: AbortSignal.timeout(2000), // 2 segundos timeout
+              });
+              
+              if (apiResponse.ok) {
+                const settings = await apiResponse.json();
+                applySettings(settings);
+                return; // Sucesso, não precisa tentar outras estratégias
+              }
+            } catch (apiError) {
+              // Se a API route não existir ou falhar, continuar com outras estratégias
+              console.debug('API route não disponível, tentando Edge Function...');
+            }
+            
+            // Estratégia 2: Tentar obter URL do Supabase e chamar Edge Function
             // 1. Tentar obter da variável global (injetada pelo Vite)
             let supabaseUrl = window.__SUPABASE_URL__;
             
@@ -77,17 +98,36 @@
             }
             
             // 3. Tentar obter de uma variável de ambiente injetada no HTML
-            if (!supabaseUrl && document.querySelector('meta[name="supabase-url"]')) {
-              supabaseUrl = document.querySelector('meta[name="supabase-url"]')?.getAttribute('content') || null;
+            if (!supabaseUrl) {
+              const metaTag = document.querySelector('meta[name="supabase-url"]');
+              if (metaTag) {
+                supabaseUrl = metaTag.getAttribute('content');
+              }
             }
             
-            // 4. Tentar inferir da URL atual (para desenvolvimento local)
+            // 4. Tentar obter do window.__ENV__ ou outras variáveis globais
+            if (!supabaseUrl && window.__ENV__) {
+              supabaseUrl = window.__ENV__.VITE_SUPABASE_URL;
+            }
+            
+            // 5. Tentar inferir da URL atual (para desenvolvimento local)
             if (!supabaseUrl && window.location.hostname === 'localhost') {
               supabaseUrl = 'http://localhost:54321'; // Supabase local padrão
             }
             
+            // 6. Tentar obter de scripts já carregados (se o código React já estiver disponível)
             if (!supabaseUrl) {
-              console.warn('URL do Supabase não encontrada. Meta tags Open Graph não serão atualizadas.');
+              // Aguardar um pouco para ver se o código React já carregou
+              await new Promise(resolve => setTimeout(resolve, 100));
+              // Tentar acessar através de window se disponível
+              if (window.__SUPABASE_CONFIG__) {
+                supabaseUrl = window.__SUPABASE_CONFIG__.url;
+              }
+            }
+            
+            if (!supabaseUrl) {
+              console.warn('URL do Supabase não encontrada. Meta tags Open Graph não serão atualizadas via script inline.');
+              console.warn('Dica: Configure VITE_SUPABASE_URL no Vercel ou use a API route /api/get-site-settings');
               return;
             }
             
@@ -97,7 +137,7 @@
             
             // Fazer requisição com timeout curto para não bloquear
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5 segundos timeout
+            const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 segundos timeout
             
             const response = await fetch(edgeFunctionUrl, {
               method: 'GET',
@@ -117,6 +157,8 @@
               if (supabaseUrl && !localStorage.getItem('__supabase_url__')) {
                 localStorage.setItem('__supabase_url__', supabaseUrl);
               }
+            } else {
+              console.warn('Erro ao buscar configurações da Edge Function:', response.status, response.statusText);
             }
           } catch (error) {
             // Ignorar erros silenciosamente (não bloquear o carregamento)
