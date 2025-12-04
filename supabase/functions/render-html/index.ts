@@ -3,14 +3,54 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SITE_SETTINGS_ID = "00000000-0000-0000-0000-000000000001";
 
+// Função para escapar HTML (prevenir XSS)
+function escapeHtml(text: string | null | undefined): string {
+  if (!text) return "";
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// Função para escapar atributos HTML
+function escapeAttr(text: string | null | undefined): string {
+  if (!text) return "";
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 serve(async (req) => {
+  // Permitir CORS para requisições de outros domínios
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+    });
+  }
+
   try {
     // Criar cliente Supabase
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     
     if (!supabaseUrl || !supabaseServiceKey) {
-      return new Response("Erro de configuração", { status: 500 });
+      return new Response("Erro de configuração", { 
+        status: 500,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
     }
     
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -28,7 +68,9 @@ serve(async (req) => {
 
     // Obter URL da requisição
     const requestUrl = new URL(req.url);
-    const siteUrl = `${requestUrl.protocol}//${requestUrl.host}`;
+    // Extrair o pathname da query string se fornecido (para suportar diferentes rotas)
+    const pathname = new URL(req.url).searchParams.get("path") || requestUrl.pathname;
+    const siteUrl = requestUrl.searchParams.get("siteUrl") || `${requestUrl.protocol}//${requestUrl.host}`;
     
     // Função para garantir URL absoluta
     const ensureAbsoluteUrl = (url: string | null | undefined): string | null => {
@@ -48,13 +90,14 @@ serve(async (req) => {
       return `${siteUrl}/${url}`;
     };
 
-    const ogTitle = settings?.og_title || settings?.site_title || "";
-    const ogDescription = settings?.og_description || settings?.site_description || "";
+    const ogTitle = escapeAttr(settings?.og_title || settings?.site_title || "");
+    const ogDescription = escapeAttr(settings?.og_description || settings?.site_description || "");
     const ogImage = ensureAbsoluteUrl(settings?.og_image);
-    const metaDescription = settings?.meta_description || settings?.site_description || "";
-    const siteTitle = settings?.site_title || "";
+    const metaDescription = escapeAttr(settings?.meta_description || settings?.site_description || "");
+    const siteTitle = escapeAttr(settings?.site_title || "");
+    const currentUrl = `${siteUrl}${pathname}`;
 
-    // Gerar HTML com meta tags preenchidas
+    // Gerar HTML com meta tags preenchidas (usando escape para segurança)
     const html = `<!doctype html>
 <html lang="pt-BR">
   <head>
@@ -62,13 +105,13 @@ serve(async (req) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${siteTitle || "Carregando..."}</title>
     <meta name="description" content="${metaDescription}" />
-    <meta name="author" content="${siteTitle}" />
+    ${siteTitle ? `<meta name="author" content="${siteTitle}" />` : ''}
 
     <meta property="og:title" content="${ogTitle}" />
     <meta property="og:description" content="${ogDescription}" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="${siteUrl}${requestUrl.pathname}" />
-    ${ogImage ? `<meta property="og:image" content="${ogImage}" />
+    <meta property="og:url" content="${escapeAttr(currentUrl)}" />
+    ${ogImage ? `<meta property="og:image" content="${escapeAttr(ogImage)}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:type" content="image/png" />` : ''}
@@ -76,7 +119,7 @@ serve(async (req) => {
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${ogTitle}" />
     <meta name="twitter:description" content="${ogDescription}" />
-    ${ogImage ? `<meta name="twitter:image" content="${ogImage}" />` : ''}
+    ${ogImage ? `<meta name="twitter:image" content="${escapeAttr(ogImage)}" />` : ''}
     
     <style>
       #root:empty::before {
@@ -85,6 +128,9 @@ serve(async (req) => {
         width: 100vw;
         height: 100vh;
         background: #f8f9fa;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
       }
     </style>
   </head>
@@ -97,11 +143,6 @@ serve(async (req) => {
         </div>
       </div>
     </div>
-    <script>
-      const style = document.createElement('style');
-      style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
-      document.head.appendChild(style);
-    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>`;
@@ -111,11 +152,20 @@ serve(async (req) => {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "public, max-age=300", // Cache de 5 minutos
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
       },
     });
   } catch (error) {
     console.error("Erro na função:", error);
-    return new Response("Erro interno do servidor", { status: 500 });
+    return new Response("Erro interno do servidor", { 
+      status: 500,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
   }
 });
 
