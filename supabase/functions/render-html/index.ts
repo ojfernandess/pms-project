@@ -26,6 +26,10 @@ function escapeAttr(text: string | null | undefined): string {
 }
 
 serve(async (req) => {
+  console.log("=== render-html Edge Function chamada ===");
+  console.log("Method:", req.method);
+  console.log("URL:", req.url);
+  
   // Permitir CORS para requisições de outros domínios
   if (req.method === "OPTIONS") {
     return new Response(null, {
@@ -43,7 +47,11 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     
+    console.log("Supabase URL configurada:", !!supabaseUrl);
+    console.log("Service Key configurada:", !!supabaseServiceKey);
+    
     if (!supabaseUrl || !supabaseServiceKey) {
+      console.error("Erro: Configuração do Supabase não encontrada");
       return new Response("Erro de configuração", { 
         status: 500,
         headers: {
@@ -56,6 +64,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Buscar configurações do site
+    console.log("Buscando configurações do site...");
     const { data: settings, error } = await supabase
       .from("site_settings")
       .select("*")
@@ -64,6 +73,13 @@ serve(async (req) => {
 
     if (error) {
       console.error("Erro ao buscar configurações:", error);
+    } else {
+      console.log("Configurações encontradas:", {
+        hasTitle: !!settings?.site_title,
+        hasOgTitle: !!settings?.og_title,
+        hasOgDescription: !!settings?.og_description,
+        hasOgImage: !!settings?.og_image,
+      });
     }
 
     // Obter URL da requisição
@@ -97,7 +113,16 @@ serve(async (req) => {
     const siteTitle = escapeAttr(settings?.site_title || "");
     const currentUrl = `${siteUrl}${pathname}`;
 
+    console.log("Valores finais:", {
+      ogTitle: ogTitle || "(vazio)",
+      ogDescription: ogDescription || "(vazio)",
+      ogImage: ogImage || "(vazio)",
+      siteTitle: siteTitle || "(vazio)",
+      currentUrl,
+    });
+
     // Gerar HTML com meta tags preenchidas (usando escape para segurança)
+    // IMPORTANTE: Não incluir og:image se estiver vazio para evitar erro no Facebook
     const html = `<!doctype html>
 <html lang="pt-BR">
   <head>
@@ -111,7 +136,7 @@ serve(async (req) => {
     <meta property="og:description" content="${ogDescription}" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="${escapeAttr(currentUrl)}" />
-    ${ogImage ? `<meta property="og:image" content="${escapeAttr(ogImage)}" />
+    ${ogImage && ogImage.trim() ? `<meta property="og:image" content="${escapeAttr(ogImage)}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:type" content="image/png" />` : ''}
@@ -119,7 +144,7 @@ serve(async (req) => {
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${ogTitle}" />
     <meta name="twitter:description" content="${ogDescription}" />
-    ${ogImage ? `<meta name="twitter:image" content="${escapeAttr(ogImage)}" />` : ''}
+    ${ogImage && ogImage.trim() ? `<meta name="twitter:image" content="${escapeAttr(ogImage)}" />` : ''}
     
     <style>
       #root:empty::before {
@@ -147,6 +172,8 @@ serve(async (req) => {
   </body>
 </html>`;
 
+    console.log("HTML gerado com sucesso, tamanho:", html.length, "bytes");
+    
     return new Response(html, {
       status: 200,
       headers: {
@@ -159,6 +186,7 @@ serve(async (req) => {
     });
   } catch (error) {
     console.error("Erro na função:", error);
+    console.error("Stack trace:", error instanceof Error ? error.stack : String(error));
     return new Response("Erro interno do servidor", { 
       status: 500,
       headers: {

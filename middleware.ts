@@ -55,6 +55,9 @@ export default async function middleware(request: Request) {
 
   // Se for um crawler, buscar o HTML renderizado da Edge Function do Supabase
   if (isCrawler(userAgent)) {
+    console.log("Crawler detectado:", userAgent);
+    console.log("Pathname:", pathname);
+    
     try {
       // Obter URL do Supabase das variáveis de ambiente do Vercel
       // No Vercel Edge Functions, as variáveis de ambiente são expostas via process.env
@@ -63,19 +66,27 @@ export default async function middleware(request: Request) {
       const supabaseUrl = (env as Record<string, string | undefined>).VITE_SUPABASE_URL || 
                          (env as Record<string, string | undefined>).SUPABASE_URL;
       
+      console.log("Supabase URL encontrada:", !!supabaseUrl);
+      
       if (supabaseUrl) {
         const cleanUrl = supabaseUrl.replace("/rest/v1", "").replace(/\/$/, "");
         const edgeFunctionUrl = `${cleanUrl}/functions/v1/render-html?path=${encodeURIComponent(pathname)}&siteUrl=${encodeURIComponent(`${url.protocol}//${url.host}`)}`;
+        
+        console.log("Chamando Edge Function:", edgeFunctionUrl);
         
         const response = await fetch(edgeFunctionUrl, {
           method: "GET",
           headers: {
             "Content-Type": "text/html",
+            "User-Agent": userAgent || "",
           },
         });
         
+        console.log("Resposta da Edge Function:", response.status, response.statusText);
+        
         if (response.ok) {
           const html = await response.text();
+          console.log("HTML recebido, tamanho:", html.length, "bytes");
           return new Response(html, {
             status: 200,
             headers: {
@@ -83,7 +94,12 @@ export default async function middleware(request: Request) {
               "Cache-Control": "public, max-age=300, s-maxage=300",
             },
           });
+        } else {
+          const errorText = await response.text();
+          console.error("Erro na Edge Function:", response.status, errorText);
         }
+      } else {
+        console.error("Supabase URL não configurada no middleware");
       }
     } catch (error) {
       console.error("Erro ao buscar HTML renderizado:", error);
