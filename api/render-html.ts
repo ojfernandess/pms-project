@@ -60,15 +60,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const userAgent = req.headers["user-agent"];
-  const pathname = (req.query.path as string) || "/";
   const protocol = req.headers["x-forwarded-proto"] || "https";
   const host = req.headers.host || req.headers["x-forwarded-host"];
+  
+  // Obter pathname: primeiro da query string, depois tentar extrair da URL original
+  let pathname = (req.query.path as string) || "/";
+  
+  // Se não tiver path na query, tentar obter do header x-invoke-path (Vercel)
+  if (pathname === "/" && req.headers["x-invoke-path"]) {
+    pathname = req.headers["x-invoke-path"] as string;
+  }
+  
+  // Se ainda não tiver, tentar obter do header x-vercel-original-path
+  if (pathname === "/" && req.headers["x-vercel-original-path"]) {
+    pathname = req.headers["x-vercel-original-path"] as string;
+  }
+  
   const siteUrl = (req.query.siteUrl as string) || `${protocol}://${host}`;
 
   // Se não for um crawler e não tiver o parâmetro force, redirecionar para a página normal
   if (!isCrawler(userAgent) && !req.query.force) {
     return res.redirect(302, pathname);
   }
+  
+  // Log para debug
+  console.log("Render HTML request:", {
+    userAgent,
+    pathname,
+    siteUrl,
+    isCrawler: isCrawler(userAgent),
+  });
 
   try {
     // Obter URL do Supabase das variáveis de ambiente
