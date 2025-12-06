@@ -14,6 +14,7 @@ const Profile = () => {
 
   const [profileData, setProfileData] = useState({
     full_name: "",
+    cpf: "",
     phone: "",
     address: "",
     city: "",
@@ -39,6 +40,7 @@ const Profile = () => {
     if (profile) {
       setProfileData({
         full_name: profile.full_name || "",
+        cpf: profile.cpf || "",
         phone: profile.phone || "",
         address: profile.address || "",
         city: profile.city || "",
@@ -169,6 +171,16 @@ const Profile = () => {
                     value={profileData.full_name}
                     onChange={(e) => setProfileData({ ...profileData, full_name: e.target.value })}
                     placeholder="Digite seu nome completo"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="cpf">CPF</Label>
+                  <Input
+                    id="cpf"
+                    value={profileData.cpf}
+                    onChange={(e) => setProfileData({ ...profileData, cpf: e.target.value })}
+                    placeholder="000.000.000-00"
                   />
                 </div>
 

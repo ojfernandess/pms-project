@@ -20,6 +20,7 @@ import {
   CheckCircle2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface ReservationQuickViewModalProps {
   open: boolean;
@@ -60,6 +61,7 @@ export function ReservationQuickViewModal({
 }: ReservationQuickViewModalProps) {
   const navigate = useNavigate();
   const { establishmentId } = useParams<{ establishmentId?: string }>();
+  const { canDelete } = usePermissions();
   if (!reservation) return null;
 
   // Determinar status real baseado em pagamento (mesma lógica do mapa de reservas)
@@ -278,7 +280,7 @@ export function ReservationQuickViewModal({
                   Transferir
                 </Button>
               )}
-              {onCancel && reservation.status !== 'cancelled' && (
+              {onCancel && reservation.status !== 'cancelled' && canDelete("reservations") && (
                 <Button
                   variant="outline"
                   className="w-full bg-red-50 hover:bg-red-100 border-red-200 text-red-900"

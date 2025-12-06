@@ -61,6 +61,7 @@ import { logActivity } from "@/lib/activityLogger";
 import { useActivityLogs, ActivityLog } from "@/hooks/useActivityLogs";
 import { Activity, Clock as ClockIcon } from "lucide-react";
 import { ManualCheckinDialog } from "@/components/reservations/ManualCheckinDialog";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const ReservationDetails = () => {
   const { reservationCode } = useParams<{ reservationCode: string }>();
@@ -70,6 +71,7 @@ const ReservationDetails = () => {
   const [isBasicInfoOpen, setIsBasicInfoOpen] = useState(false);
   const { cancelReservation, updateReservation, confirmPreregistration } = useReservations();
   const { calculatePrice } = usePricing();
+  const { canDelete } = usePermissions();
   
   // Labels e cores para os tipos de ação
   const actionTypeLabels: Record<string, string> = {
@@ -2446,7 +2448,7 @@ const ReservationDetails = () => {
                   Efetivar Pré-reserva
                 </Button>
               )}
-              {!["checkedout", "cancelled"].includes(reservation.status) && (
+              {!["checkedout", "cancelled"].includes(reservation.status) && canDelete("reservations") && (
                 <Button
                   variant="outline"
                   className="w-full justify-start gap-2 text-destructive hover:text-destructive"

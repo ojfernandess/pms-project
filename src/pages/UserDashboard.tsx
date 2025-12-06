@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useUserCompanies } from "@/hooks/useUserCompanies";
 import { useEstablishments } from "@/hooks/useEstablishments";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { useUserLimits } from "@/hooks/useUserLimits";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Building2, Hotel, ArrowRight, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -28,6 +29,7 @@ const UserDashboard = () => {
   const { userCompanies, isLoading: isLoadingCompanies, refetch: refetchUserCompanies } = useUserCompanies(undefined);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
   const { establishments, isLoading: isLoadingEstablishments, createEstablishment } = useEstablishments(selectedCompanyId || undefined);
+  const { userLimit } = useUserLimits(userId || undefined);
   const { setSelectedEstablishment } = useEstablishment();
   const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
   const [establishmentDialogOpen, setEstablishmentDialogOpen] = useState(false);
@@ -114,12 +116,137 @@ const UserDashboard = () => {
     }
   }, [userId, refetchUserCompanies]);
 
-  // Extrair empresas dos userCompanies
-  const companies = userCompanies.map((uc: any) => uc.companies).filter(Boolean);
+  // Buscar estabelecimentos onde o usuário é funcionário
+  const [employeeEstablishmentIds, setEmployeeEstablishmentIds] = useState<Set<string>>(new Set());
+  const [employeeCompanyIds, setEmployeeCompanyIds] = useState<Set<string>>(new Set());
+  const [isLoadingEmployeeData, setIsLoadingEmployeeData] = useState(true);
+  
+  useEffect(() => {
+    const fetchEmployeeData = async () => {
+      setIsLoadingEmployeeData(true);
+      if (!userId) {
+        setEmployeeEstablishmentIds(new Set());
+        setEmployeeCompanyIds(new Set());
+        setIsLoadingEmployeeData(false);
+        return;
+      }
+
+      try {
+        // Buscar todos os estabelecimentos onde o usuário é funcionário
+        const { data: employees, error: employeesError } = await supabase
+          .from("employees")
+          .select("establishment_id")
+          .eq("user_id", userId)
+          .eq("is_active", true);
+
+        if (employeesError) {
+          console.error("Erro ao buscar funcionários:", employeesError);
+          setEmployeeEstablishmentIds(new Set());
+          setEmployeeCompanyIds(new Set());
+          setIsLoadingEmployeeData(false);
+          return;
+        }
+
+        if (!employees || employees.length === 0) {
+          setEmployeeEstablishmentIds(new Set());
+          setEmployeeCompanyIds(new Set());
+          setIsLoadingEmployeeData(false);
+          return;
+        }
+
+        // Extrair IDs dos estabelecimentos
+        const establishmentIds = employees.map((emp: any) => emp.establishment_id);
+        setEmployeeEstablishmentIds(new Set(establishmentIds));
+
+        // Buscar os estabelecimentos para obter os company_ids
+        const { data: establishments, error: establishmentsError } = await supabase
+          .from("establishments")
+          .select("company_id, is_active")
+          .in("id", establishmentIds)
+          .eq("is_active", true);
+
+        if (establishmentsError) {
+          console.error("Erro ao buscar estabelecimentos:", establishmentsError);
+          setEmployeeCompanyIds(new Set());
+          setIsLoadingEmployeeData(false);
+          return;
+        }
+
+        // Extrair company_ids únicos dos estabelecimentos onde é funcionário
+        const companyIdsSet = new Set<string>();
+        if (establishments) {
+          establishments.forEach((est: any) => {
+            if (est.company_id) {
+              companyIdsSet.add(est.company_id);
+            }
+          });
+        }
+
+        setEmployeeCompanyIds(companyIdsSet);
+      } catch (error) {
+        console.error("Erro ao buscar dados do funcionário:", error);
+        setEmployeeEstablishmentIds(new Set());
+        setEmployeeCompanyIds(new Set());
+      } finally {
+        setIsLoadingEmployeeData(false);
+      }
+    };
+
+    fetchEmployeeData();
+  }, [userId]);
+
+  // Determinar se o usuário é funcionário (tem estabelecimentos onde trabalha)
+  const isEmployee = employeeEstablishmentIds.size > 0;
+
+  // Filtrar empresas baseado se o usuário é funcionário ou proprietário
+  // - Se o usuário É funcionário (tem registros em employees): mostrar APENAS empresas onde ele é funcionário
+  // - Se o usuário NÃO é funcionário: mostrar todas as empresas (é proprietário)
+  const companies = useMemo(() => {
+    if (isLoadingEmployeeData) {
+      // Enquanto carrega, não mostrar nada (ou mostrar loading)
+      return [];
+    }
+    
+    if (isEmployee) {
+      // Usuário é funcionário: mostrar apenas empresas onde ele trabalha
+      const filtered = userCompanies
+        .map((uc: any) => uc.companies)
+        .filter((company: any) => company && employeeCompanyIds.has(company.id));
+      console.log("Funcionário - Empresas filtradas:", filtered.length, "de", userCompanies.length);
+      return filtered;
+    } else {
+      // Usuário não é funcionário: mostrar todas as empresas (é proprietário)
+      const all = userCompanies.map((uc: any) => uc.companies).filter(Boolean);
+      console.log("Proprietário - Todas as empresas:", all.length);
+      return all;
+    }
+  }, [isEmployee, employeeCompanyIds, userCompanies, isLoadingEmployeeData]);
+
+  // Filtrar estabelecimentos:
+  // - Se o usuário é funcionário: mostrar APENAS estabelecimentos onde ele é funcionário
+  // - Se o usuário NÃO é funcionário: mostrar todos os estabelecimentos (é proprietário)
+  const filteredEstablishments = isEmployee
+    ? establishments.filter((est: any) => employeeEstablishmentIds.has(est.id))
+    : establishments;
 
   const handleCreateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userId) return;
+    
+    // Verificar se o usuário pode criar empresas
+    const maxCompanies = userLimit?.max_companies ?? 1; // Se não tiver limite, assume 1 (comportamento padrão antigo)
+    const currentCompaniesCount = companies.length;
+    
+    if (maxCompanies === 0) {
+      toast.error("Você não tem permissão para criar empresas. Funcionários não podem criar empresas.");
+      return;
+    }
+    
+    if (currentCompaniesCount >= maxCompanies) {
+      toast.error(`Você atingiu o limite máximo de empresas (${maxCompanies}). Entre em contato com o administrador para aumentar seu limite.`);
+      return;
+    }
+    
     try {
       // Criar empresa
       const { data: company, error: companyError } = await supabase
@@ -150,6 +277,21 @@ const UserDashboard = () => {
   const handleCreateEstablishment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCompanyId) return;
+    
+    // Verificar se o usuário pode criar estabelecimentos
+    const maxEstablishments = userLimit?.max_establishments ?? 1; // Se não tiver limite, assume 1 (comportamento padrão antigo)
+    const currentEstablishmentsCount = establishments.length;
+    
+    if (maxEstablishments === 0) {
+      toast.error("Você não tem permissão para criar estabelecimentos. Funcionários não podem criar estabelecimentos.");
+      return;
+    }
+    
+    if (currentEstablishmentsCount >= maxEstablishments) {
+      toast.error(`Você atingiu o limite máximo de estabelecimentos para esta empresa (${maxEstablishments}). Entre em contato com o administrador para aumentar seu limite.`);
+      return;
+    }
+    
     try {
       const establishment = await createEstablishment({
         company_id: selectedCompanyId,
@@ -181,13 +323,15 @@ const UserDashboard = () => {
           <h1 className="text-3xl font-bold text-foreground">Minhas Empresas</h1>
           <p className="text-muted-foreground">Gerencie suas empresas e estabelecimentos</p>
         </div>
-        <Button onClick={() => setCompanyDialogOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nova Empresa
-        </Button>
+        {(userLimit?.max_companies ?? 1) > 0 && (
+          <Button onClick={() => setCompanyDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nova Empresa
+          </Button>
+        )}
       </div>
 
-      {isLoadingCompanies ? (
+      {isLoadingCompanies || isLoadingEmployeeData ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
@@ -195,10 +339,14 @@ const UserDashboard = () => {
         <Card className="p-8 text-center">
           <Building2 className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
           <p className="text-muted-foreground mb-4">Nenhuma empresa cadastrada</p>
-          <Button onClick={() => setCompanyDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Criar Primeira Empresa
-          </Button>
+          {(userLimit?.max_companies ?? 1) > 0 ? (
+            <Button onClick={() => setCompanyDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Criar Primeira Empresa
+            </Button>
+          ) : (
+            <p className="text-sm text-muted-foreground">Você não tem permissão para criar empresas</p>
+          )}
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -227,30 +375,32 @@ const UserDashboard = () => {
 
               {selectedCompanyId === company.id && (
                 <div className="mt-4 space-y-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => {
-                      setEstablishmentFormData({ name: "", type: "hotel", manager_user_id: "__current_user__" });
-                      setEstablishmentDialogOpen(true);
-                    }}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Novo Estabelecimento
-                  </Button>
+                  {(userLimit?.max_establishments ?? 1) > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => {
+                        setEstablishmentFormData({ name: "", type: "hotel", manager_user_id: "__current_user__" });
+                        setEstablishmentDialogOpen(true);
+                      }}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Novo Estabelecimento
+                    </Button>
+                  )}
 
                   {isLoadingEstablishments ? (
                     <div className="flex items-center justify-center py-4">
                       <Loader2 className="h-4 w-4 animate-spin" />
                     </div>
-                  ) : establishments.length === 0 ? (
+                  ) : filteredEstablishments.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-2">
-                      Nenhum estabelecimento
+                      Nenhum estabelecimento disponível
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      {establishments.map((establishment: any) => (
+                      {filteredEstablishments.map((establishment: any) => (
                         <Card
                           key={establishment.id}
                           className="p-3 cursor-pointer hover:bg-muted transition-colors"

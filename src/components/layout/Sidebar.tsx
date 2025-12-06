@@ -49,7 +49,7 @@ const getMenuItems = (t: (key: string) => string) => [
 
 export const Sidebar = ({ isOpen }: SidebarProps) => {
   const { isSuperAdmin } = useIsSuperAdmin();
-  const { role } = useCurrentEmployeeRole();
+  const { role, customPermissions } = useCurrentEmployeeRole();
   const { establishmentId } = useParams<{ establishmentId?: string }>();
   const { selectedEstablishment } = useEstablishment();
   const { settings } = useSiteSettings();
@@ -95,13 +95,18 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
       return role.code === "manager" || isSuperAdmin;
     }
 
+    if (item.feature === "settings") {
+      // Apenas gerentes e super admins podem ver configurações
+      return role.code === "manager" || isSuperAdmin;
+    }
+
     if (item.feature === "user_dashboard") {
       // Sempre mostrar user-dashboard
       return true;
     }
 
-    // Verificar permissão para o recurso
-    return checkPermission(role, item.feature);
+    // Verificar permissão para o recurso (usando customPermissions se disponível)
+    return checkPermission(role, item.feature, undefined, customPermissions);
   });
 
   // Adicionar item de Super Admin apenas se o usuário for super admin

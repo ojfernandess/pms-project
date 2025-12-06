@@ -33,6 +33,7 @@ import { AddServiceFeeDialog } from "./AddServiceFeeDialog";
 import { useServiceFees } from "@/hooks/useServiceFees";
 import { useReservationServiceFees } from "@/hooks/useReservationServiceFees";
 import { cn } from "@/lib/utils";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -75,6 +76,7 @@ export const ReservationDialog = ({
   const { calculatePrice } = usePricing();
   const { settings: hotelSettings } = useHotelSettings();
   const { ratePlans } = useRateSystem();
+  const { canDelete } = usePermissions();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [availableRooms, setAvailableRooms] = useState<any[]>([]);
@@ -1924,7 +1926,7 @@ export const ReservationDialog = ({
             </span>
             {/* Ícone de Cancelar Reserva - só aparece em modo de visualização e se não estiver cancelada/checkedout */}
             {reservationId && !isEditMode && currentReservation && 
-             !["cancelled", "checkedout"].includes(currentReservation.status) && (
+             !["cancelled", "checkedout"].includes(currentReservation.status) && canDelete("reservations") && (
               <Button
                 type="button"
                 variant="ghost"

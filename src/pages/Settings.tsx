@@ -12,12 +12,14 @@ import { useApiSettings } from "@/hooks/useApiSettings";
 import { usePaymentCarriers } from "@/hooks/usePaymentCarriers";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { useEstablishmentServices, EstablishmentService } from "@/hooks/useEstablishmentServices";
-import { Loader2, Upload, Image as ImageIcon, Save, Plus, X, Check, CreditCard, FileText, Mail } from "lucide-react";
+import { Loader2, Upload, Image as ImageIcon, Save, Plus, X, Check, CreditCard, FileText, Mail, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { StripeEstablishmentConfigDialog } from "@/components/stripe/StripeEstablishmentConfigDialog";
 import { useStripe } from "@/hooks/useStripe";
+import { useCurrentEmployeeRole } from "@/hooks/useEmployees";
+import { useIsSuperAdmin } from "@/hooks/useUsers";
 import {
   Table,
   TableBody,
@@ -32,6 +34,25 @@ const Settings = () => {
   const { selectedEstablishment } = useEstablishment();
   const { apiSettings, saveApiSetting, deleteApiSetting, isLoading: isLoadingApi } = useApiSettings();
   const { carriers } = usePaymentCarriers();
+  const { role } = useCurrentEmployeeRole();
+  const { isSuperAdmin } = useIsSuperAdmin();
+
+  // Verificar se o usuário pode acessar configurações (apenas gerente ou super admin)
+  const canAccessSettings = role?.code === "manager" || isSuperAdmin;
+
+  if (!canAccessSettings) {
+    return (
+      <div className="space-y-6">
+        <Card className="p-12 text-center">
+          <AlertCircle className="h-16 w-16 mx-auto mb-4 text-destructive" />
+          <h2 className="text-2xl font-bold mb-2">Acesso Negado</h2>
+          <p className="text-muted-foreground">
+            Apenas gerentes e super admins podem acessar as configurações do estabelecimento.
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
   const [formData, setFormData] = useState({
     name: "",

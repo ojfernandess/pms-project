@@ -24,6 +24,7 @@ export interface Employee {
   phone: string | null;
   email: string | null;
   is_active: boolean;
+  custom_permissions?: any;
   created_at: string;
   updated_at: string;
   employee_roles?: EmployeeRole;
@@ -145,6 +146,12 @@ export const useEmployees = () => {
         userData = user;
       }
 
+      // Invalidar cache do current_employee_role para o estabelecimento onde o funcionário foi criado
+      // Isso garante que se o funcionário criado for o próprio usuário logado, o role será atualizado
+      queryClient.invalidateQueries({ 
+        queryKey: ["current_employee_role", employeeData.establishment_id] 
+      });
+
       return {
         ...employee,
         users: userData,
@@ -183,6 +190,12 @@ export const useEmployees = () => {
           .single();
         userData = user;
       }
+
+      // Invalidar cache do current_employee_role para o estabelecimento do funcionário atualizado
+      // Isso garante que se o funcionário atualizado for o próprio usuário logado, o role será atualizado
+      queryClient.invalidateQueries({ 
+        queryKey: ["current_employee_role", employee.establishment_id] 
+      });
 
       return {
         ...employee,
@@ -258,14 +271,18 @@ export const useCurrentEmployeeRole = () => {
         return null;
       }
 
-      return employee as (Employee & { employee_roles: EmployeeRole }) | null;
+      return employee as (Employee & { employee_roles: EmployeeRole; custom_permissions?: any }) | null;
     },
     enabled: !!establishmentId,
+    // Refetch quando o estabelecimento mudar para garantir que o role seja atualizado
+    refetchOnMount: true,
+    refetchOnWindowFocus: false,
   });
 
   return {
     employee: data || null,
     role: data?.employee_roles || null,
+    customPermissions: data?.custom_permissions || null,
     isLoading,
   };
 };

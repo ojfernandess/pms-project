@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { logActivity, createMoveDescription, createSwapDescription } from "@/lib/activityLogger";
+import { usePermissions } from "@/hooks/usePermissions";
 import { QuickReservationDialog } from "./QuickReservationDialog";
 import { ReservationQuickViewModal } from "./ReservationQuickViewModal";
 import { ReservationTransferModal } from "./ReservationTransferModal";
@@ -128,6 +129,7 @@ export const ReservationCalendarMap = ({
   const { establishmentId: establishmentIdFromParams } = useParams<{ establishmentId?: string }>();
   const { selectedEstablishment, establishments, setSelectedEstablishment } = useEstablishment();
   const { rateCalendar, ratePlans } = useRateSystem();
+  const { canCreate, canUpdate, canDelete, canAccess } = usePermissions();
   
   // Obter o UUID do establishment (não o numeric_id)
   const establishmentId = useMemo(() => {
@@ -637,6 +639,12 @@ export const ReservationCalendarMap = ({
 
   // Handlers para criar reserva (drag)
   const handleMouseDown = (date: Date, categoryId?: string, roomId?: string) => {
+    // Verificar permissão: pode criar reservas OU pode bloquear (para camareiras)
+    if (!canCreate("reservations") && !canAccess("reservations", "block")) {
+      toast.error("Você não tem permissão para criar reservas ou bloquear quartos");
+      return;
+    }
+    
     if (draggedReservation) return;
     if (roomId && isDateOccupied(date, roomId)) return;
     
@@ -800,14 +808,17 @@ export const ReservationCalendarMap = ({
             return;
           }
           
-          const clickedDate = startOfDay(date);
-          setQuickDialogData({
-            checkin_date: format(clickedDate, "yyyy-MM-dd"),
-            checkout_date: format(addDays(clickedDate, 1), "yyyy-MM-dd"),
-            category_id: categoryId,
-            room_id: undefined,
-          });
-          setQuickDialogOpen(true);
+          // Permitir abrir o modal se pode criar reservas OU pode bloquear (para camareiras)
+          if (canCreate("reservations") || canAccess("reservations", "block")) {
+            const clickedDate = startOfDay(date);
+            setQuickDialogData({
+              checkin_date: format(clickedDate, "yyyy-MM-dd"),
+              checkout_date: format(addDays(clickedDate, 1), "yyyy-MM-dd"),
+              category_id: categoryId,
+              room_id: undefined,
+            });
+            setQuickDialogOpen(true);
+          }
         }
       }
       setIsDragging(false);
@@ -871,13 +882,16 @@ export const ReservationCalendarMap = ({
       }
     }
 
-    setQuickDialogData({
-      checkin_date: format(startOfDay(minDate), "yyyy-MM-dd"),
-      checkout_date: format(addDays(startOfDay(maxDate), 1), "yyyy-MM-dd"),
-      category_id: categoryId || dragStart.categoryId,
-      room_id: roomId || dragStart.roomId,
-    });
-    setQuickDialogOpen(true);
+    // Permitir abrir o modal se pode criar reservas OU pode bloquear (para camareiras)
+    if (canCreate("reservations") || canAccess("reservations", "block")) {
+      setQuickDialogData({
+        checkin_date: format(startOfDay(minDate), "yyyy-MM-dd"),
+        checkout_date: format(addDays(startOfDay(maxDate), 1), "yyyy-MM-dd"),
+        category_id: categoryId || dragStart.categoryId,
+        room_id: roomId || dragStart.roomId,
+      });
+      setQuickDialogOpen(true);
+    }
 
     setIsDragging(false);
     setDragStart(null);
@@ -916,6 +930,19 @@ export const ReservationCalendarMap = ({
 
     e.preventDefault();
     e.stopPropagation();
+    
+    // Verificar permissão para mover reservas (update)
+    if (!canUpdate("reservations")) {
+      // Se for bloqueio, verificar permissão específica de bloquear
+      if (reservation.status === "blocked" && !canAccess("reservations", "block")) {
+        toast.error("Você não tem permissão para mover reservas");
+        return;
+      }
+      if (reservation.status !== "blocked") {
+        toast.error("Você não tem permissão para mover reservas");
+        return;
+      }
+    }
     
     if (["blocked", "cancelled", "checkedout"].includes(reservation.status)) return;
     if (!reservation.room_id) return;
@@ -2918,11 +2945,11 @@ export const ReservationCalendarMap = ({
             setTransferModalOpen(true);
           }
         }}
-        onCancel={() => {
+        onCancel={canDelete("reservations") ? () => {
           if (selectedReservation) {
             onReservationAction?.("cancel", selectedReservation.id);
           }
-        }}
+        } : undefined}
       />
 
       {/* Modal de Transferência */}

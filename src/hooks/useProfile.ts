@@ -6,6 +6,7 @@ export interface UserProfile {
   id: string;
   email: string;
   full_name?: string | null;
+  cpf?: string | null;
   phone?: string | null;
   address?: string | null;
   city?: string | null;
@@ -20,6 +21,7 @@ export interface UserProfile {
 
 export interface UpdateProfileData {
   full_name?: string;
+  cpf?: string;
   phone?: string;
   address?: string;
   city?: string;
@@ -64,10 +66,27 @@ export const useProfile = () => {
         throw new Error("Usuário não autenticado");
       }
 
+      // Filtrar campos vazios e converter strings vazias para null
+      const cleanedData: any = {};
+      Object.keys(profileData).forEach((key) => {
+        const value = (profileData as any)[key];
+        // Converter strings vazias para null (especialmente importante para campos de data)
+        if (value === "" || value === null || value === undefined) {
+          // Para birth_date e outros campos que podem ser null, enviar null explicitamente
+          if (key === "birth_date") {
+            cleanedData[key] = null;
+          }
+          // Para outros campos opcionais, não incluir se estiver vazio
+          // (o banco manterá o valor atual)
+        } else {
+          cleanedData[key] = value;
+        }
+      });
+
       // Atualizar na tabela users
       const { data, error } = await supabase
         .from("users")
-        .update(profileData)
+        .update(cleanedData)
         .eq("id", user.id)
         .select()
         .single();
@@ -78,10 +97,10 @@ export const useProfile = () => {
 
       // Atualizar user_metadata no auth.users (se possível)
       // Nota: Isso requer permissões especiais, mas tentamos atualizar
-      if (profileData.full_name) {
+      if (cleanedData.full_name) {
         await supabase.auth.updateUser({
           data: {
-            full_name: profileData.full_name,
+            full_name: cleanedData.full_name,
           },
         });
       }

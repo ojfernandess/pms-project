@@ -134,7 +134,35 @@ export const EstablishmentProvider = ({ children }: { children: ReactNode }) => 
 
       const user = session.user;
 
-      // Buscar empresas do usuário
+      // Primeiro, verificar se o usuário é funcionário (tem registros em employees)
+      const { data: employees, error: employeesError } = await supabase
+        .from("employees")
+        .select("establishment_id")
+        .eq("user_id", user.id)
+        .eq("is_active", true);
+
+      if (employeesError) {
+        console.error("Erro ao buscar funcionários:", employeesError);
+        // Se houver erro, continuar com a lógica antiga (proprietário)
+      }
+
+      // Se o usuário é funcionário, mostrar apenas estabelecimentos onde trabalha
+      if (employees && employees.length > 0) {
+        const establishmentIds = employees.map((emp: any) => emp.establishment_id);
+        
+        // Buscar apenas os estabelecimentos onde o usuário é funcionário
+        const { data, error } = await supabase
+          .from("establishments")
+          .select("*")
+          .in("id", establishmentIds)
+          .eq("is_active", true)
+          .order("name");
+
+        if (error) throw error;
+        return data || [];
+      }
+
+      // Se não é funcionário, buscar estabelecimentos das empresas do usuário (proprietário)
       const { data: userCompanies, error: userCompaniesError } = await supabase
         .from("user_companies")
         .select("company_id")

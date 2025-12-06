@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEmployees, useEmployeeRoles, useCurrentEmployeeRole } from "@/hooks/useEmployees";
-import { useUsers } from "@/hooks/useUsers";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useUserLimits } from "@/hooks/useUserLimits";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Edit, Trash2, Loader2, Users, Shield, AlertCircle } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, Edit, Trash2, Loader2, Users, Shield, AlertCircle, Key, UserPlus, User, Briefcase, Mail, Phone, FileText, MapPin, Building2, Calendar, Lock, CheckCircle2, XCircle, Sparkles } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -43,18 +44,87 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MoreVertical } from "lucide-react";
+import { EmployeePermissionsDialog } from "@/components/employees/EmployeePermissionsDialog";
 
 const Employees = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>();
+  const [selectedEmployeeForPermissions, setSelectedEmployeeForPermissions] = useState<any>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  const { employees, isLoading, createEmployee, updateEmployee, deleteEmployee } = useEmployees();
+  const queryClient = useQueryClient();
+  const { employees, isLoading, createEmployee, updateEmployee, deleteEmployee, refetch } = useEmployees();
   const { roles } = useEmployeeRoles();
-  const { users } = useUsers();
   const { role } = useCurrentEmployeeRole();
   const { canAccess } = usePermissions();
+  const { createOrUpdateUserLimit } = useUserLimits();
+  
+  // Buscar usuários da empresa do estabelecimento atual
+  const { data: companyUsers = [], isLoading: isLoadingCompanyUsers } = useQuery({
+    queryKey: ["company_users"],
+    queryFn: async () => {
+      const establishmentId = localStorage.getItem("selectedEstablishmentId");
+      if (!establishmentId) {
+        return [];
+      }
+
+      // Buscar a empresa do estabelecimento
+      const { data: establishmentData, error: establishmentError } = await supabase
+        .from("establishments")
+        .select("company_id")
+        .eq("id", establishmentId)
+        .single();
+
+      if (establishmentError || !establishmentData?.company_id) {
+        console.error("Erro ao buscar empresa do estabelecimento:", establishmentError);
+        return [];
+      }
+
+      const companyId = establishmentData.company_id;
+
+      // Buscar user_ids associados à empresa via user_companies
+      const { data: userCompanies, error: userCompaniesError } = await supabase
+        .from("user_companies")
+        .select("user_id")
+        .eq("company_id", companyId)
+        .eq("is_active", true);
+
+      if (userCompaniesError) {
+        console.error("Erro ao buscar usuários da empresa:", userCompaniesError);
+        return [];
+      }
+
+      if (!userCompanies || userCompanies.length === 0) {
+        return [];
+      }
+
+      // Extrair os user_ids
+      const userIds = userCompanies.map((uc: any) => uc.user_id);
+
+      // Buscar os dados dos usuários
+      const { data: users, error: usersError } = await supabase
+        .from("users")
+        .select("id, email, full_name, cpf, phone")
+        .in("id", userIds);
+
+      if (usersError) {
+        console.error("Erro ao buscar dados dos usuários:", usersError);
+        return [];
+      }
+
+      // Formatar os usuários
+      return (users || []).map((user: any) => ({
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        cpf: user.cpf,
+        phone: user.phone,
+      }));
+    },
+    enabled: !!localStorage.getItem("selectedEstablishmentId"),
+  });
 
   // Verificar se tem permissão para acessar funcionários (apenas gerentes)
   if (role && role.code !== "manager" && !canAccess("employees")) {
@@ -171,6 +241,21 @@ const Employees = () => {
             if (!userData) throw new Error("Usuário criado mas não encontrado na tabela");
 
             userId = userData.id;
+
+            // Criar limite de usuário para impedir que funcionário crie empresas ou estabelecimentos
+            // Funcionários criados por gerentes devem ter max_companies = 0 e max_establishments = 0
+            try {
+              await createOrUpdateUserLimit({
+                user_id: userId,
+                max_companies: 0, // Funcionário não pode criar empresas
+                max_establishments: 0, // Funcionário não pode criar estabelecimentos
+              });
+            } catch (limitError: any) {
+              console.error("Erro ao configurar limites do funcionário:", limitError);
+              // Não bloquear a criação do funcionário se houver erro ao configurar limites
+              // Mas avisar o usuário
+              toast.warning("Funcionário criado, mas houve um aviso ao configurar permissões");
+            }
           } catch (error: any) {
             toast.error(error.message || "Erro ao criar usuário");
             throw error;
@@ -182,6 +267,54 @@ const Employees = () => {
           return;
         }
 
+        // Buscar a empresa do estabelecimento para associar o funcionário
+        const { data: establishmentData, error: establishmentError } = await supabase
+          .from("establishments")
+          .select("company_id")
+          .eq("id", establishmentId)
+          .single();
+
+        if (establishmentError || !establishmentData?.company_id) {
+          toast.error("Erro ao buscar dados do estabelecimento");
+          return;
+        }
+
+        const companyId = establishmentData.company_id;
+
+        // Se não foi criado um novo usuário, verificar se precisa configurar limites
+        // Apenas se o usuário não tiver limites configurados e não tiver empresas associadas
+        if (!createNewUser) {
+          try {
+            const { data: existingLimit } = await supabase
+              .from("user_limits")
+              .select("*")
+              .eq("user_id", userId)
+              .maybeSingle();
+
+            // Verificar se o usuário já tem empresas associadas
+            const { data: userCompanies } = await supabase
+              .from("user_companies")
+              .select("id")
+              .eq("user_id", userId)
+              .limit(1);
+
+            // Se o usuário não tem limites configurados E não tem empresas associadas,
+            // configurar limites para funcionário (não pode criar empresas ou estabelecimentos)
+            // Se o usuário já tem empresas, não alteramos os limites (pode ser um proprietário)
+            if (!existingLimit && (!userCompanies || userCompanies.length === 0)) {
+              await createOrUpdateUserLimit({
+                user_id: userId,
+                max_companies: 0, // Funcionário não pode criar empresas
+                max_establishments: 0, // Funcionário não pode criar estabelecimentos
+              });
+            }
+          } catch (limitError: any) {
+            console.error("Erro ao verificar/configurar limites do funcionário:", limitError);
+            // Não bloquear a criação do funcionário se houver erro
+          }
+        }
+
+        // Criar o funcionário
         await createEmployee({
           user_id: userId,
           establishment_id: establishmentId,
@@ -191,6 +324,38 @@ const Employees = () => {
           phone: formData.phone || undefined,
           email: formData.email || undefined,
         });
+
+        // Associar o funcionário à empresa do estabelecimento
+        // Usar upsert para permitir que outras empresas também possam adicionar o mesmo funcionário
+        // Se já existir associação com esta empresa, não dará erro (upsert)
+        try {
+          const { error: userCompanyError } = await supabase
+            .from("user_companies")
+            .upsert(
+              {
+                user_id: userId,
+                company_id: companyId,
+                max_companies: 0, // Funcionário não pode criar empresas
+                max_establishments: 0, // Funcionário não pode criar estabelecimentos
+                is_active: true,
+              },
+              {
+                onConflict: "user_id,company_id", // Se já existir, atualiza
+                ignoreDuplicates: false,
+              }
+            );
+
+          if (userCompanyError) {
+            console.error("Erro ao associar funcionário à empresa:", userCompanyError);
+            // Não bloquear se já existir associação (pode ser que outra empresa já tenha adicionado)
+            if (!userCompanyError.message.includes("duplicate") && !userCompanyError.message.includes("unique")) {
+              toast.warning("Funcionário criado, mas houve um aviso ao associar à empresa");
+            }
+          }
+        } catch (userCompanyError: any) {
+          console.error("Erro ao associar funcionário à empresa:", userCompanyError);
+          // Não bloquear a criação do funcionário se houver erro na associação
+        }
       }
       setDialogOpen(false);
       setCreateNewUser(false);
@@ -217,7 +382,7 @@ const Employees = () => {
   };
 
   const handleUserSelect = (userId: string) => {
-    const selectedUser = users.find((u: any) => u.id === userId);
+    const selectedUser = companyUsers.find((u: any) => u.id === userId);
     if (selectedUser) {
       setFormData({
         ...formData,
@@ -364,6 +529,15 @@ const Employees = () => {
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => {
+                              setSelectedEmployeeForPermissions(employee);
+                              setPermissionsDialogOpen(true);
+                            }}
+                          >
+                            <Key className="h-4 w-4 mr-2" />
+                            Editar Permissões
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
                               setDeleteId(employee.id);
                               setDeleteDialogOpen(true);
                             }}
@@ -385,79 +559,156 @@ const Employees = () => {
 
       {/* Dialog: Funcionário */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto w-[95vw] sm:w-full">
-          <DialogHeader>
-            <DialogTitle>
-              {selectedEmployeeId ? "Editar Funcionário" : "Novo Funcionário"}
-            </DialogTitle>
+        <DialogContent className="max-w-3xl max-h-[95vh] overflow-y-auto w-[95vw] sm:w-full">
+          <DialogHeader className="pb-4 border-b">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10">
+                {selectedEmployeeId ? (
+                  <Edit className="h-5 w-5 text-primary" />
+                ) : (
+                  <UserPlus className="h-5 w-5 text-primary" />
+                )}
+              </div>
+              <div>
+                <DialogTitle className="text-2xl font-bold">
+                  {selectedEmployeeId ? "Editar Funcionário" : "Novo Funcionário"}
+                </DialogTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {selectedEmployeeId 
+                    ? "Atualize as informações do funcionário" 
+                    : "Adicione um funcionário e vincule-o à empresa"}
+                </p>
+              </div>
+            </div>
           </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6 pt-4">
             {!selectedEmployeeId && (
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 border rounded-lg bg-muted/50">
-                <div className="flex-1">
-                  <Label htmlFor="create_new_user" className="text-sm sm:text-base font-medium">
-                    Cadastrar novo usuário
-                  </Label>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {createNewUser 
-                      ? "Preencha os dados abaixo para criar um novo usuário" 
-                      : "Não encontrou o usuário? Crie um novo"}
-                  </p>
+              <div 
+                className={`relative p-5 rounded-xl border-2 transition-all group ${
+                  createNewUser 
+                    ? "border-primary bg-primary/5 shadow-md" 
+                    : "border-border bg-gradient-to-br from-muted/50 to-muted/30 hover:border-primary/50 hover:shadow-sm"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-4 flex-1">
+                    <div className={`p-3 rounded-lg transition-colors ${
+                      createNewUser ? "bg-primary/20" : "bg-muted group-hover:bg-primary/10"
+                    }`}>
+                      <Sparkles className={`h-5 w-5 transition-colors ${
+                        createNewUser ? "text-primary" : "text-muted-foreground group-hover:text-primary"
+                      }`} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Label htmlFor="create_new_user" className="text-base font-semibold cursor-pointer">
+                          Cadastrar novo usuário
+                        </Label>
+                        {createNewUser && (
+                          <CheckCircle2 className="h-4 w-4 text-primary" />
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {createNewUser 
+                          ? "Preencha os dados abaixo para criar um novo usuário no sistema" 
+                          : "Não encontrou o usuário na lista? Ative para criar um novo"}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    id="create_new_user"
+                    checked={createNewUser}
+                    onCheckedChange={(checked) => {
+                      setCreateNewUser(checked);
+                      if (checked) {
+                        setFormData((prev) => ({ ...prev, user_id: "" }));
+                      }
+                    }}
+                  />
                 </div>
-                <Switch
-                  id="create_new_user"
-                  checked={createNewUser}
-                  onCheckedChange={(checked) => {
-                    setCreateNewUser(checked);
-                    if (checked) {
-                      setFormData({ ...formData, user_id: "" });
-                    }
-                  }}
-                />
               </div>
             )}
 
             {!createNewUser && !selectedEmployeeId && (
-              <div>
-                <Label htmlFor="user_id" className="text-sm">Usuário *</Label>
-                <Select
-                  value={formData.user_id}
-                  onValueChange={handleUserSelect}
-                  required={!createNewUser}
-                  disabled={!!selectedEmployeeId}
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Selecione um usuário" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {users.length === 0 ? (
-                      <div className="p-4 text-center text-sm text-muted-foreground">
-                        Nenhum usuário encontrado. Ative a opção acima para criar um novo.
-                      </div>
-                    ) : (
-                      users.map((user: any) => (
-                        <SelectItem key={user.id} value={user.id}>
-                          <span className="text-sm">{user.full_name || user.email}</span>
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Selecione o usuário que será funcionário
-                </p>
+              <div className="space-y-4 p-5 rounded-xl border bg-card">
+                <div className="flex items-center gap-3 pb-3 border-b">
+                  <div className="p-2 rounded-lg bg-blue-500/10">
+                    <User className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold">Dados do Usuário</h3>
+                    <p className="text-xs text-muted-foreground">Selecione um usuário da empresa</p>
+                  </div>
+                </div>
+                {isLoadingCompanyUsers ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    <span className="ml-2 text-sm text-muted-foreground">Carregando usuários...</span>
+                  </div>
+                ) : companyUsers.length === 0 ? (
+                  <div className="p-4 border-2 border-dashed rounded-lg bg-muted/30 text-center">
+                    <User className="h-8 w-8 mx-auto mb-2 text-muted-foreground opacity-50" />
+                    <p className="text-sm text-muted-foreground">
+                      Nenhum usuário cadastrado na empresa. Ative a opção acima para criar um novo usuário.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="user_id" className="text-sm font-medium flex items-center gap-2">
+                      <Building2 className="h-4 w-4 text-muted-foreground" />
+                      Usuário da Empresa *
+                    </Label>
+                    <Select
+                      value={formData.user_id}
+                      onValueChange={handleUserSelect}
+                      required={!createNewUser}
+                      disabled={!!selectedEmployeeId}
+                    >
+                      <SelectTrigger className="h-11">
+                        <SelectValue placeholder="Selecione um usuário cadastrado na empresa" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {companyUsers.map((user: any) => (
+                          <SelectItem key={user.id} value={user.id}>
+                            <div className="flex items-center gap-2">
+                              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                                <User className="h-4 w-4 text-primary" />
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="text-sm font-medium">{user.full_name || "Sem nome"}</span>
+                                <span className="text-xs text-muted-foreground">{user.email}</span>
+                              </div>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      Usuários podem ser funcionários de múltiplas empresas
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
             {createNewUser && !selectedEmployeeId && (
-              <div className="space-y-3 sm:space-y-4 p-3 sm:p-4 border rounded-lg bg-muted/30">
-                <div className="flex items-center gap-2 mb-3 sm:mb-4">
-                  <Users className="h-4 w-4 text-primary flex-shrink-0" />
-                  <Label className="text-sm sm:text-base font-medium">Dados do Novo Usuário</Label>
+              <div className="space-y-5 p-5 rounded-xl border bg-gradient-to-br from-primary/5 to-primary/0">
+                <div className="flex items-center gap-3 pb-3 border-b">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <UserPlus className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold">Dados do Novo Usuário</h3>
+                    <p className="text-xs text-muted-foreground">Preencha os dados para criar um novo usuário</p>
+                  </div>
                 </div>
-                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
                   <div className="sm:col-span-2">
-                    <Label htmlFor="new_email" className="text-sm">E-mail *</Label>
+                    <Label htmlFor="new_email" className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      E-mail *
+                    </Label>
                     <Input
                       id="new_email"
                       type="email"
@@ -465,11 +716,14 @@ const Employees = () => {
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       required={createNewUser}
                       placeholder="usuario@exemplo.com"
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <Label htmlFor="password" className="text-sm">Senha *</Label>
+                    <Label htmlFor="password" className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <Lock className="h-4 w-4 text-muted-foreground" />
+                      Senha *
+                    </Label>
                     <Input
                       id="password"
                       type="password"
@@ -478,97 +732,112 @@ const Employees = () => {
                       required={createNewUser}
                       placeholder="Mínimo 6 caracteres"
                       minLength={6}
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <Label htmlFor="new_full_name" className="text-sm">Nome Completo</Label>
+                    <Label htmlFor="new_full_name" className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <User className="h-4 w-4 text-muted-foreground" />
+                      Nome Completo
+                    </Label>
                     <Input
                       id="new_full_name"
                       value={formData.full_name}
                       onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
                       placeholder="Digite o nome completo"
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="new_cpf" className="text-sm">CPF</Label>
+                    <Label htmlFor="new_cpf" className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-muted-foreground" />
+                      CPF
+                    </Label>
                     <Input
                       id="new_cpf"
                       value={formData.cpf}
                       onChange={(e) => setFormData({ ...formData, cpf: e.target.value })}
                       placeholder="000.000.000-00"
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="new_phone" className="text-sm">Telefone</Label>
+                    <Label htmlFor="new_phone" className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                      Telefone
+                    </Label>
                     <Input
                       id="new_phone"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                       placeholder="(00) 00000-0000"
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <Label htmlFor="new_birth_date" className="text-sm">Data de Nascimento</Label>
+                    <Label htmlFor="new_birth_date" className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-muted-foreground" />
+                      Data de Nascimento
+                    </Label>
                     <Input
                       id="new_birth_date"
                       type="date"
                       value={formData.birth_date}
                       onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <Label htmlFor="new_address" className="text-sm">Endereço</Label>
+                    <Label htmlFor="new_address" className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                      Endereço
+                    </Label>
                     <Input
                       id="new_address"
                       value={formData.address}
                       onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                       placeholder="Rua, número, complemento"
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="new_city" className="text-sm">Cidade</Label>
+                    <Label htmlFor="new_city" className="text-sm font-medium mb-2">Cidade</Label>
                     <Input
                       id="new_city"
                       value={formData.city}
                       onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                       placeholder="Cidade"
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="new_state" className="text-sm">Estado</Label>
+                    <Label htmlFor="new_state" className="text-sm font-medium mb-2">Estado</Label>
                     <Input
                       id="new_state"
                       value={formData.state}
                       onChange={(e) => setFormData({ ...formData, state: e.target.value })}
                       placeholder="UF"
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="new_postal_code" className="text-sm">CEP</Label>
+                    <Label htmlFor="new_postal_code" className="text-sm font-medium mb-2">CEP</Label>
                     <Input
                       id="new_postal_code"
                       value={formData.postal_code}
                       onChange={(e) => setFormData({ ...formData, postal_code: e.target.value })}
                       placeholder="00000-000"
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="new_country" className="text-sm">País</Label>
+                    <Label htmlFor="new_country" className="text-sm font-medium mb-2">País</Label>
                     <Input
                       id="new_country"
                       value={formData.country}
                       onChange={(e) => setFormData({ ...formData, country: e.target.value })}
                       placeholder="País"
-                      className="mt-1"
+                      className="h-11"
                     />
                   </div>
                 </div>
@@ -576,91 +845,154 @@ const Employees = () => {
             )}
 
             {selectedEmployeeId && (
-              <div className="p-3 sm:p-4 bg-muted/50 rounded-lg">
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  <strong>Usuário:</strong> {users.find((u: any) => u.id === formData.user_id)?.full_name || users.find((u: any) => u.id === formData.user_id)?.email || "N/A"}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">Usuário não pode ser alterado</p>
+              <div className="flex items-center gap-3 p-4 bg-muted/50 rounded-lg border">
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <User className="h-5 w-5 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium">
+                    {companyUsers.find((u: any) => u.id === formData.user_id)?.full_name || companyUsers.find((u: any) => u.id === formData.user_id)?.email || "N/A"}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Usuário não pode ser alterado</p>
+                </div>
               </div>
             )}
-            <div>
-              <Label htmlFor="role_id" className="text-sm">Função *</Label>
-              <Select
-                value={formData.role_id}
-                onValueChange={(value) => setFormData({ ...formData, role_id: value })}
-                required
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Selecione a função" />
-                </SelectTrigger>
-                <SelectContent>
-                  {roles.map((role) => (
-                    <SelectItem key={role.id} value={role.id}>
-                      <div>
-                        <div className="font-medium text-sm">{role.name}</div>
-                        {role.description && (
-                          <div className="text-xs text-muted-foreground">{role.description}</div>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+
+            {/* Informações Profissionais */}
+            <div className="space-y-4 p-5 rounded-xl border bg-card">
+              <div className="flex items-center gap-3 pb-3 border-b">
+                <div className="p-2 rounded-lg bg-purple-500/10">
+                  <Briefcase className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold">Informações Profissionais</h3>
+                  <p className="text-xs text-muted-foreground">Defina a função do funcionário</p>
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="role_id" className="text-sm font-medium mb-2 flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-muted-foreground" />
+                  Função *
+                </Label>
+                <Select
+                  value={formData.role_id}
+                  onValueChange={(value) => setFormData({ ...formData, role_id: value })}
+                  required
+                >
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder="Selecione a função" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roles.map((role) => (
+                      <SelectItem key={role.id} value={role.id}>
+                        <div className="flex items-center gap-2">
+                          <Shield className="h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <div className="font-medium text-sm">{role.name}</div>
+                            {role.description && (
+                              <div className="text-xs text-muted-foreground">{role.description}</div>
+                            )}
+                          </div>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+
+            {/* Informações Pessoais */}
             {!createNewUser && (
-              <>
-                <div>
-                  <Label htmlFor="full_name" className="text-sm">Nome Completo *</Label>
-                  <Input
-                    id="full_name"
-                    value={formData.full_name}
-                    onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                    required
-                    placeholder="Digite o nome completo"
-                    className="mt-1"
-                  />
-                </div>
-                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
-                  <div>
-                    <Label htmlFor="cpf" className="text-sm">CPF</Label>
-                    <Input
-                      id="cpf"
-                      value={formData.cpf}
-                      onChange={(e) => setFormData({ ...formData, cpf: e.target.value })}
-                      placeholder="000.000.000-00"
-                      className="mt-1"
-                    />
+              <div className="space-y-4 p-5 rounded-xl border bg-card">
+                <div className="flex items-center gap-3 pb-3 border-b">
+                  <div className="p-2 rounded-lg bg-green-500/10">
+                    <User className="h-5 w-5 text-green-600 dark:text-green-400" />
                   </div>
                   <div>
-                    <Label htmlFor="phone" className="text-sm">Telefone</Label>
-                    <Input
-                      id="phone"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      placeholder="(00) 00000-0000"
-                      className="mt-1"
-                    />
+                    <h3 className="text-base font-semibold">Informações Pessoais</h3>
+                    <p className="text-xs text-muted-foreground">Dados pessoais do funcionário</p>
                   </div>
                 </div>
-                <div>
-                  <Label htmlFor="email" className="text-sm">E-mail</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    placeholder="email@exemplo.com"
-                    className="mt-1"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    E-mail de contato do funcionário (opcional)
-                  </p>
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="full_name" className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <User className="h-4 w-4 text-muted-foreground" />
+                      Nome Completo *
+                    </Label>
+                    <Input
+                      id="full_name"
+                      value={formData.full_name}
+                      onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                      required
+                      placeholder="Digite o nome completo"
+                      className="h-11"
+                    />
+                  </div>
+                  <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="cpf" className="text-sm font-medium mb-2 flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        CPF
+                      </Label>
+                      <Input
+                        id="cpf"
+                        value={formData.cpf}
+                        onChange={(e) => setFormData({ ...formData, cpf: e.target.value })}
+                        placeholder="000.000.000-00"
+                        className="h-11"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="phone" className="text-sm font-medium mb-2 flex items-center gap-2">
+                        <Phone className="h-4 w-4 text-muted-foreground" />
+                        Telefone
+                      </Label>
+                      <Input
+                        id="phone"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        placeholder="(00) 00000-0000"
+                        className="h-11"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="email" className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      E-mail
+                    </Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      placeholder="email@exemplo.com"
+                      className="h-11"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1.5">
+                      E-mail de contato do funcionário (opcional)
+                    </p>
+                  </div>
                 </div>
-              </>
+              </div>
             )}
             {selectedEmployeeId && (
-              <div className="flex items-center justify-between">
-                <Label htmlFor="is_active">Ativo</Label>
+              <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg border">
+                <div className="flex items-center gap-3">
+                  {formData.is_active ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  ) : (
+                    <XCircle className="h-5 w-5 text-muted-foreground" />
+                  )}
+                  <div>
+                    <Label htmlFor="is_active" className="text-sm font-medium cursor-pointer">
+                      Status do Funcionário
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {formData.is_active ? "Funcionário está ativo" : "Funcionário está inativo"}
+                    </p>
+                  </div>
+                </div>
                 <Switch
                   id="is_active"
                   checked={formData.is_active}
@@ -668,25 +1000,49 @@ const Employees = () => {
                 />
               </div>
             )}
-            <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-2 pt-4 border-t">
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-6 border-t">
               <Button 
                 type="button" 
                 variant="outline" 
                 onClick={() => setDialogOpen(false)}
-                className="w-full sm:w-auto"
+                className="w-full sm:w-auto h-11"
               >
+                <XCircle className="h-4 w-4 mr-2" />
                 Cancelar
               </Button>
               <Button 
                 type="submit"
-                className="w-full sm:w-auto"
+                className="w-full sm:w-auto h-11"
               >
+                <CheckCircle2 className="h-4 w-4 mr-2" />
                 Salvar
               </Button>
             </div>
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Dialog: Permissões */}
+      {selectedEmployeeForPermissions && (
+        <EmployeePermissionsDialog
+          open={permissionsDialogOpen}
+          onOpenChange={setPermissionsDialogOpen}
+          employee={selectedEmployeeForPermissions}
+          onSuccess={async () => {
+            // Recarregar lista de funcionários e invalidar cache de permissões
+            refetch();
+            // Se o funcionário editado for o usuário atual, invalidar cache de role
+            try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user && selectedEmployeeForPermissions?.user_id === user.id) {
+                queryClient.invalidateQueries({ queryKey: ["current_employee_role"] });
+              }
+            } catch (error) {
+              console.error("Erro ao verificar usuário:", error);
+            }
+          }}
+        />
+      )}
 
       {/* Alert Dialog: Exclusão */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

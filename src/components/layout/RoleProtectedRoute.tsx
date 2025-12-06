@@ -12,7 +12,7 @@ interface RoleProtectedRouteProps {
 
 export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
   const { user, loading: authLoading } = useAuth();
-  const { role, isLoading: roleLoading } = useCurrentEmployeeRole();
+  const { role, customPermissions, isLoading: roleLoading } = useCurrentEmployeeRole();
   const { isSuperAdmin } = useIsSuperAdmin();
   const navigate = useNavigate();
   const location = useLocation();
@@ -46,14 +46,14 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
         return;
       }
     } else {
-      // Verificar permissão baseada no role
-      const hasAccess = checkPermission(role, feature);
+      // Verificar permissão baseada no role (usando customPermissions se disponível)
+      const hasAccess = checkPermission(role, feature, undefined, customPermissions);
       if (!hasAccess) {
         navigate("/");
         return;
       }
     }
-  }, [user, authLoading, roleLoading, role, isSuperAdmin, location.pathname, navigate]);
+  }, [user, authLoading, roleLoading, role, customPermissions, isSuperAdmin, location.pathname, navigate]);
 
   if (authLoading || roleLoading) {
     return (
@@ -75,10 +75,10 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
     return <>{children}</>;
   }
 
-  // Verificar permissão para a rota atual
+  // Verificar permissão para a rota atual (usando customPermissions se disponível)
   const feature = routeToFeature[location.pathname];
   if (feature && role) {
-    const hasAccess = checkPermission(role, feature);
+    const hasAccess = checkPermission(role, feature, undefined, customPermissions);
     if (!hasAccess) {
       return null;
     }

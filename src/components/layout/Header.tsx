@@ -15,6 +15,8 @@ import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { NotificationsDropdown } from "./NotificationsDropdown";
 import { LanguageSelector } from "./LanguageSelector";
 import { useTranslation } from "react-i18next";
+import { useCurrentEmployeeRole } from "@/hooks/useEmployees";
+import { useIsSuperAdmin } from "@/hooks/useUsers";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -25,7 +27,12 @@ export const Header = ({ onMenuClick }: HeaderProps) => {
   const navigate = useNavigate();
   const { establishmentId } = useParams<{ establishmentId?: string }>();
   const { selectedEstablishment, establishments, setSelectedEstablishment } = useEstablishment();
+  const { role } = useCurrentEmployeeRole();
+  const { isSuperAdmin } = useIsSuperAdmin();
   const { t } = useTranslation();
+  
+  // Verificar se o usuário pode acessar configurações (apenas gerente ou super admin)
+  const canAccessSettings = role?.code === "manager" || isSuperAdmin;
   
   // Usar establishmentId da URL ou do contexto (numeric_id)
   const currentEstablishmentId = establishmentId || (selectedEstablishment?.numeric_id?.toString());
@@ -149,11 +156,13 @@ export const Header = ({ onMenuClick }: HeaderProps) => {
               <UserCircle className="h-4 w-4 mr-2" />
               {t("header.myProfile")}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={handleSettings}>
-              <Settings className="h-4 w-4 mr-2" />
-              {t("header.settings")}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            {canAccessSettings && (
+              <DropdownMenuItem onSelect={handleSettings}>
+                <Settings className="h-4 w-4 mr-2" />
+                {t("header.settings")}
+              </DropdownMenuItem>
+            )}
+            {canAccessSettings && <DropdownMenuSeparator />}
             <DropdownMenuItem onSelect={handleSignOut} className="text-destructive">
               <LogOut className="h-4 w-4 mr-2" />
               {t("header.logout")}

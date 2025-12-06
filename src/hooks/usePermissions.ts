@@ -3,9 +3,9 @@ import { useIsSuperAdmin } from "./useUsers";
 import { usePermissions as usePermissionsLib, checkPermission } from "@/lib/permissions";
 
 export const usePermissions = () => {
-  const { role } = useCurrentEmployeeRole();
+  const { role, customPermissions } = useCurrentEmployeeRole();
   const { isSuperAdmin } = useIsSuperAdmin();
-  const permissions = usePermissionsLib(role);
+  const permissions = usePermissionsLib(role, customPermissions);
 
   // Super Admin tem todas as permissões (exceto super_admin que é verificado separadamente)
   if (isSuperAdmin) {
