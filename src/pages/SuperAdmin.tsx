@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect, useMemo } from "react";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +32,8 @@ import {
   MoreVertical,
   Upload,
   Image as ImageIcon,
-  Globe
+  Globe,
+  Eye
 } from "lucide-react";
 import {
   Table,
@@ -484,6 +485,9 @@ const SuperAdmin = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
   
+  const [userDetailsDialogOpen, setUserDetailsDialogOpen] = useState(false);
+  const [selectedUserDetails, setSelectedUserDetails] = useState<any>(null);
+  
   const [companyFormData, setCompanyFormData] = useState({
     name: "",
     cnpj: "",
@@ -526,6 +530,132 @@ const SuperAdmin = () => {
 
   // Buscar todas as associações de usuários e empresas
   const { allUserCompanies, isLoading: isLoadingAssociations } = useAllUserCompanies();
+  
+  // Buscar todos os funcionários (employees) com seus roles e estabelecimentos
+  const { data: allEmployees, isLoading: isLoadingEmployees } = useQuery({
+    queryKey: ["all_employees_with_roles"],
+    queryFn: async () => {
+      const { data: employees, error } = await supabase
+        .from("employees")
+        .select(`
+          id,
+          user_id,
+          establishment_id,
+          role_id,
+          is_active,
+          employee_roles (
+            id,
+            name,
+            code,
+            description
+          ),
+          establishments (
+            id,
+            name,
+            company_id,
+            companies (
+              id,
+              name
+            )
+          )
+        `)
+        .eq("is_active", true);
+
+      if (error) {
+        console.error("Erro ao buscar funcionários:", error);
+        return [];
+      }
+
+      if (!employees || employees.length === 0) return [];
+
+      // Buscar dados dos usuários separadamente
+      const userIds = [...new Set(employees.map((emp: any) => emp.user_id).filter(Boolean))];
+      
+      let usersMap: Record<string, any> = {};
+      
+      if (userIds.length > 0) {
+        const { data: usersData, error: usersError } = await supabase
+          .from("users")
+          .select("id, email, full_name, cpf, phone")
+          .in("id", userIds);
+
+        if (usersError) {
+          console.error("Erro ao buscar usuários:", usersError);
+        } else if (usersData) {
+          usersData.forEach((user: any) => {
+            usersMap[user.id] = user;
+          });
+        }
+      }
+
+      // Combinar dados dos funcionários com dados dos usuários
+      return employees.map((emp: any) => ({
+        ...emp,
+        users: usersMap[emp.user_id] || null,
+      }));
+    },
+  });
+
+  // Buscar gerentes de cada estabelecimento
+  const managersByEstablishment = useMemo(() => {
+    if (!allEmployees) return {};
+
+    const managers = allEmployees.filter((emp: any) => 
+      emp.employee_roles?.code === "manager"
+    );
+
+    const managersMap: Record<string, any> = {};
+    managers.forEach((manager: any) => {
+      if (manager.establishment_id) {
+        managersMap[manager.establishment_id] = manager;
+      }
+    });
+
+    return managersMap;
+  }, [allEmployees]);
+
+  // Buscar super admins da tabela admin_users
+  const { data: superAdmins } = useQuery({
+    queryKey: ["super_admins"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("admin_users")
+        .select("user_id")
+        .eq("is_super_admin", true);
+
+      if (error) {
+        console.error("Erro ao buscar super admins:", error);
+        return [];
+      }
+
+      return (data || []).map((admin: any) => admin.user_id);
+    },
+  });
+
+  // Filtrar usuários que são gerentes ou super admins
+  const managersAndSuperAdmins = useMemo(() => {
+    if (!users || !allEmployees) return [];
+
+    // Buscar user_ids que são gerentes
+    const managerUserIds = new Set(
+      allEmployees
+        .filter((emp: any) => emp.employee_roles?.code === "manager")
+        .map((emp: any) => emp.user_id)
+    );
+
+    // Buscar user_ids que são super admins
+    const superAdminUserIds = new Set(superAdmins || []);
+
+    return users.filter((user: any) => {
+      // Verificar se é gerente
+      if (managerUserIds.has(user.id)) return true;
+      
+      // Verificar se é super admin
+      if (superAdminUserIds.has(user.id)) return true;
+
+      return false;
+    });
+  }, [users, allEmployees, superAdmins]);
   
   // Carregar limites do usuário quando selecionado para edição
   useEffect(() => {
@@ -813,9 +943,70 @@ const SuperAdmin = () => {
     company.cnpj?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const filteredUsers = users.filter((user: any) =>
-    user.email?.toLowerCase().includes(searchTerm.toLowerCase())
+  // Filtrar usuários gerentes e super admins
+  const filteredManagersAndAdmins = managersAndSuperAdmins.filter((user: any) =>
+    user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    user.full_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Agrupar funcionários por user_id e filtrar (não gerentes)
+  const groupedEmployees = useMemo(() => {
+    if (!allEmployees) return [];
+    
+    // Filtrar funcionários (excluir gerentes)
+    const employees = allEmployees.filter((emp: any) => {
+      const roleCode = emp.employee_roles?.code;
+      // Excluir gerentes
+      if (roleCode === "manager") return false;
+      
+      // Filtrar por termo de busca
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = 
+        emp.users?.email?.toLowerCase().includes(searchLower) ||
+        emp.users?.full_name?.toLowerCase().includes(searchLower) ||
+        emp.establishments?.name?.toLowerCase().includes(searchLower) ||
+        emp.employee_roles?.name?.toLowerCase().includes(searchLower);
+      
+      return !searchTerm || matchesSearch;
+    });
+
+    // Agrupar por user_id
+    const grouped: Record<string, any> = {};
+    
+    employees.forEach((emp: any) => {
+      const userId = emp.user_id;
+      if (!userId) return;
+      
+      if (!grouped[userId]) {
+        grouped[userId] = {
+          user: emp.users,
+          user_id: userId,
+          establishments: [],
+          roles: new Set(),
+        };
+      }
+      
+      // Adicionar estabelecimento
+      grouped[userId].establishments.push({
+        id: emp.id,
+        establishment: emp.establishments,
+        role: emp.employee_roles,
+        is_active: emp.is_active,
+        establishment_id: emp.establishment_id,
+      });
+      
+      // Adicionar cargo ao conjunto de cargos
+      if (emp.employee_roles?.name) {
+        grouped[userId].roles.add(emp.employee_roles.name);
+      }
+    });
+    
+    // Converter Set para Array
+    return Object.values(grouped).map((item: any) => ({
+      ...item,
+      roles: Array.from(item.roles),
+    }));
+  }, [allEmployees, searchTerm]);
 
   const filteredEstablishments = establishments.filter((est: any) =>
     est.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1191,14 +1382,22 @@ const SuperAdmin = () => {
 
         {/* Tab: Usuários */}
         <TabsContent value="users" className="space-y-4">
-          <Card>
-            <div className="p-6 border-b flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">Usuários</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Gerencie todos os usuários do sistema
-                </p>
-              </div>
+          <Tabs defaultValue="managers" className="space-y-4">
+            <TabsList>
+              <TabsTrigger value="managers">Gerentes e Super Admins</TabsTrigger>
+              <TabsTrigger value="employees">Funcionários</TabsTrigger>
+            </TabsList>
+
+            {/* Tab: Gerentes e Super Admins */}
+            <TabsContent value="managers" className="space-y-4">
+              <Card>
+                <div className="p-6 border-b flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-semibold">Gerentes e Super Admins</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Gerencie os gerentes e super administradores do sistema
+                    </p>
+                  </div>
               <Button onClick={() => {
                 setSelectedUserId(undefined);
                 setUserFormData({ 
@@ -1221,125 +1420,289 @@ const SuperAdmin = () => {
               </Button>
             </div>
 
-            {isLoadingUsers ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              </div>
-            ) : filteredUsers.length === 0 ? (
-              <div className="p-12 text-center">
-                <Users className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-                <p className="text-muted-foreground font-medium">Nenhum usuário encontrado</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {searchTerm ? "Tente ajustar os filtros de busca" : "Os usuários serão sincronizados automaticamente"}
-                </p>
-              </div>
-            ) : (
-              <div className="p-6">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Usuário</TableHead>
-                      <TableHead>CPF</TableHead>
-                      <TableHead>Telefone</TableHead>
-                      <TableHead>Limite Empresas</TableHead>
-                      <TableHead>Limite Estabelecimentos</TableHead>
-                      <TableHead>Data de Cadastro</TableHead>
-                      <TableHead className="text-right">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredUsers.map((user: any) => (
-                      <TableRow key={user.id} className="hover:bg-muted/50">
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                              <Users className="h-5 w-5 text-primary" />
-                            </div>
-                            <div>
-                              <p className="font-medium">{user.full_name || user.email}</p>
-                              <p className="text-xs text-muted-foreground">{user.email}</p>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm">{user.cpf || "-"}</span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm">{user.phone || "-"}</span>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_companies || 1}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_establishments || 1}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm">
-                            {user.created_at ? new Date(user.created_at).toLocaleDateString("pt-BR", {
-                              day: "2-digit",
-                              month: "2-digit",
-                              year: "numeric",
-                            }) : "-"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setSelectedUserId(user.id);
-                                  // Os limites serão carregados pelo hook useUserLimits
-                                  setUserFormData({
-                                    email: user.email || "",
-                                    password: "",
-                                    full_name: (user as any).full_name || "",
-                                    cpf: (user as any).cpf || "",
-                                    phone: (user as any).phone || "",
-                                    address: (user as any).address || "",
-                                    city: (user as any).city || "",
-                                    state: (user as any).state || "",
-                                    postal_code: (user as any).postal_code || "",
-                                    country: (user as any).country || "Brasil",
-                                    birth_date: (user as any).birth_date || "",
-                                    max_companies: 1,
-                                    max_establishments: 1,
-                                  });
-                                  setUserDialogOpen(true);
-                                }}
-                              >
-                                <Edit className="h-4 w-4 mr-2" />
-                                Editar
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setDeleteType("user");
-                                  setDeleteId(user.id);
-                                  setDeleteDialogOpen(true);
-                                }}
-                                className="text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Excluir
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </Card>
+                  {isLoadingUsers || isLoadingEmployees ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : filteredManagersAndAdmins.length === 0 ? (
+                    <div className="p-12 text-center">
+                      <Users className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                      <p className="text-muted-foreground font-medium">Nenhum gerente ou super admin encontrado</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {searchTerm ? "Tente ajustar os filtros de busca" : "Os usuários serão sincronizados automaticamente"}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-6">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Usuário</TableHead>
+                            <TableHead>CPF</TableHead>
+                            <TableHead>Telefone</TableHead>
+                            <TableHead>Tipo</TableHead>
+                            <TableHead>Limite Empresas</TableHead>
+                            <TableHead>Limite Estabelecimentos</TableHead>
+                            <TableHead>Data de Cadastro</TableHead>
+                            <TableHead className="text-right">Ações</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredManagersAndAdmins.map((user: any) => {
+                            // Buscar funcionários deste usuário
+                            const userEmployees = (allEmployees || []).filter((emp: any) => emp.user_id === user.id);
+                            const isManager = userEmployees.some((emp: any) => emp.employee_roles?.code === "manager");
+                            const isSuperAdmin = (superAdmins || []).includes(user.id);
+                            
+                            return (
+                              <TableRow key={user.id} className="hover:bg-muted/50">
+                                <TableCell>
+                                  <div className="flex items-center gap-3">
+                                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                      <Users className="h-5 w-5 text-primary" />
+                                    </div>
+                                    <div>
+                                      <p className="font-medium">{user.full_name || user.email}</p>
+                                      <p className="text-xs text-muted-foreground">{user.email}</p>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-sm">{user.cpf || "-"}</span>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-sm">{user.phone || "-"}</span>
+                                </TableCell>
+                                <TableCell>
+                                  {isSuperAdmin ? (
+                                    <Badge variant="default" className="bg-purple-600">
+                                      <Shield className="h-3 w-3 mr-1" />
+                                      Super Admin
+                                    </Badge>
+                                  ) : isManager ? (
+                                    <Badge variant="outline">
+                                      <Shield className="h-3 w-3 mr-1" />
+                                      Gerente
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="secondary">Usuário</Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">
+                                    {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_companies || 1}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">
+                                    {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_establishments || 1}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-sm">
+                                    {user.created_at ? new Date(user.created_at).toLocaleDateString("pt-BR", {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      year: "numeric",
+                                    }) : "-"}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSelectedUserDetails({
+                                          user,
+                                          employees: userEmployees,
+                                        });
+                                        setUserDetailsDialogOpen(true);
+                                      }}
+                                      title="Ver detalhes"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="sm">
+                                          <MoreVertical className="h-4 w-4" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem
+                                          onClick={() => {
+                                            setSelectedUserId(user.id);
+                                            // Os limites serão carregados pelo hook useUserLimits
+                                            setUserFormData({
+                                              email: user.email || "",
+                                              password: "",
+                                              full_name: (user as any).full_name || "",
+                                              cpf: (user as any).cpf || "",
+                                              phone: (user as any).phone || "",
+                                              address: (user as any).address || "",
+                                              city: (user as any).city || "",
+                                              state: (user as any).state || "",
+                                              postal_code: (user as any).postal_code || "",
+                                              country: (user as any).country || "Brasil",
+                                              birth_date: (user as any).birth_date || "",
+                                              max_companies: 1,
+                                              max_establishments: 1,
+                                            });
+                                            setUserDialogOpen(true);
+                                          }}
+                                        >
+                                          <Edit className="h-4 w-4 mr-2" />
+                                          Editar
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onClick={() => {
+                                            setDeleteType("user");
+                                            setDeleteId(user.id);
+                                            setDeleteDialogOpen(true);
+                                          }}
+                                          className="text-destructive"
+                                        >
+                                          <Trash2 className="h-4 w-4 mr-2" />
+                                          Excluir
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </Card>
+              </TabsContent>
+
+              {/* Tab: Funcionários */}
+              <TabsContent value="employees" className="space-y-4">
+                <Card>
+                  <div className="p-6 border-b">
+                    <div>
+                      <h2 className="text-xl font-semibold">Funcionários</h2>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Visualize todos os funcionários e seus gerentes responsáveis
+                      </p>
+                    </div>
+                  </div>
+
+                  {isLoadingEmployees ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : groupedEmployees.length === 0 ? (
+                    <div className="p-12 text-center">
+                      <Users className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                      <p className="text-muted-foreground font-medium">Nenhum funcionário encontrado</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {searchTerm ? "Tente ajustar os filtros de busca" : "Não há funcionários cadastrados"}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-6">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Funcionário</TableHead>
+                            <TableHead>Cargos</TableHead>
+                            <TableHead>Estabelecimentos</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead className="text-right">Ações</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {groupedEmployees.map((groupedEmp: any) => {
+                            // Buscar todos os funcionários deste usuário para o modal
+                            const userEmployees = (allEmployees || []).filter(
+                              (emp: any) => emp.user_id === groupedEmp.user_id
+                            );
+                            
+                            return (
+                              <TableRow key={groupedEmp.user_id} className="hover:bg-muted/50">
+                                <TableCell>
+                                  <div className="flex items-center gap-3">
+                                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                      <Users className="h-5 w-5 text-primary" />
+                                    </div>
+                                    <div>
+                                      <p className="font-medium">{groupedEmp.user?.full_name || groupedEmp.user?.email || "-"}</p>
+                                      <p className="text-xs text-muted-foreground">{groupedEmp.user?.email || "-"}</p>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-col gap-1">
+                                    {groupedEmp.roles.map((roleName: string) => (
+                                      <Badge key={roleName} variant="outline" className="w-fit">
+                                        <Shield className="h-3 w-3 mr-1" />
+                                        {roleName}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-col gap-2 max-w-xs">
+                                    {groupedEmp.establishments.map((est: any) => (
+                                      <div key={est.id} className="flex flex-col gap-1">
+                                        <div className="flex items-center gap-1">
+                                          <Hotel className="h-3 w-3 text-muted-foreground" />
+                                          <span className="text-sm font-medium">{est.establishment?.name || "-"}</span>
+                                        </div>
+                                        {est.establishment?.companies?.name && (
+                                          <div className="flex items-center gap-1 ml-4">
+                                            <Building2 className="h-3 w-3 text-muted-foreground" />
+                                            <span className="text-xs text-muted-foreground">{est.establishment.companies.name}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-col gap-1">
+                                    {groupedEmp.establishments.map((est: any) => (
+                                      <Badge 
+                                        key={est.id} 
+                                        variant={est.is_active ? "default" : "secondary"}
+                                        className="w-fit"
+                                      >
+                                        {est.is_active ? "Ativo" : "Inativo"}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setSelectedUserDetails({
+                                        user: groupedEmp.user,
+                                        employees: userEmployees,
+                                      });
+                                      setUserDetailsDialogOpen(true);
+                                    }}
+                                    title="Ver detalhes"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </Card>
+              </TabsContent>
+            </Tabs>
         </TabsContent>
 
         {/* Tab: Associações */}
@@ -2052,6 +2415,142 @@ const SuperAdmin = () => {
               <Button type="submit">Criar</Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Detalhes do Usuário */}
+      <Dialog open={userDetailsDialogOpen} onOpenChange={setUserDetailsDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              Detalhes do Usuário
+            </DialogTitle>
+          </DialogHeader>
+          {selectedUserDetails && (
+            <div className="space-y-6">
+              {/* Informações do Usuário */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Informações Pessoais
+                </h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Nome Completo</Label>
+                    <p className="font-medium">{selectedUserDetails.user.full_name || "-"}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">E-mail</Label>
+                    <p className="font-medium">{selectedUserDetails.user.email}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">CPF</Label>
+                    <p className="font-medium">{selectedUserDetails.user.cpf || "-"}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Telefone</Label>
+                    <p className="font-medium">{selectedUserDetails.user.phone || "-"}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Data de Cadastro</Label>
+                    <p className="font-medium">
+                      {selectedUserDetails.user.created_at
+                        ? new Date(selectedUserDetails.user.created_at).toLocaleDateString("pt-BR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "-"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cargos e Estabelecimentos */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <Shield className="h-5 w-5" />
+                  Cargos e Estabelecimentos
+                </h3>
+                {isLoadingEmployees ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : selectedUserDetails.employees.length > 0 ? (
+                  <div className="space-y-4">
+                    {selectedUserDetails.employees.map((emp: any) => (
+                      <Card key={emp.id} className="p-4">
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Shield className="h-4 w-4 text-primary" />
+                            <Label className="text-sm font-semibold">Cargo</Label>
+                            <Badge variant="outline" className="ml-2">
+                              {emp.employee_roles?.name || "Sem cargo"}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Hotel className="h-4 w-4 text-primary" />
+                            <Label className="text-sm font-semibold">Estabelecimento</Label>
+                            <span className="text-sm ml-2">
+                              {emp.establishments?.name || "Estabelecimento não encontrado"}
+                            </span>
+                          </div>
+                          {emp.establishments?.companies?.name && (
+                            <div className="flex items-center gap-2">
+                              <Building2 className="h-4 w-4 text-primary" />
+                              <Label className="text-sm font-semibold">Empresa</Label>
+                              <span className="text-sm ml-2">{emp.establishments.companies.name}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <Label className="text-sm font-semibold">Status</Label>
+                            <Badge variant={emp.is_active ? "default" : "secondary"} className="ml-2">
+                              {emp.is_active ? "Ativo" : "Inativo"}
+                            </Badge>
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Shield className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                    <p>Este usuário não possui cargos atribuídos</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Limites */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <Activity className="h-5 w-5" />
+                  Limites do Sistema
+                </h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Limite de Empresas</Label>
+                    <p className="font-medium text-lg">
+                      {allUserLimits.find((ul: any) => ul.user_id === selectedUserDetails.user.id)?.max_companies || 1}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Limite de Estabelecimentos</Label>
+                    <p className="font-medium text-lg">
+                      {allUserLimits.find((ul: any) => ul.user_id === selectedUserDetails.user.id)?.max_establishments || 1}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end pt-4 border-t">
+            <Button variant="outline" onClick={() => setUserDetailsDialogOpen(false)}>
+              Fechar
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
