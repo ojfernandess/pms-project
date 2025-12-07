@@ -633,23 +633,39 @@ const OccupancyMap = () => {
           {/* Status */}
           <div>
             <Label className="text-sm font-medium mb-2 block">Status</Label>
-            <div className="flex flex-wrap gap-2">
-        {Object.entries(statusConfig).map(([status, config]) => (
-                <div key={status} className="flex items-center gap-1">
-                  <Checkbox
-                    id={`status-${status}`}
-                    checked={selectedStatuses.has(status as RoomOccupancyStatus)}
-                    onCheckedChange={() => toggleStatusFilter(status as RoomOccupancyStatus)}
-                  />
-                  <Label
-                    htmlFor={`status-${status}`}
-                    className="text-xs cursor-pointer flex items-center gap-1"
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(statusConfig).map(([status, config]) => {
+                const isSelected = selectedStatuses.has(status as RoomOccupancyStatus);
+                return (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => toggleStatusFilter(status as RoomOccupancyStatus)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200",
+                      "border-2 cursor-pointer select-none",
+                      "hover:scale-105 active:scale-95",
+                      isSelected
+                        ? cn(
+                            "bg-slate-900 text-white border-slate-900 shadow-sm",
+                            "hover:bg-slate-800 hover:border-slate-800"
+                          )
+                        : cn(
+                            "bg-white text-slate-700 border-slate-200",
+                            "hover:bg-slate-50 hover:border-slate-300"
+                          )
+                    )}
                   >
-                    <span>{config.emoji}</span>
-                    <span className="hidden sm:inline">{config.label.split("/")[0]}</span>
-                  </Label>
-                </div>
-              ))}
+                    <span className="text-sm leading-none">{config.emoji}</span>
+                    <span className="hidden sm:inline whitespace-nowrap">
+                      {config.label.split("/")[0]}
+                    </span>
+                    {isSelected && (
+                      <CheckCircle2 className="h-3 w-3 text-white" />
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
