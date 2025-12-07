@@ -288,7 +288,7 @@ export const EmployeePermissionsDialog = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Key className="h-5 w-5" />
-            Matrix de Permissões - {employee.full_name}
+            Gerenciar Permissões - {employee.full_name}
           </DialogTitle>
         </DialogHeader>
 

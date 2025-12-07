@@ -1265,8 +1265,424 @@ export async function sendFiscalDocumentRequestEmail(
   }
 }
 
+/**
+ * Envia e-mail quando um funcionário é adicionado a um estabelecimento
+ */
+export async function sendEmployeeAddedToEstablishmentEmail(
+  employeeData: {
+    userId: string;
+    employeeName: string;
+    employeeEmail: string;
+    establishmentId: string;
+    establishmentName?: string;
+    companyName?: string;
+    roleName?: string;
+  }
+): Promise<string | null> {
+  try {
+    console.log('📧 Enviando e-mail de adição de funcionário ao estabelecimento:', { 
+      employeeEmail: employeeData.employeeEmail,
+      establishmentId: employeeData.establishmentId 
+    });
+    
+    // Verificar se as configurações de e-mail estão ativas
+    const settings = await getEmailSettings();
+    if (!settings || !settings.is_active) {
+      console.warn('⚠️ Configurações de e-mail não encontradas ou inativas. E-mail não será enviado.');
+      return null;
+    }
+    
+    // Buscar template ativo para o evento
+    console.log('🔍 Buscando template para evento: employee.added_to_establishment');
+    const { data: templates, error: templateError } = await supabase
+      .from('email_templates')
+      .select('*')
+      .eq('event_type', 'employee.added_to_establishment')
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+
+    if (templateError) {
+      console.error('❌ Erro ao buscar template para evento: employee.added_to_establishment', templateError);
+      return null;
+    }
+
+    console.log('📋 Templates encontrados:', templates?.length || 0);
+
+    if (!templates || templates.length === 0) {
+      console.error('❌ Template não encontrado para evento: employee.added_to_establishment');
+      console.log('💡 Dica: Verifique se a migration 20251204000001_add_employee_added_to_establishment_email_template.sql foi executada no Supabase.');
+      return null;
+    }
+
+    const template = templates[0];
+    
+    // Buscar dados do estabelecimento se não foram fornecidos
+    let establishmentName = employeeData.establishmentName;
+    let companyName = employeeData.companyName;
+    
+    if (!establishmentName || !companyName) {
+      const { data: establishmentData, error: establishmentError } = await supabase
+        .from('establishments')
+        .select(`
+          name,
+          companies (
+            name
+          )
+        `)
+        .eq('id', employeeData.establishmentId)
+        .maybeSingle();
+      
+      if (!establishmentError && establishmentData) {
+        if (!establishmentName) {
+          establishmentName = establishmentData.name;
+        }
+        if (!companyName && establishmentData.companies) {
+          const companies = Array.isArray(establishmentData.companies) 
+            ? establishmentData.companies[0] 
+            : establishmentData.companies;
+          companyName = companies?.name;
+        }
+      }
+    }
+    
+    // Buscar dados do cargo se não foi fornecido
+    let roleName = employeeData.roleName;
+    if (!roleName) {
+      // Buscar o cargo do funcionário através do employee_id
+      // Mas como não temos o employee_id aqui, vamos buscar pelo user_id e establishment_id
+      const { data: employeeRecord, error: employeeError } = await supabase
+        .from('employees')
+        .select(`
+          employee_roles (
+            name
+          )
+        `)
+        .eq('user_id', employeeData.userId)
+        .eq('establishment_id', employeeData.establishmentId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (!employeeError && employeeRecord?.employee_roles) {
+        const roles = Array.isArray(employeeRecord.employee_roles) 
+          ? employeeRecord.employee_roles[0] 
+          : employeeRecord.employee_roles;
+        roleName = roles?.name;
+      }
+    }
+    
+    // Buscar site settings para informações gerais
+    const { data: siteSettings } = await supabase
+      .from('site_settings')
+      .select('*')
+      .maybeSingle();
+
+    // Preparar variáveis do template
+    const variables: TemplateVariables = {
+      employee_name: employeeData.employeeName || employeeData.employeeEmail.split('@')[0],
+      employee_email: employeeData.employeeEmail,
+      establishment_name: establishmentName || 'Estabelecimento',
+      company_name: companyName || 'Empresa',
+      role_name: roleName || 'Funcionário',
+      hotel_name: establishmentName || siteSettings?.site_title || 'Hotel',
+      hotel_email: siteSettings?.contact_email || '',
+      hotel_phone: siteSettings?.contact_phone || '',
+      logo_url: siteSettings?.logo_url || '',
+    };
+
+    // Processar template
+    const subject = processTemplate(template.subject, variables);
+    const bodyHtml = processTemplate(template.body_html, variables);
+
+    // Adicionar à fila
+    const queueId = await queueEmail({
+      template_id: template.id,
+      event_type: 'employee.added_to_establishment',
+      recipient_email: employeeData.employeeEmail,
+      recipient_name: employeeData.employeeName,
+      subject,
+      body_html: bodyHtml,
+      variables,
+    });
+
+    if (!queueId) {
+      console.error('❌ Erro ao adicionar e-mail à fila');
+      return null;
+    }
+
+    // Processar imediatamente
+    try {
+      const success = await processEmailQueue(queueId);
+      if (success) {
+        console.log('✅ E-mail de adição ao estabelecimento enviado com sucesso:', { queueId });
+      } else {
+        console.warn('⚠️ E-mail adicionado à fila mas não foi enviado:', { queueId });
+      }
+    } catch (processError) {
+      console.error('❌ Erro ao processar e-mail da fila:', processError);
+    }
+
+    return queueId;
+  } catch (error) {
+    console.error('❌ Erro ao enviar e-mail de adição ao estabelecimento:', error);
+    return null;
+  }
+}
+
+/**
+ * Envia e-mail de lembrete de check-out próximo
+ */
+export async function sendCheckoutReminderEmail(
+  reservation: any
+): Promise<string | null> {
+  try {
+    console.log('📧 Enviando e-mail de lembrete de check-out:', { 
+      reservationId: reservation?.id,
+      checkoutDate: reservation?.checkout_date
+    });
+    
+    // Verificar se as configurações de e-mail estão ativas
+    const settings = await getEmailSettings();
+    if (!settings || !settings.is_active) {
+      console.warn('⚠️ Configurações de e-mail não encontradas ou inativas. E-mail não será enviado.');
+      return null;
+    }
+    
+    // Buscar template ativo para o evento
+    console.log('🔍 Buscando template para evento: checkout.reminder');
+    const { data: templates, error: templateError } = await supabase
+      .from('email_templates')
+      .select('*')
+      .eq('event_type', 'checkout.reminder')
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+
+    if (templateError) {
+      console.error('❌ Erro ao buscar template para evento: checkout.reminder', templateError);
+      return null;
+    }
+
+    console.log('📋 Templates encontrados:', templates?.length || 0);
+
+    if (!templates || templates.length === 0) {
+      console.error('❌ Template não encontrado para evento: checkout.reminder');
+      console.log('💡 Dica: Verifique se a migration 20251204000003_create_checkout_reminder_email_template.sql foi executada no Supabase.');
+      return null;
+    }
+
+    const template = templates[0];
+    
+    // Buscar dados completos da reserva com relacionamentos
+    const { data: fullReservation, error: reservationError } = await supabase
+      .from('reservations')
+      .select(`
+        *,
+        financial_responsible:clients!client_id(*),
+        guest:clients!guest_id(*),
+        rooms (id, room_number, name),
+        room_categories (id, name, description, building_id)
+      `)
+      .eq('id', reservation.id || reservation)
+      .single();
+
+    if (reservationError || !fullReservation) {
+      console.error('❌ Erro ao buscar reserva:', reservationError);
+      return null;
+    }
+
+    // Buscar configurações do hotel
+    const establishmentId = fullReservation.establishment_id;
+    let hotelSettings = null;
+    if (establishmentId) {
+      const { data: settings, error: settingsError } = await supabase
+        .from('hotel_settings')
+        .select('*')
+        .eq('establishment_id', establishmentId)
+        .maybeSingle();
+      
+      if (settingsError) {
+        console.warn('⚠️ Erro ao buscar configurações do hotel:', settingsError);
+      }
+      
+      hotelSettings = settings;
+    }
+
+    // Gerar variáveis do template
+    const { generateReservationVariables } = await import('./emailTemplateEngine');
+    const variables = await generateReservationVariables(
+      fullReservation,
+      fullReservation.financial_responsible,
+      fullReservation.guest,
+      hotelSettings
+    );
+
+    // Adicionar/atualizar variáveis específicas
+    // O generateReservationVariables já inclui identification_number (com #) e web_checkin_link,
+    // mas vamos garantir que estão no formato correto
+    const identificationNumberRaw = fullReservation.identification_number || fullReservation.reservation_code || '';
+    const baseUrl = typeof window !== 'undefined' 
+      ? window.location.origin 
+      : (process.env.VITE_APP_URL || 'http://localhost:8080');
+    
+    // Garantir que o link do web-checkin está correto (usar o número sem #)
+    let webCheckinLink = variables.web_checkin_link || '';
+    if (!webCheckinLink && identificationNumberRaw) {
+      webCheckinLink = `${baseUrl}/web-checkin/${identificationNumberRaw}`;
+    }
+
+    // Adicionar/atualizar variáveis específicas
+    // O identification_number já vem formatado com # do generateReservationVariables
+    const allVariables: TemplateVariables = {
+      ...variables,
+      web_checkin_link: webCheckinLink, // Garantir que o link está correto
+    };
+
+    // Processar template
+    const subject = processTemplate(template.subject, allVariables);
+    const bodyHtml = processTemplate(template.body_html, allVariables);
+
+    // Determinar destinatário
+    const recipientEmail = fullReservation.guest?.email || fullReservation.financial_responsible?.email;
+    const recipientName = fullReservation.guest?.full_name || fullReservation.financial_responsible?.full_name;
+
+    if (!recipientEmail) {
+      console.warn('⚠️ E-mail do destinatário não encontrado para reserva:', fullReservation.id);
+      return null;
+    }
+
+    console.log('✅ Destinatário encontrado:', { email: recipientEmail, name: recipientName });
+
+    // Adicionar à fila
+    const queueId = await queueEmail({
+      template_id: template.id,
+      event_type: 'checkout.reminder',
+      recipient_email: recipientEmail,
+      recipient_name: recipientName,
+      subject,
+      body_html: bodyHtml,
+      variables: allVariables,
+      reservation_id: fullReservation.id,
+    });
+
+    if (!queueId) {
+      console.error('❌ Erro ao adicionar e-mail à fila');
+      return null;
+    }
+
+    console.log('✅ E-mail adicionado à fila:', { queueId });
+
+    // Processar imediatamente
+    try {
+      const success = await processEmailQueue(queueId);
+      if (success) {
+        console.log('✅ E-mail de lembrete de check-out enviado com sucesso:', { queueId });
+      } else {
+        console.warn('⚠️ E-mail adicionado à fila mas não foi enviado:', { queueId });
+      }
+    } catch (processError) {
+      console.error('❌ Erro ao processar e-mail da fila:', processError);
+    }
+
+    return queueId;
+  } catch (error) {
+    console.error('❌ Erro ao enviar e-mail de lembrete de check-out:', error);
+    return null;
+  }
+}
+
+/**
+ * Verifica reservas com check-out próximo e envia e-mails de lembrete
+ * @param daysBeforeCheckout - Número de dias antes do check-out para enviar o lembrete (padrão: 1)
+ * @param establishmentId - ID do estabelecimento (opcional, se não fornecido, verifica todos)
+ */
+export async function sendCheckoutReminders(
+  daysBeforeCheckout: number = 1,
+  establishmentId?: string
+): Promise<{ sent: number; errors: number }> {
+  try {
+    console.log(`🔍 Verificando reservas com check-out em ${daysBeforeCheckout} dia(s)...`);
+    
+    // Calcular data alvo (checkout_date - daysBeforeCheckout)
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + daysBeforeCheckout);
+    const targetDateStr = targetDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    
+    // Buscar reservas com check-out na data alvo
+    let query = supabase
+      .from('reservations')
+      .select('id, checkout_date, status, establishment_id')
+      .eq('status', 'confirmed') // Apenas reservas confirmadas
+      .gte('checkout_date', targetDateStr) // checkout_date >= targetDate
+      .lt('checkout_date', new Date(new Date(targetDateStr).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]); // checkout_date < targetDate + 1 dia
+      // .eq('checkout_date', targetDateStr); // Alternativa: exatamente na data
+    
+    if (establishmentId) {
+      query = query.eq('establishment_id', establishmentId);
+    }
+    
+    const { data: reservations, error: reservationsError } = await query;
+    
+    if (reservationsError) {
+      console.error('❌ Erro ao buscar reservas:', reservationsError);
+      return { sent: 0, errors: 0 };
+    }
+    
+    if (!reservations || reservations.length === 0) {
+      console.log('ℹ️ Nenhuma reserva encontrada com check-out próximo');
+      return { sent: 0, errors: 0 };
+    }
+    
+    console.log(`📋 Encontradas ${reservations.length} reserva(s) com check-out próximo`);
+    
+    let sent = 0;
+    let errors = 0;
+    
+    // Enviar e-mail para cada reserva
+    for (const reservation of reservations) {
+      try {
+        // Verificar se já foi enviado um lembrete hoje para esta reserva
+        // (evitar enviar múltiplos e-mails no mesmo dia)
+        const today = new Date().toISOString().split('T')[0];
+        const { data: existingEmail } = await supabase
+          .from('email_queue')
+          .select('id')
+          .eq('reservation_id', reservation.id)
+          .eq('event_type', 'checkout.reminder')
+          .gte('created_at', `${today}T00:00:00Z`)
+          .limit(1);
+        
+        if (existingEmail && existingEmail.length > 0) {
+          console.log(`⏭️ E-mail de lembrete já enviado hoje para reserva ${reservation.id}`);
+          continue;
+        }
+        
+        const result = await sendCheckoutReminderEmail(reservation);
+        if (result) {
+          sent++;
+          console.log(`✅ E-mail de lembrete enviado para reserva ${reservation.id}`);
+        } else {
+          errors++;
+          console.warn(`⚠️ Falha ao enviar e-mail de lembrete para reserva ${reservation.id}`);
+        }
+      } catch (error) {
+        errors++;
+        console.error(`❌ Erro ao processar reserva ${reservation.id}:`, error);
+      }
+    }
+    
+    console.log(`✅ Processamento concluído: ${sent} enviado(s), ${errors} erro(s)`);
+    return { sent, errors };
+  } catch (error) {
+    console.error('❌ Erro ao verificar e enviar lembretes de check-out:', error);
+    return { sent: 0, errors: 0 };
+  }
+}
+
 export async function triggerEmail(
-  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request',
+  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder',
   reservation: any,
   additionalVariables?: TemplateVariables
 ): Promise<string | null> {

@@ -75,7 +75,9 @@ export function EmailTemplatesManager() {
     { value: "payment.pending", label: "Pagamento Pendente" },
     { value: "checkin.confirmed", label: "Check-in Confirmado" },
     { value: "checkout.completed", label: "Check-out Concluído" },
+    { value: "checkout.reminder", label: "Lembrete de Check-out Próximo" },
     { value: "fiscal_document.request", label: "Solicitação de Documento Fiscal" },
+    { value: "employee.added_to_establishment", label: "Funcionário Adicionado ao Estabelecimento" },
   ];
 
   const handleOpenDialog = (template?: any) => {

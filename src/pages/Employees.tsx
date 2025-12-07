@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MoreVertical } from "lucide-react";
 import { EmployeePermissionsDialog } from "@/components/employees/EmployeePermissionsDialog";
+import { sendEmployeeAddedToEstablishmentEmail } from "@/lib/emailService";
 
 const Employees = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -324,6 +325,123 @@ const Employees = () => {
           phone: formData.phone || undefined,
           email: formData.email || undefined,
         });
+
+        // Buscar dados do cargo para o e-mail
+        let roleName = "";
+        if (formData.role_id) {
+          try {
+            const { data: roleData } = await supabase
+              .from("employee_roles")
+              .select("name")
+              .eq("id", formData.role_id)
+              .maybeSingle();
+            if (roleData) {
+              roleName = roleData.name;
+            }
+          } catch (error) {
+            console.error("Erro ao buscar nome do cargo:", error);
+          }
+        }
+
+        // Buscar nome do estabelecimento e empresa
+        let establishmentName = "";
+        let companyName = "";
+        try {
+          const { data: estData } = await supabase
+            .from("establishments")
+            .select(`
+              name,
+              companies (
+                name
+              )
+            `)
+            .eq("id", establishmentId)
+            .maybeSingle();
+          
+          if (estData) {
+            establishmentName = estData.name || "";
+            if (estData.companies) {
+              const companies = Array.isArray(estData.companies) ? estData.companies[0] : estData.companies;
+              companyName = companies?.name || "";
+            }
+          }
+        } catch (error) {
+          console.error("Erro ao buscar dados do estabelecimento:", error);
+        }
+
+        // Buscar e-mail do usuário se não foi fornecido no formulário
+        let employeeEmail = formData.email;
+        let employeeName = formData.full_name;
+        
+        // Se não temos e-mail do formulário, buscar do usuário
+        if (!employeeEmail && userId) {
+          try {
+            // Buscar da tabela users
+            const { data: userData } = await supabase
+              .from("users")
+              .select("email, full_name")
+              .eq("id", userId)
+              .maybeSingle();
+            
+            if (userData) {
+              employeeEmail = userData.email || null;
+              if (!employeeName && userData.full_name) {
+                employeeName = userData.full_name;
+              }
+            }
+            
+            // Se ainda não encontrou e-mail, verificar se o usuário selecionado tem e-mail
+            // (pode estar na lista de companyUsers)
+            if (!employeeEmail) {
+              const selectedUser = companyUsers?.find((u: any) => u.id === userId);
+              if (selectedUser?.email) {
+                employeeEmail = selectedUser.email;
+                if (!employeeName && selectedUser.full_name) {
+                  employeeName = selectedUser.full_name;
+                }
+              }
+            }
+          } catch (error) {
+            console.error("Erro ao buscar e-mail do usuário:", error);
+          }
+        }
+
+        // Log para debug
+        console.log("📧 Dados para envio de e-mail:", {
+          hasEmail: !!employeeEmail,
+          employeeEmail: employeeEmail ? employeeEmail.substring(0, 10) + "..." : "não encontrado",
+          employeeName,
+          establishmentName,
+          companyName,
+          roleName,
+        });
+
+        // Enviar e-mail de notificação ao funcionário
+        if (employeeEmail) {
+          try {
+            const emailResult = await sendEmployeeAddedToEstablishmentEmail({
+              userId: userId,
+              employeeName: employeeName || employeeEmail.split('@')[0],
+              employeeEmail: employeeEmail,
+              establishmentId: establishmentId,
+              establishmentName: establishmentName,
+              companyName: companyName,
+              roleName: roleName,
+            });
+            
+            if (emailResult) {
+              console.log("✅ E-mail de notificação enviado com sucesso:", emailResult);
+            } else {
+              console.warn("⚠️ E-mail de notificação não foi enviado (retornou null)");
+            }
+          } catch (emailError: any) {
+            console.error("❌ Erro ao enviar e-mail de notificação:", emailError);
+            // Não bloquear a criação do funcionário se houver erro no e-mail
+            toast.warning("Funcionário criado, mas houve um aviso ao enviar e-mail de notificação");
+          }
+        } else {
+          console.warn("⚠️ E-mail do funcionário não encontrado. E-mail de notificação não será enviado.");
+        }
 
         // Associar o funcionário à empresa do estabelecimento
         // Usar upsert para permitir que outras empresas também possam adicionar o mesmo funcionário
