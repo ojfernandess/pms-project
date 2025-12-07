@@ -84,6 +84,7 @@ const AppContent = () => {
             <Route path="/payment/return" element={<PaymentSuccess />} />
             <Route path="/policies/:token" element={<PublicPolicies />} />
             <Route path="/documentation" element={<ProtectedRoute><AppLayout><Documentation /></AppLayout></ProtectedRoute>} />
+            <Route path="/:establishmentId/documentation" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Documentation /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/clientes" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Clients /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/clientes/centralizacao" element={<ProtectedRoute><EstablishmentRoute><AppLayout><ClientDeduplication /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/unidades" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Units /></AppLayout></EstablishmentRoute></ProtectedRoute>} />

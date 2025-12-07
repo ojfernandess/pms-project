@@ -169,7 +169,8 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
       
       <nav className="p-2 space-y-1">
         {finalMenuItems.map((item) => {
-          // Se for user-dashboard ou super-admin, não adicionar establishmentId
+          // Se for user-dashboard ou super-admin, não adicionar establishmentId (são rotas globais)
+          // Documentation pode ser acessada tanto globalmente quanto dentro de um estabelecimento
           const isSpecialRoute = item.path === "/user-dashboard" || item.path === "/super-admin";
           const path = isSpecialRoute || !currentEstablishmentId 
             ? item.path 
