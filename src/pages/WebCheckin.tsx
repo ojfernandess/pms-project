@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useWebCheckin } from "@/hooks/useWebCheckin";
 import { useQueryClient } from "@tanstack/react-query";
@@ -135,26 +135,8 @@ export default function WebCheckin() {
     fetchEstablishmentContact();
   }, [currentWebCheckin?.establishment_id, currentWebCheckin?.establishment]);
 
-  // Verificar periodicamente se o cache foi invalidado e refazer as queries
-  useEffect(() => {
-    if (!locator && !token) return;
-
-    const interval = setInterval(() => {
-      // Verificar se as queries foram invalidadas
-      const locatorQuery = queryClient.getQueryState(["web_checkin", locator]);
-      const tokenQuery = token ? queryClient.getQueryState(["web_checkin", "token", token]) : null;
-      
-      // Se a query foi invalidada, refazer imediatamente
-      if (locator && locatorQuery?.isInvalidated) {
-        refetchWebCheckin();
-      }
-      if (token && tokenQuery?.isInvalidated) {
-        refetchWebCheckinByToken();
-      }
-    }, 1000); // Verificar a cada 1 segundo
-
-    return () => clearInterval(interval);
-  }, [locator, token, queryClient, refetchWebCheckin, refetchWebCheckinByToken]);
+  // Removido: Verificação periódica que causava múltiplas verificações desnecessárias
+  // As queries do React Query já têm refetch automático configurado no hook
 
   // Atualizar URL quando localizador mudar (apenas uma vez)
   useEffect(() => {
@@ -222,6 +204,9 @@ export default function WebCheckin() {
 
   // SEGURANÇA: Processar web check-in quando os dados estiverem disponíveis
   // APENAS se o usuário estiver autenticado
+  // OTIMIZAÇÃO: Usar useRef para evitar processamento duplicado
+  const processedWebCheckinId = useRef<string | null>(null);
+  
   useEffect(() => {
     // BLOQUEAR: Não processar nada sem autenticação
     if (!isAuthenticated || !guestAccountId) {
@@ -233,15 +218,17 @@ export default function WebCheckin() {
       return;
     }
     
-    // BLOQUEAR: Não processar se o usuário está inserindo um novo localizador
-    if (showLocatorInput || !locator || locator.trim() === "") {
+    if (!webCheckinInfo || !locator) return;
+    
+    // OTIMIZAÇÃO: Se já processou este web check-in, não processar novamente
+    if (processedWebCheckinId.current === webCheckinInfo.id) {
       return;
     }
     
-    if (!webCheckinInfo || !locator) return;
-    
-    // Se já processou este web check-in, não processar novamente
-    if (token && token === webCheckinInfo.token) return;
+    // Se já processou este web check-in com o mesmo token, não processar novamente
+    if (token && token === webCheckinInfo.token && processedWebCheckinId.current === webCheckinInfo.id) {
+      return;
+    }
 
     setShowLocatorInput(false);
     
@@ -437,13 +424,13 @@ export default function WebCheckin() {
     setWebCheckinData({});
     setReservationLinkedToOtherUser(false);
     setShowLocatorInput(false); // Fechar input de localizador
+    processedWebCheckinId.current = null; // Resetar flag de processamento
     
     // Invalidar e remover TODAS as queries antigas para forçar nova busca
     queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
-    if (oldLocator) {
+    if (oldLocator && oldLocator !== locator.trim()) {
       queryClient.removeQueries({ queryKey: ["web_checkin", oldLocator] });
     }
-    queryClient.removeQueries({ queryKey: ["web_checkin"] });
     
     // Atualizar URL com novo localizador
     navigate(`/web-checkin/${locator.trim()}`, { replace: true });
@@ -469,51 +456,33 @@ export default function WebCheckin() {
       }
     }
     
-    // Aguardar um pouco antes de refazer a busca para garantir que as queries foram limpas
-    setTimeout(async () => {
-      try {
-        await refetchWebCheckin();
-      } finally {
-        setIsSearchingLocator(false);
-      }
-    }, 200);
+    // Refazer a busca uma única vez após limpar o cache
+    try {
+      await refetchWebCheckin();
+    } catch (error) {
+      console.error("Erro ao buscar reserva:", error);
+    } finally {
+      setIsSearchingLocator(false);
+    }
   };
   
-  // Sincronizar estado de busca com isLoadingInfo
+  // Sincronizar estado de busca com isLoadingInfo apenas quando necessário
   useEffect(() => {
-    if (currentStep === 1 && isLoadingInfo) {
-      setIsSearchingLocator(true);
-    } else if (!isLoadingInfo && currentStep === 1) {
-      // Só desativar se não estiver mais carregando e não houver busca automática pendente
-      const timeoutId = setTimeout(() => {
-        if (!isLoadingInfo) {
-          setIsSearchingLocator(false);
+    if (currentStep === 1) {
+      if (isLoadingInfo) {
+        setIsSearchingLocator(true);
+      } else {
+        // Desativar apenas se não houver busca manual em andamento
+        // O estado será controlado pelo handleLocatorSubmit
+        if (!isSearchingLocator) {
+          // Não fazer nada, deixar o handleLocatorSubmit controlar
         }
-      }, 300);
-      return () => clearTimeout(timeoutId);
+      }
     }
   }, [isLoadingInfo, currentStep]);
 
-  // Buscar automaticamente quando o localizador for inserido na etapa 1
-  useEffect(() => {
-    if (currentStep === 1 && isAuthenticated && guestAccountId && locator && locator.trim().length >= 3) {
-      // Forçar busca quando o localizador tiver pelo menos 3 caracteres
-      setIsSearchingLocator(true);
-      const timeoutId = setTimeout(() => {
-        if (locator && locator.trim().length >= 3) {
-          refetchWebCheckin().finally(() => {
-            // O estado será atualizado pelo useEffect acima baseado em isLoadingInfo
-          });
-        } else {
-          setIsSearchingLocator(false);
-        }
-      }, 500); // Debounce de 500ms para evitar muitas requisições
-      
-      return () => {
-        clearTimeout(timeoutId);
-      };
-    }
-  }, [locator, currentStep, isAuthenticated, guestAccountId, refetchWebCheckin]);
+  // Removido: Busca automática ao digitar que causava múltiplas verificações
+  // A busca agora só acontece quando o usuário submete o formulário (handleLocatorSubmit)
 
   // SEGURANÇA: Avançar automaticamente para verificação quando a reserva for encontrada
   // APENAS se o usuário estiver autenticado

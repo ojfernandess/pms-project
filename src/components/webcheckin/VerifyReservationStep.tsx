@@ -2,11 +2,12 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, MapPin, User, Phone, Mail, CreditCard } from "lucide-react";
+import { Calendar, MapPin, User, Phone, Mail, CreditCard, Loader2 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { ptBR, enUS, es } from "date-fns/locale";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 
 interface VerifyReservationStepProps {
   webCheckin: any;
@@ -26,6 +27,11 @@ export function VerifyReservationStep({
   const reservation = webCheckin?.reservation;
   const establishment = webCheckin?.establishment;
   
+  // Estado para controlar transição suave do status
+  const [statusKey, setStatusKey] = useState<string>("");
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [showContent, setShowContent] = useState(false);
+  
   // Selecionar locale baseado no idioma atual
   const getDateLocale = () => {
     const lang = i18n.language;
@@ -33,6 +39,67 @@ export function VerifyReservationStep({
     if (lang.startsWith('en')) return enUS;
     return ptBR;
   };
+  
+  // Determinar status real baseado em pagamento
+  const getReservationStatus = () => {
+    if (!reservation) return null;
+    
+    // Status especiais que não dependem de pagamento
+    if (['blocked', 'cancelled', 'checkedin', 'checkedout', 'noshow'].includes(reservation.status)) {
+      return reservation.status;
+    }
+
+    const paidAmount = Number(reservation.paid_amount || 0);
+    const baseTotalAmount = Number(reservation.total_amount || 0);
+    
+    // Calcular total incluindo taxas extras
+    const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum: number, fee: any) => {
+      return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
+    }, 0);
+    
+    const totalAmount = baseTotalAmount + serviceFeesTotal;
+    
+    if (paidAmount === 0) {
+      // Sem pagamento = Não Pago
+      return "unpaid";
+    } else if (paidAmount >= totalAmount && totalAmount > 0) {
+      // Pagamento completo = Confirmada
+      return "confirmed";
+    } else {
+      // Pagamento parcial ou serviço extra = Pendente
+      return "pending";
+    }
+  };
+
+  // Efeito para controlar transição suave quando o status muda
+  useEffect(() => {
+    const currentStatus = getReservationStatus();
+    if (!currentStatus) return;
+    
+    // Se é a primeira vez ou o status mudou
+    if (statusKey !== currentStatus) {
+      // Se já tinha um status anterior, fazer transição suave
+      if (statusKey) {
+        setIsTransitioning(true);
+        // Aguardar mais tempo para permitir fade out completo (aumentado de 200ms para 400ms)
+        setTimeout(() => {
+          setStatusKey(currentStatus);
+          // Aguardar um pouco mais antes de remover o estado de transição para fade in suave
+          setTimeout(() => {
+            setIsTransitioning(false);
+          }, 50);
+        }, 400);
+      } else {
+        // Primeira vez, apenas definir
+        setStatusKey(currentStatus);
+        // Mostrar conteúdo após um pequeno delay para evitar flash
+        setTimeout(() => {
+          setShowContent(true);
+        }, 150);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reservation?.paid_amount, reservation?.total_amount, reservation?.reservation_service_fees, reservation?.status, statusKey]);
   
   // Debug: verificar dados do establishment
   console.log("🔍 VerifyReservationStep - establishment:", establishment);
@@ -47,6 +114,15 @@ export function VerifyReservationStep({
       </div>
     );
   }
+  
+  const actualStatus = getReservationStatus();
+  const statusLabels: Record<string, { labelKey: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+    unpaid: { labelKey: "webCheckin.verify.status.unpaid", variant: "destructive" },
+    pending: { labelKey: "webCheckin.verify.status.pending", variant: "secondary" },
+    confirmed: { labelKey: "webCheckin.verify.status.confirmed", variant: "default" },
+    cancelled: { labelKey: "webCheckin.verify.status.cancelled", variant: "destructive" },
+  };
+  const statusInfo = statusLabels[statusKey || actualStatus || "pending"] || { labelKey: "webCheckin.verify.status.pending", variant: "secondary" };
 
   return (
     <div className="space-y-6">
@@ -70,51 +146,40 @@ export function VerifyReservationStep({
             <p className="text-sm text-slate-600 mb-1">{t("webCheckin.verify.locator")}</p>
             <p className="text-2xl font-bold text-blue-600">{webCheckin.locator}</p>
           </div>
-          {(() => {
-            // Determinar status real baseado em pagamento (mesma lógica do PMS)
-            const getReservationStatus = () => {
-              // Status especiais que não dependem de pagamento
-              if (['blocked', 'cancelled', 'checkedin', 'checkedout', 'noshow'].includes(reservation.status)) {
-                return reservation.status;
-              }
-
-              const paidAmount = Number(reservation.paid_amount || 0);
-              const baseTotalAmount = Number(reservation.total_amount || 0);
-              
-              // Calcular total incluindo taxas extras
-              const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum: number, fee: any) => {
-                return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
-              }, 0);
-              
-              const totalAmount = baseTotalAmount + serviceFeesTotal;
-              
-              if (paidAmount === 0) {
-                // Sem pagamento = Não Pago
-                return "unpaid";
-              } else if (paidAmount >= totalAmount && totalAmount > 0) {
-                // Pagamento completo = Confirmada
-                return "confirmed";
-              } else {
-                // Pagamento parcial ou serviço extra = Pendente
-                return "pending";
-              }
-            };
-
-            const actualStatus = getReservationStatus();
-            const statusLabels: Record<string, { labelKey: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-              unpaid: { labelKey: "webCheckin.verify.status.unpaid", variant: "destructive" },
-              pending: { labelKey: "webCheckin.verify.status.pending", variant: "secondary" },
-              confirmed: { labelKey: "webCheckin.verify.status.confirmed", variant: "default" },
-              cancelled: { labelKey: "webCheckin.verify.status.cancelled", variant: "destructive" },
-            };
-            const statusInfo = statusLabels[actualStatus] || { labelKey: "webCheckin.verify.status.pending", variant: "secondary" };
+          <div className="relative min-w-[120px] flex justify-end">
+            {/* Skeleton/Loading enquanto carrega */}
+            {!statusKey && !showContent && (
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                <div className="h-6 w-20 bg-slate-200 rounded animate-pulse" />
+              </div>
+            )}
             
-            return (
-              <Badge variant={statusInfo.variant} className="text-sm">
-                {t(statusInfo.labelKey)}
-              </Badge>
-            );
-          })()}
+            {/* Badge com transição suave aprimorada */}
+            {statusKey && (
+              <div
+                className={cn(
+                  "transition-all duration-500 ease-in-out",
+                  isTransitioning 
+                    ? "opacity-0 scale-90 translate-y-1" 
+                    : "opacity-100 scale-100 translate-y-0",
+                  // Adicionar animação especial quando muda para "confirmed"
+                  statusKey === "confirmed" && !isTransitioning && "animate-in fade-in slide-in-from-bottom-2 duration-700"
+                )}
+              >
+                <Badge 
+                  variant={statusInfo.variant} 
+                  className={cn(
+                    "text-sm transition-all duration-500",
+                    // Efeito de "glow" suave quando é confirmada
+                    statusKey === "confirmed" && !isTransitioning && "shadow-lg shadow-green-200/50"
+                  )}
+                >
+                  {t(statusInfo.labelKey)}
+                </Badge>
+              </div>
+            )}
+          </div>
         </div>
       </Card>
 
@@ -266,9 +331,15 @@ export function VerifyReservationStep({
                 const pendingAmount = totalWithFees - totalPaid;
                 
                 return (
-                  <div className="space-y-2">
+                  <div className={cn(
+                    "space-y-2 transition-all duration-500 ease-in-out",
+                    showContent ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+                  )}>
                     <div>
-                      <p className="text-lg font-bold text-green-600">
+                      <p className={cn(
+                        "text-lg font-bold text-green-600 transition-all duration-500 ease-in-out",
+                        isTransitioning && statusKey === "confirmed" && "scale-105"
+                      )}>
                         {formatCurrency(totalWithFees)}
                       </p>
                       <p className="text-xs text-slate-500 mt-1">
@@ -302,16 +373,27 @@ export function VerifyReservationStep({
                       </div>
                     )}
                     
-                    {/* Mostrar valor pago e pendente */}
-                    <div className="mt-2 pt-2 border-t border-slate-200 space-y-1">
+                    {/* Mostrar valor pago e pendente com transição suave aprimorada */}
+                    <div className={cn(
+                      "mt-2 pt-2 border-t border-slate-200 space-y-1 transition-all duration-500 ease-in-out",
+                      isTransitioning ? "opacity-40 blur-sm" : "opacity-100 blur-0"
+                    )}>
                       <div className="flex justify-between text-sm">
                         <span className="text-slate-600">{t("webCheckin.verify.paidValue")}</span>
-                        <span className="font-semibold text-green-600">
+                        <span className={cn(
+                          "font-semibold transition-all duration-500 ease-in-out",
+                          totalPaid > 0 
+                            ? "text-green-600 scale-105" 
+                            : "text-slate-400 scale-100"
+                        )}>
                           {formatCurrency(totalPaid)}
                         </span>
                       </div>
                       {pendingAmount > 0 && (
-                        <div className="flex justify-between text-sm">
+                        <div className={cn(
+                          "flex justify-between text-sm transition-all duration-500",
+                          isTransitioning ? "opacity-0 max-h-0 overflow-hidden" : "opacity-100 max-h-20"
+                        )}>
                           <span className="text-slate-600">{t("webCheckin.verify.pendingValue")}</span>
                           <span className="font-semibold text-orange-600">
                             {formatCurrency(pendingAmount)}
@@ -319,7 +401,13 @@ export function VerifyReservationStep({
                         </div>
                       )}
                       {pendingAmount <= 0 && totalPaid > 0 && (
-                        <div className="text-xs text-green-600 font-medium">
+                        <div className={cn(
+                          "text-xs font-medium transition-all duration-700 ease-in-out",
+                          isTransitioning 
+                            ? "opacity-0 scale-90 translate-y-2" 
+                            : "opacity-100 scale-100 translate-y-0 animate-in fade-in slide-in-from-bottom-1",
+                          "text-green-600"
+                        )}>
                           {t("webCheckin.verify.paymentComplete")}
                         </div>
                       )}

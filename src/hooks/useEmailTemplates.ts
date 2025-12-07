@@ -54,6 +54,24 @@ export const useEmailTemplates = () => {
     mutationFn: async ({ id, ...updates }: { id: string } & EmailTemplateUpdate) => {
       console.log('📝 Atualizando template:', { id, updates: Object.keys(updates) });
       
+      // Primeiro, verificar se o template existe
+      const { data: existingTemplate, error: checkError } = await supabase
+        .from('email_templates')
+        .select('id')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('❌ Erro ao verificar template:', checkError);
+        throw checkError;
+      }
+
+      if (!existingTemplate) {
+        const error = new Error('Template não encontrado. Pode ter sido deletado ou você não tem permissão para editá-lo.');
+        console.error('❌', error.message);
+        throw error;
+      }
+      
       // Garantir que updated_at seja atualizado explicitamente (o trigger deve fazer isso, mas vamos garantir)
       const { data, error } = await supabase
         .from('email_templates')
@@ -63,10 +81,16 @@ export const useEmailTemplates = () => {
         })
         .eq('id', id)
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('❌ Erro ao atualizar template:', error);
+        throw error;
+      }
+
+      if (!data) {
+        const error = new Error('Template não foi atualizado. Pode ser um problema de permissões (RLS) ou o template foi deletado durante a atualização.');
+        console.error('❌', error.message);
         throw error;
       }
       

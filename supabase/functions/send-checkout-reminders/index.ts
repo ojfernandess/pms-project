@@ -76,6 +76,7 @@ serve(async (req) => {
       .select(
         `
         id,
+        checkin_date,
         checkout_date,
         status,
         establishment_id,
@@ -85,8 +86,7 @@ serve(async (req) => {
         client_id,
         financial_responsible:clients!client_id(id, email, full_name),
         guest:clients!guest_id(id, email, full_name),
-        rooms(id, room_number, name),
-        room_categories(id, name, description, building_id)
+        rooms(id, room_number, name, category_id, room_categories!category_id(id, name, description))
       `
       )
       .eq("status", "confirmed") // Apenas reservas confirmadas
@@ -246,37 +246,169 @@ serve(async (req) => {
         // Gerar variáveis do template
         // Importar funções necessárias (simplificado para Edge Function)
         const checkinDate = reservation.checkin_date
-          ? new Date(reservation.checkin_date).toLocaleDateString("pt-BR")
+          ? new Date(reservation.checkin_date).toLocaleDateString("pt-BR", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+            })
           : "";
         const checkoutDate = reservation.checkout_date
-          ? new Date(reservation.checkout_date).toLocaleDateString("pt-BR")
+          ? new Date(reservation.checkout_date).toLocaleDateString("pt-BR", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+            })
           : "";
 
-        const identificationNumber =
-          reservation.identification_number || reservation.reservation_code || "";
+        // Priorizar identification_number, se não existir, usar reservation_code
+        const identificationNumber = reservation.identification_number || "";
+        const reservationCode = reservation.reservation_code || "";
         const identificationNumberFormatted = identificationNumber
           ? `#${identificationNumber}`
+          : reservationCode
+          ? reservationCode
           : "";
 
-        // Gerar link do web-checkin
-        const baseUrl = Deno.env.get("VITE_APP_URL") || 
-                       Deno.env.get("SITE_URL") || 
-                       supabaseUrl.replace(/\.supabase\.co.*$/, "") || 
-                       "http://localhost:8080";
-        const webCheckinLink = identificationNumber
-          ? `${baseUrl}/web-checkin/${identificationNumber}`
+        // Gerar link do web-checkin (usar reservation_code como prioridade para o link)
+        // O link deve usar reservation_code (ex: RSV742516) e não identification_number
+        
+        // Detectar URL base automaticamente (ordem de prioridade):
+        // 1. Headers da requisição (Origin, Referer, X-Forwarded-Host)
+        // 2. hotel_settings.website
+        // 3. site_settings.site_url
+        // 4. Variáveis de ambiente
+        // 5. Fallback para localhost
+        let baseUrl = "";
+        let urlSource = "";
+        
+        // 1. Tentar obter dos headers da requisição
+        try {
+          const origin = req.headers.get("origin");
+          const referer = req.headers.get("referer");
+          const forwardedHost = req.headers.get("x-forwarded-host");
+          const forwardedProto = req.headers.get("x-forwarded-proto") || "https";
+          
+          // Tentar Origin primeiro
+          if (origin && !origin.includes(".supabase.co") && 
+              !origin.includes("localhost") && 
+              !origin.includes("127.0.0.1")) {
+            baseUrl = origin.replace(/\/$/, "");
+            urlSource = "request-origin-header";
+            console.log("🌐 URL base detectada do header Origin:", baseUrl);
+          }
+          // Se não tem Origin, tentar Referer
+          else if (referer && !baseUrl) {
+            try {
+              const refererUrl = new URL(referer);
+              if (!refererUrl.hostname.includes(".supabase.co") &&
+                  !refererUrl.hostname.includes("localhost") &&
+                  !refererUrl.hostname.includes("127.0.0.1")) {
+                baseUrl = `${refererUrl.protocol}//${refererUrl.hostname}${refererUrl.port ? `:${refererUrl.port}` : ""}`;
+                urlSource = "request-referer-header";
+                console.log("🌐 URL base detectada do header Referer:", baseUrl);
+              }
+            } catch (e) {
+              // Ignorar erro de parsing
+            }
+          }
+          // Se não tem Origin nem Referer, tentar X-Forwarded-Host
+          else if (forwardedHost && !baseUrl) {
+            if (!forwardedHost.includes(".supabase.co") &&
+                !forwardedHost.includes("localhost") &&
+                !forwardedHost.includes("127.0.0.1")) {
+              baseUrl = `${forwardedProto}://${forwardedHost}`;
+              urlSource = "request-forwarded-host-header";
+              console.log("🌐 URL base detectada do header X-Forwarded-Host:", baseUrl);
+            }
+          }
+        } catch (e) {
+          console.log("⚠️ Erro ao processar headers da requisição:", e);
+        }
+        
+        // 2. Se não obteve dos headers, tentar hotel_settings.website
+        if (!baseUrl && hotelSettings) {
+          const hotelWebsite = (hotelSettings.website as string) || "";
+          if (hotelWebsite && !hotelWebsite.includes(".supabase.co") && 
+              hotelWebsite.trim() !== "" &&
+              (hotelWebsite.startsWith("http://") || hotelWebsite.startsWith("https://"))) {
+            baseUrl = hotelWebsite.replace(/\/$/, "");
+            urlSource = "hotel_settings-website";
+            console.log("🌐 URL base obtida de hotel_settings.website:", baseUrl);
+          }
+        }
+        
+        // 3. Se não obteve, tentar site_settings.site_url
+        if (!baseUrl && siteSettings) {
+          const siteUrl = (siteSettings.site_url as string) || "";
+          if (siteUrl && !siteUrl.includes(".supabase.co") && 
+              siteUrl.trim() !== "" &&
+              (siteUrl.startsWith("http://") || siteUrl.startsWith("https://"))) {
+            baseUrl = siteUrl.replace(/\/$/, "");
+            urlSource = "site_settings-site_url";
+            console.log("🌐 URL base obtida de site_settings.site_url:", baseUrl);
+          }
+        }
+        
+        // 4. Se ainda não tem, tentar variáveis de ambiente
+        if (!baseUrl) {
+          const envUrl = Deno.env.get("VITE_APP_URL") || Deno.env.get("SITE_URL") || "";
+          if (envUrl && !envUrl.includes(".supabase.co") && 
+              envUrl.trim() !== "" &&
+              (envUrl.startsWith("http://") || envUrl.startsWith("https://"))) {
+            baseUrl = envUrl.replace(/\/$/, "");
+            urlSource = "environment-variable";
+            console.log("🌐 URL base obtida de variáveis de ambiente:", baseUrl);
+          }
+        }
+        
+        // 5. Fallback para localhost se ainda não tem
+        if (!baseUrl || baseUrl.includes(".supabase.co") || baseUrl.trim() === "") {
+          baseUrl = "http://localhost:8080";
+          urlSource = "fallback-localhost";
+          console.log("⚠️ URL base usando fallback (localhost) - configure site_url em site_settings ou hotel_settings.website");
+        }
+        
+        // Para o link, sempre usar reservation_code se disponível, senão identification_number
+        const locatorForLink = reservationCode || identificationNumber || "";
+        const webCheckinLink = locatorForLink
+          ? `${baseUrl}/web-checkin/${locatorForLink}`
           : "";
+        
+        console.log("🔗 Web-checkin link gerado:", {
+          baseUrl,
+          locatorForLink,
+          webCheckinLink,
+          hasReservationCode: !!reservationCode,
+          hasIdentificationNumber: !!identificationNumber,
+          urlSource,
+          headers: {
+            origin: req.headers.get("origin") || "não disponível",
+            referer: req.headers.get("referer") ? "disponível" : "não disponível",
+            forwardedHost: req.headers.get("x-forwarded-host") || "não disponível",
+          },
+          hotelSettingsWebsite: hotelSettings?.website || "não configurado",
+          siteSettingsUrl: siteSettings?.site_url || "não configurado",
+        });
 
         // Preparar variáveis do template (garantir todas as variáveis necessárias)
+        // Nota: Para condicionais {{#if}}, a variável precisa existir e não estar vazia
+        
+        // rooms pode ser um array, pegar o primeiro item
+        const firstRoom = Array.isArray(reservation.rooms) && reservation.rooms.length > 0
+          ? reservation.rooms[0]
+          : (reservation.rooms as any);
+        
         const variables: Record<string, string> = {
           guest_name: recipientName || "Hóspede",
           guest_email: recipientEmail,
-          reservation_code: reservation.reservation_code || "",
+          reservation_code: reservationCode,
           identification_number: identificationNumberFormatted,
           checkin_date: checkinDate,
           checkout_date: checkoutDate,
-          room_number: reservation.rooms?.room_number || "",
-          room_name: reservation.rooms?.name || reservation.rooms?.room_number || "",
+          room_number: firstRoom?.room_number || "",
+          room_name: firstRoom?.name || firstRoom?.room_number || "",
+          // category_name vem de room_categories através da relação do quarto
+          category_name: firstRoom?.room_categories?.name || "",
           hotel_name: (hotelSettings?.name as string) || (siteSettings?.site_title as string) || "Hotel",
           hotel_email: (hotelSettings?.email as string) || (siteSettings?.contact_email as string) || "",
           hotel_phone: (hotelSettings?.phone as string) || (siteSettings?.contact_phone as string) || "",
@@ -287,16 +419,46 @@ serve(async (req) => {
           web_checkin_link: webCheckinLink,
         };
 
-        // Processar template (simplificado - substituir variáveis)
+        // Processar template (suporta Handlebars simples)
         let subject = template.subject;
         let bodyHtml = template.body_html;
 
+        // IMPORTANTE: Processar condicionais ANTES de substituir variáveis simples
+        // Isso evita que variáveis dentro de condicionais sejam substituídas antes do processamento
+        console.log("🔄 Processando condicionais Handlebars...");
+        console.log("📋 Variáveis disponíveis:", Object.keys(variables).filter(k => variables[k] && variables[k].trim() !== "").join(", "));
+        console.log("📋 Variáveis vazias:", Object.keys(variables).filter(k => !variables[k] || variables[k].trim() === "").join(", "));
+        
+        bodyHtml = processHandlebarsConditionals(bodyHtml, variables);
+        subject = processHandlebarsConditionals(subject, variables);
+
+        // Depois, substituir variáveis simples {{variavel}}
+        console.log("🔄 Substituindo variáveis simples...");
         Object.keys(variables).forEach((key) => {
           const value = variables[key as keyof typeof variables] || "";
           const regex = new RegExp(`\\{\\{${key}\\}\\}`, "g");
+          const beforeSubject = subject;
+          const beforeBody = bodyHtml;
           subject = subject.replace(regex, String(value));
           bodyHtml = bodyHtml.replace(regex, String(value));
+          if (beforeSubject !== subject || beforeBody !== bodyHtml) {
+            const displayValue = value.length > 50 ? value.substring(0, 50) + "..." : value;
+            console.log(`  ✅ Substituído {{${key}}} = "${displayValue}"`);
+          }
         });
+
+        // Verificar se ainda há variáveis não processadas
+        const remainingVars = bodyHtml.match(/\{\{(\w+)\}\}/g) || [];
+        const remainingConditionals = bodyHtml.match(/\{\{#if|\{\{else\}}|\{\{\/if\}\}/g) || [];
+        
+        if (remainingVars.length > 0 || remainingConditionals.length > 0) {
+          console.warn("⚠️ Variáveis/condicionais não processados:", {
+            vars: remainingVars.slice(0, 10),
+            conditionals: remainingConditionals.slice(0, 10),
+          });
+        } else {
+          console.log("✅ Todas as variáveis e condicionais foram processados com sucesso!");
+        }
 
         // Adicionar à fila de e-mails
         const { data: queueItem, error: queueError } = await supabase
@@ -696,5 +858,96 @@ async function sendViaSMTP(
     console.error("Erro ao enviar via SMTP:", error);
     throw error;
   }
+}
+
+/**
+ * Processa condicionais Handlebars simples {{#if variavel}} ... {{/if}} e {{#if variavel}} ... {{else}} ... {{/if}}
+ */
+function processHandlebarsConditionals(template: string, variables: Record<string, string>): string {
+  let result = template;
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = 20; // Aumentar limite para lidar com múltiplos condicionais
+
+  // Processar condicionais em loop até não haver mais mudanças (para lidar com condicionais aninhados)
+  while (changed && iterations < maxIterations) {
+    changed = false;
+    iterations++;
+
+    // Processar {{#if variavel}} ... {{else}} ... {{/if}} (precisa processar antes do if simples)
+    // Usar regex não-greedy (.*?) e garantir que captura até o {{/if}} correspondente
+    const ifElsePattern = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{else\}\}([\s\S]*?)\{\{\/if\}\}/g;
+    const beforeIfElse = result;
+    result = result.replace(ifElsePattern, (match, varName, ifContent, elseContent) => {
+      const value = variables[varName] || "";
+      // Se a variável existe e não está vazia, retorna o conteúdo do if, senão retorna o else
+      if (value && value.trim() !== "") {
+        return ifContent;
+      }
+      return elseContent;
+    });
+    if (result !== beforeIfElse) {
+      changed = true;
+      console.log(`🔄 Processado if-else para: ${ifElsePattern.source}`);
+    }
+
+    // Processar {{#if variavel}} ... {{/if}}
+    // IMPORTANTE: Processar de dentro para fora (condicionais aninhados)
+    // Usar uma abordagem que processa do mais interno para o mais externo
+    let ifPattern = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g;
+    let beforeIf = result;
+    let tempResult = result;
+    
+    // Processar múltiplas vezes até não haver mais mudanças
+    let innerIterations = 0;
+    while (innerIterations < 10) {
+      const beforeInner = tempResult;
+      tempResult = tempResult.replace(ifPattern, (match, varName, content) => {
+        // Verificar se o conteúdo ainda tem condicionais aninhados
+        if (content.match(/\{\{#if\s+\w+\}\}/)) {
+          // Se tem condicionais aninhados, não processar ainda
+          return match;
+        }
+        
+        const value = variables[varName] || "";
+        // Se a variável existe e não está vazia, retorna o conteúdo
+        if (value && value.trim() !== "") {
+          console.log(`  ✅ Condicional if: ${varName} = "${value.substring(0, 30)}" -> mostrando conteúdo`);
+          return content;
+        }
+        console.log(`  ✅ Condicional if: ${varName} = vazio -> removendo conteúdo`);
+        return "";
+      });
+      
+      if (tempResult === beforeInner) {
+        break; // Não houve mudanças, sair do loop
+      }
+      innerIterations++;
+    }
+    
+    result = tempResult;
+    if (result !== beforeIf) {
+      changed = true;
+    }
+  }
+
+  if (iterations >= maxIterations) {
+    console.warn("⚠️ Aviso: processamento de condicionais atingiu o limite de iterações");
+  }
+
+  // Verificar se ainda há condicionais não processados
+  const remainingIf = (result.match(/\{\{#if\s+\w+\}\}/g) || []).length;
+  const remainingEndIf = (result.match(/\{\{\/if\}\}/g) || []).length;
+  const remainingElse = (result.match(/\{\{else\}\}/g) || []).length;
+  
+  if (remainingIf > 0 || remainingEndIf > 0 || remainingElse > 0) {
+    console.warn(`⚠️ Ainda há condicionais não processados: #if=${remainingIf}, /if=${remainingEndIf}, else=${remainingElse}`);
+    // Tentar uma última vez com uma abordagem mais agressiva - remover condicionais não processados
+    result = result.replace(/\{\{#if\s+\w+\}\}[\s\S]*?\{\{\/if\}\}/g, "");
+    result = result.replace(/\{\{else\}\}/g, "");
+    result = result.replace(/\{\{\/if\}\}/g, "");
+  }
+
+  return result;
 }
 

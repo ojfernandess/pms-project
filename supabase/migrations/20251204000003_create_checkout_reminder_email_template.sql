@@ -1,5 +1,8 @@
--- Adicionar template de e-mail para lembrete de check-out próximo
+-- Adicionar ou atualizar template de e-mail para lembrete de check-out próximo
 -- Evento: checkout.reminder
+
+-- Primeiro, deletar template existente se houver (para garantir atualização)
+DELETE FROM public.email_templates WHERE event_type = 'checkout.reminder'::email_event_type;
 
 INSERT INTO public.email_templates (
   name,
@@ -52,7 +55,12 @@ SELECT
               
               <div style="background-color: #f8f9fa; border-left: 4px solid #667eea; padding: 20px; margin: 30px 0; border-radius: 4px;">
                 <h2 style="color: #667eea; margin: 0 0 15px 0; font-size: 18px;">Detalhes da Reserva</h2>
-                <p style="color: #555555; font-size: 14px; margin: 5px 0;"><strong>Localizador:</strong> {{#if identification_number}}{{identification_number}}{{else}}{{reservation_code}}{{/if}}</p>
+                {{#if identification_number}}
+                <p style="color: #555555; font-size: 14px; margin: 5px 0;"><strong>Localizador:</strong> {{identification_number}}</p>
+                {{/if}}
+                {{#if reservation_code}}
+                <p style="color: #555555; font-size: 14px; margin: 5px 0;"><strong>Identificador da Reserva:</strong> {{reservation_code}}</p>
+                {{/if}}
                 <p style="color: #555555; font-size: 14px; margin: 5px 0;"><strong>Check-in:</strong> {{checkin_date}}</p>
                 <p style="color: #555555; font-size: 14px; margin: 5px 0;"><strong>Check-out:</strong> {{checkout_date}}</p>
                 {{#if room_number}}
@@ -117,9 +125,5 @@ SELECT
 </body>
 </html>',
   true,
-  '["guest_name", "guest_email", "reservation_code", "identification_number", "checkin_date", "checkout_date", "room_number", "room_name", "hotel_name", "hotel_email", "hotel_phone", "hotel_whatsapp", "hotel_address", "hotel_website", "logo_url", "web_checkin_link"]'::jsonb
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.email_templates 
-  WHERE event_type = 'checkout.reminder'::email_event_type
-);
+  '["guest_name", "guest_email", "reservation_code", "identification_number", "checkin_date", "checkout_date", "room_number", "room_name", "category_name", "hotel_name", "hotel_email", "hotel_phone", "hotel_whatsapp", "hotel_address", "hotel_website", "logo_url", "web_checkin_link"]'::jsonb;
 

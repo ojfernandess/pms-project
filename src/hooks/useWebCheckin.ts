@@ -12,13 +12,10 @@ export const useWebCheckin = () => {
   const getWebCheckinByLocator = (locator: string, requireAuth: boolean = false) => {
     return useQuery({
       queryKey: ["web_checkin", locator],
-      refetchOnMount: true, // Sempre refazer quando o componente montar
-      refetchOnWindowFocus: true, // Refazer quando a janela receber foco
-      staleTime: 0, // Considerar dados stale imediatamente para forçar refetch quando invalidado
-      refetchInterval: (query) => {
-        // Refazer a cada 5 segundos se a query estiver ativa e a página estiver visível
-        return query.state.isInvalidated ? 0 : 5000;
-      },
+      refetchOnMount: false, // Não refazer automaticamente ao montar (evita múltiplas verificações)
+      refetchOnWindowFocus: false, // Não refazer ao focar na janela (evita verificações desnecessárias)
+      staleTime: 30 * 1000, // Considerar dados válidos por 30 segundos (evita refetches desnecessários)
+      refetchInterval: false, // Desabilitar refetch automático (evita verificações repetidas)
       refetchIntervalInBackground: false, // Não refazer quando a página estiver em background
       enabled: !!locator && locator.trim() !== "" && (!requireAuth || (requireAuth && !!localStorage.getItem("guest_account_id"))), // SEGURANÇA: Só habilitar se tiver locator e (não requerer auth ou requerer e estiver autenticado)
       queryFn: async () => {
@@ -368,13 +365,10 @@ export const useWebCheckin = () => {
   const getWebCheckinByToken = (token: string, requireAuth: boolean = false) => {
     return useQuery({
       queryKey: ["web_checkin", "token", token],
-      refetchOnMount: true, // Sempre refazer quando o componente montar
-      refetchOnWindowFocus: true, // Refazer quando a janela receber foco
-      staleTime: 0, // Considerar dados stale imediatamente para forçar refetch quando invalidado
-      refetchInterval: (query) => {
-        // Refazer a cada 5 segundos se a query estiver ativa e a página estiver visível
-        return query.state.isInvalidated ? 0 : 5000;
-      },
+      refetchOnMount: false, // Não refazer automaticamente ao montar (evita múltiplas verificações)
+      refetchOnWindowFocus: false, // Não refazer ao focar na janela (evita verificações desnecessárias)
+      staleTime: 30 * 1000, // Considerar dados válidos por 30 segundos (evita refetches desnecessários)
+      refetchInterval: false, // Desabilitar refetch automático (evita verificações repetidas)
       refetchIntervalInBackground: false, // Não refazer quando a página estiver em background
       enabled: !!token && (!requireAuth || requireAuth), // SEGURANÇA: Só habilitar se tiver token e (não requerer auth ou requerer e estiver autenticado)
       queryFn: async () => {
