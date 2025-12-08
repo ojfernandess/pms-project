@@ -456,10 +456,11 @@ const Documentation = () => {
         </div>
 
         <Tabs value={activeSection} onValueChange={setActiveSection} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 lg:grid-cols-6 mb-6">
+          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 lg:grid-cols-7 mb-6">
             <TabsTrigger value="overview">Visão Geral</TabsTrigger>
             <TabsTrigger value="routes">Rotas</TabsTrigger>
             <TabsTrigger value="apis">APIs</TabsTrigger>
+            <TabsTrigger value="swagger">Swagger/Postman</TabsTrigger>
             <TabsTrigger value="features">Funcionalidades</TabsTrigger>
             <TabsTrigger value="database">Banco de Dados</TabsTrigger>
             <TabsTrigger value="integrations">Integrações</TabsTrigger>
@@ -1160,6 +1161,43 @@ const Documentation = () => {
                 <Code className="h-6 w-6 text-primary" />
                 APIs e Endpoints Técnicos
               </h2>
+              
+              {/* Documentação Técnica Online */}
+              <div className="mb-6 p-4 bg-blue-50 rounded-lg border-l-4 border-blue-500">
+                <h3 className="font-semibold mb-2 text-blue-900 flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Documentação Técnica Online
+                </h3>
+                <p className="text-sm text-blue-800 mb-3">
+                  Acesse a documentação técnica completa em formato Swagger/OpenAPI e Postman Collection:
+                </p>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div className="p-3 bg-white rounded border">
+                    <h4 className="font-semibold text-sm mb-1">OpenAPI/Swagger</h4>
+                    <p className="text-xs text-slate-600 mb-2">
+                      Especificação OpenAPI 3.0 completa com todos os endpoints, schemas e exemplos.
+                    </p>
+                    <code className="text-xs block bg-slate-100 p-1 rounded">docs/openapi.yaml</code>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Importe no Swagger UI, Postman ou qualquer ferramenta compatível com OpenAPI.
+                    </p>
+                  </div>
+                  <div className="p-3 bg-white rounded border">
+                    <h4 className="font-semibold text-sm mb-1">Postman Collection</h4>
+                    <p className="text-xs text-slate-600 mb-2">
+                      Collection completa do Postman com todas as requisições pré-configuradas.
+                    </p>
+                    <code className="text-xs block bg-slate-100 p-1 rounded">docs/PMS_API.postman_collection.json</code>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Importe diretamente no Postman para testar todos os endpoints.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 p-2 bg-blue-100 rounded text-xs text-blue-900">
+                  <strong>💡 Dica:</strong> Consulte a aba "Swagger/Postman" para instruções detalhadas de uso.
+                </div>
+              </div>
+
               <div className="h-[600px] overflow-y-auto pr-4">
                 <div className="space-y-6">
                   {/* Autenticação */}
@@ -1751,6 +1789,458 @@ const { data, isLoading, error } = useGetReservationByLocator("RSV742516");`}
                           <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto">
 {COMPLEX_QUERY_3}
                           </pre>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </TabsContent>
+
+          {/* Swagger/Postman */}
+          <TabsContent value="swagger" className="space-y-6">
+            <Card className="p-6">
+              <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
+                <FileText className="h-6 w-6 text-primary" />
+                Documentação Técnica Online - Swagger e Postman
+              </h2>
+              <div className="h-[600px] overflow-y-auto pr-4">
+                <div className="space-y-6">
+                  {/* Introdução */}
+                  <div className="p-4 bg-blue-50 rounded-lg border-l-4 border-blue-500">
+                    <h3 className="font-semibold mb-2 text-blue-900">📚 Documentação Técnica Completa</h3>
+                    <p className="text-sm text-blue-800 mb-3">
+                      O sistema fornece documentação técnica completa em formatos padrão da indústria para facilitar
+                      a integração e testes da API.
+                    </p>
+                    <div className="grid md:grid-cols-2 gap-3 mt-3">
+                      <div className="p-3 bg-white rounded">
+                        <h4 className="font-semibold text-sm mb-1 flex items-center gap-2">
+                          <Code className="h-4 w-4" />
+                          OpenAPI/Swagger
+                        </h4>
+                        <p className="text-xs text-slate-600">
+                          Especificação OpenAPI 3.0.3 completa com todos os endpoints, schemas, exemplos de requests/responses
+                          e documentação de autenticação.
+                        </p>
+                      </div>
+                      <div className="p-3 bg-white rounded">
+                        <h4 className="font-semibold text-sm mb-1 flex items-center gap-2">
+                          <Globe className="h-4 w-4" />
+                          Postman Collection
+                        </h4>
+                        <p className="text-xs text-slate-600">
+                          Collection completa do Postman com todas as requisições pré-configuradas, variáveis de ambiente
+                          e exemplos prontos para uso.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* OpenAPI/Swagger */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Code className="h-5 w-5" />
+                      OpenAPI/Swagger Specification
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500">
+                        <h4 className="font-semibold mb-2">Arquivo</h4>
+                        <code className="text-sm bg-slate-200 px-2 py-1 rounded block mb-2">docs/openapi.yaml</code>
+                        <p className="text-sm text-slate-700 mb-3">
+                          Especificação OpenAPI 3.0.3 completa seguindo os padrões da indústria.
+                        </p>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Como usar</h4>
+                        <div className="space-y-2 text-sm">
+                          <div>
+                            <strong>1. Swagger UI (Online):</strong>
+                            <ul className="list-disc list-inside mt-1 text-slate-600 ml-4">
+                              <li>Acesse <a href="https://editor.swagger.io" target="_blank" rel="noopener noreferrer" className="underline text-blue-600">editor.swagger.io</a></li>
+                              <li>Clique em "File" → "Import file"</li>
+                              <li>Selecione o arquivo <code>docs/openapi.yaml</code></li>
+                              <li>Visualize e teste todos os endpoints interativamente</li>
+                            </ul>
+                          </div>
+                          <div>
+                            <strong>2. Swagger UI (Local):</strong>
+                            <pre className="mt-1 p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`# Instalar Swagger UI
+npm install -g swagger-ui-serve
+
+# Executar
+swagger-ui-serve docs/openapi.yaml`}
+                            </pre>
+                          </div>
+                          <div>
+                            <strong>3. Postman:</strong>
+                            <ul className="list-disc list-inside mt-1 text-slate-600 ml-4">
+                              <li>Abra o Postman</li>
+                              <li>Clique em "Import"</li>
+                              <li>Selecione "File" e escolha <code>docs/openapi.yaml</code></li>
+                              <li>Postman criará automaticamente uma collection baseada na especificação</li>
+                            </ul>
+                          </div>
+                          <div>
+                            <strong>4. Outras ferramentas:</strong>
+                            <ul className="list-disc list-inside mt-1 text-slate-600 ml-4">
+                              <li>Insomnia: Import → OpenAPI</li>
+                              <li>VS Code: Extensão "OpenAPI (Swagger) Editor"</li>
+                              <li>Redoc: Gera documentação HTML a partir do YAML</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Conteúdo da especificação</h4>
+                        <ul className="list-disc list-inside text-sm text-slate-700 space-y-1">
+                          <li>✅ Todos os endpoints documentados (GET, POST, PATCH, DELETE)</li>
+                          <li>✅ Schemas completos de request e response</li>
+                          <li>✅ Exemplos de requests e responses para cada endpoint</li>
+                          <li>✅ Documentação completa de autenticação (JWT e Guest Account)</li>
+                          <li>✅ Códigos de status HTTP e mensagens de erro</li>
+                          <li>✅ Parâmetros de query, path e body documentados</li>
+                          <li>✅ Tags organizadas por categoria (Reservations, Email, Payments, etc.)</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Postman Collection */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Globe className="h-5 w-5" />
+                      Postman Collection
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-slate-50 rounded border-l-4 border-orange-500">
+                        <h4 className="font-semibold mb-2">Arquivo</h4>
+                        <code className="text-sm bg-slate-200 px-2 py-1 rounded block mb-2">docs/PMS_API.postman_collection.json</code>
+                        <p className="text-sm text-slate-700 mb-3">
+                          Collection completa do Postman com todas as requisições pré-configuradas e prontas para uso.
+                        </p>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Como importar</h4>
+                        <div className="space-y-2 text-sm">
+                          <div>
+                            <strong>1. Importar Collection:</strong>
+                            <ul className="list-disc list-inside mt-1 text-slate-600 ml-4">
+                              <li>Abra o Postman</li>
+                              <li>Clique em "Import" no canto superior esquerdo</li>
+                              <li>Selecione "File" e escolha <code>docs/PMS_API.postman_collection.json</code></li>
+                              <li>A collection será importada com todas as requisições organizadas</li>
+                            </ul>
+                          </div>
+                          <div>
+                            <strong>2. Configurar variáveis de ambiente:</strong>
+                            <p className="text-slate-600 mt-1 mb-2">
+                              A collection inclui variáveis que precisam ser configuradas:
+                            </p>
+                            <ul className="list-disc list-inside text-slate-600 ml-4 space-y-1">
+                              <li><code>supabase_url</code>: URL do seu projeto Supabase</li>
+                              <li><code>supabase_anon_key</code>: Chave anônima do Supabase</li>
+                              <li><code>jwt_token</code>: Token JWT (preenchido automaticamente após login)</li>
+                              <li><code>guest_account_id</code>: ID da conta do hóspede (opcional)</li>
+                            </ul>
+                            <p className="text-slate-600 mt-2">
+                              Para configurar, clique com botão direito na collection → "Edit" → aba "Variables"
+                            </p>
+                          </div>
+                          <div>
+                            <strong>3. Obter JWT Token:</strong>
+                            <p className="text-slate-600 mt-1 mb-2">
+                              Use a requisição "Get JWT Token (Login)" na pasta "Authentication". O token será
+                              automaticamente salvo na variável <code>jwt_token</code>.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Estrutura da Collection</h4>
+                        <div className="space-y-2 text-sm">
+                          <div>
+                            <strong>📁 Authentication</strong>
+                            <ul className="list-disc list-inside text-slate-600 ml-4">
+                              <li>Get JWT Token (Login) - Obtém token JWT via Supabase Auth</li>
+                            </ul>
+                          </div>
+                          <div>
+                            <strong>📁 Reservations</strong>
+                            <ul className="list-disc list-inside text-slate-600 ml-4">
+                              <li>Get Reservation (GET) - Busca reserva via GET</li>
+                              <li>Get Reservation (POST) - Busca reserva via POST</li>
+                              <li>List Reservations (REST API) - Lista reservas via REST API</li>
+                            </ul>
+                          </div>
+                          <div>
+                            <strong>📁 Email</strong>
+                            <ul className="list-disc list-inside text-slate-600 ml-4">
+                              <li>Send Email (Resend) - Envia email via Resend API</li>
+                              <li>Send Email (SMTP) - Envia email via SMTP</li>
+                            </ul>
+                          </div>
+                          <div>
+                            <strong>📁 Payments (Stripe)</strong>
+                            <ul className="list-disc list-inside text-slate-600 ml-4">
+                              <li>Create Payment Intent - Cria intenção de pagamento</li>
+                              <li>Get Payment Status - Verifica status de pagamento</li>
+                              <li>Process Refund - Processa reembolso</li>
+                              <li>Stripe Webhook - Endpoint para webhooks</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Autenticação Detalhada */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Lock className="h-5 w-5" />
+                      Processo de Autenticação - Guia Completo
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Tipos de Autenticação</h4>
+                        <div className="space-y-3">
+                          <div className="p-3 bg-white rounded border-l-4 border-blue-500">
+                            <h5 className="font-semibold text-sm mb-1">1. JWT Token (Supabase Auth)</h5>
+                            <p className="text-xs text-slate-600 mb-2">
+                              Para usuários admin/user. Token obtido via Supabase Auth.
+                            </p>
+                            <div className="text-xs">
+                              <strong>Como obter:</strong>
+                              <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto">
+{`// No frontend (React/TypeScript)
+const { data: { session } } = await supabase.auth.getSession();
+const token = session?.access_token;
+
+// Headers para requisições
+const headers = {
+  "Authorization": "Bearer " + token,
+  "apikey": "VITE_SUPABASE_PUBLISHABLE_KEY",
+  "Content-Type": "application/json"
+}`}
+                              </pre>
+                            </div>
+                            <div className="text-xs mt-2">
+                              <strong>Validação:</strong>
+                              <ul className="list-disc list-inside text-slate-600 ml-4">
+                                <li>Token expira após 1 hora (padrão Supabase)</li>
+                                <li>Token é automaticamente renovado pelo cliente Supabase</li>
+                                <li>Token contém informações do usuário (user_id, email, role)</li>
+                              </ul>
+                            </div>
+                          </div>
+
+                          <div className="p-3 bg-white rounded border-l-4 border-green-500">
+                            <h5 className="font-semibold text-sm mb-1">2. Guest Account ID</h5>
+                            <p className="text-xs text-slate-600 mb-2">
+                              Para hóspedes autenticados. ID da conta do hóspede armazenado no localStorage.
+                            </p>
+                            <div className="text-xs">
+                              <strong>Como obter:</strong>
+                              <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto">
+{`// No frontend
+const guestAccountId = localStorage.getItem("guest_account_id");
+
+// Enviar no body (POST) ou query params (GET)
+{
+  "guest_account_id": guestAccountId,
+  "locator": "RSV742516"
+}`}
+                              </pre>
+                            </div>
+                            <div className="text-xs mt-2">
+                              <strong>Permissões:</strong>
+                              <ul className="list-disc list-inside text-slate-600 ml-4">
+                                <li>Acesso apenas a reservas vinculadas à conta (guest_stay_history)</li>
+                                <li>Operações limitadas ao próprio perfil</li>
+                                <li>Web check-in para suas reservas</li>
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Fluxo de Autenticação Completo</h4>
+                        <div className="space-y-2 text-sm">
+                          <div className="p-2 bg-white rounded">
+                            <strong>Para Usuários Admin/User:</strong>
+                            <ol className="list-decimal list-inside text-slate-600 ml-4 mt-1 space-y-1">
+                              <li>Usuário faz login via Supabase Auth (email/senha, OAuth, etc.)</li>
+                              <li>Supabase retorna JWT token no campo <code>access_token</code></li>
+                              <li>Token é armazenado automaticamente pelo cliente Supabase</li>
+                              <li>Token é incluído no header <code>Authorization: Bearer {"{token}"}</code> em todas as requisições</li>
+                              <li>Edge Functions validam o token e extraem informações do usuário</li>
+                              <li>RLS (Row Level Security) no banco valida permissões baseadas no user_id</li>
+                            </ol>
+                          </div>
+                          <div className="p-2 bg-white rounded">
+                            <strong>Para Hóspedes:</strong>
+                            <ol className="list-decimal list-inside text-slate-600 ml-4 mt-1 space-y-1">
+                              <li>Hóspede acessa web check-in com localizador</li>
+                              <li>Sistema cria ou recupera guest_account vinculado ao localizador</li>
+                              <li>guest_account_id é armazenado no localStorage</li>
+                              <li>guest_account_id é enviado nas requisições (body ou query params)</li>
+                              <li>Edge Functions validam se a reserva está vinculada ao guest_account</li>
+                              <li>RLS no banco garante que hóspede só acessa suas próprias reservas</li>
+                            </ol>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Exemplos de Requisições com Autenticação</h4>
+                        <div className="space-y-3 text-sm">
+                          <div>
+                            <strong>Com JWT Token (cURL):</strong>
+                            <pre className="mt-1 p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`curl -X GET "https://your-project.supabase.co/functions/v1/get-reservation?locator=RSV742516" \\
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\
+  -H "apikey: YOUR_SUPABASE_ANON_KEY"`}
+                            </pre>
+                          </div>
+                          <div>
+                            <strong>Com Guest Account ID (cURL):</strong>
+                            <pre className="mt-1 p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`curl -X POST "https://your-project.supabase.co/functions/v1/get-reservation" \\
+  -H "Content-Type: application/json" \\
+  -H "apikey: YOUR_SUPABASE_ANON_KEY" \\
+  -d '{
+    "locator": "RSV742516",
+    "guest_account_id": "550e8400-e29b-41d4-a716-446655440000"
+  }'`}
+                            </pre>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Exemplos de Requests e Responses */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Code className="h-5 w-5" />
+                      Exemplos de Requests e Responses
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Get Reservation - Request</h4>
+                        <div className="space-y-2 text-sm">
+                          <div>
+                            <strong>GET:</strong>
+                            <pre className="mt-1 p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`GET /functions/v1/get-reservation?locator=RSV742516
+Headers:
+  Authorization: Bearer {jwt_token}
+  apikey: {supabase_anon_key}`}
+                            </pre>
+                          </div>
+                          <div>
+                            <strong>POST:</strong>
+                            <pre className="mt-1 p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`POST /functions/v1/get-reservation
+Headers:
+  Authorization: Bearer {jwt_token}
+  apikey: {supabase_anon_key}
+  Content-Type: application/json
+
+Body:
+{
+  "locator": "RSV742516"
+}`}
+                            </pre>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Get Reservation - Response (200 OK)</h4>
+                        <pre className="p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`{
+  "success": true,
+  "reservation": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "reservation_code": "RSV742516",
+    "identification_number": "123456",
+    "checkin_date": "2024-01-15",
+    "checkout_date": "2024-01-20",
+    "status": "confirmed",
+    "total_amount": 1000.00,
+    "paid_amount": 500.00,
+    "payment_status": "partial",
+    "guest": {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "full_name": "João Silva",
+      "email": "joao@example.com",
+      "phone": "+5511999999999",
+      "document_number": "12345678900"
+    },
+    "room": {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "room_number": "101",
+      "name": "Quarto 101"
+    },
+    "payments": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "amount": 500.00,
+        "payment_date": "2024-01-10",
+        "payment_method": "credit_card"
+      }
+    ]
+  }
+}`}
+                        </pre>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Erros Comuns</h4>
+                        <div className="space-y-2 text-sm">
+                          <div>
+                            <strong>401 Unauthorized:</strong>
+                            <pre className="mt-1 p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`{
+  "error": "Authentication required",
+  "message": "Autenticação necessária. Forneça um token de usuário ou guest_account_id"
+}`}
+                            </pre>
+                          </div>
+                          <div>
+                            <strong>403 Forbidden:</strong>
+                            <pre className="mt-1 p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`{
+  "error": "Access denied",
+  "message": "Você não tem permissão para acessar esta reserva"
+}`}
+                            </pre>
+                          </div>
+                          <div>
+                            <strong>404 Not Found:</strong>
+                            <pre className="mt-1 p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`{
+  "error": "Reservation not found",
+  "message": "Reserva não encontrada com os identificadores fornecidos"
+}`}
+                            </pre>
+                          </div>
                         </div>
                       </div>
                     </div>
