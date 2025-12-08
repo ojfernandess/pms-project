@@ -410,6 +410,255 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /rest/v1/web_checkin:
+    get:
+      tags:
+        - Web Check-in
+      summary: Buscar web check-in
+      description: |
+        Busca informações de web check-in por locator, token ou reservation_id.
+        
+        **Autenticação**: Opcional (JWT token ou guest_account_id para dados completos)
+      operationId: getWebCheckin
+      parameters:
+        - name: locator
+          in: query
+          description: Localizador do web check-in
+          schema:
+            type: string
+        - name: token
+          in: query
+          description: Token do web check-in
+          schema:
+            type: string
+        - name: reservation_id
+          in: query
+          description: ID da reserva
+          schema:
+            type: string
+            format: uuid
+        - name: select
+          in: query
+          description: Campos a retornar (PostgREST)
+          schema:
+            type: string
+            default: "*"
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Web check-in encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebCheckin'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+        - Web Check-in
+      summary: Criar web check-in
+      description: |
+        Cria um novo web check-in para uma reserva.
+        
+        **Autenticação**: Obrigatória (JWT token)
+      operationId: createWebCheckin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebCheckinCreate'
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Web check-in criado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebCheckin'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags:
+        - Web Check-in
+      summary: Atualizar web check-in
+      description: |
+        Atualiza informações do web check-in (status, dados dos hóspedes, etc.).
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: updateWebCheckin
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: ID do web check-in
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebCheckinUpdate'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Web check-in atualizado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebCheckin'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /rest/v1/web_checkin_guests:
+    get:
+      tags:
+        - Web Check-in
+      summary: Listar hóspedes do web check-in
+      description: |
+        Lista hóspedes associados a um web check-in.
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: listWebCheckinGuests
+      parameters:
+        - name: web_checkin_id
+          in: query
+          required: true
+          description: ID do web check-in
+          schema:
+            type: string
+            format: uuid
+        - name: select
+          in: query
+          description: Campos a retornar
+          schema:
+            type: string
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de hóspedes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebCheckinGuest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags:
+        - Web Check-in
+      summary: Adicionar hóspedes ao web check-in
+      description: |
+        Adiciona ou atualiza hóspedes de um web check-in.
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: createWebCheckinGuests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/WebCheckinGuestCreate'
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Hóspedes adicionados com sucesso
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebCheckinGuest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /rest/v1/web_checkin_documents:
+    get:
+      tags:
+        - Web Check-in
+      summary: Listar documentos do web check-in
+      description: |
+        Lista documentos associados a um web check-in.
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: listWebCheckinDocuments
+      parameters:
+        - name: web_checkin_id
+          in: query
+          required: true
+          description: ID do web check-in
+          schema:
+            type: string
+            format: uuid
+        - name: select
+          in: query
+          description: Campos a retornar
+          schema:
+            type: string
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de documentos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebCheckinDocument'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags:
+        - Web Check-in
+      summary: Adicionar documentos ao web check-in
+      description: |
+        Adiciona ou atualiza documentos de um web check-in.
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: createWebCheckinDocuments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/WebCheckinDocumentCreate'
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Documentos adicionados com sucesso
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebCheckinDocument'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -662,6 +911,259 @@ components:
         status:
           type: string
         amount:
+          type: integer
+
+    WebCheckin:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        reservation_id:
+          type: string
+          format: uuid
+        establishment_id:
+          type: string
+          format: uuid
+        locator:
+          type: string
+          description: Localizador único do web check-in
+        token:
+          type: string
+          description: Token de acesso do web check-in
+        status:
+          type: string
+          enum: [pending, in_progress, completed, expired, cancelled]
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+        ip_address:
+          type: string
+          nullable: true
+        user_agent:
+          type: string
+          nullable: true
+        guest_data:
+          type: object
+          nullable: true
+        documents:
+          type: array
+          nullable: true
+
+    WebCheckinCreate:
+      type: object
+      required:
+        - reservation_id
+      properties:
+        reservation_id:
+          type: string
+          format: uuid
+        establishment_id:
+          type: string
+          format: uuid
+        locator:
+          type: string
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    WebCheckinUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, in_progress, completed, expired, cancelled]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        guest_data:
+          type: object
+        documents:
+          type: array
+        ip_address:
+          type: string
+        user_agent:
+          type: string
+
+    WebCheckinGuest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        web_checkin_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        cpf:
+          type: string
+          nullable: true
+        birth_date:
+          type: string
+          format: date
+          nullable: true
+        document_type:
+          type: string
+          nullable: true
+        document_number:
+          type: string
+          nullable: true
+        is_main_guest:
+          type: boolean
+        order:
+          type: integer
+        zip_code:
+          type: string
+          nullable: true
+        street:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        complement:
+          type: string
+          nullable: true
+        neighborhood:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+        nationality:
+          type: string
+          nullable: true
+
+    WebCheckinGuestCreate:
+      type: object
+      required:
+        - web_checkin_id
+        - name
+      properties:
+        web_checkin_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        cpf:
+          type: string
+        birth_date:
+          type: string
+          format: date
+        document_type:
+          type: string
+        document_number:
+          type: string
+        is_main_guest:
+          type: boolean
+          default: false
+        order:
+          type: integer
+        zip_code:
+          type: string
+        street:
+          type: string
+        number:
+          type: string
+        complement:
+          type: string
+        neighborhood:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        country:
+          type: string
+        nationality:
+          type: string
+
+    WebCheckinDocument:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        web_checkin_id:
+          type: string
+          format: uuid
+        guest_name:
+          type: string
+        document_type:
+          type: string
+        document_number:
+          type: string
+          nullable: true
+        document_front_url:
+          type: string
+          nullable: true
+        document_back_url:
+          type: string
+          nullable: true
+        selfie_url:
+          type: string
+          nullable: true
+        is_main_guest:
+          type: boolean
+        order:
+          type: integer
+
+    WebCheckinDocumentCreate:
+      type: object
+      required:
+        - web_checkin_id
+        - guest_name
+      properties:
+        web_checkin_id:
+          type: string
+          format: uuid
+        guest_name:
+          type: string
+        document_type:
+          type: string
+          default: cpf
+        document_number:
+          type: string
+        document_front_url:
+          type: string
+        document_back_url:
+          type: string
+        selfie_url:
+          type: string
+        is_main_guest:
+          type: boolean
+          default: false
+        order:
           type: integer
 
     Error:

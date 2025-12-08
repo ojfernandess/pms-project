@@ -1999,6 +1999,225 @@ swagger-ui-serve docs/openapi.yaml`}
                               <li>Stripe Webhook - Endpoint para webhooks</li>
                             </ul>
                           </div>
+                          <div>
+                            <strong>📁 Web Check-in</strong>
+                            <ul className="list-disc list-inside text-slate-600 ml-4">
+                              <li>Get Web Check-in by Locator - Busca web check-in por localizador</li>
+                              <li>Create Web Check-in - Cria novo web check-in</li>
+                              <li>Update Web Check-in Status - Atualiza status do web check-in</li>
+                              <li>List Web Check-in Guests - Lista hóspedes do web check-in</li>
+                              <li>Add Web Check-in Guests - Adiciona hóspedes ao web check-in</li>
+                              <li>List Web Check-in Documents - Lista documentos do web check-in</li>
+                              <li>Add Web Check-in Documents - Adiciona documentos ao web check-in</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Web Check-in */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Web Check-in - Documentação Completa
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Visão Geral</h4>
+                        <p className="text-sm text-slate-700 mb-3">
+                          O sistema de Web Check-in permite que hóspedes realizem o check-in online antes da chegada,
+                          preenchendo dados pessoais, documentos e preferências através de uma interface web.
+                        </p>
+                        <div className="space-y-2 text-sm">
+                          <div>
+                            <strong>Fluxo do Web Check-in:</strong>
+                            <ol className="list-decimal list-inside text-slate-600 ml-4 mt-1 space-y-1">
+                              <li>Hóspede recebe link ou localizador do web check-in</li>
+                              <li>Acessa a página de web check-in com o localizador</li>
+                              <li>Verifica dados da reserva</li>
+                              <li>Preenche dados dos hóspedes (nome, CPF, documentos, etc.)</li>
+                              <li>Faz upload de documentos (RG, CPF, selfie)</li>
+                              <li>Confirma e completa o check-in</li>
+                            </ol>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Endpoints Disponíveis</h4>
+                        <div className="space-y-3 text-sm">
+                          <div className="p-3 bg-white rounded border-l-4 border-blue-500">
+                            <h5 className="font-semibold text-sm mb-1">GET /rest/v1/web_checkin</h5>
+                            <p className="text-xs text-slate-600 mb-2">
+                              Busca informações de web check-in por locator, token ou reservation_id.
+                            </p>
+                            <div className="text-xs">
+                              <strong>Parâmetros:</strong>
+                              <ul className="list-disc list-inside text-slate-600 ml-4 mt-1">
+                                <li><code>locator</code> - Localizador do web check-in</li>
+                                <li><code>token</code> - Token do web check-in</li>
+                                <li><code>reservation_id</code> - ID da reserva</li>
+                              </ul>
+                            </div>
+                          </div>
+
+                          <div className="p-3 bg-white rounded border-l-4 border-green-500">
+                            <h5 className="font-semibold text-sm mb-1">POST /rest/v1/web_checkin</h5>
+                            <p className="text-xs text-slate-600 mb-2">
+                              Cria um novo web check-in para uma reserva.
+                            </p>
+                            <div className="text-xs">
+                              <strong>Body:</strong>
+                              <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto">
+{`{
+  "reservation_id": "uuid",
+  "establishment_id": "uuid",
+  "locator": "RSV742516",
+  "expires_at": "2024-01-20T12:00:00Z"
+}`}
+                              </pre>
+                            </div>
+                          </div>
+
+                          <div className="p-3 bg-white rounded border-l-4 border-yellow-500">
+                            <h5 className="font-semibold text-sm mb-1">PATCH /rest/v1/web_checkin</h5>
+                            <p className="text-xs text-slate-600 mb-2">
+                              Atualiza informações do web check-in (status, dados dos hóspedes, etc.).
+                            </p>
+                            <div className="text-xs">
+                              <strong>Status possíveis:</strong>
+                              <ul className="list-disc list-inside text-slate-600 ml-4 mt-1">
+                                <li><code>pending</code> - Aguardando início</li>
+                                <li><code>in_progress</code> - Em andamento</li>
+                                <li><code>completed</code> - Concluído</li>
+                                <li><code>expired</code> - Expirado</li>
+                                <li><code>cancelled</code> - Cancelado</li>
+                              </ul>
+                            </div>
+                          </div>
+
+                          <div className="p-3 bg-white rounded border-l-4 border-purple-500">
+                            <h5 className="font-semibold text-sm mb-1">GET /rest/v1/web_checkin_guests</h5>
+                            <p className="text-xs text-slate-600 mb-2">
+                              Lista hóspedes associados a um web check-in.
+                            </p>
+                            <div className="text-xs">
+                              <strong>Parâmetros:</strong>
+                              <ul className="list-disc list-inside text-slate-600 ml-4 mt-1">
+                                <li><code>web_checkin_id</code> - ID do web check-in (obrigatório)</li>
+                              </ul>
+                            </div>
+                          </div>
+
+                          <div className="p-3 bg-white rounded border-l-4 border-indigo-500">
+                            <h5 className="font-semibold text-sm mb-1">POST /rest/v1/web_checkin_guests</h5>
+                            <p className="text-xs text-slate-600 mb-2">
+                              Adiciona ou atualiza hóspedes de um web check-in.
+                            </p>
+                            <div className="text-xs">
+                              <strong>Body (array):</strong>
+                              <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto">
+{`[
+  {
+    "web_checkin_id": "uuid",
+    "name": "João Silva",
+    "email": "joao@example.com",
+    "phone": "+5511999999999",
+    "cpf": "12345678900",
+    "birth_date": "1990-01-01",
+    "is_main_guest": true,
+    "order": 0
+  }
+]`}
+                              </pre>
+                            </div>
+                          </div>
+
+                          <div className="p-3 bg-white rounded border-l-4 border-pink-500">
+                            <h5 className="font-semibold text-sm mb-1">GET /rest/v1/web_checkin_documents</h5>
+                            <p className="text-xs text-slate-600 mb-2">
+                              Lista documentos associados a um web check-in.
+                            </p>
+                          </div>
+
+                          <div className="p-3 bg-white rounded border-l-4 border-red-500">
+                            <h5 className="font-semibold text-sm mb-1">POST /rest/v1/web_checkin_documents</h5>
+                            <p className="text-xs text-slate-600 mb-2">
+                              Adiciona ou atualiza documentos de um web check-in.
+                            </p>
+                            <div className="text-xs">
+                              <strong>Body (array):</strong>
+                              <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto">
+{`[
+  {
+    "web_checkin_id": "uuid",
+    "guest_name": "João Silva",
+    "document_type": "cpf",
+    "document_number": "12345678900",
+    "document_front_url": "https://example.com/doc-front.jpg",
+    "document_back_url": "https://example.com/doc-back.jpg",
+    "selfie_url": "https://example.com/selfie.jpg",
+    "is_main_guest": true,
+    "order": 0
+  }
+]`}
+                              </pre>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Autenticação para Web Check-in</h4>
+                        <div className="space-y-2 text-sm">
+                          <p className="text-slate-700">
+                            O web check-in pode ser acessado de duas formas:
+                          </p>
+                          <div className="p-2 bg-white rounded">
+                            <strong>1. Sem autenticação (público):</strong>
+                            <p className="text-xs text-slate-600 mt-1">
+                              Hóspede acessa com localizador. Pode visualizar dados básicos da reserva.
+                            </p>
+                          </div>
+                          <div className="p-2 bg-white rounded">
+                            <strong>2. Com autenticação (guest_account_id):</strong>
+                            <p className="text-xs text-slate-600 mt-1">
+                              Hóspede autenticado pode acessar dados completos e realizar operações de atualização.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Exemplos de Uso</h4>
+                        <div className="space-y-3 text-sm">
+                          <div>
+                            <strong>Buscar web check-in por localizador:</strong>
+                            <pre className="mt-1 p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`GET /rest/v1/web_checkin?locator=RSV742516&select=*
+Headers:
+  apikey: {supabase_anon_key}`}
+                            </pre>
+                          </div>
+                          <div>
+                            <strong>Atualizar status para "in_progress":</strong>
+                            <pre className="mt-1 p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`PATCH /rest/v1/web_checkin?id=eq.{uuid}
+Headers:
+  Authorization: Bearer {jwt_token}
+  apikey: {supabase_anon_key}
+  Content-Type: application/json
+
+Body:
+{
+  "status": "in_progress",
+  "started_at": "2024-01-15T14:00:00Z"
+}`}
+                            </pre>
+                          </div>
                         </div>
                       </div>
                     </div>

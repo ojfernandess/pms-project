@@ -397,6 +397,294 @@
         }
       ],
       "description": "Endpoints de processamento de pagamentos via Stripe"
+    },
+    {
+      "name": "Web Check-in",
+      "item": [
+        {
+          "name": "Get Web Check-in by Locator",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text",
+                "disabled": true
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin?locator=RSV742516&select=*",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin"],
+              "query": [
+                {
+                  "key": "locator",
+                  "value": "RSV742516",
+                  "description": "Localizador do web check-in"
+                },
+                {
+                  "key": "select",
+                  "value": "*",
+                  "description": "Campos a retornar"
+                },
+                {
+                  "key": "token",
+                  "value": "",
+                  "description": "Token do web check-in",
+                  "disabled": true
+                },
+                {
+                  "key": "reservation_id",
+                  "value": "",
+                  "description": "ID da reserva",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Busca informações de web check-in por locator, token ou reservation_id.\n\n**Autenticação**: Opcional (JWT token ou guest_account_id para dados completos)"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Web Check-in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Prefer",
+                "value": "return=representation"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reservation_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"establishment_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"locator\": \"RSV742516\",\n  \"expires_at\": \"2024-01-20T12:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin"]
+            },
+            "description": "Cria um novo web check-in para uma reserva.\n\n**Autenticação**: Obrigatória (JWT token)"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Web Check-in Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Prefer",
+                "value": "return=representation"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"in_progress\",\n  \"started_at\": \"2024-01-15T14:00:00Z\",\n  \"ip_address\": \"192.168.1.1\",\n  \"user_agent\": \"Mozilla/5.0...\"\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin?id=eq.550e8400-e29b-41d4-a716-446655440000",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin"],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "eq.550e8400-e29b-41d4-a716-446655440000",
+                  "description": "ID do web check-in"
+                }
+              ]
+            },
+            "description": "Atualiza informações do web check-in (status, dados dos hóspedes, etc.).\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "List Web Check-in Guests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin_guests?web_checkin_id=eq.550e8400-e29b-41d4-a716-446655440000&select=*&order=order.asc",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin_guests"],
+              "query": [
+                {
+                  "key": "web_checkin_id",
+                  "value": "eq.550e8400-e29b-41d4-a716-446655440000",
+                  "description": "ID do web check-in"
+                },
+                {
+                  "key": "select",
+                  "value": "*",
+                  "description": "Campos a retornar"
+                },
+                {
+                  "key": "order",
+                  "value": "order.asc",
+                  "description": "Ordenação"
+                }
+              ]
+            },
+            "description": "Lista hóspedes associados a um web check-in.\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "Add Web Check-in Guests",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Prefer",
+                "value": "return=representation"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"web_checkin_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"João Silva\",\n    \"email\": \"joao@example.com\",\n    \"phone\": \"+5511999999999\",\n    \"cpf\": \"12345678900\",\n    \"birth_date\": \"1990-01-01\",\n    \"is_main_guest\": true,\n    \"order\": 0\n  },\n  {\n    \"web_checkin_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"Maria Silva\",\n    \"email\": \"maria@example.com\",\n    \"is_main_guest\": false,\n    \"order\": 1\n  }\n]"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin_guests",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin_guests"]
+            },
+            "description": "Adiciona ou atualiza hóspedes de um web check-in.\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "List Web Check-in Documents",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin_documents?web_checkin_id=eq.550e8400-e29b-41d4-a716-446655440000&select=*&order=order.asc",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin_documents"],
+              "query": [
+                {
+                  "key": "web_checkin_id",
+                  "value": "eq.550e8400-e29b-41d4-a716-446655440000",
+                  "description": "ID do web check-in"
+                },
+                {
+                  "key": "select",
+                  "value": "*",
+                  "description": "Campos a retornar"
+                },
+                {
+                  "key": "order",
+                  "value": "order.asc",
+                  "description": "Ordenação"
+                }
+              ]
+            },
+            "description": "Lista documentos associados a um web check-in.\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "Add Web Check-in Documents",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Prefer",
+                "value": "return=representation"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"web_checkin_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"guest_name\": \"João Silva\",\n    \"document_type\": \"cpf\",\n    \"document_number\": \"12345678900\",\n    \"document_front_url\": \"https://example.com/doc-front.jpg\",\n    \"document_back_url\": \"https://example.com/doc-back.jpg\",\n    \"selfie_url\": \"https://example.com/selfie.jpg\",\n    \"is_main_guest\": true,\n    \"order\": 0\n  }\n]"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin_documents",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin_documents"]
+            },
+            "description": "Adiciona ou atualiza documentos de um web check-in.\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints relacionados ao processo de web check-in de hóspedes"
     }
   ],
   "variable": [
