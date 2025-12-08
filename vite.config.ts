@@ -11,22 +11,46 @@ const injectEnvPlugin = () => {
       // Obter URL do Supabase da variável de ambiente
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
       
-      // Injetar como variável global e como meta tag
+      if (!supabaseUrl) {
+        return html; // Se não houver URL, retornar HTML sem modificações
+      }
+      
       let modifiedHtml = html;
       
-      // Adicionar meta tag com a URL do Supabase (antes do fechamento do </head>)
-      if (supabaseUrl && !html.includes('name="supabase-url"')) {
+      // 1. Adicionar meta tag com a URL do Supabase (antes do fechamento do </head>)
+      if (!html.includes('name="supabase-url"')) {
         modifiedHtml = modifiedHtml.replace(
           '</head>',
           `  <meta name="supabase-url" content="${supabaseUrl}" />\n</head>`
         );
       }
       
-      // Injetar como variável global JavaScript
-      modifiedHtml = modifiedHtml.replace(
-        /window\.__SUPABASE_URL__\s*=\s*window\.__SUPABASE_URL__\s*\|\|\s*null;/g,
-        `window.__SUPABASE_URL__ = window.__SUPABASE_URL__ || "${supabaseUrl}";`
-      );
+      // 2. Injetar como variável global JavaScript antes do script que a utiliza
+      // Inserir logo após a tag <head> ou antes do primeiro <script>
+      const scriptInit = `    <script>
+      // Inicializar variável global com URL do Supabase (injetada pelo Vite durante o build)
+      window.__SUPABASE_URL__ = "${supabaseUrl}";
+      window.__ENV__ = window.__ENV__ || {};
+      window.__ENV__.VITE_SUPABASE_URL = "${supabaseUrl}";
+    </script>`;
+      
+      // Inserir antes do primeiro script tag que contém fetchSettings
+      if (html.includes('fetchSettings') && !html.includes('window.__SUPABASE_URL__ =')) {
+        // Procurar pelo primeiro script que contém "Script para buscar e injetar meta tags"
+        const scriptPattern = /(<script>\s*\/\/ Script para buscar e injetar meta tags Open Graph)/i;
+        if (scriptPattern.test(modifiedHtml)) {
+          modifiedHtml = modifiedHtml.replace(
+            scriptPattern,
+            scriptInit + '\n    $1'
+          );
+        } else {
+          // Se não encontrar o padrão exato, inserir antes do primeiro script
+          modifiedHtml = modifiedHtml.replace(
+            /(<script>)/,
+            scriptInit + '\n    $1'
+          );
+        }
+      }
       
       return modifiedHtml;
     },

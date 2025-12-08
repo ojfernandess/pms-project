@@ -126,8 +126,10 @@
             }
             
             if (!supabaseUrl) {
-              console.warn('URL do Supabase não encontrada. Meta tags Open Graph não serão atualizadas via script inline.');
-              console.warn('Dica: Configure VITE_SUPABASE_URL no Vercel ou use a API route /api/get-site-settings');
+              // Apenas avisar se a API route também falhou (já tentamos antes)
+              // Se chegou aqui, significa que a API route não está disponível E não temos URL do Supabase
+              console.debug('URL do Supabase não encontrada. Meta tags Open Graph não serão atualizadas via script inline.');
+              console.debug('Dica: Configure VITE_SUPABASE_URL no Vercel ou use a API route /api/get-site-settings');
               return;
             }
             

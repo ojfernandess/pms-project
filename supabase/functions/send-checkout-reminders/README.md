@@ -92,3 +92,4 @@ A Edge Function usa as seguintes variáveis de ambiente (configuradas automatica
 - Reservas devem ter status `confirmed`
 - Reservas devem ter e-mail do hóspede cadastrado
 
+

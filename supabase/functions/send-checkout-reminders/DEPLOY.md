@@ -143,3 +143,4 @@ Monitore regularmente para garantir que os e-mails estão sendo enviados correta
 - Verifique a fila de e-mails em **Configurações** > **Fila de E-mails**
 - Verifique se o provedor de e-mail está configurado corretamente
 
+
