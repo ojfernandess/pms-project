@@ -456,11 +456,12 @@ const Documentation = () => {
         </div>
 
         <Tabs value={activeSection} onValueChange={setActiveSection} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 lg:grid-cols-7 mb-6">
+          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 lg:grid-cols-8 mb-6">
             <TabsTrigger value="overview">Visão Geral</TabsTrigger>
             <TabsTrigger value="routes">Rotas</TabsTrigger>
             <TabsTrigger value="apis">APIs</TabsTrigger>
             <TabsTrigger value="swagger">Swagger/Postman</TabsTrigger>
+            <TabsTrigger value="stability">Estabilidade</TabsTrigger>
             <TabsTrigger value="features">Funcionalidades</TabsTrigger>
             <TabsTrigger value="database">Banco de Dados</TabsTrigger>
             <TabsTrigger value="integrations">Integrações</TabsTrigger>
@@ -2463,6 +2464,152 @@ Body:
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </TabsContent>
+
+          {/* Estabilidade e Monitoramento */}
+          <TabsContent value="stability" className="space-y-6">
+            <Card className="p-6">
+              <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
+                <Shield className="h-6 w-6 text-primary" />
+                Estabilidade e Monitoramento
+              </h2>
+              <div className="h-[600px] overflow-y-auto pr-4">
+                <div className="space-y-6">
+                  {/* Introdução */}
+                  <div className="p-4 bg-blue-50 rounded-lg border-l-4 border-blue-500">
+                    <h3 className="font-semibold mb-2 text-blue-900">🎯 Objetivos de Estabilidade</h3>
+                    <ul className="list-disc list-inside text-sm text-blue-800 space-y-1">
+                      <li><strong>Uptime de 99%</strong>: Sistema disponível 99% do tempo</li>
+                      <li><strong>Log de Erros</strong>: Todos os erros registrados de forma estruturada</li>
+                      <li><strong>Observabilidade</strong>: Monitoramento contínuo do sistema</li>
+                      <li><strong>Proteção contra Overbooking</strong>: Locks garantem disponibilidade correta</li>
+                    </ul>
+                  </div>
+
+                  <Separator />
+
+                  {/* Sistema de Logging */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <FileText className="h-5 w-5" />
+                      Sistema de Logging de Erros
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Funcionalidades</h4>
+                        <ul className="list-disc list-inside text-sm text-slate-700 space-y-1">
+                          <li>✅ Logging estruturado com severidade (low, medium, high, critical)</li>
+                          <li>✅ Armazenamento no banco de dados (tabela <code>error_logs</code>)</li>
+                          <li>✅ Metadata contextual para debugging</li>
+                          <li>✅ Stack traces para erros críticos</li>
+                          <li>✅ Integração automática com ErrorBoundary</li>
+                        </ul>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Uso</h4>
+                        <pre className="p-2 bg-slate-100 rounded text-xs overflow-x-auto">
+{`import { logError } from "@/lib/errorLogger";
+
+await logError({
+  error: new Error("Mensagem de erro"),
+  context: "nome-do-contexto",
+  severity: "high",
+  metadata: { dados_adicionais: "valor" },
+});`}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Sistema de Monitoramento */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Zap className="h-5 w-5" />
+                      Sistema de Monitoramento
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Health Check</h4>
+                        <p className="text-sm text-slate-700 mb-2">
+                          Verifica a saúde do sistema (database, storage, API).
+                        </p>
+                        <div className="space-y-2 text-sm">
+                          <div>
+                            <strong>Endpoint:</strong>
+                            <code className="ml-2 text-xs bg-slate-200 px-1 rounded">/functions/v1/health-check</code>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Monitoramento Periódico</h4>
+                        <p className="text-sm text-slate-700 mb-2">
+                          O sistema inicia monitoramento automático ao carregar a aplicação.
+                        </p>
+                        <ul className="list-disc list-inside text-sm text-slate-700 space-y-1">
+                          <li>Verifica saúde do sistema a cada 5 minutos</li>
+                          <li>Gera alertas automáticos para problemas críticos</li>
+                          <li>Coleta métricas de performance</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Proteção contra Overbooking */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-slate-800 flex items-center gap-2">
+                      <Lock className="h-5 w-5" />
+                      Proteção contra Overbooking
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Solução: Validação em Duas Camadas</h4>
+                        <div className="space-y-3 text-sm">
+                          <div className="p-3 bg-white rounded border-l-4 border-green-500">
+                            <strong>1. Validação Inicial (Frontend)</strong>
+                            <p className="text-xs text-slate-600 mt-1">
+                              Validação rápida antes de tentar criar a reserva.
+                            </p>
+                          </div>
+
+                          <div className="p-3 bg-white rounded border-l-4 border-blue-500">
+                            <strong>2. Criação com Lock (Backend)</strong>
+                            <p className="text-xs text-slate-600 mt-1">
+                              Validação atômica com lock exclusivo.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 rounded">
+                        <h4 className="font-semibold mb-2">Garantias</h4>
+                        <ul className="list-disc list-inside text-sm text-slate-700 space-y-1">
+                          <li>✅ <strong>Não há overbooking</strong>: Lock garante que apenas uma reserva é criada por vez</li>
+                          <li>✅ <strong>Disponibilidade correta</strong>: Validação atômica garante disponibilidade sempre correta</li>
+                          <li>✅ <strong>Retry automático</strong>: Sistema sugere retry quando lock não está disponível</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Documentação Completa */}
+                  <div className="p-4 bg-blue-50 rounded-lg">
+                    <h4 className="font-semibold mb-2 text-blue-900">📚 Documentação Completa</h4>
+                    <p className="text-sm text-blue-800 mb-2">
+                      Para mais detalhes, consulte:
+                    </p>
+                    <code className="text-xs block bg-blue-100 p-2 rounded">docs/STABILITY_AND_MONITORING.md</code>
                   </div>
                 </div>
               </div>

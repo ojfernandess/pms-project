@@ -41,6 +41,8 @@ import { EstablishmentProvider } from "./contexts/EstablishmentContext";
 import { StripeProvider } from "./components/stripe/StripeProvider";
 import { useSiteMeta } from "./hooks/useSiteMeta";
 import "./i18n/config";
+import { useEffect } from "react";
+import { startMonitoring, stopMonitoring } from "./lib/monitoring";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,12 +50,51 @@ const queryClient = new QueryClient({
       retry: 1,
       refetchOnWindowFocus: false,
       staleTime: 5 * 60 * 1000, // 5 minutos
+      onError: async (error) => {
+        // Logar erros de queries automaticamente
+        try {
+          const { logError } = await import("@/lib/errorLogger");
+          await logError({
+            error: error instanceof Error ? error : new Error(String(error)),
+            context: "react-query",
+            severity: "medium",
+          });
+        } catch (logError) {
+          console.warn("Erro ao fazer log de query error:", logError);
+        }
+      },
+    },
+    mutations: {
+      onError: async (error) => {
+        // Logar erros de mutations automaticamente
+        try {
+          const { logError } = await import("@/lib/errorLogger");
+          await logError({
+            error: error instanceof Error ? error : new Error(String(error)),
+            context: "react-query.mutation",
+            severity: "high",
+          });
+        } catch (logError) {
+          console.warn("Erro ao fazer log de mutation error:", logError);
+        }
+      },
     },
   },
 });
 
 const AppContent = () => {
   useSiteMeta(); // Atualizar título e meta tags dinamicamente
+  
+  // Iniciar monitoramento do sistema
+  useEffect(() => {
+    // Iniciar monitoramento periódico (a cada 5 minutos)
+    startMonitoring(5 * 60 * 1000);
+    
+    // Cleanup ao desmontar
+    return () => {
+      stopMonitoring();
+    };
+  }, []);
   
   return (
     <BrowserRouter>

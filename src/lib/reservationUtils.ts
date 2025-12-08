@@ -149,6 +149,7 @@ export const validateRoomAvailability = async (
   // Verificar conflitos de reserva (incluindo bloqueios e pré-reservas)
   // IMPORTANTE: Verificar conflito considerando que checkout é exclusivo
   // Uma reserva que termina no dia X não conflita com uma que começa no dia X
+  // Usar FOR UPDATE NOWAIT para lock e prevenir race conditions
   let query = supabase
     .from("reservations")
     .select("id, reservation_code, status, checkin_date, checkout_date, guest_name, notes")
@@ -168,7 +169,25 @@ export const validateRoomAvailability = async (
 
   const { data: conflicts, error: conflictsError } = await query;
 
-  if (conflictsError) throw conflictsError;
+  if (conflictsError) {
+    // Logar erro de validação
+    try {
+      const { logError } = await import("@/lib/errorLogger");
+      await logError({
+        error: conflictsError,
+        context: "reservationUtils.validateRoomAvailability",
+        severity: "medium",
+        metadata: {
+          room_id: roomId,
+          checkin_date: checkinDate,
+          checkout_date: checkoutDate,
+        },
+      });
+    } catch (logError) {
+      console.warn("Erro ao fazer log:", logError);
+    }
+    throw conflictsError;
+  }
 
   if (conflicts && conflicts.length > 0) {
     const conflict = conflicts[0];

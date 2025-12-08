@@ -17,7 +17,7 @@ window.addEventListener("error", (event) => {
 });
 
 // Suprimir erros não capturados de Promise relacionados a extensões
-window.addEventListener("unhandledrejection", (event) => {
+window.addEventListener("unhandledrejection", async (event) => {
   const errorMessage = event.reason?.message || event.reason?.toString() || "";
   
   // Suprimir erro de extensões do navegador relacionado a message channels
@@ -28,6 +28,21 @@ window.addEventListener("unhandledrejection", (event) => {
   ) {
     event.preventDefault();
     return false;
+  }
+
+  // Logar erros não capturados
+  try {
+    const { logError } = await import("@/lib/errorLogger");
+    await logError({
+      error: event.reason instanceof Error ? event.reason : new Error(String(event.reason)),
+      context: "unhandledRejection",
+      severity: "high",
+      metadata: {
+        promise_rejection: true,
+      },
+    });
+  } catch (logError) {
+    console.warn("Erro ao fazer log de unhandled rejection:", logError);
   }
 });
 

@@ -24,6 +24,22 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("ErrorBoundary capturou um erro:", error, errorInfo);
+    
+    // Logar erro estruturado
+    import("@/lib/errorLogger").then(({ logError }) => {
+      logError({
+        error,
+        context: "ErrorBoundary",
+        severity: "critical",
+        metadata: {
+          componentStack: errorInfo.componentStack,
+          errorBoundary: true,
+        },
+        stack: error.stack,
+      });
+    }).catch((logError) => {
+      console.warn("Erro ao fazer log:", logError);
+    });
   }
 
   handleReset = () => {

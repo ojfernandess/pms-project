@@ -160,65 +160,150 @@ export const useReservations = () => {
     },
   });
 
-  // Criar nova reserva
+  // Criar nova reserva com proteção contra race conditions
   const createReservation = useMutation({
     mutationFn: async (reservation: Omit<ReservationInsert, "reservation_code">) => {
       const { data: { user } } = await supabase.auth.getUser();
       const establishmentId = getEstablishmentId();
       
-      // Verificar se o quarto está interditado ANTES de criar a reserva
-      if (reservation.room_id) {
-        const { data: roomCheck, error: roomError } = await supabase
-          .from("rooms")
-          .select("is_blocked, room_number, name")
-          .eq("id", reservation.room_id)
-          .single();
-        
-        if (roomError) {
-          console.error("Erro ao verificar quarto:", roomError);
-          throw new Error("Erro ao verificar status do quarto");
-        }
-        
-        if (roomCheck?.is_blocked === true) {
-          const roomName = roomCheck.room_number || roomCheck.name || "selecionado";
-          throw new Error(`O quarto ${roomName} está interditado e não pode receber reservas`);
-        }
+      if (!establishmentId) {
+        throw new Error("Estabelecimento não selecionado");
       }
-      
-      // Preparar dados para inserção, garantindo que campos opcionais sejam null ao invés de undefined
-      const insertData: any = {
-        ...reservation,
-        establishment_id: establishmentId || undefined,
-        created_by: user?.id || null,
-        // Garantir que campos opcionais sejam null ao invés de undefined ou string vazia
-        room_id: reservation.room_id || null,
-        pricing_plan_id: reservation.pricing_plan_id || null,
-        notes: reservation.notes || null,
-        guest_name: reservation.guest_name || null,
-        checkin_time: reservation.checkin_time || null,
-        checkout_time: reservation.checkout_time || null,
-        // reservation_code será gerado automaticamente pelo trigger, não enviar
-      };
-      
-      console.log("📤 Inserindo reserva no banco:", insertData);
-      
-      const { data, error } = await supabase
-        .from("reservations")
-        .insert([insertData])
-        .select(`
-          *,
-          financial_responsible:clients!client_id(*),
-          guest:clients!guest_id(*),
-          rooms (*),
-          room_categories (*)
-        `)
-        .single();
 
-      if (error) {
-        console.error("❌ Erro ao criar reserva:", error);
-        throw error;
+      // Importar validação de disponibilidade
+      const { validateRoomAvailability, validateCategoryAvailability } = await import("@/lib/reservationUtils");
+      const { logError } = await import("@/lib/errorLogger");
+      const { monitorOperation } = await import("@/lib/monitoring");
+
+      // Validar disponibilidade ANTES de tentar criar
+      if (reservation.room_id && reservation.checkin_date && reservation.checkout_date) {
+        // Validar quarto específico
+        const availability = await validateRoomAvailability(
+          reservation.room_id,
+          reservation.checkin_date,
+          reservation.checkout_date
+        );
+
+        if (!availability.available) {
+          await logError({
+            error: new Error(availability.reason || "Quarto não disponível"),
+            context: "reservations.createReservation",
+            severity: "medium",
+            metadata: {
+              room_id: reservation.room_id,
+              checkin_date: reservation.checkin_date,
+              checkout_date: reservation.checkout_date,
+            },
+          });
+          throw new Error(availability.reason || "Quarto não disponível no período solicitado");
+        }
+      } else if (reservation.category_id && reservation.checkin_date && reservation.checkout_date) {
+        // Validar categoria (sem quarto específico)
+        const categoryAvailability = await validateCategoryAvailability(
+          reservation.category_id,
+          reservation.checkin_date,
+          reservation.checkout_date
+        );
+
+        if (!categoryAvailability.available) {
+          await logError({
+            error: new Error(categoryAvailability.reason || "Categoria sem quartos disponíveis"),
+            context: "reservations.createReservation",
+            severity: "medium",
+            metadata: {
+              category_id: reservation.category_id,
+              checkin_date: reservation.checkin_date,
+              checkout_date: reservation.checkout_date,
+              available_rooms: categoryAvailability.availableRooms || 0,
+            },
+          });
+          throw new Error(categoryAvailability.reason || "Nenhum quarto disponível nesta categoria");
+        }
       }
-      return data;
+
+      // Usar função com lock para criar reserva (proteção contra race conditions)
+      return await monitorOperation("createReservation", async () => {
+        // Preparar dados para a função
+        const reservationData = {
+          establishment_id: establishmentId,
+          room_id: reservation.room_id || null,
+          category_id: reservation.category_id || null,
+          guest_id: reservation.guest_id || null,
+          client_id: reservation.client_id || null,
+          financial_responsible_id: reservation.financial_responsible_id || null,
+          guest_name: reservation.guest_name || null,
+          adults: reservation.adults || 1,
+          children: reservation.children || 0,
+          total_amount: reservation.total_amount || 0,
+          paid_amount: reservation.paid_amount || 0,
+          payment_status: reservation.payment_status || "pending",
+          status: reservation.status || "pending",
+          notes: reservation.notes || null,
+          checkin_time: reservation.checkin_time || null,
+          checkout_time: reservation.checkout_time || null,
+          pricing_plan_id: reservation.pricing_plan_id || null,
+          created_by: user?.id || null,
+        };
+
+        // Chamar função com lock (ordem: obrigatórios primeiro, opcionais depois)
+        const { data: lockResult, error: lockError } = await supabase.rpc(
+          "create_reservation_with_lock",
+          {
+            p_reservation_data: reservationData,
+            p_checkin_date: reservation.checkin_date,
+            p_checkout_date: reservation.checkout_date,
+            p_establishment_id: establishmentId,
+            p_room_id: reservation.room_id || null,
+            p_category_id: reservation.category_id || null,
+          }
+        );
+
+        if (lockError) {
+          await logError({
+            error: lockError,
+            context: "reservations.createReservation.lock",
+            severity: "high",
+            metadata: { reservation_data: reservationData },
+          });
+          throw new Error(lockError.message || "Erro ao criar reserva com lock");
+        }
+
+        if (!lockResult?.success) {
+          const errorMessage = lockResult?.error || "Erro ao criar reserva";
+          await logError({
+            error: new Error(errorMessage),
+            context: "reservations.createReservation.validation",
+            severity: "medium",
+            metadata: { lock_result: lockResult },
+          });
+          throw new Error(errorMessage);
+        }
+
+        // Buscar a reserva criada com todos os relacionamentos
+        const { data: newReservation, error: fetchError } = await supabase
+          .from("reservations")
+          .select(`
+            *,
+            financial_responsible:clients!client_id(*),
+            guest:clients!guest_id(*),
+            rooms (*),
+            room_categories (*)
+          `)
+          .eq("id", lockResult.reservation_id)
+          .single();
+
+        if (fetchError || !newReservation) {
+          await logError({
+            error: fetchError || new Error("Reserva não encontrada após criação"),
+            context: "reservations.createReservation.fetch",
+            severity: "high",
+            metadata: { reservation_id: lockResult.reservation_id },
+          });
+          throw fetchError || new Error("Erro ao buscar reserva criada");
+        }
+
+        return newReservation;
+      });
     },
         onSuccess: async (newReservation) => {
           // Criar notificação para nova reserva
