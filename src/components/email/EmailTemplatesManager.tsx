@@ -76,6 +76,7 @@ export function EmailTemplatesManager() {
     { value: "payment.confirmed", label: "Pagamento Confirmado" },
     { value: "payment.pending", label: "Pagamento Pendente" },
     { value: "checkin.confirmed", label: "Check-in Confirmado" },
+    { value: "checkin.reception.notification", label: "Notificação de Check-in para Portaria" },
     { value: "checkout.completed", label: "Check-out Concluído" },
     { value: "checkout.reminder", label: "Lembrete de Check-out Próximo" },
     { value: "fiscal_document.request", label: "Solicitação de Documento Fiscal" },
@@ -225,16 +226,29 @@ export function EmailTemplatesManager() {
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-1">
-                    {(template.variables || []).slice(0, 3).map((v: string) => (
-                      <Badge key={v} variant="outline" className="text-xs">
-                        {`{{${v}}}`}
-                      </Badge>
-                    ))}
-                    {(template.variables || []).length > 3 && (
-                      <Badge variant="outline" className="text-xs">
-                        +{(template.variables || []).length - 3}
-                      </Badge>
-                    )}
+                    {(() => {
+                      // template.variables é um objeto JSONB, não um array
+                      // Converter para array de chaves
+                      const variablesObj = template.variables || {};
+                      const variableKeys = typeof variablesObj === 'object' && !Array.isArray(variablesObj)
+                        ? Object.keys(variablesObj)
+                        : Array.isArray(variablesObj) ? variablesObj : [];
+                      
+                      return (
+                        <>
+                          {variableKeys.slice(0, 3).map((v: string) => (
+                            <Badge key={v} variant="outline" className="text-xs">
+                              {`{{${v}}}`}
+                            </Badge>
+                          ))}
+                          {variableKeys.length > 3 && (
+                            <Badge variant="outline" className="text-xs">
+                              +{variableKeys.length - 3}
+                            </Badge>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </TableCell>
                 <TableCell className="text-right">

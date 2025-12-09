@@ -1086,13 +1086,122 @@ export const useWebCheckin = () => {
             .single();
 
           if (!reservationError && reservation) {
-            // Disparar email de check-in confirmado
+            // Disparar email de check-in confirmado para o hóspede
             const emailQueueId = await triggerEmail('checkin.confirmed', reservation);
             
             if (emailQueueId) {
               console.log('✅ Email de confirmação de check-in enviado automaticamente:', { queueId: emailQueueId });
             } else {
               console.warn('⚠️ Email de confirmação não foi enviado. Verifique se o template está configurado e as configurações de e-mail estão ativas.');
+            }
+
+            // Enviar email para portaria com informações do check-in, foto selfie e documentos
+            try {
+              // Buscar dados completos do web check-in (incluindo fotos e documentos)
+              const { data: webCheckinData, error: webCheckinError } = await supabase
+                .from("web_checkin")
+                .select(`
+                  *,
+                  guests:web_checkin_guests(*),
+                  documents:web_checkin_documents(*)
+                `)
+                .eq("reservation_id", reservation.id)
+                .eq("status", "completed")
+                .order("completed_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+              if (!webCheckinError && webCheckinData) {
+                // Buscar email da portaria (pode estar em establishments ou buildings)
+                let receptionEmail: string | null = null;
+                
+                // Tentar buscar do establishment primeiro
+                if (reservation.establishment_id) {
+                  const { data: establishment } = await supabase
+                    .from("establishments")
+                    .select("reception_email")
+                    .eq("id", reservation.establishment_id)
+                    .maybeSingle();
+                  
+                  receptionEmail = establishment?.reception_email || null;
+                }
+
+                // Se não encontrou no establishment, tentar buscar do building
+                if (!receptionEmail && reservation.rooms?.[0]?.room_categories?.building_id) {
+                  const { data: building } = await supabase
+                    .from("buildings")
+                    .select("reception_email")
+                    .eq("id", reservation.rooms[0].room_categories.building_id)
+                    .maybeSingle();
+                  
+                  receptionEmail = building?.reception_email || null;
+                }
+
+                if (receptionEmail) {
+                  // Preparar variáveis adicionais com dados do web check-in
+                  const mainGuest = webCheckinData.guests?.find((g: any) => g.is_main_guest) || webCheckinData.guests?.[0];
+                  const additionalGuests = webCheckinData.guests?.filter((g: any) => !g.is_main_guest) || [];
+                  
+                  // Buscar selfie do hóspede principal (pode estar em guests ou documents)
+                  let selfieUrl = mainGuest?.selfie_url || null;
+                  if (!selfieUrl && webCheckinData.documents?.length > 0) {
+                    const mainGuestDoc = webCheckinData.documents.find((d: any) => 
+                      d.guest_name === mainGuest?.name || d.guest_name === reservation.guest?.full_name
+                    );
+                    selfieUrl = mainGuestDoc?.selfie_url || null;
+                  }
+
+                  const receptionVariables = {
+                    selfie_url: selfieUrl,
+                    documents: webCheckinData.documents?.map((doc: any) => ({
+                      guest_name: doc.guest_name,
+                      document_type: doc.document_type,
+                      document_number: doc.document_number,
+                      selfie_url: doc.selfie_url,
+                      document_front_url: doc.document_front_url,
+                      document_back_url: doc.document_back_url,
+                    })) || [],
+                    main_guest: mainGuest ? {
+                      name: mainGuest.name || reservation.guest?.full_name,
+                      email: mainGuest.email || reservation.guest?.email,
+                      phone: mainGuest.phone || reservation.guest?.phone,
+                      birth_date: mainGuest.birth_date,
+                      document_type: mainGuest.document_type,
+                      document_number: mainGuest.document_number,
+                    } : null,
+                    additional_guests: additionalGuests.map((g: any) => ({
+                      name: g.name,
+                      document_type: g.document_type,
+                      document_number: g.document_number,
+                    })),
+                    checkin_completed_at: webCheckinData.completed_at ? new Date(webCheckinData.completed_at).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR'),
+                  };
+
+                  // Enviar email para portaria
+                  const receptionEmailQueueId = await triggerEmail(
+                    'checkin.reception.notification',
+                    reservation,
+                    receptionVariables,
+                    receptionEmail
+                  );
+
+                  if (receptionEmailQueueId) {
+                    console.log('✅ Email de notificação para portaria enviado:', { 
+                      queueId: receptionEmailQueueId,
+                      receptionEmail 
+                    });
+                  } else {
+                    console.warn('⚠️ Email para portaria não foi enviado. Verifique se o template está configurado.');
+                  }
+                } else {
+                  console.warn('⚠️ Email da portaria não configurado. Email de notificação não será enviado.');
+                }
+              } else {
+                console.warn('⚠️ Dados do web check-in não encontrados para enviar email à portaria:', webCheckinError);
+              }
+            } catch (receptionEmailError) {
+              // Não bloquear o sucesso do check-in se o email para portaria falhar
+              console.error('❌ Erro ao enviar email para portaria:', receptionEmailError);
             }
           } else {
             console.warn('⚠️ Não foi possível buscar dados da reserva para enviar o email:', reservationError);

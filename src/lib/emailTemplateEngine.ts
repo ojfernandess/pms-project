@@ -3,7 +3,7 @@
  */
 
 export interface TemplateVariables {
-  [key: string]: string | number | null | undefined;
+  [key: string]: string | number | null | undefined | any; // Permite objetos e arrays
 }
 
 /**
@@ -48,36 +48,200 @@ function detectBaseUrl(): string {
 }
 
 /**
+ * Obtém valor de uma variável aninhada (ex: "main_guest.name" ou "documents.0.guest_name")
+ */
+function getNestedValue(variables: TemplateVariables, path: string): any {
+  const parts = path.split('.');
+  let value: any = variables;
+  
+  for (const part of parts) {
+    if (value === null || value === undefined) return null;
+    
+    // Se for um número, tratar como índice de array
+    const numPart = parseInt(part, 10);
+    if (!isNaN(numPart) && Array.isArray(value)) {
+      value = value[numPart];
+    } else if (typeof value === 'object' && part in value) {
+      value = value[part];
+    } else {
+      return null;
+    }
+  }
+  
+  return value;
+}
+
+/**
+ * Processa loops {{#each array}}...{{/each}}
+ */
+function processEachLoops(template: string, variables: TemplateVariables): string {
+  let processed = template;
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = 100;
+
+  while (changed && iterations < maxIterations) {
+    iterations++;
+    changed = false;
+
+    // Regex para encontrar {{#each variable}}
+    const eachRegex = /\{\{#each\s+(\w+(?:\.\w+)*)\}\}/g;
+    let match;
+
+    while ((match = eachRegex.exec(processed)) !== null) {
+      const startIndex = match.index;
+      const variablePath = match[1];
+      const startTag = match[0];
+
+      // Encontrar o {{/each}} correspondente
+      let depth = 1;
+      let searchIndex = startIndex + startTag.length;
+      let endIndex = -1;
+
+      while (depth > 0 && searchIndex < processed.length) {
+        const nextEach = processed.indexOf('{{#each', searchIndex);
+        const nextEndEach = processed.indexOf('{{/each}}', searchIndex);
+
+        if (nextEndEach === -1) break;
+
+        if (nextEach !== -1 && nextEach < nextEndEach) {
+          depth++;
+          searchIndex = nextEach + 7;
+        } else {
+          depth--;
+          if (depth === 0) {
+            endIndex = nextEndEach + 10; // {{/each}} tem 10 caracteres
+            break;
+          } else {
+            searchIndex = nextEndEach + 10;
+          }
+        }
+      }
+
+      if (endIndex === -1) break;
+
+      const fullMatch = processed.substring(startIndex, endIndex);
+      const content = processed.substring(startIndex + startTag.length, endIndex - 10);
+
+      // Obter o array da variável
+      const arrayValue = getNestedValue(variables, variablePath);
+      
+      if (Array.isArray(arrayValue) && arrayValue.length > 0) {
+        // Processar cada item do array
+        const items = arrayValue.map((item: any, index: number) => {
+          // Criar contexto com "this" e índice
+          const itemContext: TemplateVariables = {
+            ...variables,
+            this: item,
+            '@index': index,
+            '@first': index === 0,
+            '@last': index === arrayValue.length - 1,
+          };
+
+          // Adicionar propriedades do item ao contexto como variáveis achatadas
+          // Ex: this.guest_name -> guest_name, this.document_type -> document_type
+          if (typeof item === 'object' && item !== null) {
+            Object.keys(item).forEach(key => {
+              // Adicionar como this.key para acesso direto
+              itemContext[`this.${key}`] = item[key];
+              // Também adicionar como key para acesso sem this (mais simples)
+              itemContext[key] = item[key];
+            });
+          }
+
+          // Processar o conteúdo do loop com o contexto do item
+          // Usar uma versão recursiva que processa apenas o conteúdo do loop
+          let itemContent = content;
+          
+          // Substituir {{this.property}} e {{property}} dentro do loop
+          if (typeof item === 'object' && item !== null) {
+            Object.keys(item).forEach(key => {
+              const value = item[key];
+              const stringValue = value !== null && value !== undefined ? String(value) : '';
+              
+              // Substituir {{this.key}}
+              const thisRegex = new RegExp(`\\{\\{this\\.${key}\\}\\}`, 'g');
+              itemContent = itemContent.replace(thisRegex, stringValue);
+              
+              // Substituir {{key}} (sem this)
+              const keyRegex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+              itemContent = itemContent.replace(keyRegex, stringValue);
+            });
+          }
+          
+          // Processar condicionais e outras variáveis no contexto do item
+          return processTemplate(itemContent, itemContext);
+        });
+
+        processed = processed.replace(fullMatch, items.join(''));
+      } else {
+        // Array vazio ou não é array: remover o bloco
+        processed = processed.replace(fullMatch, '');
+      }
+
+      changed = true;
+      break;
+    }
+  }
+
+  return processed;
+}
+
+/**
  * Processa um template HTML substituindo variáveis no formato {{variable_name}}
  * e processando condicionais no formato {{#if variable_name}}...{{/if}}
+ * e loops no formato {{#each array}}...{{/each}}
  */
 export function processTemplate(template: string, variables: TemplateVariables): string {
   let processed = template;
 
-  // Primeiro, processar condicionais {{#if variable}}...{{/if}}
-  // Suporta condicionais aninhados
+  // Primeiro, processar loops {{#each array}}...{{/each}}
+  processed = processEachLoops(processed, variables);
+
+  // Depois, processar condicionais {{#if variable}}...{{/if}}
   processed = processConditionals(processed, variables);
 
-  // Depois, substituir variáveis no formato {{variable_name}}
-  // Usar replace com função para garantir que valores null/undefined sejam tratados como string vazia
+  // Por último, substituir variáveis no formato {{variable_name}} ou {{variable.path}}
+  // Processar variáveis aninhadas primeiro (ex: {{main_guest.name}})
+  const nestedVarRegex = /\{\{(\w+(?:\.\w+)+)\}\}/g;
+  let nestedMatch;
+  while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
+    const fullMatch = nestedMatch[0];
+    const path = nestedMatch[1];
+    const value = getNestedValue(variables, path);
+    const stringValue = value !== null && value !== undefined ? String(value) : '';
+    processed = processed.replace(fullMatch, stringValue);
+  }
+
+  // Depois, substituir variáveis simples no formato {{variable_name}}
   Object.keys(variables).forEach((key) => {
     const value = variables[key];
-    // Converter para string, tratando null/undefined como string vazia
-    const stringValue = value !== null && value !== undefined ? String(value) : '';
-    const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
-    processed = processed.replace(regex, stringValue);
+    
+    // Pular objetos e arrays (já foram processados nos loops)
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // Processar propriedades do objeto como variáveis aninhadas
+      Object.keys(value).forEach((prop) => {
+        const nestedPath = `${key}.${prop}`;
+        const nestedValue = value[prop];
+        const stringValue = nestedValue !== null && nestedValue !== undefined ? String(nestedValue) : '';
+        const regex = new RegExp(`\\{\\{${nestedPath.replace(/\./g, '\\.')}\\}\\}`, 'g');
+        processed = processed.replace(regex, stringValue);
+      });
+    } else {
+      // Converter para string, tratando null/undefined como string vazia
+      const stringValue = value !== null && value !== undefined ? String(value) : '';
+      const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+      processed = processed.replace(regex, stringValue);
+    }
   });
   
   // Log de debug para variáveis não substituídas (apenas em desenvolvimento)
   if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    const remainingVars = processed.match(/\{\{[\w]+\}\}/g);
+    const remainingVars = processed.match(/\{\{[\w.]+(?:\.[\w.]+)*\}\}/g);
     if (remainingVars && remainingVars.length > 0) {
       console.log('⚠️ Variáveis não substituídas no template:', remainingVars);
     }
   }
-
-  // Remover variáveis não substituídas (opcional - pode ser útil para debug)
-  // processed = processed.replace(/\{\{[\w]+\}\}/g, '');
 
   return processed;
 }
@@ -101,8 +265,8 @@ function processConditionals(template: string, variables: TemplateVariables): st
     changed = false;
     
     // Regex para encontrar blocos {{#if variable}}...{{/if}}
-    // Procura pelo primeiro bloco que não contém outros blocos {{#if}} dentro dele
-    const ifRegex = /\{\{#if\s+(\w+)\}\}/g;
+    // Suporta variáveis aninhadas (ex: {{#if main_guest.name}})
+    const ifRegex = /\{\{#if\s+(\w+(?:\.\w+)*)\}\}/g;
     let match;
     let lastIndex = 0;
     

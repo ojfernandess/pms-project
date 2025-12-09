@@ -1694,7 +1694,9 @@ export async function sendCheckoutReminderEmail(
     const bodyHtml = processTemplate(template.body_html, allVariables);
 
     // Determinar destinatário
-    const recipientEmail = fullReservation.guest?.email || fullReservation.financial_responsible?.email;
+    // Se customRecipientEmail foi fornecido (ex: para portaria), usar ele
+    // Caso contrário, usar o email do hóspede ou responsável financeiro
+    const recipientEmail = customRecipientEmail || fullReservation.guest?.email || fullReservation.financial_responsible?.email;
     const recipientName = fullReservation.guest?.full_name || fullReservation.financial_responsible?.full_name;
 
     if (!recipientEmail) {
@@ -1702,7 +1704,7 @@ export async function sendCheckoutReminderEmail(
       return null;
     }
 
-    console.log('✅ Destinatário encontrado:', { email: recipientEmail, name: recipientName });
+    console.log('✅ Destinatário encontrado:', { email: recipientEmail, name: recipientName, isCustom: !!customRecipientEmail });
 
     // Adicionar à fila (incluindo CC e BCC do template)
     const queueId = await queueEmail({
@@ -1833,9 +1835,10 @@ export async function sendCheckoutReminders(
 }
 
 export async function triggerEmail(
-  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder',
+  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification',
   reservation: any,
-  additionalVariables?: TemplateVariables
+  additionalVariables?: TemplateVariables,
+  customRecipientEmail?: string
 ): Promise<string | null> {
   try {
     console.log(`📧 Disparando e-mail para evento: ${eventType}`, { reservationId: reservation?.id });
@@ -2001,7 +2004,9 @@ export async function triggerEmail(
     });
 
     // Determinar destinatário
-    const recipientEmail = fullReservation.guest?.email || fullReservation.financial_responsible?.email;
+    // Se customRecipientEmail foi fornecido (ex: para portaria), usar ele
+    // Caso contrário, usar o email do hóspede ou responsável financeiro
+    const recipientEmail = customRecipientEmail || fullReservation.guest?.email || fullReservation.financial_responsible?.email;
     const recipientName = fullReservation.guest?.full_name || fullReservation.financial_responsible?.full_name;
 
     if (!recipientEmail) {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,7 @@ import { usePaymentCarriers } from "@/hooks/usePaymentCarriers";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { useEstablishmentServices, EstablishmentService } from "@/hooks/useEstablishmentServices";
+import { supabase } from "@/integrations/supabase/client";
 import { Loader2, Upload, Image as ImageIcon, Save, Plus, X, Check, CreditCard, FileText, Mail, AlertCircle, Key, Globe, Eye, EyeOff, Trash2, Edit } from "lucide-react";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -69,6 +71,7 @@ const Settings = () => {
     invoice_email: "",
     establishment_cnpj: "",
     show_establishment_cnpj: true,
+    reception_email: "",
   });
 
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -123,6 +126,7 @@ const Settings = () => {
         invoice_email: settings.invoice_email || "",
         establishment_cnpj: settings.establishment_cnpj || "",
         show_establishment_cnpj: settings.show_establishment_cnpj !== undefined ? settings.show_establishment_cnpj : true,
+        reception_email: selectedEstablishment?.reception_email || "",
       });
       if (settings.logo_url) setLogoPreview(settings.logo_url);
       if (settings.photo_url) setPhotoPreview(settings.photo_url);
@@ -224,8 +228,11 @@ const Settings = () => {
         }
       }
 
+      // Separar reception_email do formData antes de salvar em hotel_settings
+      const { reception_email, ...settingsData } = formData;
+
       await saveSettings({
-        ...formData,
+        ...settingsData,
         whatsapp_ddi: whatsappDdi,
         whatsapp_number: whatsappNumber,
         logo_url: logoUrl,
@@ -235,6 +242,26 @@ const Settings = () => {
         checkout_time: `${formData.checkout_time}:00`,
         auto_payment_carrier_id: formData.auto_payment_carrier_id || undefined,
       });
+
+      // Salvar reception_email na tabela establishments (não em hotel_settings)
+      if (selectedEstablishment?.id && reception_email !== undefined) {
+        try {
+          const { error: updateError } = await supabase
+            .from("establishments")
+            .update({ reception_email: reception_email || null })
+            .eq("id", selectedEstablishment.id);
+
+          if (updateError) {
+            console.warn("Erro ao atualizar email da portaria:", updateError);
+          } else {
+            // Invalidar cache de establishments para atualizar o contexto
+            queryClient.invalidateQueries({ queryKey: ["establishments"] });
+          }
+        } catch (error) {
+          console.warn("Erro ao atualizar email da portaria:", error);
+          // Não bloquear o sucesso da operação principal
+        }
+      }
 
       setLogoFile(null);
       setPhotoFile(null);
@@ -777,6 +804,26 @@ const Settings = () => {
                         setFormData({ ...formData, show_establishment_cnpj: checked })
                       }
                     />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="reception_email" className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      E-mail da Portaria
+                    </Label>
+                    <Input
+                      id="reception_email"
+                      type="email"
+                      value={formData.reception_email || ""}
+                      onChange={(e) =>
+                        setFormData({ ...formData, reception_email: e.target.value })
+                      }
+                      placeholder="recepcao@estabelecimento.com"
+                      className="mt-1"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      E-mail que receberá notificações automáticas quando hóspedes completarem o check-in online, incluindo foto selfie e documentos. Se não configurado, o sistema tentará usar o email do prédio associado ao quarto.
+                    </p>
                   </div>
                 </div>
               </div>
