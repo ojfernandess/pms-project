@@ -32,6 +32,8 @@ export interface EmailQueueItem {
   variables?: TemplateVariables;
   reservation_id?: string;
   priority?: number;
+  cc_emails?: string; // Emails em cópia, separados por vírgula
+  bcc_emails?: string; // Emails em cópia oculta, separados por vírgula
 }
 
 /**
@@ -63,6 +65,17 @@ export async function getEmailSettings(): Promise<EmailSettings | null> {
 }
 
 /**
+ * Converte string de emails separados por vírgula em array
+ */
+function parseEmailList(emailString?: string): string[] {
+  if (!emailString || !emailString.trim()) return [];
+  return emailString
+    .split(',')
+    .map(email => email.trim())
+    .filter(email => email.length > 0 && email.includes('@'));
+}
+
+/**
  * Adiciona um e-mail à fila
  */
 export async function queueEmail(email: EmailQueueItem): Promise<string | null> {
@@ -70,7 +83,11 @@ export async function queueEmail(email: EmailQueueItem): Promise<string | null> 
     console.log('📬 Adicionando e-mail à fila:', { 
       eventType: email.event_type, 
       recipient: email.recipient_email,
-      reservationId: email.reservation_id 
+      reservationId: email.reservation_id,
+      cc_emails: email.cc_emails || 'Nenhum',
+      bcc_emails: email.bcc_emails || 'Nenhum',
+      cc_parsed: email.cc_emails ? parseEmailList(email.cc_emails) : [],
+      bcc_parsed: email.bcc_emails ? parseEmailList(email.bcc_emails) : []
     });
     
     // Tentar inserir diretamente primeiro
@@ -88,16 +105,20 @@ export async function queueEmail(email: EmailQueueItem): Promise<string | null> 
       console.warn('⚠️ Erro de RLS ao inserir diretamente, tentando usar função insert_email_queue:', error);
       
       // Usar a função insert_email_queue que bypassa RLS
+      // IMPORTANTE: p_template_id e p_recipient_name são obrigatórios na função SQL
+      // mas podem ser NULL no banco, então passamos string vazia se não tiver valor
       const { data: functionData, error: functionError } = await supabase.rpc('insert_email_queue', {
-        p_template_id: email.template_id || null,
+        p_template_id: email.template_id || '00000000-0000-0000-0000-000000000000',
         p_event_type: email.event_type,
         p_recipient_email: email.recipient_email,
-        p_recipient_name: email.recipient_name || null,
+        p_recipient_name: email.recipient_name || '',
         p_subject: email.subject,
         p_body_html: email.body_html,
         p_reservation_id: email.reservation_id || null,
         p_variables: email.variables || null,
-        p_priority: email.priority || 1
+        p_priority: email.priority || 1,
+        p_cc_emails: email.cc_emails || null,
+        p_bcc_emails: email.bcc_emails || null
       });
 
       if (functionError) {
@@ -140,6 +161,16 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
     return false;
   }
 
+  // Log para debug de CC e BCC
+  if (queueItem.cc_emails || queueItem.bcc_emails) {
+    console.log('📧 CC e BCC encontrados na fila:', {
+      cc_emails: queueItem.cc_emails,
+      bcc_emails: queueItem.bcc_emails,
+      cc_parsed: parseEmailList(queueItem.cc_emails),
+      bcc_parsed: parseEmailList(queueItem.bcc_emails),
+    });
+  }
+
   // Atualizar status para "sending"
   // Tratar erro 403 (Forbidden) que pode ocorrer por RLS
   const { error: updateError } = await supabase
@@ -180,16 +211,25 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
     let success = false;
     let errorMessage = '';
 
+    console.log('📧 Processando email com provedor:', {
+      provider: settings.provider,
+      cc_emails: queueItem.cc_emails || 'Nenhum',
+      bcc_emails: queueItem.bcc_emails || 'Nenhum'
+    });
+
     try {
       switch (settings.provider) {
         case 'smtp':
+          console.log('📧 Usando SMTP para enviar email');
           success = await sendViaSMTP(queueItem, settings);
           break;
         case 'sendgrid':
+          console.log('📧 Usando SendGrid para enviar email');
           success = await sendViaSendGrid(queueItem, settings);
           // sendViaSendGrid já lança exceção em caso de erro
           break;
         case 'mailgun':
+          console.log('📧 Usando Mailgun para enviar email');
           success = await sendViaMailgun(queueItem, settings);
           // sendViaMailgun já lança exceção em caso de erro
           break;
@@ -198,6 +238,7 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
           if (!success) errorMessage = 'AWS SES não implementado. Use Edge Function.';
           break;
         case 'resend':
+          console.log('📧 Usando Resend para enviar email');
           success = await sendViaResend(queueItem, settings);
           // sendViaResend já lança exceção em caso de erro, então se chegou aqui é sucesso
           break;
@@ -318,28 +359,41 @@ async function sendViaSMTP(queueItem: any, settings: EmailSettings): Promise<boo
       throw new Error('Configurações SMTP incompletas. Verifique host, usuário e senha.');
     }
 
+    // Processar CC e BCC
+    const ccEmails = parseEmailList(queueItem.cc_emails);
+    const bccEmails = parseEmailList(queueItem.bcc_emails);
+    
+    const smtpPayload = {
+      to: queueItem.recipient_email,
+      to_name: queueItem.recipient_name,
+      from: settings.sender_email,
+      from_name: settings.sender_name,
+      reply_to: settings.reply_to_email || settings.sender_email,
+      subject: queueItem.subject,
+      html: queueItem.body_html,
+      text: queueItem.body_text,
+      ...(ccEmails.length > 0 ? { cc: ccEmails.join(',') } : {}),
+      ...(bccEmails.length > 0 ? { bcc: bccEmails.join(',') } : {}),
+      smtp_config: {
+        host: settings.smtp_host,
+        port: settings.smtp_port,
+        secure: settings.smtp_secure,
+        auth: {
+          user: settings.smtp_username,
+          pass: settings.smtp_password,
+        },
+      },
+    };
+    
+    console.log('📧 SMTP - Payload completo sendo enviado:', {
+      ...smtpPayload,
+      smtp_config: { ...smtpPayload.smtp_config, auth: { user: smtpPayload.smtp_config.auth.user, pass: '***' } }
+    });
+    
     // Chamar Edge Function do Supabase para enviar via SMTP
     try {
       const result = await supabase.functions.invoke('send-email-smtp', {
-        body: {
-          to: queueItem.recipient_email,
-          to_name: queueItem.recipient_name,
-          from: settings.sender_email,
-          from_name: settings.sender_name,
-          reply_to: settings.reply_to_email || settings.sender_email,
-          subject: queueItem.subject,
-          html: queueItem.body_html,
-          text: queueItem.body_text,
-          smtp_config: {
-            host: settings.smtp_host,
-            port: settings.smtp_port,
-            secure: settings.smtp_secure,
-            auth: {
-              user: settings.smtp_username,
-              pass: settings.smtp_password,
-            },
-          },
-        },
+        body: smtpPayload,
       });
       
       // Verificar se há erro no resultado
@@ -434,24 +488,53 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings): Promise
       throw new Error('E-mail do remetente não configurado');
     }
 
+    // Processar CC e BCC
+    const ccEmails = parseEmailList(queueItem.cc_emails);
+    const bccEmails = parseEmailList(queueItem.bcc_emails);
+    
+    console.log('📧 SendGrid - CC e BCC processados:', {
+      cc_emails: queueItem.cc_emails,
+      bcc_emails: queueItem.bcc_emails,
+      cc_parsed: ccEmails,
+      bcc_parsed: bccEmails,
+      cc_count: ccEmails.length,
+      bcc_count: bccEmails.length
+    });
+    
+    const personalizations: any = {
+      to: [{ email: queueItem.recipient_email, name: queueItem.recipient_name || undefined }],
+    };
+    
+    if (ccEmails.length > 0) {
+      personalizations.cc = ccEmails.map(email => ({ email }));
+      console.log('✅ SendGrid - CC adicionado:', personalizations.cc);
+    }
+    
+    if (bccEmails.length > 0) {
+      personalizations.bcc = bccEmails.map(email => ({ email }));
+      console.log('✅ SendGrid - BCC adicionado:', personalizations.bcc);
+    }
+
     const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${settings.api_key}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        personalizations: [{
-          to: [{ email: queueItem.recipient_email, name: queueItem.recipient_name || undefined }],
-        }],
-        from: { email: settings.sender_email, name: settings.sender_name || undefined },
-        reply_to: { email: settings.reply_to_email || settings.sender_email },
-        subject: queueItem.subject,
-        content: [
-          { type: 'text/html', value: queueItem.body_html },
-          ...(queueItem.body_text ? [{ type: 'text/plain', value: queueItem.body_text }] : []),
-        ],
-      }),
+      body: (() => {
+        const payload = {
+          personalizations: [personalizations],
+          from: { email: settings.sender_email, name: settings.sender_name || undefined },
+          reply_to: { email: settings.reply_to_email || settings.sender_email },
+          subject: queueItem.subject,
+          content: [
+            { type: 'text/html', value: queueItem.body_html },
+            ...(queueItem.body_text ? [{ type: 'text/plain', value: queueItem.body_text }] : []),
+          ],
+        };
+        console.log('📧 SendGrid - Payload completo sendo enviado:', JSON.stringify(payload, null, 2));
+        return JSON.stringify(payload);
+      })(),
     });
 
     if (!response.ok) {
@@ -461,8 +544,14 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings): Promise
       try {
         const errorData = JSON.parse(responseText);
         errorMessage = errorData.errors?.[0]?.message || errorData.message || errorMessage;
+        console.error('❌ SendGrid - Erro na resposta:', {
+          status: response.status,
+          errors: errorData.errors,
+          message: errorMessage
+        });
       } catch {
         errorMessage = responseText || errorMessage;
+        console.error('❌ SendGrid - Erro ao parsear resposta:', responseText);
       }
 
       if (response.status === 401 || response.status === 403) {
@@ -474,6 +563,7 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings): Promise
       }
     }
 
+    console.log('✅ SendGrid - Email enviado com sucesso (incluindo CC/BCC se configurado)');
     return true;
   } catch (error: any) {
     console.error('Erro ao enviar via SendGrid:', error);
@@ -500,22 +590,53 @@ async function sendViaMailgun(queueItem: any, settings: EmailSettings): Promise<
       throw new Error('Domínio do e-mail do remetente inválido. O Mailgun precisa do domínio para enviar.');
     }
 
+    // Processar CC e BCC
+    const ccEmails = parseEmailList(queueItem.cc_emails);
+    const bccEmails = parseEmailList(queueItem.bcc_emails);
+    
+    console.log('📧 Mailgun - CC e BCC processados:', {
+      cc_emails: queueItem.cc_emails,
+      bcc_emails: queueItem.bcc_emails,
+      cc_parsed: ccEmails,
+      bcc_parsed: bccEmails,
+      cc_count: ccEmails.length,
+      bcc_count: bccEmails.length
+    });
+    
+    const params: Record<string, string> = {
+      from: settings.sender_name 
+        ? `${settings.sender_name} <${settings.sender_email}>`
+        : settings.sender_email,
+      to: queueItem.recipient_email,
+      subject: queueItem.subject,
+      html: queueItem.body_html,
+      ...(queueItem.body_text ? { text: queueItem.body_text } : {}),
+      ...(settings.reply_to_email ? { 'h:Reply-To': settings.reply_to_email } : {}),
+    };
+    
+    if (ccEmails.length > 0) {
+      params.cc = ccEmails.join(',');
+      console.log('✅ Mailgun - CC adicionado:', params.cc);
+    }
+    
+    if (bccEmails.length > 0) {
+      params.bcc = bccEmails.join(',');
+      console.log('✅ Mailgun - BCC adicionado:', params.bcc);
+    }
+
+    console.log('📧 Mailgun - Parâmetros sendo enviados:', {
+      ...params,
+      cc: params.cc || 'Nenhum',
+      bcc: params.bcc || 'Nenhum'
+    });
+
     const response = await fetch(`https://api.mailgun.net/v3/${domain}/messages`, {
       method: 'POST',
       headers: {
         'Authorization': `Basic ${btoa(`api:${settings.api_key}`)}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({
-        from: settings.sender_name 
-          ? `${settings.sender_name} <${settings.sender_email}>`
-          : settings.sender_email,
-        to: queueItem.recipient_email,
-        subject: queueItem.subject,
-        html: queueItem.body_html,
-        ...(queueItem.body_text ? { text: queueItem.body_text } : {}),
-        ...(settings.reply_to_email ? { 'h:Reply-To': settings.reply_to_email } : {}),
-      }),
+      body: new URLSearchParams(params),
     });
 
     if (!response.ok) {
@@ -583,6 +704,19 @@ async function sendViaResend(queueItem: any, settings: EmailSettings): Promise<b
       throw new Error('E-mail do remetente não configurado');
     }
 
+    // Processar CC e BCC
+    const ccEmails = parseEmailList(queueItem.cc_emails);
+    const bccEmails = parseEmailList(queueItem.bcc_emails);
+    
+    console.log('📧 Resend - CC e BCC processados:', {
+      cc_emails: queueItem.cc_emails,
+      bcc_emails: queueItem.bcc_emails,
+      cc_parsed: ccEmails,
+      bcc_parsed: bccEmails,
+      cc_count: ccEmails.length,
+      bcc_count: bccEmails.length
+    });
+    
     // Usar Edge Function para evitar problemas de CORS
     const result = await supabase.functions.invoke('send-email-resend', {
       body: {
@@ -595,8 +729,17 @@ async function sendViaResend(queueItem: any, settings: EmailSettings): Promise<b
         html: queueItem.body_html,
         text: queueItem.body_text || undefined,
         api_key: settings.api_key,
+        ...(ccEmails.length > 0 ? { cc: ccEmails } : {}),
+        ...(bccEmails.length > 0 ? { bcc: bccEmails } : {}),
       },
     });
+    
+    if (ccEmails.length > 0 || bccEmails.length > 0) {
+      console.log('✅ Resend - Payload enviado com CC/BCC:', {
+        cc: ccEmails.length > 0 ? ccEmails : undefined,
+        bcc: bccEmails.length > 0 ? bccEmails : undefined
+      });
+    }
 
     if (result.error) {
       const errorMessage = result.error.message || result.error.toString();
@@ -753,7 +896,7 @@ export async function sendGuestPasswordResetEmail(
     const subject = processTemplate(template.subject, variables);
     const bodyHtml = processTemplate(template.body_html, variables);
 
-    // Adicionar à fila
+    // Adicionar à fila (incluindo CC e BCC do template)
     const queueId = await queueEmail({
       template_id: template.id,
       event_type: 'guest.password_reset',
@@ -762,6 +905,8 @@ export async function sendGuestPasswordResetEmail(
       subject,
       body_html: bodyHtml,
       variables,
+      cc_emails: template.cc_emails || undefined,
+      bcc_emails: template.bcc_emails || undefined,
     });
 
     if (!queueId) {
@@ -1206,7 +1351,7 @@ export async function sendFiscalDocumentRequestEmail(
       ? processTemplate(template.body_text, variables)
       : bodyHtml.replace(/<[^>]*>/g, "");
 
-    // Adicionar à fila
+    // Adicionar à fila (incluindo CC e BCC do template)
     const queueId = await queueEmail({
       template_id: template.id,
       event_type: 'fiscal_document.request',
@@ -1217,6 +1362,8 @@ export async function sendFiscalDocumentRequestEmail(
       body_text: bodyText,
       variables,
       reservation_id: requestData.reservationId,
+      cc_emails: template.cc_emails || undefined,
+      bcc_emails: template.bcc_emails || undefined,
     });
 
     if (!queueId) {
@@ -1396,7 +1543,7 @@ export async function sendEmployeeAddedToEstablishmentEmail(
     const subject = processTemplate(template.subject, variables);
     const bodyHtml = processTemplate(template.body_html, variables);
 
-    // Adicionar à fila
+    // Adicionar à fila (incluindo CC e BCC do template)
     const queueId = await queueEmail({
       template_id: template.id,
       event_type: 'employee.added_to_establishment',
@@ -1405,6 +1552,8 @@ export async function sendEmployeeAddedToEstablishmentEmail(
       subject,
       body_html: bodyHtml,
       variables,
+      cc_emails: template.cc_emails || undefined,
+      bcc_emails: template.bcc_emails || undefined,
     });
 
     if (!queueId) {
@@ -1555,7 +1704,7 @@ export async function sendCheckoutReminderEmail(
 
     console.log('✅ Destinatário encontrado:', { email: recipientEmail, name: recipientName });
 
-    // Adicionar à fila
+    // Adicionar à fila (incluindo CC e BCC do template)
     const queueId = await queueEmail({
       template_id: template.id,
       event_type: 'checkout.reminder',
@@ -1565,6 +1714,8 @@ export async function sendCheckoutReminderEmail(
       body_html: bodyHtml,
       variables: allVariables,
       reservation_id: fullReservation.id,
+      cc_emails: template.cc_emails || undefined,
+      bcc_emails: template.bcc_emails || undefined,
     });
 
     if (!queueId) {
@@ -1729,7 +1880,9 @@ export async function triggerEmail(
       isActive: template.is_active,
       updatedAt: template.updated_at,
       bodyHtmlLength: template.body_html?.length || 0,
-      subjectLength: template.subject?.length || 0
+      subjectLength: template.subject?.length || 0,
+      cc_emails: template.cc_emails || 'Nenhum',
+      bcc_emails: template.bcc_emails || 'Nenhum'
     });
     
     // Log do conteúdo do template para debug
@@ -1857,7 +2010,17 @@ export async function triggerEmail(
     }
     console.log('✅ Destinatário encontrado:', { email: recipientEmail, name: recipientName });
 
-    // Adicionar à fila
+    // Adicionar à fila (incluindo CC e BCC do template)
+    const ccEmails = template.cc_emails?.trim() || undefined;
+    const bccEmails = template.bcc_emails?.trim() || undefined;
+    
+    console.log('📧 Preparando email com CC e BCC:', {
+      cc_emails: ccEmails || 'Nenhum',
+      bcc_emails: bccEmails || 'Nenhum',
+      cc_parsed: ccEmails ? parseEmailList(ccEmails) : [],
+      bcc_parsed: bccEmails ? parseEmailList(bccEmails) : []
+    });
+    
     const queueId = await queueEmail({
       template_id: template.id,
       event_type: eventType,
@@ -1867,6 +2030,8 @@ export async function triggerEmail(
       body_html: bodyHtml,
       variables: allVariables,
       reservation_id: fullReservation.id,
+      cc_emails: ccEmails,
+      bcc_emails: bccEmails,
     });
 
     if (!queueId) {

@@ -39,7 +39,7 @@ import {
   CreditCard,
   ChevronDown
 } from "lucide-react";
-import { format, parseISO, differenceInDays, addDays, isAfter, isBefore } from "date-fns";
+import { format, parseISO, differenceInDays, addDays, isAfter, isBefore, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { formatCurrency, validateRoomAvailability, validateCategoryAvailability } from "@/lib/reservationUtils";
 import { useServiceFees } from "@/hooks/useServiceFees";
@@ -1548,12 +1548,15 @@ const ReservationDetails = () => {
                 <div className="flex-1">
                   <h3 className="font-semibold text-red-900 mb-2">Reserva Cancelada</h3>
                   <div className="space-y-1 text-sm text-red-800">
-                    {reservation.cancelled_at && (
-                      <div>
-                        <span className="font-medium">Cancelada em: </span>
-                        {format(parseISO(reservation.cancelled_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                      </div>
-                    )}
+                    {reservation.cancelled_at && (() => {
+                      const cancelledDate = parseISO(reservation.cancelled_at);
+                      return isValid(cancelledDate) ? (
+                        <div>
+                          <span className="font-medium">Cancelada em: </span>
+                          {format(cancelledDate, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                        </div>
+                      ) : null;
+                    })()}
                     {reservation.cancelled_by_user && (
                       <div>
                         <span className="font-medium">Cancelada por: </span>
@@ -2195,7 +2198,10 @@ const ReservationDetails = () => {
                       </div>
                       <div className="text-xs text-muted-foreground mt-1">
                         {payment.payment_types?.name || payment.payment_method} - 
-                        {payment.payment_date ? format(parseISO(payment.payment_date), "dd/MM/yyyy", { locale: ptBR }) : "Data não informada"}
+                        {payment.payment_date ? (() => {
+                          const paymentDate = parseISO(payment.payment_date);
+                          return isValid(paymentDate) ? format(paymentDate, "dd/MM/yyyy", { locale: ptBR }) : "Data inválida";
+                        })() : "Data não informada"}
                       </div>
                       {payment.notes && (
                         <div className="text-xs text-slate-600 mt-1 italic">
@@ -3232,7 +3238,10 @@ const ReservationDetails = () => {
                   <div className="font-medium">Pagamento:</div>
                   <div>
                     {formatCurrency(paymentToEditNotes.amount || 0)} - 
-                    {paymentToEditNotes.payment_date ? format(parseISO(paymentToEditNotes.payment_date), "dd/MM/yyyy", { locale: ptBR }) : "Data não informada"}
+                    {paymentToEditNotes.payment_date ? (() => {
+                      const paymentDate = parseISO(paymentToEditNotes.payment_date);
+                      return isValid(paymentDate) ? format(paymentDate, "dd/MM/yyyy", { locale: ptBR }) : "Data inválida";
+                    })() : "Data não informada"}
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -3349,7 +3358,10 @@ const ReservationDetails = () => {
                   <div className="flex justify-between">
                     <span className="text-sm font-medium">Data:</span>
                     <span className="text-sm">
-                      {paymentToRefund.payment_date ? format(parseISO(paymentToRefund.payment_date), "dd/MM/yyyy", { locale: ptBR }) : "Data não informada"}
+                      {paymentToRefund.payment_date ? (() => {
+                        const paymentDate = parseISO(paymentToRefund.payment_date);
+                        return isValid(paymentDate) ? format(paymentDate, "dd/MM/yyyy", { locale: ptBR }) : "Data inválida";
+                      })() : "Data não informada"}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -3457,14 +3469,17 @@ const ReservationDetails = () => {
                       </Badge>
                     </div>
                   </div>
-                  {reservation.web_checkin.status === "completed" && reservation.web_checkin.completed_at && (
-                    <div className="text-right">
-                      <Label className="text-sm font-semibold text-slate-600">Concluído em</Label>
-                      <div className="mt-1 text-sm text-slate-700">
-                        {format(parseISO(reservation.web_checkin.completed_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                  {reservation.web_checkin.status === "completed" && reservation.web_checkin.completed_at && (() => {
+                    const completedDate = parseISO(reservation.web_checkin.completed_at);
+                    return isValid(completedDate) ? (
+                      <div className="text-right">
+                        <Label className="text-sm font-semibold text-slate-600">Concluído em</Label>
+                        <div className="mt-1 text-sm text-slate-700">
+                          {format(completedDate, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    ) : null;
+                  })()}
                 </div>
               </Card>
 
@@ -3488,30 +3503,39 @@ const ReservationDetails = () => {
                         <Label className="text-sm text-slate-600">Token</Label>
                         <div className="mt-1 text-xs font-mono truncate">{reservation.web_checkin.token}</div>
                       </div>
-                      {reservation.web_checkin.created_at && (
-                        <div>
-                          <Label className="text-sm text-slate-600">Criado em</Label>
-                          <div className="mt-1 text-sm">
-                            {format(parseISO(reservation.web_checkin.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                      {reservation.web_checkin.created_at && (() => {
+                        const createdDate = parseISO(reservation.web_checkin.created_at);
+                        return isValid(createdDate) ? (
+                          <div>
+                            <Label className="text-sm text-slate-600">Criado em</Label>
+                            <div className="mt-1 text-sm">
+                              {format(createdDate, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      {reservation.web_checkin.expires_at && (
-                        <div>
-                          <Label className="text-sm text-slate-600">Expira em</Label>
-                          <div className="mt-1 text-sm">
-                            {format(parseISO(reservation.web_checkin.expires_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                        ) : null;
+                      })()}
+                      {reservation.web_checkin.expires_at && (() => {
+                        const expiresDate = parseISO(reservation.web_checkin.expires_at);
+                        return isValid(expiresDate) ? (
+                          <div>
+                            <Label className="text-sm text-slate-600">Expira em</Label>
+                            <div className="mt-1 text-sm">
+                              {format(expiresDate, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      {reservation.web_checkin.started_at && (
-                        <div>
-                          <Label className="text-sm text-slate-600">Iniciado em</Label>
-                          <div className="mt-1 text-sm">
-                            {format(parseISO(reservation.web_checkin.started_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                        ) : null;
+                      })()}
+                      {reservation.web_checkin.started_at && (() => {
+                        const startedDate = parseISO(reservation.web_checkin.started_at);
+                        return isValid(startedDate) ? (
+                          <div>
+                            <Label className="text-sm text-slate-600">Iniciado em</Label>
+                            <div className="mt-1 text-sm">
+                              {format(startedDate, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        ) : null;
+                      })()}
                       {reservation.web_checkin.ip_address && (
                         <div>
                           <Label className="text-sm text-slate-600">IP de Acesso</Label>
@@ -3584,14 +3608,17 @@ const ReservationDetails = () => {
                               <div className="mt-1 text-sm">{mainGuestFromWebCheckin.cpf}</div>
                             </div>
                           )}
-                          {mainGuestFromWebCheckin.birth_date && (
-                            <div>
-                              <Label className="text-sm font-semibold text-slate-600">Data de Nascimento</Label>
-                              <div className="mt-1 text-sm">
-                                {format(parseISO(mainGuestFromWebCheckin.birth_date), "dd/MM/yyyy", { locale: ptBR })}
+                          {mainGuestFromWebCheckin.birth_date && (() => {
+                            const birthDate = parseISO(mainGuestFromWebCheckin.birth_date);
+                            return isValid(birthDate) ? (
+                              <div>
+                                <Label className="text-sm font-semibold text-slate-600">Data de Nascimento</Label>
+                                <div className="mt-1 text-sm">
+                                  {format(birthDate, "dd/MM/yyyy", { locale: ptBR })}
+                                </div>
                               </div>
-                            </div>
-                          )}
+                            ) : null;
+                          })()}
                           {mainGuestFromWebCheckin.nationality && (
                             <div>
                               <Label className="text-sm font-semibold text-slate-600">Nacionalidade</Label>
@@ -3702,14 +3729,17 @@ const ReservationDetails = () => {
                           </div>
                         </div>
                       )}
-                      {reservation.guest.birth_date && (
-                        <div>
-                          <Label className="text-sm font-semibold text-slate-600">Data de Nascimento</Label>
-                          <div className="mt-1 text-sm">
-                            {format(parseISO(reservation.guest.birth_date), "dd/MM/yyyy", { locale: ptBR })}
+                      {reservation.guest.birth_date && (() => {
+                        const birthDate = parseISO(reservation.guest.birth_date);
+                        return isValid(birthDate) ? (
+                          <div>
+                            <Label className="text-sm font-semibold text-slate-600">Data de Nascimento</Label>
+                            <div className="mt-1 text-sm">
+                              {format(birthDate, "dd/MM/yyyy", { locale: ptBR })}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        ) : null;
+                      })()}
                       {reservation.guest.gender && (
                         <div>
                           <Label className="text-sm font-semibold text-slate-600">Gênero</Label>
@@ -3829,14 +3859,17 @@ const ReservationDetails = () => {
                                 <div className="mt-1 text-sm">{guest.cpf}</div>
                               </div>
                             )}
-                            {guest.birth_date && (
-                              <div>
-                                <Label className="text-sm font-semibold text-slate-600">Data de Nascimento</Label>
-                                <div className="mt-1 text-sm">
-                                  {format(parseISO(guest.birth_date), "dd/MM/yyyy", { locale: ptBR })}
+                            {guest.birth_date && (() => {
+                              const birthDate = parseISO(guest.birth_date);
+                              return isValid(birthDate) ? (
+                                <div>
+                                  <Label className="text-sm font-semibold text-slate-600">Data de Nascimento</Label>
+                                  <div className="mt-1 text-sm">
+                                    {format(birthDate, "dd/MM/yyyy", { locale: ptBR })}
+                                  </div>
                                 </div>
-                              </div>
-                            )}
+                              ) : null;
+                            })()}
                             {guest.nationality && (
                               <div>
                                 <Label className="text-sm font-semibold text-slate-600">Nacionalidade</Label>

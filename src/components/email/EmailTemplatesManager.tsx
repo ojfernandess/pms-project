@@ -63,6 +63,8 @@ export function EmailTemplatesManager() {
     primary_color: "#4F46E5",
     footer_text: "",
     logo_url: "",
+    cc_emails: "",
+    bcc_emails: "",
   });
 
   const eventTypes = [
@@ -93,6 +95,8 @@ export function EmailTemplatesManager() {
         primary_color: template.primary_color || "#4F46E5",
         footer_text: template.footer_text || "",
         logo_url: template.logo_url || "",
+        cc_emails: template.cc_emails || "",
+        bcc_emails: template.bcc_emails || "",
       });
     } else {
       setSelectedTemplate(null);
@@ -106,6 +110,8 @@ export function EmailTemplatesManager() {
         primary_color: "#4F46E5",
         footer_text: "",
         logo_url: "",
+        cc_emails: "",
+        bcc_emails: "",
       });
     }
     setDialogOpen(true);
@@ -342,6 +348,35 @@ export function EmailTemplatesManager() {
               <p className="text-xs text-muted-foreground mt-1">
                 Variáveis disponíveis: guest_name, reservation_code, checkin_date, checkout_date, total_amount, policies_link, etc.
               </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label htmlFor="cc_emails">Emails em Cópia (CC)</Label>
+                <Input
+                  id="cc_emails"
+                  type="text"
+                  value={formData.cc_emails}
+                  onChange={(e) => setFormData({ ...formData, cc_emails: e.target.value })}
+                  placeholder="email1@exemplo.com, email2@exemplo.com"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Separe múltiplos emails por vírgula
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="bcc_emails">Emails em Cópia Oculta (BCC)</Label>
+                <Input
+                  id="bcc_emails"
+                  type="text"
+                  value={formData.bcc_emails}
+                  onChange={(e) => setFormData({ ...formData, bcc_emails: e.target.value })}
+                  placeholder="email1@exemplo.com, email2@exemplo.com"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Separe múltiplos emails por vírgula
+                </p>
+              </div>
             </div>
 
             <div className="flex items-center gap-2">

@@ -99,7 +99,9 @@ export const useEmailTemplates = () => {
         name: data.name,
         updated_at: data.updated_at,
         body_html_length: data.body_html?.length || 0,
-        subject_length: data.subject?.length || 0
+        subject_length: data.subject?.length || 0,
+        cc_emails: data.cc_emails || 'Nenhum',
+        bcc_emails: data.bcc_emails || 'Nenhum'
       });
       
       return data;
@@ -160,7 +162,12 @@ export const useEmailTemplates = () => {
       const subject = processTemplate(template.subject, variables || {});
       const bodyHtml = processTemplate(template.body_html, variables || {});
 
-      // Adicionar à fila
+      // Adicionar à fila (incluindo CC e BCC do template)
+      console.log('📧 Enviando email de teste com CC e BCC:', {
+        cc_emails: template.cc_emails || 'Nenhum',
+        bcc_emails: template.bcc_emails || 'Nenhum'
+      });
+      
       const { data, error } = await supabase
         .from('email_queue')
         .insert([{
@@ -171,6 +178,8 @@ export const useEmailTemplates = () => {
           body_html: bodyHtml,
           status: 'pending',
           priority: 2, // Alta prioridade para testes
+          cc_emails: template.cc_emails || null,
+          bcc_emails: template.bcc_emails || null,
         }])
         .select('id')
         .single();

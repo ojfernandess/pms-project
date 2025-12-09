@@ -1006,29 +1006,55 @@ export const useWebCheckin = () => {
       // Registrar log de atividade
       if (reservationId) {
         try {
-          await logActivity({
-            actionType: "checked_in",
-            entityType: "reservation",
-            entityId: reservationId,
-            entityCode: reservationCode,
-            description: `Check-in web concluído${reservationCode ? ` para reserva ${reservationCode}` : ""} - Realizado pelo hóspede: ${mainGuestName}`,
-            newValues: {
-              status: "confirmed",
-              checkin_method: "web",
-              web_checkin_id: webCheckin.id,
-              completed_at: new Date().toISOString(),
-              performed_by: mainGuestName,
-              performed_by_type: "guest",
-            },
-            metadata: {
-              web_checkin_id: webCheckin.id,
-              locator: webCheckin.locator,
-              ip_address: webCheckin.ip_address,
-              user_agent: webCheckin.user_agent,
-              guest_name: mainGuestName,
-              performed_by: "guest",
-            },
-          });
+          // Buscar establishment_id da reserva se não estiver no web_checkin
+          let establishmentId = webCheckin.establishment_id;
+          if (!establishmentId && reservationId) {
+            const { data: reservationData } = await supabase
+              .from("reservations")
+              .select("establishment_id")
+              .eq("id", reservationId)
+              .single();
+            establishmentId = reservationData?.establishment_id || null;
+          }
+
+          if (establishmentId) {
+            // Usar a função RPC diretamente para garantir que o log seja criado
+            // mesmo durante o web check-in (quando não há usuário logado no sistema)
+            const { error: logError } = await supabase.rpc("log_activity", {
+              p_establishment_id: establishmentId,
+              p_user_id: null, // Web check-in é feito pelo hóspede, não por usuário do sistema
+              p_action_type: "checked_in",
+              p_entity_type: "reservation",
+              p_description: `Check-in web concluído${reservationCode ? ` para reserva ${reservationCode}` : ""} - Realizado pelo hóspede: ${mainGuestName}`,
+              p_entity_id: reservationId,
+              p_entity_code: reservationCode || null,
+              p_old_values: { status: "pending" },
+              p_new_values: {
+                status: "confirmed",
+                checkin_method: "web",
+                web_checkin_id: webCheckin.id,
+                completed_at: new Date().toISOString(),
+                performed_by: mainGuestName,
+                performed_by_type: "guest",
+              },
+              p_metadata: {
+                web_checkin_id: webCheckin.id,
+                locator: webCheckin.locator,
+                ip_address: webCheckin.ip_address,
+                user_agent: webCheckin.user_agent,
+                guest_name: mainGuestName,
+                performed_by: "guest",
+              },
+            });
+
+            if (logError) {
+              console.error("❌ Erro ao registrar log de atividade do web check-in:", logError);
+            } else {
+              console.log("✅ Log de atividade do web check-in registrado com sucesso");
+            }
+          } else {
+            console.warn("⚠️ Não foi possível registrar log: establishment_id não encontrado");
+          }
         } catch (logError) {
           console.error("❌ Erro ao registrar log de atividade do web check-in:", logError);
           // Não lançar erro para não interromper o fluxo principal
@@ -1036,10 +1062,12 @@ export const useWebCheckin = () => {
       }
 
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       return data;
     },
     onSuccess: async (data) => {
       queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       
       // Disparar email de confirmação automaticamente após concluir o check-in
       try {

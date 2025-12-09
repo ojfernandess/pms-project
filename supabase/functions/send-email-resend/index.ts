@@ -19,6 +19,8 @@ interface EmailRequest {
   html: string;
   text?: string;
   api_key: string;
+  cc?: string[]; // Array de emails em cópia
+  bcc?: string[]; // Array de emails em cópia oculta
 }
 
 serve(async (req) => {
@@ -59,6 +61,10 @@ serve(async (req) => {
       subject: emailData.subject,
       hasHtml: !!emailData.html,
       hasApiKey: !!emailData.api_key,
+      cc: emailData.cc || [],
+      bcc: emailData.bcc || [],
+      cc_count: emailData.cc?.length || 0,
+      bcc_count: emailData.bcc?.length || 0,
     });
 
     // Validar dados obrigatórios com mensagens mais detalhadas
@@ -101,6 +107,30 @@ serve(async (req) => {
       ? `${emailData.from_name} <${emailData.from}>`
       : emailData.from;
 
+    // Preparar payload do Resend com CC e BCC
+    const resendPayload: any = {
+      from: fromEmail,
+      to: emailData.to,
+      ...(emailData.reply_to ? { reply_to: emailData.reply_to } : {}),
+      subject: emailData.subject,
+      html: emailData.html,
+      ...(emailData.text ? { text: emailData.text } : {}),
+    };
+
+    // Adicionar CC se houver
+    if (emailData.cc && emailData.cc.length > 0) {
+      resendPayload.cc = emailData.cc;
+      console.log("Resend - CC adicionado:", resendPayload.cc);
+    }
+
+    // Adicionar BCC se houver
+    if (emailData.bcc && emailData.bcc.length > 0) {
+      resendPayload.bcc = emailData.bcc;
+      console.log("Resend - BCC adicionado:", resendPayload.bcc);
+    }
+
+    console.log("Resend - Payload completo:", JSON.stringify(resendPayload, null, 2));
+
     // Enviar e-mail via API do Resend
     try {
       const response = await fetch('https://api.resend.com/emails', {
@@ -109,14 +139,7 @@ serve(async (req) => {
           'Authorization': `Bearer ${emailData.api_key}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          from: fromEmail,
-          to: emailData.to,
-          ...(emailData.reply_to ? { reply_to: emailData.reply_to } : {}),
-          subject: emailData.subject,
-          html: emailData.html,
-          ...(emailData.text ? { text: emailData.text } : {}),
-        }),
+        body: JSON.stringify(resendPayload),
       });
 
       const responseData = await response.json().catch(() => ({}));

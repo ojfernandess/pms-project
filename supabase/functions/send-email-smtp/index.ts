@@ -18,6 +18,8 @@ interface EmailRequest {
   subject: string;
   html: string;
   text?: string;
+  cc?: string; // Emails em cópia, separados por vírgula
+  bcc?: string; // Emails em cópia oculta, separados por vírgula
   smtp_config: {
     host: string;
     port: number;
@@ -121,6 +123,21 @@ serve(async (req) => {
         ? `${emailData.to_name} <${emailData.to}>`
         : emailData.to;
 
+      // Processar CC e BCC
+      const ccEmails = emailData.cc 
+        ? emailData.cc.split(',').map((e: string) => e.trim()).filter((e: string) => e.length > 0)
+        : [];
+      const bccEmails = emailData.bcc 
+        ? emailData.bcc.split(',').map((e: string) => e.trim()).filter((e: string) => e.length > 0)
+        : [];
+
+      console.log("SMTP - CC e BCC processados:", {
+        cc: ccEmails,
+        bcc: bccEmails,
+        cc_count: ccEmails.length,
+        bcc_count: bccEmails.length
+      });
+
       // Conectar ao servidor SMTP
       if (smtpConfig.secure || port === 465) {
         // Conexão TLS direta (porta 465)
@@ -140,8 +157,8 @@ serve(async (req) => {
         });
       }
 
-      // Enviar e-mail
-      await client.send({
+      // Preparar objeto de envio com CC e BCC
+      const sendOptions: any = {
         from: fromEmail,
         to: toEmail,
         subject: emailData.subject,
@@ -149,7 +166,22 @@ serve(async (req) => {
         html: emailData.html,
         ...(emailData.text ? { text: emailData.text } : {}),
         ...(emailData.reply_to ? { replyTo: emailData.reply_to } : {}),
-      });
+      };
+
+      // Adicionar CC se houver
+      if (ccEmails.length > 0) {
+        sendOptions.cc = ccEmails.join(', ');
+        console.log("SMTP - CC adicionado:", sendOptions.cc);
+      }
+
+      // Adicionar BCC se houver
+      if (bccEmails.length > 0) {
+        sendOptions.bcc = bccEmails.join(', ');
+        console.log("SMTP - BCC adicionado:", sendOptions.bcc);
+      }
+
+      // Enviar e-mail
+      await client.send(sendOptions);
 
       await client.close();
 
