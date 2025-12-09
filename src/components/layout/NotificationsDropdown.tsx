@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Bell, Check, CheckCheck, Trash2, AlertCircle, CreditCard, Wrench, Calendar } from "lucide-react";
+import { Bell, Check, CheckCheck, Trash2, AlertCircle, CreditCard, Wrench, Calendar, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,8 +42,10 @@ const getPriorityColor = (priority: Notification["priority"]) => {
 };
 
 export function NotificationsDropdown() {
-  const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useNotifications();
+  const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification, clearAllNotifications } = useNotifications();
   const [open, setOpen] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
 
   const handleMarkAsRead = async (notificationId: string) => {
     await markAsRead(notificationId);
@@ -54,6 +57,38 @@ export function NotificationsDropdown() {
 
   const handleMarkAllAsRead = async () => {
     await markAllAsRead();
+  };
+
+  const handleClearAll = async () => {
+    if (confirm("Tem certeza que deseja limpar todas as notificações? Esta ação não pode ser desfeita.")) {
+      setIsClearing(true);
+      setIsAnimating(true);
+      
+      // Aguardar um pouco para mostrar a animação
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      try {
+        await clearAllNotifications();
+        
+        // Mostrar toast de sucesso
+        toast.success("Todas as notificações foram removidas", {
+          description: "A lista foi limpa com sucesso",
+          duration: 2000,
+        });
+        
+        // Fechar o dropdown após um breve delay
+        setTimeout(() => {
+          setOpen(false);
+        }, 500);
+      } catch (error) {
+        toast.error("Erro ao limpar notificações", {
+          description: "Tente novamente mais tarde",
+        });
+      } finally {
+        setIsClearing(false);
+        setIsAnimating(false);
+      }
+    }
   };
 
   return (
@@ -68,22 +103,49 @@ export function NotificationsDropdown() {
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80 p-0">
-        <div className="flex items-center justify-between p-4 border-b">
-          <h3 className="font-semibold">Notificações</h3>
-          {unreadCount > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleMarkAllAsRead}
-              className="h-8 text-xs"
-            >
-              <CheckCheck className="h-3 w-3 mr-1" />
-              Marcar todas como lidas
-            </Button>
-          )}
+      <DropdownMenuContent align="end" className="w-[calc(100vw-2rem)] sm:w-[420px] md:w-[450px] max-w-[450px] p-0">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 border-b bg-background overflow-visible">
+          <h3 className="font-semibold text-base shrink-0">Notificações</h3>
+          <div className="flex items-center gap-2 w-full sm:w-auto overflow-visible">
+            {unreadCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleMarkAllAsRead}
+                className="h-8 text-xs px-3 whitespace-nowrap shrink-0 flex-1 sm:flex-initial"
+              >
+                <CheckCheck className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                <span className="hidden sm:inline">Marcar todas como lidas</span>
+                <span className="sm:hidden">Marcar lidas</span>
+              </Button>
+            )}
+            {notifications.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearAll}
+                disabled={isClearing}
+                className="h-8 text-xs px-3 text-destructive hover:text-destructive hover:bg-destructive/10 whitespace-nowrap shrink-0 flex-1 sm:flex-initial transition-all duration-200"
+                title="Limpar todas as notificações"
+              >
+                {isClearing ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 shrink-0 animate-spin" />
+                    <span className="hidden sm:inline">Limpando...</span>
+                    <span className="sm:hidden">Limpando...</span>
+                  </>
+                ) : (
+                  <>
+                    <X className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                    <span className="hidden sm:inline">Limpar todas</span>
+                    <span className="sm:hidden">Limpar</span>
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         </div>
-        <ScrollArea className="h-[400px]">
+        <ScrollArea className="h-[300px] sm:h-[400px]">
           {notifications.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
               <Bell className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -95,9 +157,14 @@ export function NotificationsDropdown() {
                 <div
                   key={notification.id}
                   className={cn(
-                    "p-4 hover:bg-muted/50 transition-colors",
-                    !notification.is_read && "bg-blue-50/50 dark:bg-blue-950/20"
+                    "p-4 hover:bg-muted/50 transition-all duration-300 ease-in-out",
+                    !notification.is_read && "bg-blue-50/50 dark:bg-blue-950/20",
+                    isAnimating && "opacity-0 -translate-x-4 scale-95"
                   )}
+                  style={{
+                    transitionDelay: isAnimating ? `${notifications.indexOf(notification) * 30}ms` : '0ms',
+                    transitionDuration: isAnimating ? '300ms' : '150ms'
+                  }}
                 >
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5">

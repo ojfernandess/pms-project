@@ -194,6 +194,28 @@ export const useNotifications = () => {
     },
   });
 
+  // Limpar todas as notificações
+  const clearAllNotifications = useMutation({
+    mutationFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error } = await supabase
+        .from("notifications")
+        .delete()
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      toast.success("Todas as notificações foram removidas");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao limpar notificações");
+    },
+  });
+
   return {
     notifications: notificationsQuery.data || [],
     unreadNotifications: unreadNotificationsQuery.data || [],
@@ -203,6 +225,7 @@ export const useNotifications = () => {
     markAsRead: markAsRead.mutateAsync,
     markAllAsRead: markAllAsRead.mutateAsync,
     deleteNotification: deleteNotification.mutateAsync,
+    clearAllNotifications: clearAllNotifications.mutateAsync,
     refetch: notificationsQuery.refetch,
   };
 };
