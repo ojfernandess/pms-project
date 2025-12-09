@@ -12,6 +12,13 @@ export interface SiteSettings {
   og_title: string;
   og_description: string;
   og_image: string | null;
+  features_enabled?: {
+    api_integrations?: boolean;
+    stripe?: boolean;
+    email?: boolean;
+    web_checkin?: boolean;
+    channel_manager?: boolean;
+  } | null;
   created_at: string;
   updated_at: string;
 }
@@ -46,6 +53,13 @@ export const useSiteSettings = () => {
           og_title: '',
           og_description: '',
           og_image: null,
+          features_enabled: {
+            api_integrations: true,
+            stripe: true,
+            email: true,
+            web_checkin: true,
+            channel_manager: true,
+          },
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         } as SiteSettings;

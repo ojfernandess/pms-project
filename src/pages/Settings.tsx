@@ -10,9 +10,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useHotelSettings } from "@/hooks/useHotelSettings";
 import { useApiSettings } from "@/hooks/useApiSettings";
 import { usePaymentCarriers } from "@/hooks/usePaymentCarriers";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { useEstablishmentServices, EstablishmentService } from "@/hooks/useEstablishmentServices";
-import { Loader2, Upload, Image as ImageIcon, Save, Plus, X, Check, CreditCard, FileText, Mail, AlertCircle } from "lucide-react";
+import { Loader2, Upload, Image as ImageIcon, Save, Plus, X, Check, CreditCard, FileText, Mail, AlertCircle, Key, Globe, Eye, EyeOff, Trash2, Edit } from "lucide-react";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -36,24 +37,12 @@ const Settings = () => {
   const { carriers } = usePaymentCarriers();
   const { role } = useCurrentEmployeeRole();
   const { isSuperAdmin } = useIsSuperAdmin();
+  const { settings: siteSettings } = useSiteSettings();
+  
+  // Verificar se a funcionalidade de integrações está habilitada
+  const isApiIntegrationsEnabled = siteSettings?.features_enabled?.api_integrations !== false;
 
-  // Verificar se o usuário pode acessar configurações (apenas gerente ou super admin)
-  const canAccessSettings = role?.code === "manager" || isSuperAdmin;
-
-  if (!canAccessSettings) {
-    return (
-      <div className="space-y-6">
-        <Card className="p-12 text-center">
-          <AlertCircle className="h-16 w-16 mx-auto mb-4 text-destructive" />
-          <h2 className="text-2xl font-bold mb-2">Acesso Negado</h2>
-          <p className="text-muted-foreground">
-            Apenas gerentes e super admins podem acessar as configurações do estabelecimento.
-          </p>
-        </Card>
-      </div>
-    );
-  }
-
+  // TODOS OS HOOKS DEVEM SER CHAMADOS ANTES DE QUALQUER RETURN CONDICIONAL
   const [formData, setFormData] = useState({
     name: "",
     website: "",
@@ -140,6 +129,10 @@ const Settings = () => {
       if (settings.signature_url) setSignaturePreview(settings.signature_url);
     }
   }, [settings, selectedEstablishment]);
+
+  // Verificar se o usuário pode acessar configurações (apenas gerente ou super admin)
+  // IMPORTANTE: Esta verificação deve vir DEPOIS de todos os hooks
+  const canAccessSettings = role?.code === "manager" || isSuperAdmin;
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -251,6 +244,21 @@ const Settings = () => {
     }
   };
 
+  // Verificar acesso ANTES de renderizar conteúdo (depois de todos os hooks)
+  if (!canAccessSettings) {
+    return (
+      <div className="space-y-6">
+        <Card className="p-12 text-center">
+          <AlertCircle className="h-16 w-16 mx-auto mb-4 text-destructive" />
+          <h2 className="text-2xl font-bold mb-2">Acesso Negado</h2>
+          <p className="text-muted-foreground">
+            Apenas gerentes e super admins podem acessar as configurações do estabelecimento.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -298,7 +306,9 @@ const Settings = () => {
           <TabsTrigger value="schedule">Horário e Pagamento</TabsTrigger>
           <TabsTrigger value="services">Serviços</TabsTrigger>
           <TabsTrigger value="policies">Políticas</TabsTrigger>
-          <TabsTrigger value="integration">Integrações</TabsTrigger>
+          {isApiIntegrationsEnabled && (
+            <TabsTrigger value="integration">Integrações</TabsTrigger>
+          )}
           <TabsTrigger value="stripe">Stripe</TabsTrigger>
         </TabsList>
 
@@ -798,22 +808,11 @@ const Settings = () => {
           <PoliciesManager />
         </TabsContent>
 
-        <TabsContent value="integration">
-          <Card className="p-6">
-            <div className="space-y-6">
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Configurações de API</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Configure as integrações com APIs externas
-                </p>
-                {/* TODO: Implementar gerenciamento de API settings */}
-                <div className="text-center py-8 text-muted-foreground">
-                  Em desenvolvimento
-                </div>
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
+        {isApiIntegrationsEnabled && (
+          <TabsContent value="integration">
+            <ApiSettingsManager />
+          </TabsContent>
+        )}
 
         <TabsContent value="stripe">
           <StripeSettingsTab />
@@ -1465,6 +1464,430 @@ const PoliciesManager = () => {
             )}
           </Button>
         </div>
+      </div>
+    </Card>
+  );
+};
+
+// Componente de Gerenciamento de Configurações de API
+const ApiSettingsManager = () => {
+  const { apiSettings, isLoading, saveApiSetting, deleteApiSetting, isSaving } = useApiSettings();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const [formData, setFormData] = useState({
+    api_name: "",
+    api_key: "",
+    api_secret: "",
+    api_url: "",
+    is_active: true,
+    config: "",
+  });
+
+  const apiNameOptions = [
+    { value: "booking_engine", label: "Booking Engine" },
+    { value: "amplifique", label: "Amplifique" },
+    { value: "channel_manager", label: "Channel Manager" },
+    { value: "payment_gateway", label: "Payment Gateway" },
+    { value: "other", label: "Outra API" },
+  ];
+
+  const handleEdit = (setting: any) => {
+    setEditingId(setting.id);
+    setFormData({
+      api_name: setting.api_name || "",
+      api_key: setting.api_key || "",
+      api_secret: setting.api_secret || "",
+      api_url: setting.api_url || "",
+      is_active: setting.is_active ?? true,
+      config: setting.config ? JSON.stringify(setting.config, null, 2) : "",
+    });
+  };
+
+  const handleCancel = () => {
+    setEditingId(null);
+    setFormData({
+      api_name: "",
+      api_key: "",
+      api_secret: "",
+      api_url: "",
+      is_active: true,
+      config: "",
+    });
+  };
+
+  const handleSave = async () => {
+    // Validações
+    if (!formData.api_name) {
+      toast.error("Nome da API é obrigatório");
+      return;
+    }
+
+    // Validar URL se fornecida
+    if (formData.api_url && formData.api_url.trim()) {
+      try {
+        new URL(formData.api_url);
+      } catch (e) {
+        toast.error("URL inválida. Use o formato: https://exemplo.com");
+        return;
+      }
+    }
+
+    try {
+      let configData = null;
+      if (formData.config.trim()) {
+        try {
+          configData = JSON.parse(formData.config);
+        } catch (e) {
+          toast.error("Config JSON inválido. Verifique a sintaxe.");
+          return;
+        }
+      }
+
+      // Se editingId é "new", não passar id (criar novo)
+      // Se editingId é um UUID, passar id (atualizar existente)
+      const isNew = editingId === "new";
+      
+      await saveApiSetting({
+        ...(isNew ? {} : { id: editingId }),
+        api_name: formData.api_name,
+        api_key: formData.api_key?.trim() || undefined,
+        api_secret: formData.api_secret?.trim() || undefined,
+        api_url: formData.api_url?.trim() || undefined,
+        is_active: formData.is_active,
+        config: configData,
+      });
+
+      handleCancel();
+    } catch (error: any) {
+      console.error("Erro ao salvar configuração de API:", error);
+      // O erro já é tratado no hook useApiSettings
+    }
+  };
+
+  const handleDelete = async (id: string, apiName: string) => {
+    if (!confirm(`Tem certeza que deseja excluir a configuração "${apiName}"?`)) {
+      return;
+    }
+
+    try {
+      await deleteApiSetting(id);
+    } catch (error: any) {
+      console.error("Erro ao excluir configuração:", error);
+      toast.error(error.message || "Erro ao excluir configuração");
+    }
+  };
+
+  const toggleSecretVisibility = (id: string) => {
+    setShowSecrets((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const maskSecret = (secret: string) => {
+    if (!secret) return "";
+    if (secret.length <= 8) return "••••••••";
+    return secret.substring(0, 4) + "••••••••" + secret.substring(secret.length - 4);
+  };
+
+  if (isLoading) {
+    return (
+      <Card className="p-6">
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-6">
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <Key className="w-5 h-5" />
+              Configurações de API
+            </h3>
+            <p className="text-sm text-muted-foreground mb-2">
+              Gerencie as integrações com APIs externas (Booking Engine, Channel Manager, Payment Gateway, etc.)
+            </p>
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>• Armazene credenciais de forma segura para integrações externas</p>
+              <p>• Configure múltiplas APIs por estabelecimento</p>
+              <p>• Ative/desative integrações conforme necessário</p>
+              <p>• Use configurações adicionais em JSON para personalização</p>
+            </div>
+          </div>
+          {!editingId && (
+            <Button
+              onClick={() => setEditingId("new")}
+              className="gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Nova Configuração
+            </Button>
+          )}
+        </div>
+
+        {/* Formulário de criação/edição */}
+        {editingId && (
+          <div className="border rounded-lg p-6 space-y-4 bg-muted/50">
+            <div className="flex items-center justify-between">
+              <h4 className="font-semibold">
+                {editingId === "new" ? "Nova Configuração de API" : "Editar Configuração"}
+              </h4>
+              <Button variant="ghost" size="sm" onClick={handleCancel}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="api_name">Nome da API *</Label>
+                <Select
+                  value={formData.api_name}
+                  onValueChange={(value) => setFormData({ ...formData, api_name: value })}
+                  disabled={editingId !== "new"}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione uma API" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {apiNameOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {editingId !== "new" && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    O nome da API não pode ser alterado após a criação
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="api_url">URL da API</Label>
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="api_url"
+                    value={formData.api_url}
+                    onChange={(e) => setFormData({ ...formData, api_url: e.target.value })}
+                    placeholder="https://api.exemplo.com"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="api_key">API Key</Label>
+                <Input
+                  id="api_key"
+                  type="text"
+                  value={formData.api_key}
+                  onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
+                  placeholder="Sua chave de API"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="api_secret">API Secret</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="api_secret"
+                    type={showSecrets[editingId] ? "text" : "password"}
+                    value={formData.api_secret}
+                    onChange={(e) => setFormData({ ...formData, api_secret: e.target.value })}
+                    placeholder="Seu segredo de API"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => toggleSecretVisibility(editingId)}
+                  >
+                    {showSecrets[editingId] ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="config">Configurações Adicionais (JSON)</Label>
+              <Textarea
+                id="config"
+                value={formData.config}
+                onChange={(e) => setFormData({ ...formData, config: e.target.value })}
+                placeholder='{"timeout": 5000, "retry": 3}'
+                rows={4}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Configurações adicionais em formato JSON (opcional)
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="is_active"
+                  checked={formData.is_active}
+                  onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
+                />
+                <Label htmlFor="is_active">Ativo</Label>
+              </div>
+
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={handleCancel}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleSave} disabled={isSaving || !formData.api_name}>
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      Salvar
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Lista de configurações */}
+        {apiSettings.length > 0 ? (
+          <div className="space-y-4">
+            <div className="border rounded-lg overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nome da API</TableHead>
+                    <TableHead>URL</TableHead>
+                    <TableHead>API Key</TableHead>
+                    <TableHead>API Secret</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {apiSettings.map((setting: any) => (
+                    <TableRow key={setting.id}>
+                      <TableCell className="font-medium">
+                        {apiNameOptions.find((opt) => opt.value === setting.api_name)?.label || setting.api_name}
+                      </TableCell>
+                      <TableCell>
+                        {setting.api_url ? (
+                          <a
+                            href={setting.api_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline flex items-center gap-1"
+                          >
+                            <Globe className="h-3 w-3" />
+                            {setting.api_url.length > 30
+                              ? setting.api_url.substring(0, 30) + "..."
+                              : setting.api_url}
+                          </a>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {setting.api_key ? (
+                          <code className="text-xs bg-muted px-2 py-1 rounded">
+                            {setting.api_key.length > 20
+                              ? setting.api_key.substring(0, 20) + "..."
+                              : setting.api_key}
+                          </code>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {setting.api_secret ? (
+                          <div className="flex items-center gap-2">
+                            <code className="text-xs bg-muted px-2 py-1 rounded">
+                              {showSecrets[setting.id]
+                                ? setting.api_secret
+                                : maskSecret(setting.api_secret)}
+                            </code>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleSecretVisibility(setting.id)}
+                              className="h-6 w-6 p-0"
+                            >
+                              {showSecrets[setting.id] ? (
+                                <EyeOff className="h-3 w-3" />
+                              ) : (
+                                <Eye className="h-3 w-3" />
+                              )}
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={setting.is_active ? "default" : "secondary"}>
+                          {setting.is_active ? "Ativo" : "Inativo"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleEdit(setting)}
+                            disabled={!!editingId}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(setting.id, setting.api_name)}
+                            disabled={!!editingId}
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        ) : (
+          !editingId && (
+            <div className="text-center py-12 border rounded-lg">
+              <Key className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+              <p className="text-muted-foreground mb-4">Nenhuma configuração de API cadastrada</p>
+              <Button onClick={() => setEditingId("new")} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Criar Primeira Configuração
+              </Button>
+            </div>
+          )
+        )}
       </div>
     </Card>
   );

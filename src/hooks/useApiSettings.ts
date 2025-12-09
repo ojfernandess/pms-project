@@ -70,7 +70,19 @@ export const useApiSettings = () => {
       toast.success("Configuração de API salva com sucesso!");
     },
     onError: (error: any) => {
-      toast.error(error.message || "Erro ao salvar configuração de API");
+      // Mensagens de erro mais amigáveis
+      if (error.code === "23505") {
+        // Violação de constraint UNIQUE (api_name, establishment_id)
+        toast.error("Já existe uma configuração com este nome de API para este estabelecimento. Escolha outro nome ou edite a existente.");
+      } else if (error.code === "23503") {
+        // Violação de foreign key
+        toast.error("Estabelecimento inválido. Verifique se o estabelecimento está selecionado.");
+      } else if (error.code === "23502") {
+        // Violação de NOT NULL
+        toast.error("Campos obrigatórios não preenchidos.");
+      } else {
+        toast.error(error.message || "Erro ao salvar configuração de API");
+      }
     },
   });
 

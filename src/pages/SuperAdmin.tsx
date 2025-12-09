@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import {
@@ -78,7 +79,7 @@ import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { Textarea } from "@/components/ui/textarea";
 import { StripeGlobalConfigDialog } from "@/components/stripe/StripeGlobalConfigDialog";
 import { useStripe } from "@/hooks/useStripe";
-import { CreditCard } from "lucide-react";
+import { CreditCard, Settings, Zap, Key } from "lucide-react";
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
@@ -1105,7 +1106,7 @@ const SuperAdmin = () => {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-8">
+        <TabsList className="grid w-full grid-cols-9">
           <TabsTrigger value="overview">Visão Geral</TabsTrigger>
           <TabsTrigger value="companies">Empresas</TabsTrigger>
           <TabsTrigger value="users">Usuários</TabsTrigger>
@@ -1113,6 +1114,7 @@ const SuperAdmin = () => {
           <TabsTrigger value="establishments">Estabelecimentos</TabsTrigger>
           <TabsTrigger value="emails">E-mails</TabsTrigger>
           <TabsTrigger value="site">Site</TabsTrigger>
+          <TabsTrigger value="features">Funcionalidades</TabsTrigger>
           <TabsTrigger value="stripe">Stripe</TabsTrigger>
         </TabsList>
 
@@ -1927,6 +1929,12 @@ const SuperAdmin = () => {
           <SiteSettingsManager />
         </TabsContent>
 
+        {/* Tab: Funcionalidades */}
+        <TabsContent value="features">
+          <FeatureFlagsManager />
+        </TabsContent>
+
+        {/* Tab: Stripe */}
         <TabsContent value="stripe">
           <StripeGlobalSettingsTab />
         </TabsContent>
@@ -2588,6 +2596,151 @@ const SuperAdmin = () => {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+};
+
+// Componente de Gerenciamento de Feature Flags (Funcionalidades)
+const FeatureFlagsManager = () => {
+  const { settings, isLoading, updateSettings, isUpdating } = useSiteSettings();
+  const [features, setFeatures] = useState({
+    api_integrations: true,
+    stripe: true,
+    email: true,
+    web_checkin: true,
+    channel_manager: true,
+  });
+
+  useEffect(() => {
+    if (settings?.features_enabled) {
+      setFeatures({
+        api_integrations: settings.features_enabled.api_integrations ?? true,
+        stripe: settings.features_enabled.stripe ?? true,
+        email: settings.features_enabled.email ?? true,
+        web_checkin: settings.features_enabled.web_checkin ?? true,
+        channel_manager: settings.features_enabled.channel_manager ?? true,
+      });
+    }
+  }, [settings]);
+
+  const handleToggle = async (feature: keyof typeof features, value: boolean) => {
+    const newFeatures = { ...features, [feature]: value };
+    setFeatures(newFeatures);
+    
+    try {
+      await updateSettings({
+        features_enabled: newFeatures,
+      });
+    } catch (error) {
+      // Reverter em caso de erro
+      setFeatures(features);
+      console.error("Erro ao atualizar funcionalidade:", error);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <Card className="p-6">
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="w-6 h-6 animate-spin" />
+        </div>
+      </Card>
+    );
+  }
+
+  const featureList = [
+    {
+      key: "api_integrations" as const,
+      label: "Integrações de API",
+      description: "Permite que estabelecimentos configurem integrações com APIs externas (Booking Engine, Channel Manager, etc.)",
+      icon: Key,
+    },
+    {
+      key: "stripe" as const,
+      label: "Stripe",
+      description: "Habilita a integração com Stripe para processamento de pagamentos",
+      icon: CreditCard,
+    },
+    {
+      key: "email" as const,
+      label: "Sistema de E-mail",
+      description: "Habilita o sistema de envio de e-mails (templates, fila, logs)",
+      icon: Mail,
+    },
+    {
+      key: "web_checkin" as const,
+      label: "Web Check-in",
+      description: "Permite que hóspedes façam check-in online antes da chegada",
+      icon: Zap,
+    },
+    {
+      key: "channel_manager" as const,
+      label: "Channel Manager",
+      description: "Habilita a sincronização com canais de distribuição (OTAs)",
+      icon: Link2,
+    },
+  ];
+
+  return (
+    <Card className="p-6">
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 mb-6">
+          <Settings className="h-5 w-5 text-primary" />
+          <h2 className="text-2xl font-bold">Controle de Funcionalidades</h2>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <p className="text-sm text-blue-800">
+            <strong>Como funciona:</strong> Ative ou desative funcionalidades globalmente. 
+            Quando uma funcionalidade está desativada, ela não aparece nas configurações dos estabelecimentos.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {featureList.map((feature) => {
+            const Icon = feature.icon;
+            const isEnabled = features[feature.key];
+
+            return (
+              <div
+                key={feature.key}
+                className="flex items-start justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+              >
+                <div className="flex items-start gap-4 flex-1">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <Icon className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="font-semibold">{feature.label}</h3>
+                      <Badge variant={isEnabled ? "default" : "secondary"}>
+                        {isEnabled ? "Ativado" : "Desativado"}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {feature.description}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 ml-4">
+                  <Switch
+                    checked={isEnabled}
+                    onCheckedChange={(checked) => handleToggle(feature.key, checked)}
+                    disabled={isUpdating}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <p className="text-sm text-amber-800">
+            <strong>⚠️ Atenção:</strong> Desativar uma funcionalidade não remove dados existentes, 
+            apenas oculta a interface. Reative para restaurar o acesso.
+          </p>
+        </div>
+      </div>
+    </Card>
   );
 };
 

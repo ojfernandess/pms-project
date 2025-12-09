@@ -24,12 +24,20 @@ interface HealthCheckResult {
 }
 
 serve(async (req) => {
+  // Log inicial para garantir que a função está sendo executada
+  console.log("=== HEALTH CHECK FUNCTION CALLED ===");
+  console.log("Method:", req.method);
+  console.log("URL:", req.url);
+  console.log("Timestamp:", new Date().toISOString());
+  
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
+    console.log("CORS preflight request");
     return new Response("ok", { headers: corsHeaders });
   }
 
   const startTime = Date.now();
+  console.log("Health check started at:", startTime);
   const checks: HealthCheckResult["checks"] = {
     database: { status: "error" },
     storage: { status: "error" },
@@ -40,11 +48,19 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    
+    console.log("Health check iniciado:", {
+      timestamp: new Date().toISOString(),
+      hasUrl: !!supabaseUrl,
+      hasKey: !!supabaseKey,
+    });
+    
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Check 1: Database
     try {
       const dbStartTime = Date.now();
+      console.log("Verificando conexão com database...");
       const { error: dbError } = await supabase
         .from("establishments")
         .select("id")
@@ -52,18 +68,21 @@ serve(async (req) => {
       const dbResponseTime = Date.now() - dbStartTime;
 
       if (dbError) {
+        console.error("Erro no database check:", dbError);
         checks.database = {
           status: "error",
           error: dbError.message,
         };
         overallStatus = "unhealthy";
       } else {
+        console.log("Database check OK:", { responseTime: dbResponseTime });
         checks.database = {
           status: "ok",
           responseTime: dbResponseTime,
         };
       }
     } catch (error) {
+      console.error("Exceção no database check:", error);
       checks.database = {
         status: "error",
         error: error instanceof Error ? error.message : String(error),
@@ -73,19 +92,23 @@ serve(async (req) => {
 
     // Check 2: Storage
     try {
+      console.log("Verificando conexão com storage...");
       const { error: storageError } = await supabase.storage.listBuckets();
       if (storageError) {
+        console.error("Erro no storage check:", storageError);
         checks.storage = {
           status: "error",
           error: storageError.message,
         };
         if (overallStatus === "healthy") overallStatus = "degraded";
       } else {
+        console.log("Storage check OK");
         checks.storage = {
           status: "ok",
         };
       }
     } catch (error) {
+      console.error("Exceção no storage check:", error);
       checks.storage = {
         status: "error",
         error: error instanceof Error ? error.message : String(error),
@@ -105,6 +128,15 @@ serve(async (req) => {
       },
     };
 
+    console.log("Health check concluído:", {
+      status: overallStatus,
+      totalResponseTime,
+      checks: {
+        database: checks.database.status,
+        storage: checks.storage.status,
+      },
+    });
+
     // Retornar status HTTP apropriado
     const statusCode = overallStatus === "healthy" ? 200 : overallStatus === "degraded" ? 200 : 503;
 
@@ -119,7 +151,11 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error("Erro no health check:", error);
+    console.error("Erro crítico no health check:", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      timestamp: new Date().toISOString(),
+    });
     
     const result: HealthCheckResult = {
       status: "unhealthy",

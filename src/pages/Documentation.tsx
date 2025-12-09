@@ -17,7 +17,8 @@ import {
   Shield,
   Zap,
   Globe,
-  Lock
+  Lock,
+  Key
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -272,6 +273,107 @@ const STRIPE_INTEGRATION_DETAILS = String.raw`// Fluxo de Pagamento Stripe
    POST /functions/v1/stripe-webhook
    - Atualiza payment_status na reserva
    - Registra pagamento na tabela payments`;
+
+const API_SETTINGS_DETAILS = String.raw`// Sistema de Configurações de API
+
+1. Armazenamento Centralizado
+   - Tabela: api_settings
+   - Multi-tenant: cada estabelecimento tem suas próprias configurações
+   - Campos: api_name, api_url, api_key, api_secret, config (JSON), is_active
+
+2. Interface de Configuração
+   - Local: Configurações > Integrações > Configurações de API
+   - Funcionalidades:
+     * Criar/editar configurações
+     * Ativar/desativar integrações
+     * Visualizar/ocultar secrets
+     * Configurações adicionais em JSON
+
+3. Uso no Código
+   - Hook React: useApiSettings()
+   - Função utilitária: getApiConfig(apiName)
+   - Cliente HTTP: apiRequest(apiName, endpoint, options)
+
+4. Exemplo de Uso
+   import { apiRequest } from "@/lib/apiClient";
+   
+   // Sincronizar reservas com Booking Engine
+   const reservations = await apiRequest("booking_engine", "/reservations", {
+     method: "GET"
+   });
+   
+   // Atualizar preços no Channel Manager
+   await apiRequest("channel_manager", "/prices/update", {
+     method: "POST",
+     body: JSON.stringify({ room_id: "uuid", price: 150.00 })
+   });`;
+
+const API_SETTINGS_CODE_EXAMPLES = String.raw`// Exemplo 1: Buscar configuração
+import { getApiConfig } from "@/lib/apiClient";
+
+const config = await getApiConfig("booking_engine");
+if (config?.is_active) {
+  console.log("API configurada:", config.api_url);
+}
+
+// Exemplo 2: Fazer requisição HTTP
+import { apiRequest } from "@/lib/apiClient";
+
+try {
+  const data = await apiRequest("channel_manager", "/sync", {
+    method: "POST",
+    body: JSON.stringify({ establishment_id: "uuid" })
+  });
+  console.log("Sincronização concluída:", data);
+} catch (error) {
+  console.error("Erro na sincronização:", error);
+}
+
+// Exemplo 3: Hook React
+import { useApiSettings } from "@/hooks/useApiSettings";
+
+function MyComponent() {
+  const { apiSettings, isLoading } = useApiSettings();
+  const bookingEngine = apiSettings.find(s => s.api_name === "booking_engine");
+  
+  if (bookingEngine?.is_active) {
+    // Renderizar interface de sincronização
+  }
+}
+
+// Exemplo 4: Edge Function
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  Deno.env.get("SUPABASE_URL")!,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+);
+
+serve(async (req) => {
+  // Buscar configuração
+  const { data: config } = await supabase
+    .from("api_settings")
+    .select("*")
+    .eq("api_name", "booking_engine")
+    .eq("establishment_id", establishmentId)
+    .eq("is_active", true)
+    .single();
+  
+  if (!config) {
+    return new Response("API não configurada", { status: 400 });
+  }
+  
+  // Fazer requisição usando configuração
+  const url = config.api_url + "/reservations";
+  const response = await fetch(url, {
+    headers: {
+      "Authorization": "Bearer " + config.api_key,
+      "X-API-Secret": config.api_secret || ""
+    }
+  });
+  
+  return new Response(JSON.stringify(await response.json()));
+});`;
 
 const EMAIL_PROVIDER_DETAILS = String.raw`// Arquitetura de Envio de E-mail
 
@@ -3528,6 +3630,186 @@ await logError({
                         <div className="p-2 bg-amber-50 rounded text-xs text-amber-800">
                           <strong>⚠️ Importante:</strong> Use chaves de teste (sk_test_, pk_test_) durante desenvolvimento. 
                           Só mude para produção (sk_live_, pk_live_) quando estiver pronto para receber pagamentos reais.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Configurações de API */}
+                  <div className="p-4 bg-slate-50 rounded border-l-4 border-purple-500">
+                    <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+                      <Key className="h-5 w-5" />
+                      Configurações de API - Gerenciamento de Integrações
+                    </h3>
+                    <p className="text-sm text-slate-700 mb-3">
+                      Sistema centralizado para gerenciar configurações de APIs externas (Booking Engine, Channel Manager, 
+                      Payment Gateways, etc.). Permite armazenar credenciais de forma segura e usar em qualquer parte do sistema.
+                    </p>
+                    
+                    <div className="space-y-3 text-xs">
+                      <div>
+                        <strong className="text-slate-800">Arquitetura:</strong>
+                        <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto text-xs">
+{API_SETTINGS_DETAILS}
+                        </pre>
+                      </div>
+                      
+                      <div>
+                        <strong className="text-slate-800">Funcionalidades:</strong>
+                        <ul className="list-disc list-inside mt-1 text-slate-600 space-y-1">
+                          <li><strong>Multi-tenant:</strong> Cada estabelecimento gerencia suas próprias configurações</li>
+                          <li><strong>Segurança:</strong> Credenciais protegidas por RLS (Row Level Security)</li>
+                          <li><strong>Flexibilidade:</strong> Campo JSON para configurações personalizadas por API</li>
+                          <li><strong>Ativação/Desativação:</strong> Controle de quais integrações estão ativas</li>
+                          <li><strong>Mascaramento:</strong> Secrets nunca expostos no frontend</li>
+                          <li><strong>Observabilidade:</strong> Erros são logados automaticamente</li>
+                        </ul>
+                      </div>
+                      
+                      <div>
+                        <strong className="text-slate-800">APIs Suportadas:</strong>
+                        <div className="grid md:grid-cols-2 gap-3 mt-2">
+                          {[
+                            { 
+                              name: "Booking Engine", 
+                              desc: "Sincronização de reservas, disponibilidade e preços com motores de reserva externos",
+                              apiName: "booking_engine"
+                            },
+                            { 
+                              name: "Channel Manager", 
+                              desc: "Gerenciamento de canais de distribuição, sincronização de inventário e tarifas",
+                              apiName: "channel_manager"
+                            },
+                            { 
+                              name: "Payment Gateway", 
+                              desc: "Integração com gateways de pagamento alternativos ao Stripe",
+                              apiName: "payment_gateway"
+                            },
+                            { 
+                              name: "Amplifique", 
+                              desc: "Integração específica com a plataforma Amplifique",
+                              apiName: "amplifique"
+                            },
+                            { 
+                              name: "Outras APIs", 
+                              desc: "Configuração personalizada para qualquer API externa que o sistema precise integrar",
+                              apiName: "other"
+                            }
+                          ].map((api) => (
+                            <div key={api.name} className="p-3 bg-white rounded border border-slate-200">
+                              <div className="font-semibold text-slate-800 mb-1">{api.name}</div>
+                              <p className="text-xs text-slate-600 mb-2">{api.desc}</p>
+                              <code className="text-xs bg-slate-100 px-1 rounded">{api.apiName}</code>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <strong className="text-slate-800">Exemplos de Código:</strong>
+                        <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto text-xs">
+{API_SETTINGS_CODE_EXAMPLES}
+                        </pre>
+                      </div>
+                      
+                      <div>
+                        <strong className="text-slate-800">Estrutura da Tabela:</strong>
+                        <pre className="mt-1 p-2 bg-slate-100 rounded overflow-x-auto text-xs">
+{`api_settings {
+  id: UUID (PK)
+  establishment_id: UUID (FK)
+  api_name: TEXT (booking_engine, channel_manager, etc.)
+  api_url: TEXT (URL base da API)
+  api_key: TEXT (Chave de API)
+  api_secret: TEXT (Secret da API - mascarado)
+  config: JSONB (Configurações adicionais)
+  is_active: BOOLEAN (Ativo/Inativo)
+  created_at: TIMESTAMPTZ
+  updated_at: TIMESTAMPTZ
+}`}
+                        </pre>
+                      </div>
+                      
+                      <div>
+                        <strong className="text-slate-800">Segurança:</strong>
+                        <ul className="list-disc list-inside mt-1 text-slate-600 space-y-1">
+                          <li><strong>RLS (Row Level Security):</strong> Usuários só veem configurações do seu estabelecimento</li>
+                          <li><strong>Secrets Protegidos:</strong> API Secret nunca exposto no frontend</li>
+                          <li><strong>Validação:</strong> Verificação de configuração antes de usar</li>
+                          <li><strong>Logging:</strong> Erros são logados automaticamente com contexto</li>
+                          <li><strong>Timeout e Retry:</strong> Configurável via campo JSON para resiliência</li>
+                        </ul>
+                      </div>
+                      
+                      <div className="mt-3 space-y-2">
+                        <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                          <strong className="text-blue-900 text-xs block mb-2">📋 Como Configurar:</strong>
+                          <div className="space-y-2 text-xs text-blue-800">
+                            <div>
+                              <strong>1. Acesse a Interface:</strong>
+                              <ol className="list-decimal list-inside ml-2 mt-1 space-y-1">
+                                <li>Vá em <strong>Configurações</strong> &gt; <strong>Integrações</strong></li>
+                                <li>Clique na aba <strong>Configurações de API</strong></li>
+                                <li>Clique em <strong>Nova Configuração</strong></li>
+                              </ol>
+                            </div>
+                            
+                            <div>
+                              <strong>2. Preencha os Campos:</strong>
+                              <ul className="list-disc list-inside ml-2 mt-1 space-y-1">
+                                <li><strong>Nome da API:</strong> Selecione o tipo (Booking Engine, Channel Manager, etc.)</li>
+                                <li><strong>URL:</strong> URL base da API (ex: https://api.bookingengine.com)</li>
+                                <li><strong>API Key:</strong> Chave de autenticação fornecida pela API externa</li>
+                                <li><strong>API Secret:</strong> Secret da API (será mascarado na interface)</li>
+                                <li><strong>Config (JSON):</strong> Configurações adicionais (opcional):
+                                  <pre className="mt-1 p-1 bg-blue-100 rounded text-xs">
+{`{
+  "timeout": 30000,
+  "retry": 3,
+  "retry_delay": 1000,
+  "customHeader": "valor"
+}`}
+                                  </pre>
+                                </li>
+                                <li><strong>Ativo:</strong> Marque para ativar a integração</li>
+                              </ul>
+                            </div>
+                            
+                            <div>
+                              <strong>3. Use no Código:</strong>
+                              <pre className="mt-1 p-1 bg-blue-100 rounded text-xs">
+{`// Em qualquer componente ou função
+import { apiRequest } from "@/lib/apiClient";
+
+// Fazer requisição
+const data = await apiRequest("booking_engine", "/reservations", {
+  method: "GET"
+});`}
+                              </pre>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="p-2 bg-green-50 rounded text-xs text-green-800">
+                          <strong>✅ Benefícios:</strong>
+                          <ul className="list-disc list-inside ml-2 mt-1 space-y-1">
+                            <li>Centralização de todas as configurações de API em um só lugar</li>
+                            <li>Facilita a manutenção e atualização de credenciais</li>
+                            <li>Permite múltiplas integrações do mesmo tipo por estabelecimento</li>
+                            <li>Reduz código duplicado com funções utilitárias reutilizáveis</li>
+                            <li>Melhora a segurança com proteção por RLS</li>
+                          </ul>
+                        </div>
+                        
+                        <div className="p-2 bg-amber-50 rounded text-xs text-amber-800">
+                          <strong>⚠️ Importante:</strong>
+                          <ul className="list-disc list-inside ml-2 mt-1 space-y-1">
+                            <li>Nunca exponha API Secrets no frontend - use apenas em Edge Functions</li>
+                            <li>Mantenha as credenciais atualizadas quando expirarem</li>
+                            <li>Use o campo JSON para configurações específicas de cada API</li>
+                            <li>Desative integrações que não estão mais em uso</li>
+                            <li>Consulte <code className="bg-amber-100 px-1 rounded">docs/API_SETTINGS_USAGE.md</code> para exemplos completos</li>
+                          </ul>
                         </div>
                       </div>
                     </div>
