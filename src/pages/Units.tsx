@@ -12,6 +12,7 @@ import { CategoryCard } from "@/components/units/CategoryCard";
 import { RoomCard } from "@/components/units/RoomCard";
 import { BuildingDialog } from "@/components/units/BuildingDialog";
 import { useBuildings } from "@/hooks/useBuildings";
+import { useOccupancyMap } from "@/hooks/useOccupancyMap";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -101,6 +102,19 @@ const Units = () => {
       return data;
     },
   });
+
+  // Usar o hook useOccupancyMap para obter o status correto dos quartos (considerando reservas)
+  // Isso garante que o status exibido seja o mesmo do mapa de ocupação
+  const { rooms: occupancyRooms } = useOccupancyMap(new Date());
+  
+  // Criar um mapa de status por quarto ID para acesso rápido
+  const roomStatusMap = useMemo(() => {
+    const statusMap: Record<string, any> = {};
+    occupancyRooms.forEach((room) => {
+      statusMap[room.id] = room.status;
+    });
+    return statusMap;
+  }, [occupancyRooms]);
 
   // Agrupar quartos por categoria
   const roomsByCategory = useMemo(() => {
@@ -320,16 +334,36 @@ const Units = () => {
                       </div>
                       <Separator />
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        {categoryRooms.map((room) => (
-                          <RoomCard 
-                            key={room.id} 
-                            room={room}
-                            onClick={() => {
-                              setSelectedRoomId(room.id);
-                              setRoomDialogOpen(true);
-                            }}
-                          />
-                        ))}
+                        {categoryRooms.map((room) => {
+                          // Obter o status correto do mapa de ocupação (considera reservas)
+                          // Se não houver status no mapa, usar o status do banco como fallback
+                          const occupancyStatus = roomStatusMap[room.id];
+                          const roomWithStatus = {
+                            ...room,
+                            // Mapear o status do mapa de ocupação para o formato do RoomCard
+                            // O RoomCard espera: 'available', 'occupied', 'cleaning', 'maintenance', 'blocked'
+                            status: occupancyStatus 
+                              ? (occupancyStatus === 'dirty' || occupancyStatus === 'dirty_priority' 
+                                  ? 'cleaning' 
+                                  : occupancyStatus === 'reserved' 
+                                    ? 'available' 
+                                    : occupancyStatus === 'inspection'
+                                      ? 'available'
+                                      : occupancyStatus)
+                              : room.status || 'available'
+                          };
+                          
+                          return (
+                            <RoomCard 
+                              key={room.id} 
+                              room={roomWithStatus}
+                              onClick={() => {
+                                setSelectedRoomId(room.id);
+                                setRoomDialogOpen(true);
+                              }}
+                            />
+                          );
+                        })}
                       </div>
                     </div>
                   );

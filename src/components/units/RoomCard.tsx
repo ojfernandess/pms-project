@@ -37,7 +37,9 @@ const statusConfig = {
 };
 
 export const RoomCard = ({ room, onClick }: RoomCardProps) => {
-  const config = statusConfig[room.status as keyof typeof statusConfig];
+  // Garantir que sempre temos um status válido (fallback para 'available')
+  const roomStatus = room.status || 'available';
+  const config = statusConfig[roomStatus as keyof typeof statusConfig] || statusConfig.available;
   const Icon = config.icon;
   const isBlocked = room.is_blocked === true;
 

@@ -79,3 +79,4 @@ O plugin do Vite injetará automaticamente essas variáveis no HTML durante o bu
 - [Documentação do Vercel sobre Environment Variables](https://vercel.com/docs/concepts/projects/environment-variables)
 - [Documentação do Supabase](https://supabase.com/docs)
 
+

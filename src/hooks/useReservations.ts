@@ -589,6 +589,9 @@ export const useReservations = () => {
       queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       // Invalidar reservas para atualizar listas
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      // Forçar refetch imediato para atualizar o mapa em tempo real
+      await queryClient.refetchQueries({ queryKey: ["reservations"] });
+      await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
       
       return data;
     },
@@ -812,11 +815,15 @@ export const useReservations = () => {
             console.error("Erro ao registrar log de check-in:", logError);
           }
           
+          // Invalidar e refetch todas as queries relacionadas para atualizar o mapa em tempo real
           queryClient.invalidateQueries({ queryKey: ["reservations"] });
           queryClient.invalidateQueries({ queryKey: ["rooms"] });
           queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
           // Invalidar web check-in para atualizar dados da acomodação
           queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+          // Forçar refetch imediato para atualizar o mapa
+          await queryClient.refetchQueries({ queryKey: ["reservations"] });
+          await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
           
           // Disparar e-mail de check-in confirmado
           try {
@@ -869,10 +876,14 @@ export const useReservations = () => {
 
       return data;
     },
-        onSuccess: () => {
+        onSuccess: async () => {
+          // Invalidar e refetch todas as queries relacionadas para atualizar o mapa em tempo real
           queryClient.invalidateQueries({ queryKey: ["reservations"] });
           queryClient.invalidateQueries({ queryKey: ["rooms"] });
           queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+          // Forçar refetch imediato para atualizar o mapa
+          await queryClient.refetchQueries({ queryKey: ["reservations"] });
+          await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
           toast.success("Check-out realizado com sucesso!");
         },
     onError: (error: any) => {

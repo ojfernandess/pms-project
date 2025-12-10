@@ -827,15 +827,17 @@ export function ReservationPaymentModal({
 
       toast.success("Pagamento lançado com sucesso!");
       
-      // Invalidar e refetch queries para atualizar os dados imediatamente
+      // Invalidar e refetch todas as queries relacionadas para atualizar o mapa em tempo real
       await queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
       await queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      await queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       
       // Aguardar um pouco para garantir que o banco processou a inserção
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Refetch explícito para garantir que os dados sejam atualizados
+      // Refetch explícito para garantir que os dados sejam atualizados imediatamente
       await queryClient.refetchQueries({ queryKey: ["reservation_payments", reservation.id] });
+      await queryClient.refetchQueries({ queryKey: ["reservations"] });
       
       // Resetar estados antes de fechar o modal
       setSelectedComponent("");

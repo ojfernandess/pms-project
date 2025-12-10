@@ -375,7 +375,7 @@ export const ReservationCalendarMap = ({
     }
   }, [categories, expandedCategories.size]);
 
-  // Buscar reservas
+  // Buscar reservas com atualização automática em tempo real
   const { data: reservations = [] } = useQuery({
     queryKey: ["reservations", establishmentId, visibleDates[0]?.toISOString(), visibleDates[visibleDates.length - 1]?.toISOString()],
     queryFn: async () => {
@@ -410,6 +410,13 @@ export const ReservationCalendarMap = ({
       return data || [];
     },
     enabled: visibleDates.length > 0 && !!establishmentId,
+    // Atualização automática a cada 10 segundos para refletir mudanças em tempo real
+    // (pagamentos, check-ins, check-outs realizados em outras abas/janelas)
+    refetchInterval: 10000, // 10 segundos
+    // Refetch quando a janela recebe foco novamente
+    refetchOnWindowFocus: true,
+    // Refetch quando reconecta à rede
+    refetchOnReconnect: true,
   });
 
   // Função auxiliar para normalizar datas (garantir formato YYYY-MM-DD)

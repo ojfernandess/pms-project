@@ -247,3 +247,4 @@ async function checkExternalAvailability(roomId: string, dates: { checkin: strin
 4. **Adicionar sincronização automática** (cron jobs)
 5. **Criar interface de monitoramento** de sincronizações
 
+

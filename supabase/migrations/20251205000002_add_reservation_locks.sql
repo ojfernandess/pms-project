@@ -34,15 +34,22 @@ BEGIN
 
   -- Se há quarto específico, verificar disponibilidade com LOCK
   IF v_room_id IS NOT NULL THEN
-    -- Verificar se quarto está bloqueado primeiro (sem lock)
+    -- Verificar se quarto está bloqueado ou em manutenção (sem lock)
+    -- IMPORTANTE: Não bloquear por status "occupied" ou "blocked" se não houver bloqueio real
+    -- O status "occupied" ou "blocked" pode ser apenas um status visual do mapa de ocupação
+    -- que considera reservas, mas não impede a criação de novas reservas se não houver conflito
     IF EXISTS (
       SELECT 1 FROM public.rooms
       WHERE id = v_room_id
-        AND (is_blocked = TRUE OR status NOT IN ('available', 'cleaning'))
+        AND (is_blocked = TRUE OR status = 'maintenance')
     ) THEN
       RETURN jsonb_build_object(
         'success', false,
-        'error', 'Quarto está bloqueado ou indisponível'
+        'error', CASE 
+          WHEN EXISTS (SELECT 1 FROM public.rooms WHERE id = v_room_id AND is_blocked = TRUE) 
+          THEN 'Quarto está interditado - não é possível criar reservas'
+          ELSE 'Quarto está em manutenção - não é possível criar reservas'
+        END
       );
     END IF;
 

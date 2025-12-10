@@ -306,18 +306,60 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         let status: RoomOccupancyStatus = "available";
         let reservationData: any = null;
 
-        // Prioridade 1: Manutenção (sobrescreve tudo)
-        if (maintenance) {
+        // PRIORIDADE MÁXIMA: Status manual do quarto (campo status da tabela rooms)
+        // Este status é definido manualmente pelo usuário e deve ter prioridade sobre tudo
+        if (room.status) {
+          // Mapear valores do ENUM room_status para RoomOccupancyStatus
+          switch (room.status) {
+            case 'maintenance':
+              status = "maintenance";
+              break;
+            case 'blocked':
+              status = "blocked";
+              break;
+            case 'cleaning':
+              status = "dirty"; // cleaning = sujo/aguardando limpeza
+              break;
+            case 'occupied':
+              // Se o status manual é 'occupied', verificar se há reserva para confirmar
+              // Se não houver reserva, manter como ocupado (status manual tem prioridade)
+              status = "occupied";
+              if (reservation) {
+                reservationData = reservation;
+              }
+              break;
+            case 'available':
+              // Se status manual é 'available', continuar com a lógica de reservas
+              // (não definir status ainda, deixar a lógica abaixo determinar)
+              break;
+            default:
+              // Para qualquer outro valor, usar o status do quarto diretamente
+              // (pode ser necessário mapear se houver novos valores no ENUM)
+              break;
+          }
+        }
+
+        // Se o status manual já foi definido como maintenance, blocked, cleaning ou occupied (sem reserva),
+        // não verificar reservas (status manual tem prioridade)
+        const manualStatusSet = room.status && 
+          (room.status === 'maintenance' || 
+           room.status === 'blocked' || 
+           room.status === 'cleaning' || 
+           (room.status === 'occupied' && !reservation));
+
+        // Prioridade 1: Manutenção (sobrescreve tudo, exceto status manual)
+        if (!manualStatusSet && maintenance) {
           status = "maintenance";
         }
-        // Prioridade 2: Bloqueio
-        else if (reservation?.status === "blocked") {
+        // Prioridade 2: Bloqueio por reserva (se não houver status manual de bloqueio)
+        else if (!manualStatusSet && reservation?.status === "blocked") {
           status = "blocked";
           reservationData = reservation;
         }
         // Prioridade 3: Verificar check-out (sujo se passou do horário) - ANTES de verificar check-in
         // Verificar se há check-out hoje ou passado e se já passou do horário
-        else if (reservation && reservation.checkout_date) {
+        // (apenas se não houver status manual definido)
+        else if (!manualStatusSet && reservation && reservation.checkout_date) {
           const checkoutDate = parseISO(reservation.checkout_date);
           const now = new Date();
           
@@ -342,7 +384,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
             if (now >= checkoutDateTime) {
               // Verificar se há nova reserva para hoje (prioridade)
               const hasNewReservationToday = nextReservation && 
-                nextReservation.checkin_date === todayStr;
+                nextReservation.checkin_date === dateStr;
               
               if (hasNewReservationToday) {
                 status = "dirty_priority"; // 🟤 Sujo com prioridade
@@ -355,7 +397,8 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         }
         
         // Prioridade 4: Check-in realizado (ocupado) - verificar se check-in ocorreu na data selecionada
-        if (status === "available" && reservation?.status === "checkedin") {
+        // (apenas se não houver status manual definido)
+        if (!manualStatusSet && status === "available" && reservation?.status === "checkedin") {
           // Se check-in é hoje ou passado e status é checkedin, considerar ocupado
           if (reservation.checkin_date <= dateStr) {
             status = "occupied";
@@ -364,10 +407,11 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         }
         
         // Se ainda não definiu status e há check-out hoje (fallback)
-        if (status === "available" && checkoutToday && isToday(parseISO(checkoutToday.checkout_date))) {
+        // (apenas se não houver status manual definido)
+        if (!manualStatusSet && status === "available" && checkoutToday && isToday(parseISO(checkoutToday.checkout_date))) {
           // Verificar se há nova reserva para hoje (prioridade)
           const hasNewReservationToday = reservation && 
-            reservation.checkin_date === todayStr && 
+            reservation.checkin_date === dateStr && 
             reservation.status !== "checkedin";
           
           if (hasNewReservationToday) {
@@ -377,7 +421,8 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           }
         }
         // Prioridade 5: Reserva confirmada mas check-in não realizado (reservado)
-        else if (reservation && 
+        // (apenas se não houver status manual definido)
+        else if (!manualStatusSet && reservation && 
                  (reservation.status === "confirmed" || reservation.status === "preregistration")) {
           // Se check-in é futuro, está reservado
           if (reservation.checkin_date > dateStr) {

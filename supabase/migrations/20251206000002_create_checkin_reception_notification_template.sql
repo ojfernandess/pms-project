@@ -216,6 +216,12 @@ INSERT INTO public.email_templates (
           <span class="info-label">Quarto:</span>
           <span class="info-value">{{room_number}} - {{room_name}}</span>
         </div>
+        {{#if room_category_name}}
+        <div class="info-row">
+          <span class="info-label">Categoria:</span>
+          <span class="info-value">{{room_category_name}}</span>
+        </div>
+        {{/if}}
         <div class="info-row">
           <span class="info-label">Status:</span>
           <span class="info-value"><span class="badge badge-success">Check-in Confirmado</span></span>
@@ -360,6 +366,7 @@ INSERT INTO public.email_templates (
     "checkout_date": "Data de check-out formatada",
     "room_number": "Número do quarto",
     "room_name": "Nome do quarto",
+    "room_category_name": "Nome da categoria do quarto",
     "main_guest": {
       "name": "Nome do hóspede principal",
       "email": "Email do hóspede",

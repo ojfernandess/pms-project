@@ -454,7 +454,10 @@ export function GuestInformationStep({
     // Validar CPF, Telefone e Data de Nascimento para todos os hóspedes com nome
     for (let i = 0; i < guestsWithNames.length; i++) {
       const guest = guestsWithNames[i];
-      const guestLabel = guest.is_main_guest ? "hóspede principal" : `hóspede ${i + 1}`;
+      // Usar o nome do hóspede se disponível, senão usar label genérico
+      const guestLabel = guest.name && guest.name.trim() 
+        ? guest.name.trim() 
+        : (guest.is_main_guest ? "hóspede principal" : `hóspede ${i + 1}`);
       
       // Validar CPF (obrigatório) - verificar tanto cpf quanto document_number quando tipo é CPF
       const cpfValue = guest.document_type === "cpf" 

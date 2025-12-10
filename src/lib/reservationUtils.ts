@@ -131,7 +131,8 @@ export const validateRoomAvailability = async (
 
   if (roomError) throw roomError;
 
-  // Verificar se o quarto está interditado
+  // Verificar se o quarto está interditado (campo is_blocked)
+  // Este é o bloqueio real que impede reservas
   if (room.is_blocked === true) {
     return {
       available: false,
@@ -139,12 +140,19 @@ export const validateRoomAvailability = async (
     };
   }
 
-  if (room.status !== "available" && room.status !== "cleaning") {
+  // Verificar se o quarto está em manutenção (status manual)
+  // Manutenção também impede reservas
+  if (room.status === "maintenance") {
     return {
       available: false,
-      reason: `Quarto está ${room.status === "maintenance" ? "em manutenção" : "bloqueado"}`,
+      reason: "Quarto está em manutenção - não é possível criar reservas",
     };
   }
+
+  // NÃO bloquear por status "occupied" ou "blocked" se não houver bloqueio real
+  // O status "occupied" ou "blocked" pode ser apenas um status visual do mapa de ocupação
+  // que considera reservas, mas não impede a criação de novas reservas se não houver conflito
+  // A verificação de conflitos de reserva será feita abaixo
 
   // Verificar conflitos de reserva (incluindo bloqueios e pré-reservas)
   // IMPORTANTE: Verificar conflito considerando que checkout é exclusivo

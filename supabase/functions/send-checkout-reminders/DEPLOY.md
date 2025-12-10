@@ -144,3 +144,4 @@ Monitore regularmente para garantir que os e-mails estão sendo enviados correta
 - Verifique se o provedor de e-mail está configurado corretamente
 
 
+

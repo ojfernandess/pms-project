@@ -139,9 +139,16 @@ export default function WebCheckin() {
   // As queries do React Query já têm refetch automático configurado no hook
 
   // Atualizar URL quando localizador mudar (apenas uma vez)
+  // Usar useRef para evitar navegação desnecessária que causa atualização de página
+  const hasNavigatedRef = useRef(false);
   useEffect(() => {
-    if (locator && locator !== locatorFromUrl && !showLocatorInput) {
+    if (locator && locator !== locatorFromUrl && !showLocatorInput && !hasNavigatedRef.current) {
+      hasNavigatedRef.current = true;
       navigate(`/web-checkin/${locator}`, { replace: true });
+      // Resetar flag após um tempo para permitir navegação futura se necessário
+      setTimeout(() => {
+        hasNavigatedRef.current = false;
+      }, 1000);
     }
   }, [locator, locatorFromUrl, navigate, showLocatorInput]);
 
@@ -206,6 +213,7 @@ export default function WebCheckin() {
   // APENAS se o usuário estiver autenticado
   // OTIMIZAÇÃO: Usar useRef para evitar processamento duplicado
   const processedWebCheckinId = useRef<string | null>(null);
+  const isProcessingRef = useRef(false);
   
   useEffect(() => {
     // BLOQUEAR: Não processar nada sem autenticação
@@ -220,6 +228,11 @@ export default function WebCheckin() {
     
     if (!webCheckinInfo || !locator) return;
     
+    // OTIMIZAÇÃO: Se já está processando, não processar novamente
+    if (isProcessingRef.current) {
+      return;
+    }
+    
     // OTIMIZAÇÃO: Se já processou este web check-in, não processar novamente
     if (processedWebCheckinId.current === webCheckinInfo.id) {
       return;
@@ -230,28 +243,38 @@ export default function WebCheckin() {
       return;
     }
 
+    // Marcar como processando
+    isProcessingRef.current = true;
+    processedWebCheckinId.current = webCheckinInfo.id;
+    
     setShowLocatorInput(false);
     
     // VALIDAÇÃO DE SEGURANÇA: Bloquear se a reserva está vinculada a outro usuário
     if (reservationLinkedToOtherUser) {
+      isProcessingRef.current = false;
       return;
     }
     
     // Verificar se a reserva está cancelada antes de processar
     if (webCheckinInfo.reservation?.status === "cancelled") {
       // Status cancelado será tratado no render
+      isProcessingRef.current = false;
       return;
     }
     
     // Se já está completo, ir direto para a última etapa (verificação adicional)
     if (webCheckinInfo.status === "completed") {
       setCurrentStep(STEPS.length - 1);
-      setToken(webCheckinInfo.token);
+      if (webCheckinInfo.token) {
+        setToken(webCheckinInfo.token);
+      }
+      isProcessingRef.current = false;
       return;
     }
     
     if (webCheckinInfo.status === "expired") {
       // Status expirado será tratado no render
+      isProcessingRef.current = false;
       return;
     }
     
@@ -263,7 +286,10 @@ export default function WebCheckin() {
         if (currentStep === 1 && webCheckinInfo.reservation) {
           setTimeout(() => {
             setCurrentStep(2);
+            isProcessingRef.current = false;
           }, 100);
+        } else {
+          isProcessingRef.current = false;
         }
         return;
       }
@@ -286,7 +312,10 @@ export default function WebCheckin() {
               if (currentStep === 1 && webCheckinInfo.reservation) {
                 setTimeout(() => {
                   setCurrentStep(2);
+                  isProcessingRef.current = false;
                 }, 100);
+              } else {
+                isProcessingRef.current = false;
               }
             },
             onError: (error) => {
@@ -299,22 +328,33 @@ export default function WebCheckin() {
               if (currentStep === 1 && webCheckinInfo.reservation) {
                 setTimeout(() => {
                   setCurrentStep(2);
+                  isProcessingRef.current = false;
                 }, 100);
+              } else {
+                isProcessingRef.current = false;
               }
             },
           }
         );
+        return;
       } else if (webCheckinInfo.status === "pending" && webCheckinInfo.token) {
         // Se já tem token mas ainda está pending, usar o token e avançar
         setToken(webCheckinInfo.token);
         if (currentStep === 1 && webCheckinInfo.reservation) {
           setTimeout(() => {
             setCurrentStep(2);
+            isProcessingRef.current = false;
           }, 100);
+        } else {
+          isProcessingRef.current = false;
         }
+        return;
       }
     }
-  }, [webCheckinInfo?.id, webCheckinInfo?.status, webCheckinInfo?.token, webCheckinInfo?.reservation, locator, token, startWebCheckin.isPending, isAuthenticated, guestAccountId, showLocatorInput, currentStep]);
+    
+    // Se chegou aqui, não processou nada, resetar flag
+    isProcessingRef.current = false;
+  }, [webCheckinInfo?.id, webCheckinInfo?.status, webCheckinInfo?.token, webCheckinInfo?.reservation, locator, token, startWebCheckin.isPending, isAuthenticated, guestAccountId, showLocatorInput]);
 
   const handleNext = (stepData: any) => {
     setWebCheckinData((prev: any) => ({ ...prev, ...stepData }));
@@ -425,6 +465,8 @@ export default function WebCheckin() {
     setReservationLinkedToOtherUser(false);
     setShowLocatorInput(false); // Fechar input de localizador
     processedWebCheckinId.current = null; // Resetar flag de processamento
+    isProcessingRef.current = false; // Resetar flag de processamento
+    hasNavigatedRef.current = false; // Resetar flag de navegação
     
     // Invalidar e remover TODAS as queries antigas para forçar nova busca
     queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
@@ -432,7 +474,8 @@ export default function WebCheckin() {
       queryClient.removeQueries({ queryKey: ["web_checkin", oldLocator] });
     }
     
-    // Atualizar URL com novo localizador
+    // Atualizar URL com novo localizador (sem causar atualização de página)
+    hasNavigatedRef.current = true;
     navigate(`/web-checkin/${locator.trim()}`, { replace: true });
     
     // Vincular reserva à conta do hóspede
@@ -484,83 +527,24 @@ export default function WebCheckin() {
   // Removido: Busca automática ao digitar que causava múltiplas verificações
   // A busca agora só acontece quando o usuário submete o formulário (handleLocatorSubmit)
 
-  // SEGURANÇA: Avançar automaticamente para verificação quando a reserva for encontrada
-  // APENAS se o usuário estiver autenticado
-  useEffect(() => {
-    // BLOQUEAR: Não avançar sem autenticação
-    if (!isAuthenticated || !guestAccountId) {
-      return;
-    }
-    
-    // BLOQUEAR: Não processar se o usuário está inserindo um novo localizador
-    if (showLocatorInput || !locator || locator.trim() === "") {
-      return;
-    }
-    
-    if (currentStep === 1 && webCheckinInfo && locator && guestAccountId) {
-      // VALIDAÇÃO DE SEGURANÇA: Não avançar se a reserva está vinculada a outro usuário
-      if (reservationLinkedToOtherUser) {
-        return;
-      }
-
-      // VERIFICAÇÃO CRÍTICA: Se já está concluído, não avançar - deixar o useEffect anterior redirecionar
-      if (webCheckinInfo.status === "completed") {
-        return; // O useEffect anterior já vai redirecionar para a última etapa
-      }
-
-      // Verificar se a reserva foi encontrada e não está cancelada/expirada
-      if (
-        webCheckinInfo.reservation &&
-        webCheckinInfo.status !== "expired" &&
-        webCheckinInfo.reservation.status !== "cancelled"
-      ) {
-        // Se já tem token, usar; senão iniciar check-in
-        if (webCheckinInfo.token) {
-          setToken(webCheckinInfo.token);
-        } else if (webCheckinInfo.status === "pending" && !startWebCheckin.isPending) {
-          const ipAddress = "";
-          const userAgent = navigator.userAgent;
-          
-          startWebCheckin.mutate(
-            { locator: locator, ipAddress, userAgent },
-            {
-              onSuccess: (data) => {
-                if (data?.token) {
-                  setToken(data.token);
-                } else if (webCheckinInfo.token) {
-                  setToken(webCheckinInfo.token);
-                }
-              },
-            }
-          );
-        }
-        
-        // Avançar imediatamente para etapa de verificação se tiver dados da reserva
-        if (webCheckinInfo.reservation) {
-          // Verificar se já aceitou as políticas
-          if (webCheckinInfo.policies_accepted) {
-            // Se já aceitou, pular para a etapa de dados dos hóspedes (após policies)
-            setTimeout(() => {
-              setCurrentStep(4); // guests
-            }, 500);
-          } else {
-            // Se não aceitou, ir para verificação e depois políticas
-            setTimeout(() => {
-              setCurrentStep(2); // Ir para etapa de verificação (índice 2 após auth e locator)
-            }, 300);
-          }
-        }
-      }
-    }
-  }, [currentStep, webCheckinInfo, locator, guestAccountId, token, startWebCheckin, isAuthenticated, showLocatorInput]);
+  // REMOVIDO: Este useEffect estava causando atualizações em loop
+  // A lógica de avanço automático já está no useEffect anterior que processa o web check-in
   
   // SEGURANÇA: Se tem localizador na URL mas não está autenticado, forçar autenticação
   // IMPORTANTE: Verificar se o check-in já está concluído ANTES de definir o step
+  // Usar useRef para evitar atualizações desnecessárias
+  const hasInitializedRef = useRef(false);
   useEffect(() => {
+    // Só inicializar uma vez para evitar loops
+    if (hasInitializedRef.current) {
+      return;
+    }
+    
     if (locatorFromUrl && !isAuthenticated) {
       // Se tem localizador na URL mas não está autenticado, garantir que está na etapa de autenticação
       setCurrentStep(0); // Forçar etapa de autenticação
       setLocator(locatorFromUrl); // Guardar o localizador para usar após autenticação
+      hasInitializedRef.current = true;
     } else if (isAuthenticated && session.accountId && locatorFromUrl) {
       // Se está autenticado e tem localizador na URL, configurar
       setGuestAccountId(session.accountId);
@@ -571,16 +555,19 @@ export default function WebCheckin() {
       const checkinToCheck = webCheckin || webCheckinInfo;
       if (checkinToCheck?.status === "completed") {
         // Não definir step aqui, o useEffect anterior já vai fazer isso
+        hasInitializedRef.current = true;
         return;
       }
       
       setCurrentStep(1); // Ir direto para inserir localizador (só se não estiver concluído)
+      hasInitializedRef.current = true;
     } else if (isAuthenticated && session.accountId && !locatorFromUrl) {
       // Se está autenticado mas não tem localizador, ir para etapa de inserir localizador
       setGuestAccountId(session.accountId);
       setCurrentStep(1); // Etapa de inserir localizador
+      hasInitializedRef.current = true;
     }
-  }, [isAuthenticated, session.accountId, locatorFromUrl, webCheckin?.status, webCheckinInfo?.status]);
+  }, [isAuthenticated, session.accountId, locatorFromUrl]);
 
   const CurrentStepComponent = STEPS[currentStep].component;
 

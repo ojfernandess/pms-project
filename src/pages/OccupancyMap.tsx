@@ -30,6 +30,7 @@ import { useOccupancyMap, RoomOccupancyStatus, RoomOccupancyData } from "@/hooks
 import { useReservations } from "@/hooks/useReservations";
 import { useMaintenance } from "@/hooks/useMaintenance";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { format, addDays, subDays, isToday, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ReservationDialog } from "@/components/reservations/ReservationDialog";
@@ -128,9 +129,30 @@ const statusConfig: Record<RoomOccupancyStatus, {
   },
 };
 
+// Função para mapear RoomOccupancyStatus para room_status (ENUM do banco)
+const mapOccupancyStatusToRoomStatus = (status: RoomOccupancyStatus): 'available' | 'occupied' | 'cleaning' | 'maintenance' | 'blocked' => {
+  switch (status) {
+    case 'maintenance':
+      return 'maintenance';
+    case 'blocked':
+      return 'blocked';
+    case 'dirty':
+    case 'dirty_priority':
+      return 'cleaning';
+    case 'occupied':
+      return 'occupied';
+    case 'reserved':
+    case 'inspection':
+    case 'available':
+    default:
+      return 'available';
+  }
+};
+
 const OccupancyMap = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { selectedEstablishment } = useEstablishment();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
@@ -343,9 +365,12 @@ const OccupancyMap = () => {
     
     // Atualizar no banco em background (sem bloquear o mapa)
     try {
+      // Mapear RoomOccupancyStatus para room_status (ENUM do banco)
+      const roomStatus = mapOccupancyStatusToRoomStatus(newStatus as RoomOccupancyStatus);
+      
       const { error } = await supabase
         .from("rooms")
-        .update({ status: newStatus })
+        .update({ status: roomStatus })
         .eq("id", roomId);
 
       if (error) {
@@ -359,8 +384,11 @@ const OccupancyMap = () => {
       }
 
       // Atualizar queries em background (sem bloquear a UI)
+      // Invalidar todas as queries do mapa de ocupação (todas as datas)
       queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
+      // Forçar refetch imediato para a data atual
+      queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms", selectedEstablishment?.id, format(selectedDate, "yyyy-MM-dd")] });
       
       toast.success("Status do quarto atualizado com sucesso!");
       

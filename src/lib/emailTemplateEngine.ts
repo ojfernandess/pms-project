@@ -808,6 +808,7 @@ export async function generateReservationVariables(
     room_password: reservation.rooms?.fixed_password || '',
     category_name: reservation.room_categories?.name || '',
     room_category: reservation.room_categories?.name || '', // Alias para category_name
+    room_category_name: reservation.room_categories?.name || '', // Nome da categoria do quarto
     adults: reservation.adults?.toString() || '1',
     children: reservation.children?.toString() || '0',
     hotel_name: hotelSettings?.name || 'Hotel',
