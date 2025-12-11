@@ -1270,66 +1270,97 @@ export const useWebCheckin = () => {
   });
 
   // Buscar dados de check-ins anteriores do hóspede
-  // Pode buscar por guestAccountId (para web check-in) ou por email/CPF (para check-in manual)
+  // Pode buscar por guestAccountId (para web check-in) ou por email/CPF/document_number (para check-in manual)
   const getPreviousCheckinData = (
     guestAccountId: string | null, 
     currentReservationId?: string,
     guestEmail?: string | null,
-    guestCpf?: string | null
+    guestCpf?: string | null,
+    guestDocumentNumber?: string | null
   ) => {
     return useQuery({
-      queryKey: ["previous_checkin_data", guestAccountId, currentReservationId, guestEmail, guestCpf],
+      queryKey: ["previous_checkin_data", guestAccountId, currentReservationId, guestEmail, guestCpf, guestDocumentNumber],
       queryFn: async () => {
-        // Se não tem guestAccountId nem email/CPF, não buscar
-        if (!guestAccountId && !guestEmail && !guestCpf) return null;
+        // Se não tem nenhum identificador, não buscar
+        if (!guestAccountId && !guestEmail && !guestCpf && !guestDocumentNumber) return null;
 
-        let reservationIds: string[] = [];
+        let allReservationIds: string[] = [];
+        const reservationIdSet = new Set<string>();
 
-        // Buscar por guestAccountId (web check-in)
+        // 1. Buscar por guestAccountId (web check-in) - método mais confiável
         if (guestAccountId) {
           const { data: stayHistory, error: historyError } = await supabase
             .from("guest_stay_history")
-            .select("reservation_id")
+            .select("reservation_id, created_at")
             .eq("guest_account_id", guestAccountId)
             .order("created_at", { ascending: false })
-            .limit(10);
+            .limit(20);
 
           if (historyError) {
             console.error("Erro ao buscar histórico:", historyError);
           } else if (stayHistory) {
-            reservationIds = stayHistory
-              .map((h) => h.reservation_id)
-              .filter((id) => id !== currentReservationId);
+            stayHistory.forEach((h) => {
+              if (h.reservation_id && h.reservation_id !== currentReservationId) {
+                reservationIdSet.add(h.reservation_id);
+              }
+            });
           }
         }
 
-        // Buscar por email ou CPF do hóspede (check-in manual)
-        if ((guestEmail || guestCpf) && reservationIds.length === 0) {
-          // Buscar check-ins anteriores onde o hóspede principal tem mesmo email ou CPF
-          const { data: previousGuests, error: guestsError } = await supabase
-            .from("web_checkin_guests")
-            .select("web_checkin_id, web_checkin:web_checkin(reservation_id)")
-            .or(
-              guestEmail && guestCpf
-                ? `email.eq.${guestEmail},cpf.eq.${guestCpf}`
-                : guestEmail
-                ? `email.eq.${guestEmail}`
-                : `cpf.eq.${guestCpf}`
-            )
-            .eq("is_main_guest", true)
-            .limit(10);
+        // 2. Buscar por email, CPF ou document_number nos hóspedes (incluindo todos, não só principal)
+        if (guestEmail || guestCpf || guestDocumentNumber) {
+          // Construir query OR para buscar por qualquer um dos identificadores
+          const conditions: string[] = [];
+          if (guestEmail) conditions.push(`email.eq.${guestEmail}`);
+          if (guestCpf) conditions.push(`cpf.eq.${guestCpf}`);
+          if (guestDocumentNumber) conditions.push(`document_number.eq.${guestDocumentNumber}`);
 
-          if (guestsError) {
-            console.error("Erro ao buscar hóspedes anteriores:", guestsError);
-          } else if (previousGuests) {
-            reservationIds = previousGuests
-              .map((g: any) => g.web_checkin?.reservation_id)
-              .filter((id: string) => id && id !== currentReservationId);
+          if (conditions.length > 0) {
+            const { data: previousGuests, error: guestsError } = await supabase
+              .from("web_checkin_guests")
+              .select(`
+                web_checkin_id,
+                is_main_guest,
+                web_checkin:web_checkin!inner(
+                  reservation_id,
+                  status,
+                  completed_at
+                )
+              `)
+              .or(conditions.join(","))
+              .limit(20);
+
+            if (guestsError) {
+              console.error("Erro ao buscar hóspedes anteriores:", guestsError);
+            } else if (previousGuests) {
+              // Ordenar por completed_at manualmente (já que não podemos ordenar por campo aninhado no Supabase)
+              const sortedGuests = previousGuests.sort((a: any, b: any) => {
+                const dateA = a.web_checkin?.completed_at ? new Date(a.web_checkin.completed_at).getTime() : 0;
+                const dateB = b.web_checkin?.completed_at ? new Date(b.web_checkin.completed_at).getTime() : 0;
+                return dateB - dateA; // Ordenar descendente (mais recente primeiro)
+              });
+              
+              sortedGuests.forEach((g: any) => {
+                const reservationId = g.web_checkin?.reservation_id;
+                if (reservationId && reservationId !== currentReservationId) {
+                  reservationIdSet.add(reservationId);
+                }
+              });
+            }
           }
         }
 
-        if (reservationIds.length === 0) return null;
+        // Converter Set para Array
+        allReservationIds = Array.from(reservationIdSet);
 
+        if (allReservationIds.length === 0) {
+          console.log("ℹ️ Nenhum check-in anterior encontrado");
+          return null;
+        }
+
+        console.log(`🔍 Encontrados ${allReservationIds.length} check-ins anteriores para reutilização`);
+
+        // 3. Buscar os check-ins completos mais recentes
         const { data: previousCheckins, error: checkinError } = await supabase
           .from("web_checkin")
           .select(`
@@ -1346,23 +1377,50 @@ export const useWebCheckin = () => {
               checkout_date
             )
           `)
-          .in("reservation_id", reservationIds)
+          .in("reservation_id", allReservationIds)
           .eq("status", "completed")
           .order("completed_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(5); // Buscar os 5 mais recentes para garantir que pegamos o mais atualizado
 
         if (checkinError) {
           console.error("Erro ao buscar check-ins anteriores:", checkinError);
           return null;
         }
 
-        if (!previousCheckins || !previousCheckins.guests || previousCheckins.guests.length === 0) {
+        if (!previousCheckins || previousCheckins.length === 0) {
+          console.log("ℹ️ Nenhum check-in completo encontrado");
           return null;
         }
 
-        // Formatar dados para reutilização
-        const previousGuests = (previousCheckins.guests as any[]).map((g) => ({
+        // 4. Selecionar o check-in mais recente com dados completos de hóspedes
+        let selectedCheckin = null;
+        for (const checkin of previousCheckins) {
+          if (checkin.guests && Array.isArray(checkin.guests) && checkin.guests.length > 0) {
+            // Verificar se tem pelo menos um hóspede com dados válidos
+            const hasValidGuest = checkin.guests.some((g: any) => 
+              g.name && g.name.trim() !== ""
+            );
+            
+            if (hasValidGuest) {
+              selectedCheckin = checkin;
+              break; // Pegar o primeiro (mais recente) com dados válidos
+            }
+          }
+        }
+
+        if (!selectedCheckin) {
+          console.log("ℹ️ Nenhum check-in com dados válidos de hóspedes encontrado");
+          return null;
+        }
+
+        console.log(`✅ Check-in selecionado para reutilização: ${selectedCheckin.reservation?.reservation_code || selectedCheckin.id} (completado em ${selectedCheckin.completed_at})`);
+
+        if (!selectedCheckin.guests || selectedCheckin.guests.length === 0) {
+          return null;
+        }
+
+        // Formatar dados para reutilização (incluindo endereço)
+        const previousGuests = (selectedCheckin.guests as any[]).map((g) => ({
           name: g.name || "",
           email: g.email || "",
           phone: g.phone || "",
@@ -1371,23 +1429,37 @@ export const useWebCheckin = () => {
           document_type: g.document_type || "cpf",
           document_number: g.document_number || "",
           is_main_guest: g.is_main_guest || false,
+          // Incluir campos de endereço
+          zip_code: g.zip_code || "",
+          postal_code: g.postal_code || "",
+          street: g.street || "",
+          number: g.number || "",
+          complement: g.complement || "",
+          neighborhood: g.neighborhood || "",
+          city: g.city || "",
+          state: g.state || "",
+          country: g.country || g.nationality || "BR",
+          nationality: g.nationality || g.country || "BR",
+          use_main_guest_address: false,
         }));
 
-        const previousDocuments = (previousCheckins.documents as any[]) || [];
-        const previousPreferences = previousCheckins.preferences || {};
+        const previousDocuments = (selectedCheckin.documents as any[]) || [];
+        const previousPreferences = selectedCheckin.preferences || {};
 
         return {
           guests: previousGuests,
           documents: previousDocuments,
           preferences: previousPreferences,
-          reservationCode: (previousCheckins.reservation as any)?.reservation_code,
-          checkinDate: (previousCheckins.reservation as any)?.checkin_date,
-          completedAt: previousCheckins.completed_at,
+          reservationCode: (selectedCheckin.reservation as any)?.reservation_code,
+          checkinDate: (selectedCheckin.reservation as any)?.checkin_date,
+          completedAt: selectedCheckin.completed_at,
         };
       },
-      enabled: !!(guestAccountId || guestEmail || guestCpf),
+      enabled: !!(guestAccountId || guestEmail || guestCpf || guestDocumentNumber),
       staleTime: 0, // Não usar cache para garantir busca sempre atualizada
       refetchOnMount: true,
+      refetchOnWindowFocus: false, // Não refazer ao focar na janela (evita verificações desnecessárias)
+      refetchInterval: false, // Não refazer automaticamente
     });
   };
 

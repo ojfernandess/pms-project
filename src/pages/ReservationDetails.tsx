@@ -138,6 +138,11 @@ const ReservationDetails = () => {
   const editCheckoutTimestamp = editCheckoutDate ? editCheckoutDate.getTime() : null;
   const [savingDates, setSavingDates] = useState(false);
   
+  // Estado para edição de observações
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
+  const [editNotes, setEditNotes] = useState("");
+  const [savingNotes, setSavingNotes] = useState(false);
+  
   // Estado para modal de imagem ampliada
   const [selectedImage, setSelectedImage] = useState<{ url: string; title: string } | null>(null);
   
@@ -595,6 +600,13 @@ const ReservationDetails = () => {
       supabase.removeChannel(paymentsChannel);
     };
   }, [reservation?.id, reservationCode, queryClient]);
+
+  // Sincronizar estado de edição de observações quando a reserva mudar
+  useEffect(() => {
+    if (!isEditingNotes && reservation) {
+      setEditNotes(reservation.notes || "");
+    }
+  }, [reservation?.notes, isEditingNotes]);
 
   // Calcular número de diárias
   const numberOfNights = useMemo(() => {
@@ -1414,6 +1426,54 @@ const ReservationDetails = () => {
     }
   };
 
+  // Função para salvar observações
+  const handleSaveNotes = async () => {
+    if (!reservation?.id) return;
+
+    try {
+      setSavingNotes(true);
+      
+      const oldNotes = reservation.notes || null;
+      const newNotes = editNotes.trim() || null;
+
+      // Atualizar a reserva
+      await updateReservation({
+        id: reservation.id,
+        notes: newNotes,
+      });
+
+      // Registrar log de alteração
+      try {
+        if (oldNotes !== newNotes) {
+          await logActivity({
+            actionType: "updated",
+            entityType: "reservation",
+            entityId: reservation.id,
+            entityCode: reservation.reservation_code,
+            description: `Observações da reserva ${reservation.reservation_code} atualizadas`,
+            oldValues: {
+              notes: oldNotes,
+            },
+            newValues: {
+              notes: newNotes,
+            },
+          });
+        }
+      } catch (logError) {
+        console.error("Erro ao registrar log de alteração:", logError);
+      }
+
+      toast.success("Observações atualizadas com sucesso!");
+      setIsEditingNotes(false);
+      refetch();
+    } catch (error: any) {
+      console.error("Erro ao salvar observações:", error);
+      toast.error(error.message || "Erro ao salvar observações");
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
   const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
     pending: { label: "Pendente", variant: "secondary" },
     confirmed: { label: "Confirmada", variant: "default" },
@@ -1981,14 +2041,80 @@ const ReservationDetails = () => {
                 )}
 
                 {/* Observações */}
-                {reservation.notes && (
-                  <div>
-                    <Label className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2 block">
-                      Observações
-                    </Label>
-                    <div className="text-sm text-slate-700 leading-relaxed">{reservation.notes}</div>
+                <Card className="bg-amber-50/50 dark:bg-amber-950/20 border-amber-200/60 dark:border-amber-800/40 shadow-sm">
+                  <div className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                        <Label className="text-xs font-medium text-amber-700 dark:text-amber-300 uppercase tracking-wider">
+                          Observações
+                        </Label>
+                      </div>
+                      {!isEditingNotes && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 gap-1.5 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                          onClick={() => {
+                            setEditNotes(reservation.notes || "");
+                            setIsEditingNotes(true);
+                          }}
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                          Editar
+                        </Button>
+                      )}
+                    </div>
+                    {isEditingNotes ? (
+                      <div className="space-y-3">
+                        <Textarea
+                          value={editNotes}
+                          onChange={(e) => setEditNotes(e.target.value)}
+                          placeholder="Digite as observações da reserva..."
+                          rows={4}
+                          className="text-sm bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-700 focus:border-amber-400 dark:focus:border-amber-600"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setIsEditingNotes(false);
+                              setEditNotes("");
+                            }}
+                            disabled={savingNotes}
+                            className="border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                          >
+                            Cancelar
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={handleSaveNotes}
+                            disabled={savingNotes}
+                            className="bg-amber-600 hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600 text-white"
+                          >
+                            {savingNotes ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                Salvando...
+                              </>
+                            ) : (
+                              "Salvar"
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed min-h-[60px] bg-white/60 dark:bg-slate-800/40 rounded-md p-3 border border-amber-200/40 dark:border-amber-800/30">
+                        {reservation.notes ? (
+                          <div className="whitespace-pre-wrap">{reservation.notes}</div>
+                        ) : (
+                          <span className="text-muted-foreground italic">Nenhuma observação cadastrada</span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
+                </Card>
               </div>
             </div>
             

@@ -125,11 +125,22 @@ export function ReuseDataDialog({
                     </p>
                     <div className="space-y-1">
                       {previousData.guests.map((guest, index) => (
-                        <p key={index} className="text-xs text-slate-600">
-                          {guest.name || t("webCheckin.reuseData.guest")} {index + 1}
-                          {guest.email && ` • ${guest.email}`}
-                          {guest.cpf && ` • CPF: ${guest.cpf}`}
-                        </p>
+                        <div key={index} className="text-xs text-slate-600">
+                          <p>
+                            {guest.name || t("webCheckin.reuseData.guest")} {index + 1}
+                            {guest.email && ` • ${guest.email}`}
+                            {guest.cpf && ` • CPF: ${guest.cpf}`}
+                          </p>
+                          {(guest.street || guest.city || guest.state) && (
+                            <p className="text-xs text-slate-500 mt-0.5 italic">
+                              📍 {guest.street && guest.number 
+                                ? `${guest.street}, ${guest.number}` 
+                                : guest.street || ""}
+                              {guest.city && ` - ${guest.city}`}
+                              {guest.state && `/${guest.state}`}
+                            </p>
+                          )}
+                        </div>
                       ))}
                     </div>
                   </div>

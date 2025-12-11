@@ -94,3 +94,4 @@ A Edge Function usa as seguintes variáveis de ambiente (configuradas automatica
 
 
 
+

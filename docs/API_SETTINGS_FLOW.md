@@ -248,3 +248,4 @@ async function checkExternalAvailability(roomId: string, dates: { checkin: strin
 5. **Criar interface de monitoramento** de sincronizações
 
 
+

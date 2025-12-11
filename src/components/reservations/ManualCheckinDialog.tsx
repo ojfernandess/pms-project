@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Plus, Trash2, Loader2, Upload, X, CheckCircle2 } from "lucide-react";
+import { Plus, Trash2, Loader2, Upload, X, CheckCircle2, Search } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useWebCheckin } from "@/hooks/useWebCheckin";
@@ -90,16 +90,25 @@ interface ManualCheckinDialogProps {
 }
 
 export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualCheckinDialogProps) {
-  const { saveGuests, saveDocuments, savePreferences, completeWebCheckin, createWebCheckin } = useWebCheckin();
+  const { saveGuests, saveDocuments, savePreferences, completeWebCheckin, createWebCheckin, getPreviousCheckinData } = useWebCheckin();
   const { checkIn } = useReservations();
   const queryClient = useQueryClient();
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showReuseDataDialog, setShowReuseDataDialog] = useState(false);
   const [hasCheckedPreviousData, setHasCheckedPreviousData] = useState(false);
-  const [isCheckingPreviousData, setIsCheckingPreviousData] = useState(false);
   
-  // Dados dos hóspedes
+  // Estados para busca inicial de hóspede
+  const [searchType, setSearchType] = useState<"cpf" | "email" | null>(null);
+  const [searchValue, setSearchValue] = useState("");
+  const [isSearchingGuest, setIsSearchingGuest] = useState(false);
+  const [hasSearchedGuest, setHasSearchedGuest] = useState(false);
+  const [skipSearch, setSkipSearch] = useState(false);
+  const [loadingCep, setLoadingCep] = useState<{ [key: number]: boolean }>({});
+  const [shouldFillReservationData, setShouldFillReservationData] = useState(true);
+  const [hasReusedData, setHasReusedData] = useState(false);
+  
+  // Dados dos hóspedes (incluindo endereço)
   const [guests, setGuests] = useState<any[]>([
     {
       name: "",
@@ -110,6 +119,18 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
       document_type: "cpf",
       document_number: "",
       is_main_guest: true,
+      // Campos de endereço
+      zip_code: "",
+      postal_code: "",
+      street: "",
+      number: "",
+      complement: "",
+      neighborhood: "",
+      city: "",
+      state: "",
+      country: "BR",
+      nationality: "BR",
+      use_main_guest_address: false,
     },
   ]);
   
@@ -129,109 +150,22 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
   const [webCheckinId, setWebCheckinId] = useState<string | null>(null);
   const [webCheckinToken, setWebCheckinToken] = useState<string | null>(null);
 
-  // Estado para armazenar dados de check-ins anteriores encontrados
-  const [previousCheckinData, setPreviousCheckinData] = useState<any>(null);
+  // Obter email/CPF/document_number do hóspede principal para buscar dados anteriores
+  // Usar valor da busca inicial ou dados preenchidos no formulário
+  const mainGuestEmail = searchType === "email" && searchValue ? searchValue : (guests?.[0]?.email || null);
+  const mainGuestCpf = searchType === "cpf" && searchValue ? searchValue : (guests?.[0]?.cpf || null);
+  const mainGuestDocumentNumber = guests?.[0]?.document_number || null;
   
-  // Função para buscar check-ins anteriores manualmente
-  const checkForPreviousCheckin = async (email: string | null, cpf: string | null) => {
-    if (!email && !cpf) return null;
-    
-    setIsCheckingPreviousData(true);
-    try {
-      // Buscar check-ins anteriores onde o hóspede principal tem mesmo email ou CPF
-      const { data: previousGuests, error: guestsError } = await supabase
-        .from("web_checkin_guests")
-        .select("web_checkin_id, web_checkin:web_checkin(reservation_id, status, completed_at, reservation:reservations(reservation_code, checkin_date, checkout_date))")
-        .or(
-          email && cpf
-            ? `email.eq.${email},cpf.eq.${cpf}`
-            : email
-            ? `email.eq.${email}`
-            : `cpf.eq.${cpf}`
-        )
-        .eq("is_main_guest", true)
-        .limit(10);
-
-      if (guestsError) {
-        console.error("Erro ao buscar hóspedes anteriores:", guestsError);
-        return null;
-      }
-
-      if (!previousGuests || previousGuests.length === 0) {
-        return null;
-      }
-
-      // Obter reservation_ids únicos (excluindo a atual)
-      const reservationIds = previousGuests
-        .map((g: any) => g.web_checkin?.reservation_id)
-        .filter((id: string) => id && id !== reservation?.id);
-
-      if (reservationIds.length === 0) {
-        return null;
-      }
-
-      // Buscar web_checkins completados dessas reservas
-      const { data: previousCheckins, error: checkinError } = await supabase
-        .from("web_checkin")
-        .select(`
-          id,
-          reservation_id,
-          status,
-          completed_at,
-          guests:web_checkin_guests(*),
-          documents:web_checkin_documents(*),
-          preferences,
-          reservation:reservations(
-            reservation_code,
-            checkin_date,
-            checkout_date
-          )
-        `)
-        .in("reservation_id", reservationIds)
-        .eq("status", "completed")
-        .order("completed_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (checkinError) {
-        console.error("Erro ao buscar check-ins anteriores:", checkinError);
-        return null;
-      }
-
-      if (!previousCheckins || !previousCheckins.guests || previousCheckins.guests.length === 0) {
-        return null;
-      }
-
-      // Formatar dados para reutilização
-      const previousGuestsFormatted = (previousCheckins.guests as any[]).map((g) => ({
-        name: g.name || "",
-        email: g.email || "",
-        phone: g.phone || "",
-        cpf: g.cpf || "",
-        birth_date: g.birth_date || "",
-        document_type: g.document_type || "cpf",
-        document_number: g.document_number || "",
-        is_main_guest: g.is_main_guest || false,
-      }));
-
-      const previousDocuments = (previousCheckins.documents as any[]) || [];
-      const previousPreferences = previousCheckins.preferences || {};
-
-      return {
-        guests: previousGuestsFormatted,
-        documents: previousDocuments,
-        preferences: previousPreferences,
-        reservationCode: (previousCheckins.reservation as any)?.reservation_code,
-        checkinDate: (previousCheckins.reservation as any)?.checkin_date,
-        completedAt: previousCheckins.completed_at,
-      };
-    } catch (error) {
-      console.error("Erro ao buscar check-ins anteriores:", error);
-      return null;
-    } finally {
-      setIsCheckingPreviousData(false);
-    }
-  };
+  // Usar o hook getPreviousCheckinData quando houver busca inicial ou dados preenchidos
+  const shouldSearchPreviousData = !!(mainGuestEmail || mainGuestCpf || mainGuestDocumentNumber) && !skipSearch;
+  
+  const { data: previousCheckinData, refetch: refetchPreviousCheckinData } = getPreviousCheckinData(
+    null, // guestAccountId (não disponível no check-in manual)
+    reservation?.id,
+    shouldSearchPreviousData ? mainGuestEmail : null,
+    shouldSearchPreviousData ? mainGuestCpf : null,
+    shouldSearchPreviousData ? mainGuestDocumentNumber : null
+  );
 
   // Função auxiliar para obter signed URL
   const getSignedUrl = async (filePath: string): Promise<string> => {
@@ -265,28 +199,73 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
   // Inicializar dados quando o dialog abrir
   useEffect(() => {
     if (open && reservation) {
-      // Preencher primeiro hóspede com dados da reserva
-      const documentNumber = reservation?.guest?.document_number || reservation?.financial_responsible?.document_number || "";
-      const documentType = reservation?.guest?.document_type?.toLowerCase() || reservation?.financial_responsible?.document_type?.toLowerCase() || "cpf";
-      
-      const initialGuest = {
-        name: reservation?.guest?.full_name || reservation?.financial_responsible?.full_name || "",
-        email: reservation?.guest?.email || reservation?.financial_responsible?.email || "",
-        phone: reservation?.guest?.phone || reservation?.financial_responsible?.phone || "",
-        cpf: documentType === "cpf" ? documentNumber : "",
-        birth_date: reservation?.guest?.birth_date || "",
-        document_type: documentType,
-        document_number: documentNumber,
-        is_main_guest: true,
-      };
+      // Só preencher dados da reserva se shouldFillReservationData for true
+      if (shouldFillReservationData) {
+        // Preencher primeiro hóspede com dados da reserva
+        const documentNumber = reservation?.guest?.document_number || reservation?.financial_responsible?.document_number || "";
+        const documentType = reservation?.guest?.document_type?.toLowerCase() || reservation?.financial_responsible?.document_type?.toLowerCase() || "cpf";
+        
+        const initialGuest = {
+          name: reservation?.guest?.full_name || reservation?.financial_responsible?.full_name || "",
+          email: reservation?.guest?.email || reservation?.financial_responsible?.email || "",
+          phone: reservation?.guest?.phone || reservation?.financial_responsible?.phone || "",
+          cpf: documentType === "cpf" ? documentNumber : "",
+          birth_date: reservation?.guest?.birth_date || "",
+          document_type: documentType,
+          document_number: documentNumber,
+          is_main_guest: true,
+          // Campos de endereço
+          zip_code: "",
+          postal_code: "",
+          street: "",
+          number: "",
+          complement: "",
+          neighborhood: "",
+          city: "",
+          state: "",
+          country: "BR",
+          nationality: "BR",
+          use_main_guest_address: false,
+        };
 
-      // Ajustar número de hóspedes baseado na reserva, respeitando a capacidade máxima
-      const totalGuests = (adults || 1) + (children || 0);
-      const maxAllowed = maxCapacity !== null ? Math.min(totalGuests, maxCapacity) : totalGuests;
-      
-      const initialGuests = [initialGuest];
-      if (maxAllowed > 1) {
-        const additionalGuests = Array.from({ length: maxAllowed - 1 }, () => ({
+        // Ajustar número de hóspedes baseado na reserva, respeitando a capacidade máxima
+        const totalGuests = (adults || 1) + (children || 0);
+        const maxAllowed = maxCapacity !== null ? Math.min(totalGuests, maxCapacity) : totalGuests;
+        
+        const initialGuests = [initialGuest];
+        if (maxAllowed > 1) {
+          const additionalGuests = Array.from({ length: maxAllowed - 1 }, () => ({
+            name: "",
+            email: "",
+            phone: "",
+            cpf: "",
+            birth_date: "",
+            document_type: "cpf",
+            document_number: "",
+            is_main_guest: false,
+            // Campos de endereço
+            zip_code: "",
+            postal_code: "",
+            street: "",
+            number: "",
+            complement: "",
+            neighborhood: "",
+            city: "",
+            state: "",
+            country: "BR",
+            nationality: "BR",
+            use_main_guest_address: false,
+          }));
+          initialGuests.push(...additionalGuests);
+        }
+        
+        setGuests(initialGuests);
+      } else {
+        // Se não deve preencher, criar hóspedes vazios
+        const totalGuests = (adults || 1) + (children || 0);
+        const maxAllowed = maxCapacity !== null ? Math.min(totalGuests, maxCapacity) : totalGuests;
+        
+        const emptyGuests = Array.from({ length: maxAllowed }, (_, index) => ({
           name: "",
           email: "",
           phone: "",
@@ -294,12 +273,23 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
           birth_date: "",
           document_type: "cpf",
           document_number: "",
-          is_main_guest: false,
+          is_main_guest: index === 0,
+          // Campos de endereço
+          zip_code: "",
+          postal_code: "",
+          street: "",
+          number: "",
+          complement: "",
+          neighborhood: "",
+          city: "",
+          state: "",
+          country: "BR",
+          nationality: "BR",
+          use_main_guest_address: false,
         }));
-        initialGuests.push(...additionalGuests);
+        
+        setGuests(emptyGuests);
       }
-      
-      setGuests(initialGuests);
       
       // Verificar se já existe web check-in
       checkExistingWebCheckin();
@@ -317,6 +307,18 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         document_type: "cpf",
         document_number: "",
         is_main_guest: true,
+        // Campos de endereço
+        zip_code: "",
+        postal_code: "",
+        street: "",
+        number: "",
+        complement: "",
+        neighborhood: "",
+        city: "",
+        state: "",
+        country: "BR",
+        nationality: "BR",
+        use_main_guest_address: false,
       }]);
       setDocuments([]);
       setPreferences({
@@ -329,10 +331,19 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
       setWebCheckinToken(null);
       setShowReuseDataDialog(false);
       setHasCheckedPreviousData(false);
-      setPreviousCheckinData(null);
-      setIsCheckingPreviousData(false);
+      // Resetar busca inicial
+      setSearchType(null);
+      setSearchValue("");
+      setIsSearchingGuest(false);
+      setHasSearchedGuest(false);
+      setSkipSearch(false);
+      setShouldFillReservationData(true);
+      setHasReusedData(false);
     }
   }, [open, reservation]);
+
+  // Buscar dados anteriores quando o usuário clicar no botão de busca
+  // A busca não é automática, apenas quando o usuário clicar no botão
 
   // Ajustar número de hóspedes quando adults/children mudarem, respeitando capacidade máxima
   useEffect(() => {
@@ -357,6 +368,18 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         document_type: "cpf",
         document_number: "",
         is_main_guest: false,
+        // Campos de endereço
+        zip_code: "",
+        postal_code: "",
+        street: "",
+        number: "",
+        complement: "",
+        neighborhood: "",
+        city: "",
+        state: "",
+        country: "BR",
+        nationality: "BR",
+        use_main_guest_address: false,
       }));
       setGuests(prevGuests => [...prevGuests, ...newGuests]);
     } else if (guests.length > maxAllowed) {
@@ -380,9 +403,149 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
     }
   };
 
+  // Função para formatar CEP
+  const formatCEP = (value: string) => {
+    const numbers = value.replace(/\D/g, "");
+    if (numbers.length <= 5) return numbers;
+    return `${numbers.slice(0, 5)}-${numbers.slice(5, 8)}`;
+  };
+
+  // Função para buscar endereço por CEP usando ViaCEP (apenas para Brasil)
+  const fetchAddressByCEP = async (cep: string, index: number) => {
+    const guest = guests[index];
+    // Só buscar CEP se o país for Brasil
+    if ((guest?.country || "BR") !== "BR") {
+      return;
+    }
+    
+    const cleanCep = cep.replace(/\D/g, "");
+    
+    if (cleanCep.length !== 8) {
+      return;
+    }
+
+    setLoadingCep({ ...loadingCep, [index]: true });
+
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+      const data = await response.json();
+
+      if (data.erro) {
+        toast.error("CEP não encontrado");
+        setLoadingCep({ ...loadingCep, [index]: false });
+        return;
+      }
+
+      const updatedGuests = [...guests];
+      const currentGuest = updatedGuests[index];
+      
+      updatedGuests[index] = {
+        ...updatedGuests[index],
+        zip_code: formatCEP(cleanCep),
+        street: data.logradouro || "",
+        neighborhood: data.bairro || "",
+        city: data.localidade || "",
+        state: data.uf || "",
+      };
+      
+      // Se for hóspede principal e houver acompanhantes usando seu endereço, sincronizar
+      if (currentGuest.is_main_guest) {
+        updatedGuests.forEach((g, idx) => {
+          if (!g.is_main_guest && g.use_main_guest_address) {
+            updatedGuests[idx] = {
+              ...g,
+              zip_code: formatCEP(cleanCep),
+              street: data.logradouro || "",
+              neighborhood: data.bairro || "",
+              city: data.localidade || "",
+              state: data.uf || "",
+            };
+          }
+        });
+      }
+      
+      setGuests(updatedGuests);
+      toast.success("Endereço preenchido automaticamente");
+    } catch (error) {
+      console.error("Erro ao buscar CEP:", error);
+      toast.error("Erro ao buscar CEP");
+    } finally {
+      setLoadingCep({ ...loadingCep, [index]: false });
+    }
+  };
+
   const handleGuestChange = (index: number, field: string, value: any) => {
     const updatedGuests = [...guests];
-    updatedGuests[index] = { ...updatedGuests[index], [field]: value };
+    const currentGuest = updatedGuests[index];
+    
+    // Se for país, limpar campos específicos do Brasil (sem sincronizar com nacionalidade)
+    if (field === "country") {
+      const isBrazil = value === "BR";
+      updatedGuests[index] = {
+        ...updatedGuests[index],
+        country: value,
+        // Limpar CEP se mudar para país estrangeiro, ou limpar código postal se mudar para Brasil
+        zip_code: isBrazil ? updatedGuests[index].zip_code : "",
+        postal_code: !isBrazil ? updatedGuests[index].postal_code : "",
+        // Limpar estado se não for Brasil
+        state: isBrazil ? updatedGuests[index].state : "",
+      };
+      
+      // Sincronizar com outros hóspedes que usam o endereço do principal (apenas país e campos de endereço)
+      if (currentGuest.is_main_guest) {
+        updatedGuests.forEach((g, idx) => {
+          if (!g.is_main_guest && g.use_main_guest_address) {
+            updatedGuests[idx] = {
+              ...g,
+              country: value,
+              zip_code: value === "BR" ? g.zip_code : "",
+              postal_code: value !== "BR" ? g.postal_code : "",
+              state: value === "BR" ? g.state : "",
+            };
+          }
+        });
+      }
+    } else if (field === "nationality") {
+      // Apenas atualizar nacionalidade, sem sincronizar com país
+      updatedGuests[index] = {
+        ...updatedGuests[index],
+        nationality: value,
+      };
+    } else if (field === "zip_code") {
+      // Se for CEP, formatar e buscar endereço quando completo (apenas para Brasil)
+      const formattedCep = formatCEP(value);
+      updatedGuests[index] = { ...updatedGuests[index], [field]: formattedCep };
+      
+      // Se for hóspede principal e houver acompanhantes usando seu endereço, sincronizar CEP
+      if (currentGuest.is_main_guest) {
+        updatedGuests.forEach((g, idx) => {
+          if (!g.is_main_guest && g.use_main_guest_address) {
+            updatedGuests[idx] = { ...g, zip_code: formattedCep };
+          }
+        });
+      }
+      
+      setGuests(updatedGuests);
+      
+      // Buscar endereço quando CEP estiver completo (8 dígitos) e país for Brasil
+      const cleanCep = value.replace(/\D/g, "");
+      if (cleanCep.length === 8 && (currentGuest.country || currentGuest.nationality || "BR") === "BR") {
+        fetchAddressByCEP(formattedCep, index);
+      }
+    } else {
+      // Para outros campos, atualizar normalmente
+      updatedGuests[index] = { ...updatedGuests[index], [field]: value };
+      
+      // Se for hóspede principal e houver acompanhantes usando seu endereço, sincronizar campos de endereço
+      if (currentGuest.is_main_guest && ["street", "number", "complement", "neighborhood", "city", "state", "postal_code"].includes(field)) {
+        updatedGuests.forEach((g, idx) => {
+          if (!g.is_main_guest && g.use_main_guest_address) {
+            updatedGuests[idx] = { ...g, [field]: value };
+          }
+        });
+      }
+    }
+    
     setGuests(updatedGuests);
   };
 
@@ -411,6 +574,18 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         document_type: "cpf",
         document_number: "",
         is_main_guest: false,
+        // Campos de endereço
+        zip_code: "",
+        postal_code: "",
+        street: "",
+        number: "",
+        complement: "",
+        neighborhood: "",
+        city: "",
+        state: "",
+        country: "BR",
+        nationality: "BR",
+        use_main_guest_address: false,
       },
     ]);
   };
@@ -529,6 +704,91 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
   const handleSubmit = async () => {
     if (!reservation?.id) return;
 
+    // Validar campos obrigatórios antes de submeter
+    const guestsWithNames = guests.filter((g) => g.name && g.name.trim() !== "");
+    if (guestsWithNames.length === 0) {
+      toast.error("É necessário cadastrar pelo menos um hóspede com nome preenchido.");
+      return;
+    }
+
+    // Validar campos obrigatórios para todos os hóspedes com nome
+    for (let i = 0; i < guestsWithNames.length; i++) {
+      const guest = guestsWithNames[i];
+      const guestLabel = guest.name && guest.name.trim() 
+        ? guest.name.trim() 
+        : (guest.is_main_guest ? "hóspede principal" : `hóspede ${i + 1}`);
+      
+      // Validar CPF
+      const cpfValue = guest.document_type === "cpf" 
+        ? (guest.document_number || guest.cpf || "")
+        : (guest.cpf || "");
+      
+      if (!cpfValue || cpfValue.trim() === "") {
+        toast.error(`O CPF do ${guestLabel} é obrigatório.`);
+        return;
+      }
+
+      // Validar Data de Nascimento
+      if (!guest.birth_date || guest.birth_date.trim() === "") {
+        toast.error(`A Data de Nascimento do ${guestLabel} é obrigatória.`);
+        return;
+      }
+
+      // Validar Email
+      if (!guest.email || guest.email.trim() === "") {
+        toast.error(`O E-mail do ${guestLabel} é obrigatório.`);
+        return;
+      }
+
+      // Validar Telefone
+      if (!guest.phone || guest.phone.trim() === "") {
+        toast.error(`O Telefone do ${guestLabel} é obrigatório.`);
+        return;
+      }
+
+      // Validar Endereço
+      const isBrazil = (guest.country || "BR") === "BR";
+      if (isBrazil) {
+        const zipCode = guest.zip_code || "";
+        if (!zipCode || zipCode.trim() === "") {
+          toast.error(`O CEP do ${guestLabel} é obrigatório.`);
+          return;
+        }
+      } else {
+        const postalCode = guest.postal_code || "";
+        if (!postalCode || postalCode.trim() === "") {
+          toast.error(`O Código Postal do ${guestLabel} é obrigatório.`);
+          return;
+        }
+      }
+
+      if (!guest.street || guest.street.trim() === "") {
+        toast.error(`A Rua/Logradouro do ${guestLabel} é obrigatória.`);
+        return;
+      }
+
+      if (!guest.number || guest.number.trim() === "") {
+        toast.error(`O Número do endereço do ${guestLabel} é obrigatório.`);
+        return;
+      }
+
+      if (!guest.neighborhood || guest.neighborhood.trim() === "") {
+        toast.error(`O Bairro do ${guestLabel} é obrigatório.`);
+        return;
+      }
+
+      if (!guest.city || guest.city.trim() === "") {
+        toast.error(`A Cidade do ${guestLabel} é obrigatória.`);
+        return;
+      }
+
+      // Validar Estado apenas se for Brasil (reutilizar isBrazil já declarado acima)
+      if (isBrazil && (!guest.state || guest.state.trim() === "")) {
+        toast.error(`O Estado do ${guestLabel} é obrigatório.`);
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -552,7 +812,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         setWebCheckinId(checkinId);
       }
 
-      // 2. Salvar hóspedes
+      // 2. Salvar hóspedes (incluindo endereço)
       const guestsToSave = guests.map((guest, index) => ({
         name: guest.name,
         cpf: guest.cpf,
@@ -563,6 +823,17 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         document_type: guest.document_type,
         document_number: guest.document_number || guest.cpf,
         order: index,
+        // Campos de endereço
+        zip_code: guest.zip_code || guest.postal_code || null,
+        postal_code: guest.postal_code || guest.zip_code || null,
+        street: guest.street || null,
+        number: guest.number || null,
+        complement: guest.complement || null,
+        neighborhood: guest.neighborhood || null,
+        city: guest.city || null,
+        state: guest.state || null,
+        country: guest.country || "BR",
+        nationality: guest.nationality || "BR",
       }));
 
       await saveGuests.mutateAsync({
@@ -668,10 +939,26 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
     { id: "review", title: "Revisar" },
   ];
 
-  // Handler para reutilizar dados anteriores
+  // Handler para reutilizar dados anteriores (mesma lógica do web check-in)
   const handleReuseData = (reusedData: any) => {
+    // Aplicar dados reutilizados (incluindo endereço) - mesma lógica do web check-in
     if (reusedData.guests && Array.isArray(reusedData.guests)) {
-      setGuests(reusedData.guests);
+      // Garantir que todos os campos de endereço estejam presentes
+      const guestsWithAddress = reusedData.guests.map((g: any) => ({
+        ...g,
+        zip_code: g.zip_code || "",
+        postal_code: g.postal_code || "",
+        street: g.street || "",
+        number: g.number || "",
+        complement: g.complement || "",
+        neighborhood: g.neighborhood || "",
+        city: g.city || "",
+        state: g.state || "",
+        country: g.country || g.nationality || "BR",
+        nationality: g.nationality || g.country || "BR",
+        use_main_guest_address: g.use_main_guest_address || false,
+      }));
+      setGuests(guestsWithAddress);
     }
     if (reusedData.documents && Array.isArray(reusedData.documents)) {
       setDocuments(reusedData.documents);
@@ -679,12 +966,20 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
     if (reusedData.preferences) {
       setPreferences((prev: any) => ({ ...prev, ...reusedData.preferences }));
     }
+    
+    setShowReuseDataDialog(false);
+    setSkipSearch(true);
+    setHasSearchedGuest(true);
+    setHasReusedData(true); // Marcar que os dados foram reutilizados
     toast.success("Dados reutilizados com sucesso! Você pode editar antes de confirmar.");
   };
 
-  // Handler para pular reutilização
+  // Handler para pular reutilização (mesma lógica do web check-in)
   const handleSkipReuse = () => {
     // Continuar com os dados já preenchidos da reserva
+    setShowReuseDataDialog(false);
+    setSkipSearch(true);
+    setHasSearchedGuest(true);
   };
 
   return (
@@ -736,6 +1031,194 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
           {/* Etapa 1: Dados dos Hóspedes */}
           {currentStep === 0 && (
             <div className="space-y-4">
+              {/* Busca inicial de hóspede - só mostra se ainda não buscou ou não pulou */}
+              {!skipSearch && (
+                <Card className="p-6 bg-blue-50/50 border-blue-200">
+                  <div className="space-y-4">
+                    <div>
+                      <h4 className="text-lg font-semibold mb-2">Buscar Hóspede</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Digite o CPF ou e-mail do hóspede para verificar se já realizou check-in anteriormente
+                      </p>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="search-type">Tipo de Busca *</Label>
+                        <Select
+                          value={searchType || ""}
+                          onValueChange={(value) => {
+                            setSearchType(value as "cpf" | "email");
+                            setSearchValue("");
+                            setHasSearchedGuest(false);
+                          }}
+                        >
+                          <SelectTrigger id="search-type">
+                            <SelectValue placeholder="Selecione o tipo" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="cpf">CPF</SelectItem>
+                            <SelectItem value="email">E-mail</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="search-value">
+                          {searchType === "cpf" ? "CPF *" : searchType === "email" ? "E-mail *" : "Valor *"}
+                        </Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="search-value"
+                            value={searchValue}
+                            onChange={(e) => {
+                              setSearchValue(e.target.value);
+                              setHasSearchedGuest(false);
+                            }}
+                            placeholder={searchType === "cpf" ? "000.000.000-00" : "email@exemplo.com"}
+                            disabled={!searchType || isSearchingGuest}
+                          />
+                          <Button
+                            type="button"
+                            onClick={async () => {
+                              if (!searchType || !searchValue.trim()) {
+                                toast.error("Selecione o tipo e digite o valor para buscar");
+                                return;
+                              }
+                              setIsSearchingGuest(true);
+                              queryClient.invalidateQueries({ queryKey: ["previous_checkin_data"] });
+                              try {
+                                await refetchPreviousCheckinData();
+                                setHasSearchedGuest(true);
+                              } catch (error) {
+                                console.error("Erro ao buscar:", error);
+                              } finally {
+                                setIsSearchingGuest(false);
+                              }
+                            }}
+                            disabled={!searchType || !searchValue.trim() || isSearchingGuest}
+                          >
+                            {isSearchingGuest ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Search className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {previousCheckinData && hasSearchedGuest && (
+                      <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <p className="text-sm text-green-800 font-medium mb-2">
+                          ✓ Hóspede encontrado! Clique em "Reutilizar Dados" para preencher automaticamente.
+                        </p>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => {
+                              setShowReuseDataDialog(true);
+                            }}
+                          >
+                            Reutilizar Dados
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setSkipSearch(true);
+                              setHasSearchedGuest(true);
+                              // Preencher o campo correspondente no primeiro hóspede
+                              if (searchType === "cpf") {
+                                handleGuestChange(0, "cpf", searchValue);
+                              } else if (searchType === "email") {
+                                handleGuestChange(0, "email", searchValue);
+                              }
+                            }}
+                          >
+                            Continuar sem Reutilizar
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {!previousCheckinData && hasSearchedGuest && !isSearchingGuest && (
+                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                        <p className="text-sm text-amber-800">
+                          ℹ️ Nenhum check-in anterior encontrado. Você pode continuar com o cadastro manual.
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="mt-2"
+                          onClick={() => {
+                            setSkipSearch(true);
+                            setHasSearchedGuest(true);
+                            // Preencher o campo correspondente no primeiro hóspede
+                            if (searchType === "cpf") {
+                              handleGuestChange(0, "cpf", searchValue);
+                            } else if (searchType === "email") {
+                              handleGuestChange(0, "email", searchValue);
+                            }
+                          }}
+                        >
+                          Continuar com Cadastro
+                        </Button>
+                      </div>
+                    )}
+                    
+                    <div className="pt-2 border-t">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setShouldFillReservationData(false);
+                          setSkipSearch(true);
+                          setHasSearchedGuest(true);
+                          // Limpar dados dos hóspedes
+                          const totalGuests = (adults || 1) + (children || 0);
+                          const maxAllowed = maxCapacity !== null ? Math.min(totalGuests, maxCapacity) : totalGuests;
+                          
+                          const emptyGuests = Array.from({ length: maxAllowed }, (_, index) => ({
+                            name: "",
+                            email: "",
+                            phone: "",
+                            cpf: "",
+                            birth_date: "",
+                            document_type: "cpf",
+                            document_number: "",
+                            is_main_guest: index === 0,
+                            // Campos de endereço
+                            zip_code: "",
+                            postal_code: "",
+                            street: "",
+                            number: "",
+                            complement: "",
+                            neighborhood: "",
+                            city: "",
+                            state: "",
+                            country: "BR",
+                            nationality: "BR",
+                            use_main_guest_address: false,
+                          }));
+                          
+                          setGuests(emptyGuests);
+                        }}
+                      >
+                        Pular busca e cadastrar manualmente
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              )}
+              
+              {/* Formulário de Dados dos Hóspedes - só mostra quando skipSearch for true */}
+              {skipSearch && (
+                <>
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Dados dos Hóspedes</h3>
                 <Button
@@ -813,43 +1296,48 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
                     </div>
 
                     <div>
-                      <Label htmlFor={`cpf-${index}`}>CPF</Label>
+                      <Label htmlFor={`cpf-${index}`}>CPF *</Label>
                       <Input
                         id={`cpf-${index}`}
                         value={guest.cpf}
                         onChange={(e) => handleGuestChange(index, "cpf", e.target.value)}
                         placeholder="000.000.000-00"
+                        required
                       />
                     </div>
 
                     <div>
-                      <Label htmlFor={`birth_date-${index}`}>Data de Nascimento</Label>
+                      <Label htmlFor={`birth_date-${index}`}>Data de Nascimento *</Label>
                       <Input
                         id={`birth_date-${index}`}
                         type="date"
                         value={guest.birth_date}
                         onChange={(e) => handleGuestChange(index, "birth_date", e.target.value)}
+                        max={new Date().toISOString().split('T')[0]}
+                        required
                       />
                     </div>
 
                     <div>
-                      <Label htmlFor={`email-${index}`}>E-mail</Label>
+                      <Label htmlFor={`email-${index}`}>E-mail *</Label>
                       <Input
                         id={`email-${index}`}
                         type="email"
                         value={guest.email}
                         onChange={(e) => handleGuestChange(index, "email", e.target.value)}
                         placeholder="email@exemplo.com"
+                        required
                       />
                     </div>
 
                     <div>
-                      <Label htmlFor={`phone-${index}`}>Telefone</Label>
+                      <Label htmlFor={`phone-${index}`}>Telefone *</Label>
                       <Input
                         id={`phone-${index}`}
                         value={guest.phone}
                         onChange={(e) => handleGuestChange(index, "phone", e.target.value)}
                         placeholder="(00) 00000-0000"
+                        required
                       />
                     </div>
 
@@ -870,9 +1358,186 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
                         </SelectContent>
                       </Select>
                     </div>
+
+                    <div>
+                      <Label htmlFor={`nationality-${index}`}>Nacionalidade *</Label>
+                      <Select
+                        value={guest.nationality || "BR"}
+                        onValueChange={(value) => handleGuestChange(index, "nationality", value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="BR">Brasil</SelectItem>
+                          <SelectItem value="US">Estados Unidos</SelectItem>
+                          <SelectItem value="AR">Argentina</SelectItem>
+                          <SelectItem value="CL">Chile</SelectItem>
+                          <SelectItem value="CO">Colômbia</SelectItem>
+                          <SelectItem value="PE">Peru</SelectItem>
+                          <SelectItem value="UY">Uruguai</SelectItem>
+                          <SelectItem value="PY">Paraguai</SelectItem>
+                          <SelectItem value="MX">México</SelectItem>
+                          <SelectItem value="PT">Portugal</SelectItem>
+                          <SelectItem value="ES">Espanha</SelectItem>
+                          <SelectItem value="FR">França</SelectItem>
+                          <SelectItem value="IT">Itália</SelectItem>
+                          <SelectItem value="DE">Alemanha</SelectItem>
+                          <SelectItem value="GB">Reino Unido</SelectItem>
+                          <SelectItem value="CA">Canadá</SelectItem>
+                          <SelectItem value="AU">Austrália</SelectItem>
+                          <SelectItem value="JP">Japão</SelectItem>
+                          <SelectItem value="CN">China</SelectItem>
+                          <SelectItem value="OTHER">Outro</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Campos de Endereço */}
+                  <div className="mt-4 pt-4 border-t">
+                    <h5 className="text-sm font-medium mb-3">Endereço *</h5>
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* País */}
+                      <div>
+                        <Label htmlFor={`country-${index}`}>País *</Label>
+                        <Select
+                          value={guest.country || "BR"}
+                          onValueChange={(value) => handleGuestChange(index, "country", value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="BR">Brasil</SelectItem>
+                            <SelectItem value="US">Estados Unidos</SelectItem>
+                            <SelectItem value="AR">Argentina</SelectItem>
+                            <SelectItem value="CL">Chile</SelectItem>
+                            <SelectItem value="CO">Colômbia</SelectItem>
+                            <SelectItem value="PE">Peru</SelectItem>
+                            <SelectItem value="UY">Uruguai</SelectItem>
+                            <SelectItem value="PY">Paraguai</SelectItem>
+                            <SelectItem value="MX">México</SelectItem>
+                            <SelectItem value="PT">Portugal</SelectItem>
+                            <SelectItem value="ES">Espanha</SelectItem>
+                            <SelectItem value="FR">França</SelectItem>
+                            <SelectItem value="IT">Itália</SelectItem>
+                            <SelectItem value="DE">Alemanha</SelectItem>
+                            <SelectItem value="GB">Reino Unido</SelectItem>
+                            <SelectItem value="CA">Canadá</SelectItem>
+                            <SelectItem value="AU">Austrália</SelectItem>
+                            <SelectItem value="JP">Japão</SelectItem>
+                            <SelectItem value="CN">China</SelectItem>
+                            <SelectItem value="OTHER">Outro</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* CEP (apenas para Brasil) ou Código Postal (outros países) */}
+                      {(guest.country || "BR") === "BR" ? (
+                        <div>
+                          <Label htmlFor={`zip_code-${index}`}>CEP *</Label>
+                          <div className="relative">
+                            <Input
+                              id={`zip_code-${index}`}
+                              value={guest.zip_code || ""}
+                              onChange={(e) => handleGuestChange(index, "zip_code", e.target.value)}
+                              placeholder="00000-000"
+                              maxLength={9}
+                              required
+                            />
+                            {loadingCep[index] && (
+                              <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <Label htmlFor={`postal_code-${index}`}>Código Postal *</Label>
+                          <Input
+                            id={`postal_code-${index}`}
+                            value={guest.postal_code || ""}
+                            onChange={(e) => handleGuestChange(index, "postal_code", e.target.value)}
+                            placeholder="Código postal"
+                            required
+                          />
+                        </div>
+                      )}
+
+                      <div>
+                        <Label htmlFor={`street-${index}`}>Rua/Logradouro *</Label>
+                        <Input
+                          id={`street-${index}`}
+                          value={guest.street || ""}
+                          onChange={(e) => handleGuestChange(index, "street", e.target.value)}
+                          placeholder="Nome da rua"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor={`number-${index}`}>Número *</Label>
+                        <Input
+                          id={`number-${index}`}
+                          value={guest.number || ""}
+                          onChange={(e) => handleGuestChange(index, "number", e.target.value)}
+                          placeholder="123"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor={`complement-${index}`}>Complemento</Label>
+                        <Input
+                          id={`complement-${index}`}
+                          value={guest.complement || ""}
+                          onChange={(e) => handleGuestChange(index, "complement", e.target.value)}
+                          placeholder="Apto, Bloco, etc."
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor={`neighborhood-${index}`}>Bairro *</Label>
+                        <Input
+                          id={`neighborhood-${index}`}
+                          value={guest.neighborhood || ""}
+                          onChange={(e) => handleGuestChange(index, "neighborhood", e.target.value)}
+                          placeholder="Nome do bairro"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor={`city-${index}`}>Cidade *</Label>
+                        <Input
+                          id={`city-${index}`}
+                          value={guest.city || ""}
+                          onChange={(e) => handleGuestChange(index, "city", e.target.value)}
+                          placeholder="Nome da cidade"
+                          required
+                        />
+                      </div>
+
+                      {/* Estado (apenas para Brasil) */}
+                      {(guest.country || "BR") === "BR" && (
+                        <div>
+                          <Label htmlFor={`state-${index}`}>Estado *</Label>
+                          <Input
+                            id={`state-${index}`}
+                            value={guest.state || ""}
+                            onChange={(e) => handleGuestChange(index, "state", e.target.value)}
+                            placeholder="UF"
+                            maxLength={2}
+                            required
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </Card>
               ))}
+                </>
+              )}
             </div>
           )}
 
@@ -1040,48 +1705,181 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
               onClick={async () => {
                 // Validar etapa atual antes de avançar
                 if (currentStep === 0) {
-                  // Validar que pelo menos o hóspede principal tem nome
-                  const mainGuest = guests.find((g) => g.is_main_guest);
-                  if (!mainGuest?.name) {
-                    toast.error("O hóspede principal deve ter um nome");
+                  // Validar todos os hóspedes com nome preenchido
+                  const guestsWithNames = guests.filter((g) => g.name && g.name.trim() !== "");
+                  if (guestsWithNames.length === 0) {
+                    toast.error("É necessário cadastrar pelo menos um hóspede com nome preenchido.");
                     return;
                   }
-                  
-                  // Buscar check-ins anteriores quando clicar em Próximo na primeira etapa
-                  const emailToCheck = mainGuest.email || reservation?.guest?.email || reservation?.financial_responsible?.email;
-                  const cpfToCheck = mainGuest.cpf || reservation?.guest?.document_number || reservation?.financial_responsible?.document_number;
-                  
-                  if (emailToCheck || cpfToCheck) {
-                    // Buscar check-ins anteriores
-                    const foundData = await checkForPreviousCheckin(emailToCheck, cpfToCheck);
+
+                  // Validar campos obrigatórios para todos os hóspedes com nome
+                  for (let i = 0; i < guestsWithNames.length; i++) {
+                    const guest = guestsWithNames[i];
+                    const guestLabel = guest.name && guest.name.trim() 
+                      ? guest.name.trim() 
+                      : (guest.is_main_guest ? "hóspede principal" : `hóspede ${i + 1}`);
                     
-                    if (foundData && !hasCheckedPreviousData) {
-                      // Encontrou dados anteriores - mostrar diálogo
-                      setPreviousCheckinData(foundData);
-                      setShowReuseDataDialog(true);
-                      setHasCheckedPreviousData(true);
-                      // Não avançar ainda - aguardar escolha do usuário
+                    // Validar CPF
+                    const cpfValue = guest.document_type === "cpf" 
+                      ? (guest.document_number || guest.cpf || "")
+                      : (guest.cpf || "");
+                    
+                    if (!cpfValue || cpfValue.trim() === "") {
+                      toast.error(`O CPF do ${guestLabel} é obrigatório.`);
+                      return;
+                    }
+
+                    // Validar Data de Nascimento
+                    if (!guest.birth_date || guest.birth_date.trim() === "") {
+                      toast.error(`A Data de Nascimento do ${guestLabel} é obrigatória.`);
+                      return;
+                    }
+
+                    // Validar Email
+                    if (!guest.email || guest.email.trim() === "") {
+                      toast.error(`O E-mail do ${guestLabel} é obrigatório.`);
+                      return;
+                    }
+
+                    // Validar Telefone
+                    if (!guest.phone || guest.phone.trim() === "") {
+                      toast.error(`O Telefone do ${guestLabel} é obrigatório.`);
+                      return;
+                    }
+
+                    // Validar Endereço
+                    const isBrazil = (guest.country || "BR") === "BR";
+                    if (isBrazil) {
+                      const zipCode = guest.zip_code || "";
+                      if (!zipCode || zipCode.trim() === "") {
+                        toast.error(`O CEP do ${guestLabel} é obrigatório.`);
+                        return;
+                      }
+                    } else {
+                      const postalCode = guest.postal_code || "";
+                      if (!postalCode || postalCode.trim() === "") {
+                        toast.error(`O Código Postal do ${guestLabel} é obrigatório.`);
+                        return;
+                      }
+                    }
+
+                    if (!guest.street || guest.street.trim() === "") {
+                      toast.error(`A Rua/Logradouro do ${guestLabel} é obrigatória.`);
+                      return;
+                    }
+
+                    if (!guest.number || guest.number.trim() === "") {
+                      toast.error(`O Número do endereço do ${guestLabel} é obrigatório.`);
+                      return;
+                    }
+
+                    if (!guest.neighborhood || guest.neighborhood.trim() === "") {
+                      toast.error(`O Bairro do ${guestLabel} é obrigatório.`);
+                      return;
+                    }
+
+                    if (!guest.city || guest.city.trim() === "") {
+                      toast.error(`A Cidade do ${guestLabel} é obrigatória.`);
+                      return;
+                    }
+
+                    // Validar Estado apenas se for Brasil (reutilizar isBrazil já declarado acima)
+                    if (isBrazil && (!guest.state || guest.state.trim() === "")) {
+                      toast.error(`O Estado do ${guestLabel} é obrigatório.`);
                       return;
                     }
                   }
                   
-                  // Se não encontrou dados anteriores ou já verificou antes, avançar normalmente
+                  // Se o usuário pulou a busca e não reutilizou dados, verificar se algum hóspede já realizou check-in anteriormente
+                  // IMPORTANTE: Não validar se os dados foram reutilizados
+                  if (skipSearch && !hasReusedData) {
+                    try {
+                      for (let i = 0; i < guestsWithNames.length; i++) {
+                        const guest = guestsWithNames[i];
+                        const guestLabel = guest.name && guest.name.trim() 
+                          ? guest.name.trim() 
+                          : (guest.is_main_guest ? "hóspede principal" : `hóspede ${i + 1}`);
+                        
+                        // Obter CPF e email do hóspede
+                        const cpfValue = guest.document_type === "cpf" 
+                          ? (guest.document_number || guest.cpf || "")
+                          : (guest.cpf || "");
+                        const emailValue = guest.email || "";
+                        
+                        // Buscar check-ins anteriores por CPF ou email
+                        if (cpfValue || emailValue) {
+                          // Construir condições de busca
+                          const conditions: string[] = [];
+                          if (cpfValue) conditions.push(`cpf.eq.${cpfValue}`);
+                          if (emailValue) conditions.push(`email.eq.${emailValue}`);
+                          
+                          if (conditions.length > 0) {
+                            // Buscar em web_checkin_guests com join em web_checkin
+                            const { data: previousGuests, error: guestsError } = await supabase
+                              .from("web_checkin_guests")
+                              .select(`
+                                web_checkin_id,
+                                web_checkin:web_checkin!inner(
+                                  reservation_id,
+                                  status,
+                                  completed_at
+                                )
+                              `)
+                              .or(conditions.join(","))
+                              .limit(10);
+                            
+                            if (guestsError) {
+                              console.error("Erro ao buscar check-ins anteriores:", guestsError);
+                            } else if (previousGuests && previousGuests.length > 0) {
+                              // Verificar se algum check-in está completo
+                              const completedCheckins = previousGuests.filter(
+                                (g: any) => g.web_checkin?.status === "completed"
+                              );
+                              
+                              if (completedCheckins.length > 0 && !hasReusedData) {
+                                toast.error(
+                                  `O ${guestLabel} (${cpfValue || emailValue}) já realizou check-in anteriormente. Por favor, use a busca inicial para reutilizar os dados.`,
+                                  { duration: 5000 }
+                                );
+                                return;
+                              }
+                            }
+                            
+                            // Buscar também em guest_stay_history
+                            const { data: stayHistory, error: historyError } = await supabase
+                              .from("guest_stay_history")
+                              .select("reservation_id")
+                              .or(conditions.join(","))
+                              .limit(1);
+                            
+                            if (historyError) {
+                              console.error("Erro ao buscar histórico:", historyError);
+                            } else if (stayHistory && stayHistory.length > 0 && !hasReusedData) {
+                              toast.error(
+                                `O ${guestLabel} (${cpfValue || emailValue}) já realizou check-in anteriormente. Por favor, use a busca inicial para reutilizar os dados.`,
+                                { duration: 5000 }
+                              );
+                              return;
+                            }
+                          }
+                        }
+                      }
+                    } catch (error) {
+                      console.error("Erro ao verificar check-ins anteriores:", error);
+                      // Em caso de erro, permitir continuar (não bloquear o fluxo)
+                    }
+                  }
+                  
+                  // Avançar normalmente
                   setCurrentStep(currentStep + 1);
                 } else {
                   // Para outras etapas, avançar normalmente
                   setCurrentStep(currentStep + 1);
                 }
               }}
-              disabled={isCheckingPreviousData}
+              disabled={false}
             >
-              {isCheckingPreviousData ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Verificando...
-                </>
-              ) : (
-                "Próximo"
-              )}
+              Próximo
             </Button>
           ) : (
             <Button

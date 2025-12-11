@@ -481,6 +481,19 @@ export function GuestInformationStep({
         return;
       }
 
+      // Validar que a data de nascimento está dentro dos limites válidos
+      const birthDate = new Date(guest.birth_date);
+      const currentYear = new Date().getFullYear();
+      const birthYear = birthDate.getFullYear();
+      if (birthYear < 1900 || birthYear > currentYear) {
+        alert(`A Data de Nascimento do ${guestLabel} é inválida. O ano deve estar entre 1900 e ${currentYear}.`);
+        return;
+      }
+      if (birthDate > new Date()) {
+        alert(`A Data de Nascimento do ${guestLabel} não pode ser no futuro.`);
+        return;
+      }
+
       // Validar campos de endereço
       // Para hóspede principal: obrigatório
       // Para acompanhantes: obrigatório apenas se não estiver usando o endereço do principal
@@ -676,7 +689,27 @@ export function GuestInformationStep({
                   id={`birth_date-${index}`}
                   type="date"
                   value={guest.birth_date}
-                  onChange={(e) => handleGuestChange(index, "birth_date", e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    // Validar ano (entre 1900 e ano atual)
+                    if (value) {
+                      const date = new Date(value);
+                      const currentYear = new Date().getFullYear();
+                      const year = date.getFullYear();
+                      if (year < 1900 || year > currentYear) {
+                        alert(t("webCheckin.guests.invalidBirthYear") || "Ano de nascimento inválido. Deve estar entre 1900 e o ano atual.");
+                        return;
+                      }
+                      // Validar que a data não é no futuro
+                      if (date > new Date()) {
+                        alert(t("webCheckin.guests.futureBirthDate") || "A data de nascimento não pode ser no futuro.");
+                        return;
+                      }
+                    }
+                    handleGuestChange(index, "birth_date", value);
+                  }}
+                  min="1900-01-01"
+                  max={new Date().toISOString().split('T')[0]}
                   required
                 />
               </div>

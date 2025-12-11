@@ -80,3 +80,4 @@ O plugin do Vite injetará automaticamente essas variáveis no HTML durante o bu
 - [Documentação do Supabase](https://supabase.com/docs)
 
 
+

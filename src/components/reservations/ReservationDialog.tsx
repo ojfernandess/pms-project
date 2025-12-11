@@ -193,16 +193,32 @@ export const ReservationDialog = ({
     },
   });
 
-  // Buscar categorias
+  // Buscar categorias filtradas por estabelecimento
   const { data: categories } = useQuery({
-    queryKey: ["room_categories"],
+    queryKey: ["room_categories", localStorage.getItem("selectedEstablishmentId")],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const establishmentId = localStorage.getItem("selectedEstablishmentId");
+      let query = supabase
         .from("room_categories")
         .select("*")
         .order("name");
 
+      if (establishmentId) {
+        query = query.eq("establishment_id", establishmentId);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
+      
+      // Remover duplicatas baseado no ID
+      if (data) {
+        const uniqueCategories = Array.from(
+          new Map(data.map((cat) => [cat.id, cat])).values()
+        );
+        return uniqueCategories;
+      }
+      
       return data;
     },
   });
@@ -683,17 +699,22 @@ export const ReservationDialog = ({
     }
   }, [reservationId, open, initialData]);
 
-  // Buscar quartos disponíveis quando categoria e datas mudarem
+  // Buscar quartos quando categoria mudar
   useEffect(() => {
     const fetchAvailableRooms = async () => {
-      if (
-        formData.category_id &&
-        formData.checkin_date &&
-        formData.checkout_date &&
-        new Date(formData.checkout_date) > new Date(formData.checkin_date)
-      ) {
-        setLoadingRooms(true);
-        try {
+      if (!formData.category_id) {
+        setAvailableRooms([]);
+        return;
+      }
+
+      setLoadingRooms(true);
+      try {
+        // Se temos datas válidas, buscar quartos disponíveis para o período
+        if (
+          formData.checkin_date &&
+          formData.checkout_date &&
+          new Date(formData.checkout_date) > new Date(formData.checkin_date)
+        ) {
           // Incluir o quarto já selecionado (se houver) na busca
           const rooms = await getAvailableRooms(
             formData.category_id,
@@ -702,13 +723,24 @@ export const ReservationDialog = ({
             formData.room_id || undefined
           );
           setAvailableRooms(rooms);
-        } catch (error: any) {
-          toast.error(error.message || "Erro ao buscar quartos disponíveis");
-        } finally {
-          setLoadingRooms(false);
+        } else {
+          // Se não temos datas, buscar todos os quartos da categoria (sem filtro de disponibilidade)
+          const { data: rooms, error } = await supabase
+            .from("rooms")
+            .select("*")
+            .eq("category_id", formData.category_id)
+            .eq("is_blocked", false)
+            .order("room_number");
+
+          if (error) throw error;
+          setAvailableRooms(rooms || []);
         }
-      } else {
+      } catch (error: any) {
+        console.error("Erro ao buscar quartos:", error);
+        toast.error(error.message || "Erro ao buscar quartos");
         setAvailableRooms([]);
+      } finally {
+        setLoadingRooms(false);
       }
     };
 
@@ -1026,7 +1058,7 @@ export const ReservationDialog = ({
       }
 
       // Validar disponibilidade ANTES de criar a reserva
-      const roomIdToCheck = formData.room_id && formData.room_id !== "__none__" ? formData.room_id : null;
+      const roomIdToCheck = formData.room_id || null;
       
       if (roomIdToCheck) {
         // Verificar se o quarto está interditado ANTES de validar disponibilidade
@@ -1100,7 +1132,7 @@ export const ReservationDialog = ({
       const reservationData: any = {
         client_id: clientId as string,
         category_id: formData.category_id,
-        room_id: formData.room_id && formData.room_id !== "__none__" ? formData.room_id : null,
+        room_id: formData.room_id || null,
         checkin_date: formData.checkin_date,
         checkout_date: formData.checkout_date,
         checkin_time: formData.checkin_time || null,
@@ -1348,7 +1380,7 @@ export const ReservationDialog = ({
         updateData.client_id = finalClientId;
         
         // Preservar room_id se não foi alterado explicitamente
-        if (!formData.room_id || formData.room_id === "__none__" || formData.room_id === "") {
+        if (!formData.room_id || formData.room_id === "") {
           // Se room_id não foi alterado, manter o valor original da reserva
           updateData.room_id = originalRoomId;
           console.log("✅ Preservando room_id original:", originalRoomId?.substring(0, 8) || "null");
@@ -1604,7 +1636,7 @@ export const ReservationDialog = ({
             console.log(`📊 Total de noites após extensão: ${totalNights} (${additionalNights} noites adicionais)`);
             
             // VALIDAÇÃO 3: Verificar disponibilidade especificamente para o período de extensão
-            const roomIdToCheck = updateData.room_id && updateData.room_id !== "__none__" ? updateData.room_id : null;
+            const roomIdToCheck = updateData.room_id || null;
             
             if (!roomIdToCheck) {
               toast.error("Não é possível estender uma reserva sem quarto específico. Selecione um quarto primeiro.");
@@ -1689,7 +1721,7 @@ export const ReservationDialog = ({
             // Mudança de período (checkin ou checkout alterados, mas não é extensão)
             console.log("📅 Alteração de período detectada (não é extensão)");
             
-            const roomIdToCheck = updateData.room_id && updateData.room_id !== "__none__" ? updateData.room_id : null;
+            const roomIdToCheck = updateData.room_id || null;
             
             if (roomIdToCheck) {
               // Verificar se o quarto está interditado ANTES de validar disponibilidade
@@ -1763,7 +1795,7 @@ export const ReservationDialog = ({
           }
         } else {
           // Se as datas não mudaram, ainda assim validar se há quarto específico e se está interditado
-          const roomIdToCheck = updateData.room_id && updateData.room_id !== "__none__" ? updateData.room_id : null;
+          const roomIdToCheck = updateData.room_id || null;
           if (roomIdToCheck) {
             const { data: roomCheck } = await supabase
               .from("rooms")
@@ -1824,6 +1856,11 @@ export const ReservationDialog = ({
         }
         if (!cleanReservationData.checkout_date) {
           toast.error("Data de check-out é obrigatória");
+          setLoading(false);
+          return;
+        }
+        if (!cleanReservationData.room_id) {
+          toast.error("Selecione um quarto");
           setLoading(false);
           return;
         }
@@ -2954,7 +2991,7 @@ export const ReservationDialog = ({
                 <SelectContent>
                   {categories?.map((category) => (
                     <SelectItem key={category.id} value={category.id}>
-                      {category.name} - {formatCurrency(category.base_price)}/noite
+                      {category.name} {category.base_price ? `- ${formatCurrency(category.base_price)}/noite` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -3128,10 +3165,10 @@ export const ReservationDialog = ({
               )}
             </div>
 
-            {/* Quarto (opcional) - Oculto se vier de initialData (mapa de reservas) */}
+            {/* Quarto - Oculto se vier de initialData (mapa de reservas) */}
             {!(initialData?.room_id && !reservationId) && (
               <div className="col-span-2">
-                <Label htmlFor="room_id">Quarto (opcional)</Label>
+                <Label htmlFor="room_id">Quarto *</Label>
                 {loadingRooms ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -3139,9 +3176,9 @@ export const ReservationDialog = ({
                   </div>
                 ) : (
                   <Select
-                    value={formData.room_id || "__none__"}
+                    value={formData.room_id || ""}
                     onValueChange={async (value) => {
-                      const roomId = value === "__none__" ? "" : value;
+                      const roomId = value;
                       
                       // Verificar se o quarto selecionado está interditado
                       if (roomId) {
@@ -3159,12 +3196,17 @@ export const ReservationDialog = ({
                       
                       setFormData({ ...formData, room_id: roomId });
                     }}
+                    required
+                    disabled={availableRooms.length === 0}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecione um quarto (opcional)" />
+                      <SelectValue placeholder={
+                        availableRooms.length === 0 
+                          ? "Nenhum quarto disponível" 
+                          : "Selecione um quarto"
+                      } />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">Não atribuir agora</SelectItem>
                       {availableRooms.map((room) => (
                         <SelectItem key={room.id} value={room.id}>
                           {room.room_number} {room.floor && `- Andar ${room.floor}`}
@@ -3173,15 +3215,19 @@ export const ReservationDialog = ({
                     </SelectContent>
                   </Select>
                 )}
-                {formData.category_id &&
-                  formData.checkin_date &&
-                  formData.checkout_date &&
-                  availableRooms.length === 0 &&
-                  !loadingRooms && (
-                    <p className="text-xs text-warning mt-1">
-                      Nenhum quarto disponível neste período
-                    </p>
-                  )}
+                {formData.category_id && !loadingRooms && (
+                  <>
+                    {!formData.checkin_date || !formData.checkout_date ? (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Preencha as datas de check-in e check-out para ver a disponibilidade
+                      </p>
+                    ) : availableRooms.length === 0 ? (
+                      <p className="text-xs text-warning mt-1">
+                        Nenhum quarto disponível neste período
+                      </p>
+                    ) : null}
+                  </>
+                )}
               </div>
             )}
 

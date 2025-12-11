@@ -89,10 +89,29 @@ export default function WebCheckin() {
   const currentWebCheckin = webCheckin || webCheckinInfo;
 
   // Buscar dados de check-ins anteriores quando estiver na etapa de guests
-  const { data: previousCheckinData } = getPreviousCheckinData(
+  // Tentar obter email/CPF/document_number dos dados já preenchidos ou da reserva
+  const mainGuestEmail = webCheckinData?.guests?.[0]?.email || 
+                         currentWebCheckin?.reservation?.guest?.email || 
+                         currentWebCheckin?.reservation?.financial_responsible?.email || null;
+  const mainGuestCpf = webCheckinData?.guests?.[0]?.cpf || null;
+  const mainGuestDocumentNumber = webCheckinData?.guests?.[0]?.document_number || null;
+  
+  const { data: previousCheckinData, refetch: refetchPreviousCheckinData } = getPreviousCheckinData(
     guestAccountId,
-    currentWebCheckin?.reservation?.id
+    currentWebCheckin?.reservation?.id,
+    mainGuestEmail,
+    mainGuestCpf,
+    mainGuestDocumentNumber
   );
+
+  // Refazer busca quando entrar na etapa de guests ou quando dados do hóspede mudarem
+  useEffect(() => {
+    if (currentStep === 4 && STEPS[currentStep]?.id === "guests") {
+      // Invalidar cache e refazer busca quando entrar na etapa de guests
+      queryClient.invalidateQueries({ queryKey: ["previous_checkin_data"] });
+      refetchPreviousCheckinData();
+    }
+  }, [currentStep, mainGuestEmail, mainGuestCpf, mainGuestDocumentNumber, guestAccountId]);
 
   // Buscar dados de contato do establishment se não estiverem presentes
   useEffect(() => {
