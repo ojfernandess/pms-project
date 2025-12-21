@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AppLayout } from "./components/layout/AppLayout";
 import { ProtectedRoute } from "./components/layout/ProtectedRoute";
+import { RoleProtectedRoute } from "./components/layout/RoleProtectedRoute";
 import { SuperAdminRoute } from "./components/layout/SuperAdminRoute";
 import { EstablishmentRoute } from "./components/layout/EstablishmentRoute";
 import Dashboard from "./pages/Dashboard";
@@ -31,6 +32,7 @@ import Employees from "./pages/Employees";
 import SuperAdmin from "./pages/SuperAdmin";
 import UserDashboard from "./pages/UserDashboard";
 import EstablishmentDashboard from "./pages/EstablishmentDashboard";
+import OwnerDashboard from "./pages/OwnerDashboard";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
@@ -109,13 +111,14 @@ const AppContent = () => {
             <Route path="/user-dashboard" element={<ProtectedRoute><AppLayout><UserDashboard /></AppLayout></ProtectedRoute>} />
             <Route path="/establishments" element={<ProtectedRoute><AppLayout><EstablishmentDashboard /></AppLayout></ProtectedRoute>} />
             {/* Rotas com establishmentId */}
-            <Route path="/:establishmentId" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Dashboard /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/ocupacao" element={<ProtectedRoute><EstablishmentRoute><AppLayout><OccupancyMap /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/occupancy-map" element={<ProtectedRoute><EstablishmentRoute><AppLayout><OccupancyMap /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/reservas" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Reservations /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/reservas/pendencias" element={<ProtectedRoute><EstablishmentRoute><AppLayout><PendingReservations /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/reservas/:reservationCode" element={<ProtectedRoute><EstablishmentRoute><AppLayout><ReservationDetails /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/logs" element={<ProtectedRoute><EstablishmentRoute><AppLayout><ActivityLogs /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Dashboard /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/proprietario" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><OwnerDashboard /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/ocupacao" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><OccupancyMap /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/occupancy-map" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><OccupancyMap /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/reservas" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Reservations /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/reservas/pendencias" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><PendingReservations /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/reservas/:reservationCode" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ReservationDetails /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/logs" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ActivityLogs /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/web-checkin/:locator" element={<WebCheckin />} />
             <Route path="/web-checkin/reset-password" element={<GuestResetPassword />} />
             <Route path="/web-checkin" element={<WebCheckin />} />
@@ -125,18 +128,18 @@ const AppContent = () => {
             <Route path="/payment/return" element={<PaymentSuccess />} />
             <Route path="/policies/:token" element={<PublicPolicies />} />
             <Route path="/documentation" element={<ProtectedRoute><AppLayout><Documentation /></AppLayout></ProtectedRoute>} />
-            <Route path="/:establishmentId/documentation" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Documentation /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/clientes" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Clients /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/clientes/centralizacao" element={<ProtectedRoute><EstablishmentRoute><AppLayout><ClientDeduplication /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/unidades" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Units /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/financeiro" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Financial /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/tarifario" element={<ProtectedRoute><EstablishmentRoute><AppLayout><PMSRateSystem /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/tarifario-legado" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Pricing /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/manutencao" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Maintenance /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/channel-manager" element={<ProtectedRoute><EstablishmentRoute><AppLayout><ChannelManager /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/configuracoes" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Settings /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/perfil" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Profile /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
-            <Route path="/:establishmentId/funcionarios" element={<ProtectedRoute><EstablishmentRoute><AppLayout><Employees /></AppLayout></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/documentation" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Documentation /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/clientes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Clients /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/clientes/centralizacao" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ClientDeduplication /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/unidades" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Units /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/financeiro" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Financial /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/tarifario" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><PMSRateSystem /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/tarifario-legado" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Pricing /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/manutencao" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Maintenance /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/channel-manager" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ChannelManager /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/configuracoes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Settings /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/perfil" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Profile /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/funcionarios" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Employees /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             {/* Rotas legadas (redirecionar para user-dashboard se não tiver establishmentId) */}
             <Route path="/" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
             <Route path="/ocupacao" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,70 @@ interface RoomDialogProps {
 
 export const RoomDialog = ({ open, onOpenChange, onSuccess, categories, roomId }: RoomDialogProps) => {
   const [loading, setLoading] = useState(false);
+  
+  // Buscar usuários da empresa do estabelecimento atual
+  const { data: companyUsers = [], isLoading: isLoadingUsers } = useQuery({
+    queryKey: ["company_users_for_rooms", getSelectedEstablishmentId()],
+    queryFn: async () => {
+      const establishmentId = getSelectedEstablishmentId();
+      if (!establishmentId) {
+        return [];
+      }
+
+      // Buscar a empresa do estabelecimento
+      const { data: establishmentData, error: establishmentError } = await supabase
+        .from("establishments")
+        .select("company_id")
+        .eq("id", establishmentId)
+        .single();
+
+      if (establishmentError || !establishmentData?.company_id) {
+        console.error("Erro ao buscar empresa do estabelecimento:", establishmentError);
+        return [];
+      }
+
+      const companyId = establishmentData.company_id;
+
+      // Buscar user_ids associados à empresa via user_companies
+      const { data: userCompanies, error: userCompaniesError } = await supabase
+        .from("user_companies")
+        .select("user_id")
+        .eq("company_id", companyId)
+        .eq("is_active", true);
+
+      if (userCompaniesError) {
+        console.error("Erro ao buscar usuários da empresa:", userCompaniesError);
+        return [];
+      }
+
+      if (!userCompanies || userCompanies.length === 0) {
+        return [];
+      }
+
+      // Extrair os user_ids
+      const userIds = userCompanies.map((uc: any) => uc.user_id);
+
+      // Buscar os dados dos usuários
+      const { data: users, error: usersError } = await supabase
+        .from("users")
+        .select("id, email, full_name")
+        .in("id", userIds)
+        .order("full_name");
+
+      if (usersError) {
+        console.error("Erro ao buscar dados dos usuários:", usersError);
+        return [];
+      }
+
+      return (users || []).map((user: any) => ({
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name || user.email || "Usuário sem nome",
+      }));
+    },
+    enabled: open && !!getSelectedEstablishmentId(),
+  });
+
   const [formData, setFormData] = useState({
     name: "",
     owner_user_id: "",
@@ -260,7 +325,17 @@ export const RoomDialog = ({ open, onOpenChange, onSuccess, categories, roomId }
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
-                    {/* TODO: Carregar usuários proprietários */}
+                    {isLoadingUsers ? (
+                      <SelectItem value="loading" disabled>Carregando usuários...</SelectItem>
+                    ) : companyUsers.length === 0 ? (
+                      <SelectItem value="no-users" disabled>Nenhum usuário disponível</SelectItem>
+                    ) : (
+                      companyUsers.map((user: any) => (
+                        <SelectItem key={user.id} value={user.id}>
+                          {user.full_name} {user.email ? `(${user.email})` : ""}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -279,7 +354,17 @@ export const RoomDialog = ({ open, onOpenChange, onSuccess, categories, roomId }
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
-                    {/* TODO: Carregar proprietários para recibo */}
+                    {isLoadingUsers ? (
+                      <SelectItem value="loading" disabled>Carregando usuários...</SelectItem>
+                    ) : companyUsers.length === 0 ? (
+                      <SelectItem value="no-users" disabled>Nenhum usuário disponível</SelectItem>
+                    ) : (
+                      companyUsers.map((user: any) => (
+                        <SelectItem key={user.id} value={user.id}>
+                          {user.full_name} {user.email ? `(${user.email})` : ""}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </div>

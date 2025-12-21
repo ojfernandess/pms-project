@@ -45,19 +45,24 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MoreVertical } from "lucide-react";
 import { EmployeePermissionsDialog } from "@/components/employees/EmployeePermissionsDialog";
+import { RolePermissionsDialog } from "@/components/employees/RolePermissionsDialog";
 import { sendEmployeeAddedToEstablishmentEmail } from "@/lib/emailService";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 const Employees = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
+  const [rolePermissionsDialogOpen, setRolePermissionsDialogOpen] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>();
   const [selectedEmployeeForPermissions, setSelectedEmployeeForPermissions] = useState<any>(null);
+  const [selectedRole, setSelectedRole] = useState<any>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("employees");
 
   const queryClient = useQueryClient();
   const { employees, isLoading, createEmployee, updateEmployee, deleteEmployee, refetch } = useEmployees();
-  const { roles } = useEmployeeRoles();
+  const { roles, isLoading: isLoadingRoles, refetch: refetchRoles } = useEmployeeRoles();
   const { role } = useCurrentEmployeeRole();
   const { canAccess } = usePermissions();
   const { createOrUpdateUserLimit } = useUserLimits();
@@ -553,29 +558,45 @@ const Employees = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Funcionários</h1>
-          <p className="text-muted-foreground">Gerencie os funcionários do estabelecimento</p>
+          <p className="text-muted-foreground">Gerencie os funcionários e funções do estabelecimento</p>
         </div>
-        <Button
-          onClick={() => {
-            setSelectedEmployeeId(undefined);
-            setCreateNewUser(false);
-            setFormData({
-              user_id: "",
-              role_id: "",
-              full_name: "",
-              cpf: "",
-              phone: "",
-              email: "",
-              password: "",
-              is_active: true,
-            });
-            setDialogOpen(true);
-          }}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Novo Funcionário
-        </Button>
+        {activeTab === "employees" && (
+          <Button
+            onClick={() => {
+              setSelectedEmployeeId(undefined);
+              setCreateNewUser(false);
+              setFormData({
+                user_id: "",
+                role_id: "",
+                full_name: "",
+                cpf: "",
+                phone: "",
+                email: "",
+                password: "",
+                is_active: true,
+              });
+              setDialogOpen(true);
+            }}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Novo Funcionário
+          </Button>
+        )}
       </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="employees">
+            <Users className="h-4 w-4 mr-2" />
+            Funcionários
+          </TabsTrigger>
+          <TabsTrigger value="roles">
+            <Shield className="h-4 w-4 mr-2" />
+            Controle de Funções
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="employees" className="space-y-6">
 
       <Card>
         {isLoading ? (
@@ -1182,6 +1203,98 @@ const Employees = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+        </TabsContent>
+
+        <TabsContent value="roles" className="space-y-6">
+          <Card>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold">Controle de Funções</h2>
+                  <p className="text-muted-foreground mt-1">
+                    Gerencie as permissões padrão de cada função. As permissões definidas aqui serão aplicadas a todos os funcionários com essa função.
+                  </p>
+                </div>
+              </div>
+
+              {isLoadingRoles ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : roles.length === 0 ? (
+                <div className="p-12 text-center">
+                  <Shield className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground font-medium">Nenhuma função cadastrada</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Função</TableHead>
+                        <TableHead>Código</TableHead>
+                        <TableHead>Descrição</TableHead>
+                        <TableHead className="text-right">Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {roles.map((role) => (
+                        <TableRow key={role.id} className="hover:bg-muted/50">
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                <Shield className="h-5 w-5 text-primary" />
+                              </div>
+                              <div>
+                                <p className="font-medium">{role.name}</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{role.code}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm text-muted-foreground">
+                              {role.description || "-"}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedRole(role);
+                                setRolePermissionsDialogOpen(true);
+                              }}
+                            >
+                              <Key className="h-4 w-4 mr-2" />
+                              Editar Permissões
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* Dialog: Editar Permissões da Função */}
+          {selectedRole && (
+            <RolePermissionsDialog
+              open={rolePermissionsDialogOpen}
+              onOpenChange={setRolePermissionsDialogOpen}
+              role={selectedRole}
+              onSuccess={() => {
+                refetchRoles();
+                queryClient.invalidateQueries({ queryKey: ["employee_roles"] });
+                queryClient.invalidateQueries({ queryKey: ["current_employee_role"] });
+              }}
+            />
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

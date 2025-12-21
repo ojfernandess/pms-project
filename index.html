@@ -92,9 +92,16 @@
             // 1. Tentar obter da variável global (injetada pelo Vite)
             let supabaseUrl = window.__SUPABASE_URL__;
             
-            // 2. Tentar obter do localStorage
+            // 2. Tentar obter do localStorage (mas validar que não seja localhost se não estiver em desenvolvimento)
             if (!supabaseUrl) {
-              supabaseUrl = localStorage.getItem('__supabase_url__');
+              const storedUrl = localStorage.getItem('__supabase_url__');
+              // Validar URL armazenada - não usar localhost em produção
+              if (storedUrl && !storedUrl.includes('localhost:54321')) {
+                supabaseUrl = storedUrl;
+              } else if (storedUrl && storedUrl.includes('localhost:54321')) {
+                // Limpar URL inválida do localStorage
+                localStorage.removeItem('__supabase_url__');
+              }
             }
             
             // 3. Tentar obter de uma variável de ambiente injetada no HTML
@@ -111,9 +118,9 @@
             }
             
             // 5. Tentar inferir da URL atual (para desenvolvimento local)
-            if (!supabaseUrl && window.location.hostname === 'localhost') {
-              supabaseUrl = 'http://localhost:54321'; // Supabase local padrão
-            }
+            // NOTA: Não tentar usar localhost:54321 automaticamente, pois pode não estar rodando
+            // Deixar que a API route ou outras estratégias funcionem primeiro
+            // Se realmente precisar usar Supabase local, deve ser configurado explicitamente
             
             // 6. Tentar obter de scripts já carregados (se o código React já estiver disponível)
             if (!supabaseUrl) {
@@ -138,29 +145,35 @@
             const edgeFunctionUrl = cleanUrl + '/functions/v1/get-site-settings';
             
             // Fazer requisição com timeout curto para não bloquear
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 segundos timeout
-            
-            const response = await fetch(edgeFunctionUrl, {
-              method: 'GET',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              signal: controller.signal,
-            });
-            
-            clearTimeout(timeoutId);
-            
-            if (response.ok) {
-              const settings = await response.json();
-              applySettings(settings);
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 segundos timeout
               
-              // Salvar URL no localStorage para próximas vezes
-              if (supabaseUrl && !localStorage.getItem('__supabase_url__')) {
-                localStorage.setItem('__supabase_url__', supabaseUrl);
+              const response = await fetch(edgeFunctionUrl, {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                signal: controller.signal,
+              });
+              
+              clearTimeout(timeoutId);
+              
+              if (response.ok) {
+                const settings = await response.json();
+                applySettings(settings);
+                
+                // Salvar URL no localStorage para próximas vezes
+                if (supabaseUrl && !localStorage.getItem('__supabase_url__')) {
+                  localStorage.setItem('__supabase_url__', supabaseUrl);
+                }
+              } else {
+                console.debug('Edge Function retornou erro:', response.status, response.statusText);
               }
-            } else {
-              console.warn('Erro ao buscar configurações da Edge Function:', response.status, response.statusText);
+            } catch (fetchError) {
+              // Ignorar erros de conexão silenciosamente (pode ser que a Edge Function não esteja disponível)
+              // Isso é esperado em desenvolvimento local ou quando a Edge Function não está configurada
+              console.debug('Não foi possível acessar Edge Function (isso é normal se não estiver configurada):', fetchError.name);
             }
           } catch (error) {
             // Ignorar erros silenciosamente (não bloquear o carregamento)

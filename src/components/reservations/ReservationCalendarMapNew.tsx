@@ -95,7 +95,6 @@ export const ReservationCalendarMap = ({
           rooms:rooms!inner(*)
         `)
         .eq("establishment_id", establishmentId)
-        .eq("rooms.is_active", true)
         .order("name")
         .order("rooms(room_number)", { foreignTable: "rooms" });
 

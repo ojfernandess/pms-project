@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { RateEditDialog } from "./RateEditDialog";
 import { BulkEditDialog } from "./BulkEditDialog";
 import { RateMetricsSummary } from "./RateMetricsSummary";
+import { CreateRateDialog } from "./CreateRateDialog";
 
 interface RateCalendarGridProps {
   ratePlans: RatePlan[];
@@ -47,6 +48,7 @@ export const RateCalendarGrid = ({
     price?: number;
   } | null>(null);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [createRateOpen, setCreateRateOpen] = useState(false);
   const [calculatedPrices, setCalculatedPrices] = useState<Map<string, number>>(new Map());
 
   const {
@@ -281,6 +283,9 @@ export const RateCalendarGrid = ({
             <Button variant="outline" size="icon">
               <Download className="h-4 w-4" />
             </Button>
+            <Button variant="outline" onClick={() => setCreateRateOpen(true)}>
+              Criar Tarifário
+            </Button>
             <Button onClick={() => setBulkEditOpen(true)}>
               Edição em Lote
             </Button>
@@ -436,6 +441,43 @@ export const RateCalendarGrid = ({
           onSave={handleSaveRate}
         />
       )}
+
+      {/* Create Rate Dialog */}
+      <CreateRateDialog
+        open={createRateOpen}
+        onOpenChange={(open) => {
+          setCreateRateOpen(open);
+          if (!open) {
+            // Refetch quando o dialog fechar para atualizar o grid
+            refetchRateCalendar();
+          }
+        }}
+        categories={categories}
+        ratePlans={ratePlans}
+        onSave={async (data) => {
+          // Criar entradas para todas as datas do período
+          const dates: string[] = [];
+          let currentDate = new Date(data.startDate);
+          const end = new Date(data.endDate);
+
+          while (currentDate <= end) {
+            dates.push(format(currentDate, "yyyy-MM-dd"));
+            currentDate = addDays(currentDate, 1);
+          }
+
+          // Criar entradas para todas as datas do período
+          const entries = dates.map((date) => ({
+            pricing_plan_id: data.planIds[0],
+            category_id: data.categoryId,
+            date,
+            base_price: data.basePrice,
+            adult_price: data.adultPrice,
+            child_price: data.childPrice,
+          }));
+
+          await upsertRateCalendar(entries);
+        }}
+      />
 
       {/* Bulk Edit Dialog */}
       <BulkEditDialog

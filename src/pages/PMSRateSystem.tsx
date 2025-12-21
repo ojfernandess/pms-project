@@ -23,6 +23,7 @@ import { RateAnalyticsView } from "@/components/rate-system/RateAnalyticsView";
 import { ChannelSyncDialog } from "@/components/rate-system/ChannelSyncDialog";
 import { RateSystemSettingsDialog } from "@/components/rate-system/RateSystemSettingsDialog";
 import { PlanTypesView } from "@/components/rate-system/PlanTypesView";
+import { PriceDashboardView } from "@/components/rate-system/PriceDashboardView";
 
 const PMSRateSystem = () => {
   const [activeTab, setActiveTab] = useState('calendar');
@@ -174,7 +175,11 @@ const PMSRateSystem = () => {
         {/* Navigation Tabs */}
         <div className="px-6">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className="grid w-full grid-cols-7">
+              <TabsTrigger value="pricing-dashboard" className="gap-2">
+                <DollarSign className="w-4 h-4" />
+                Dashboard de Preços
+              </TabsTrigger>
               <TabsTrigger value="calendar" className="gap-2">
                 <Calendar className="w-4 h-4" />
                 Mapa de Tarifas
@@ -207,6 +212,11 @@ const PMSRateSystem = () => {
       {/* Main Content */}
       <div className="p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
+          {/* Price Dashboard View */}
+          <TabsContent value="pricing-dashboard" className="space-y-4">
+            <PriceDashboardView />
+          </TabsContent>
+
           {/* Calendar View */}
           <TabsContent value="calendar" className="space-y-4">
             <RateCalendarGrid

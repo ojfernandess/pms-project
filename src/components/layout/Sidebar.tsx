@@ -13,7 +13,8 @@ import {
   Shield,
   UserCog,
   FileText,
-  BookOpen
+  BookOpen,
+  BarChart3
 } from "lucide-react";
 import { NavLink, useParams } from "react-router-dom";
 import { useIsSuperAdmin } from "@/hooks/useUsers";
@@ -32,6 +33,7 @@ interface SidebarProps {
 
 const getMenuItems = (t: (key: string) => string) => [
   { icon: LayoutDashboard, label: t("sidebar.dashboard"), path: "/", feature: "dashboard" },
+  { icon: BarChart3, label: "Dashboard Proprietário", path: "/proprietario", feature: "owner_dashboard" },
   { icon: Bed, label: t("sidebar.occupancyMap"), path: "/ocupacao", feature: "occupancy_map" },
   { icon: Calendar, label: t("sidebar.reservations"), path: "/reservas", feature: "reservations" },
   { icon: Users, label: t("sidebar.clients"), path: "/clientes", feature: "clients" },
@@ -103,6 +105,15 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
     if (item.feature === "user_dashboard") {
       // Sempre mostrar user-dashboard
       return true;
+    }
+
+    if (item.feature === "owner_dashboard") {
+      // REGRA ESPECIAL: Apenas proprietários podem ver o dashboard do proprietário
+      // Sempre mostrar para proprietários, independente de permissões configuradas
+      if (role && role.code === "owner") {
+        return true;
+      }
+      return false;
     }
 
     // Verificar permissão para o recurso (usando customPermissions se disponível)
