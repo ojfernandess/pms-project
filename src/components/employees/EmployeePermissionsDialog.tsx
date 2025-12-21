@@ -10,10 +10,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Key } from "lucide-react";
+import { Loader2, Key, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface EmployeePermissionsDialogProps {
   open: boolean;
@@ -69,12 +79,22 @@ export const EmployeePermissionsDialog = ({
   const [permissions, setPermissions] = useState<Record<string, Record<string, boolean>>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showExceedDialog, setShowExceedDialog] = useState(false);
+  const [exceededPermissions, setExceededPermissions] = useState<Array<{ module: string; action: string; label: string }>>([]);
+  const [showRemovedDialog, setShowRemovedDialog] = useState(false);
+  const [removedPermissions, setRemovedPermissions] = useState<Array<{ module: string; action: string; label: string }>>([]);
+  const [pendingSave, setPendingSave] = useState<(() => void) | null>(null);
 
   // Carregar permissões ao abrir o dialog
   useEffect(() => {
     if (open && employee) {
       // Se tiver custom_permissions, usar elas, senão usar as do role
-      const basePermissions = employee.custom_permissions || employee.employee_roles?.permissions || {};
+      // IMPORTANTE: Se custom_permissions existir (mesmo que vazio), usar apenas ele
+      // Não mesclar com permissões da função
+      const hasCustomPermissions = employee.custom_permissions !== null && employee.custom_permissions !== undefined;
+      const basePermissions = hasCustomPermissions 
+        ? (employee.custom_permissions || {})
+        : (employee.employee_roles?.permissions || {});
       
       // Converter permissões para o formato da matriz
       const matrixPermissions: Record<string, Record<string, boolean>> = {};
@@ -112,10 +132,12 @@ export const EmployeePermissionsDialog = ({
             });
             matrixPermissions[module.key] = allActions;
           }
+          // Se for boolean false, já está inicializado como false (todas desmarcadas)
+          // Não precisa fazer nada, já está correto
         } else if (typeof modulePerm === "object" && modulePerm !== null) {
           // Se for objeto, mapear as ações
           const mappedActions: Record<string, boolean> = {
-            read: modulePerm.read === true || modulePerm.create === true || modulePerm.update === true,
+            read: modulePerm.read === true,
             create: modulePerm.create === true,
             update: modulePerm.update === true,
             delete: modulePerm.delete === true,
@@ -125,6 +147,35 @@ export const EmployeePermissionsDialog = ({
             mappedActions[action.key] = modulePerm[action.key] === true;
           });
           matrixPermissions[module.key] = mappedActions;
+        } else if (hasCustomPermissions && modulePerm === undefined) {
+          // Se custom_permissions existe mas o módulo não está nele, significa que não foi customizado
+          // Neste caso, usar as permissões da função como base
+          const roleModulePerm = employee.employee_roles?.permissions?.[module.key];
+          if (roleModulePerm !== undefined && roleModulePerm !== null) {
+            if (typeof roleModulePerm === "boolean" && roleModulePerm === true) {
+              const allActions: Record<string, boolean> = {
+                read: true,
+                create: true,
+                update: true,
+                delete: true,
+              };
+              moduleSpecificActions.forEach((action) => {
+                allActions[action.key] = true;
+              });
+              matrixPermissions[module.key] = allActions;
+            } else if (typeof roleModulePerm === "object" && roleModulePerm !== null) {
+              const mappedActions: Record<string, boolean> = {
+                read: roleModulePerm.read === true,
+                create: roleModulePerm.create === true,
+                update: roleModulePerm.update === true,
+                delete: roleModulePerm.delete === true,
+              };
+              moduleSpecificActions.forEach((action) => {
+                mappedActions[action.key] = roleModulePerm[action.key] === true;
+              });
+              matrixPermissions[module.key] = mappedActions;
+            }
+          }
         }
       });
 
@@ -142,15 +193,196 @@ export const EmployeePermissionsDialog = ({
     }));
   };
 
-  const handleSave = async () => {
+  // Função para verificar se uma permissão está habilitada na função
+  const hasRolePermission = (module: string, action: string): boolean => {
+    const rolePerms = employee.employee_roles?.permissions || {};
+    const modulePerm = rolePerms[module];
+    
+    if (!modulePerm) return false;
+    
+    // Se for boolean true, todas as ações estão permitidas
+    if (typeof modulePerm === "boolean" && modulePerm === true) {
+      return true;
+    }
+    
+    // Se for boolean false, nenhuma ação está permitida
+    if (typeof modulePerm === "boolean" && modulePerm === false) {
+      return false;
+    }
+    
+    // Se for objeto, verificar a ação específica
+    if (typeof modulePerm === "object" && modulePerm !== null) {
+      return modulePerm[action] === true;
+    }
+    
+    return false;
+  };
+
+  // Função para verificar se as permissões customizadas excedem as da função
+  const checkExceededPermissions = (): Array<{ module: string; action: string; label: string }> => {
+    const exceeded: Array<{ module: string; action: string; label: string }> = [];
+    
+    MODULES.forEach((module) => {
+      const modulePerms = permissions[module.key];
+      if (!modulePerms) return;
+      
+      // Verificar ações padrão
+      ACTIONS.forEach((action) => {
+        if (modulePerms[action.key] === true && !hasRolePermission(module.key, action.key)) {
+          exceeded.push({
+            module: module.key,
+            action: action.key,
+            label: `${module.label} - ${action.label}`,
+          });
+        }
+      });
+      
+      // Verificar ações específicas do módulo
+      const moduleSpecificActions = MODULE_SPECIFIC_ACTIONS[module.key] || [];
+      moduleSpecificActions.forEach((action) => {
+        if (modulePerms[action.key] === true && !hasRolePermission(module.key, action.key)) {
+          exceeded.push({
+            module: module.key,
+            action: action.key,
+            label: `${module.label} - ${action.label}`,
+          });
+        }
+      });
+    });
+    
+    return exceeded;
+  };
+
+  // Função para verificar se há permissões que foram removidas além do que a função tinha
+  const checkRemovedPermissions = (): Array<{ module: string; action: string; label: string }> => {
+    const removed: Array<{ module: string; action: string; label: string }> = [];
+    const rolePerms = employee.employee_roles?.permissions || {};
+    
+    MODULES.forEach((module) => {
+      const modulePerms = permissions[module.key];
+      const roleModulePerm = rolePerms[module.key];
+      
+      // Se a função não tinha permissões para este módulo, não há nada a remover
+      if (!roleModulePerm || roleModulePerm === null) return;
+      
+      // Se a função tinha boolean true (todas as ações), verificar quais estão desmarcadas
+      if (typeof roleModulePerm === "boolean" && roleModulePerm === true) {
+        // Verificar ações padrão que estão desmarcadas
+        ACTIONS.forEach((action) => {
+          const hasPermission = modulePerms?.[action.key] === true;
+          // Se a função tinha todas as ações mas a customização não tem esta ação, está removendo
+          if (!hasPermission) {
+            removed.push({
+              module: module.key,
+              action: action.key,
+              label: `${module.label} - ${action.label}`,
+            });
+          }
+        });
+        
+        // Verificar ações específicas do módulo que estão desmarcadas
+        const moduleSpecificActions = MODULE_SPECIFIC_ACTIONS[module.key] || [];
+        moduleSpecificActions.forEach((action) => {
+          const hasPermission = modulePerms?.[action.key] === true;
+          if (!hasPermission) {
+            removed.push({
+              module: module.key,
+              action: action.key,
+              label: `${module.label} - ${action.label}`,
+            });
+          }
+        });
+      } else if (typeof roleModulePerm === "object" && roleModulePerm !== null) {
+        // Se a função tinha um objeto de permissões, verificar quais estão sendo removidas
+        ACTIONS.forEach((action) => {
+          const roleHasAction = roleModulePerm[action.key] === true;
+          const customHasAction = modulePerms?.[action.key] === true;
+          
+          // Se a função tinha mas a customização não tem, está removendo
+          if (roleHasAction && !customHasAction) {
+            removed.push({
+              module: module.key,
+              action: action.key,
+              label: `${module.label} - ${action.label}`,
+            });
+          }
+        });
+        
+        // Verificar ações específicas do módulo
+        const moduleSpecificActions = MODULE_SPECIFIC_ACTIONS[module.key] || [];
+        moduleSpecificActions.forEach((action) => {
+          const roleHasAction = roleModulePerm[action.key] === true;
+          const customHasAction = modulePerms?.[action.key] === true;
+          
+          if (roleHasAction && !customHasAction) {
+            removed.push({
+              module: module.key,
+              action: action.key,
+              label: `${module.label} - ${action.label}`,
+            });
+          }
+        });
+      }
+    });
+    
+    return removed;
+  };
+
+  // Função para obter permissões da função formatadas
+  const getRolePermissionsSummary = (): string[] => {
+    const rolePerms = employee.employee_roles?.permissions || {};
+    const summary: string[] = [];
+    
+    MODULES.forEach((module) => {
+      const modulePerm = rolePerms[module.key];
+      if (!modulePerm) return;
+      
+      const moduleActions: string[] = [];
+      
+      if (typeof modulePerm === "boolean" && modulePerm === true) {
+        moduleActions.push("Todas as ações");
+      } else if (typeof modulePerm === "object" && modulePerm !== null) {
+        ACTIONS.forEach((action) => {
+          if (modulePerm[action.key] === true) {
+            moduleActions.push(action.label);
+          }
+        });
+        
+        const moduleSpecificActions = MODULE_SPECIFIC_ACTIONS[module.key] || [];
+        moduleSpecificActions.forEach((action) => {
+          if (modulePerm[action.key] === true) {
+            moduleActions.push(action.label);
+          }
+        });
+      }
+      
+      if (moduleActions.length > 0) {
+        summary.push(`${module.label}: ${moduleActions.join(", ")}`);
+      }
+    });
+    
+    return summary;
+  };
+
+  const performSave = async () => {
     setIsSaving(true);
     try {
       // Converter a matriz de permissões para o formato JSONB
       const customPermissions: Record<string, any> = {};
+      const rolePerms = employee.employee_roles?.permissions || {};
 
       MODULES.forEach((module) => {
         const modulePerms = permissions[module.key];
-        if (!modulePerms) return;
+        if (!modulePerms) {
+          // Se não houver permissões definidas na matriz, verificar se a função tinha
+          // Se a função tinha permissões e agora não há nenhuma marcada, negar explicitamente
+          const roleModulePerm = rolePerms[module.key];
+          if (roleModulePerm !== undefined && roleModulePerm !== null) {
+            // A função tinha permissões, mas agora todas foram desmarcadas - negar explicitamente
+            customPermissions[module.key] = false;
+          }
+          return;
+        }
 
         // Obter ações específicas do módulo
         const moduleSpecificActions = MODULE_SPECIFIC_ACTIONS[module.key] || [];
@@ -161,30 +393,38 @@ export const EmployeePermissionsDialog = ({
         // Verificar se todas as ações específicas também estão marcadas
         const allSpecificActions = moduleSpecificActions.every((action) => modulePerms[action.key] === true);
         
+        // Verificar se nenhuma ação está marcada (usar === true para garantir que undefined seja tratado como false)
+        const hasAnyStandardAction = modulePerms.read === true || modulePerms.create === true || modulePerms.update === true || modulePerms.delete === true;
+        const hasAnySpecificAction = moduleSpecificActions.some((action) => modulePerms[action.key] === true);
+        const hasAnyAction = hasAnyStandardAction || hasAnySpecificAction;
+        
         // Se todas as ações (padrão + específicas) estão marcadas, pode usar boolean true
         if (allStandardActions && allSpecificActions) {
           customPermissions[module.key] = true;
-        } else {
-          // Verificar se pelo menos uma ação está marcada
-          const hasAnyStandardAction = modulePerms.read || modulePerms.create || modulePerms.update || modulePerms.delete;
-          const hasAnySpecificAction = moduleSpecificActions.some((action) => modulePerms[action.key] === true);
-          
-          if (hasAnyStandardAction || hasAnySpecificAction) {
-            // Se pelo menos uma ação está marcada, usar objeto
-            const permObject: Record<string, boolean> = {
-              read: modulePerms.read || false,
-              create: modulePerms.create || false,
-              update: modulePerms.update || false,
-              delete: modulePerms.delete || false,
-            };
-            // Adicionar ações específicas do módulo
-            moduleSpecificActions.forEach((action) => {
-              permObject[action.key] = modulePerms[action.key] || false;
-            });
-            customPermissions[module.key] = permObject;
+        } else if (!hasAnyAction) {
+          // Se nenhuma ação está marcada, verificar se a função tinha permissões
+          const roleModulePerm = rolePerms[module.key];
+          if (roleModulePerm !== undefined && roleModulePerm !== null) {
+            // A função tinha permissões, mas agora todas foram desmarcadas - negar explicitamente
+            // Isso garante que mesmo que a função permita, o acesso será negado
+            customPermissions[module.key] = false;
           }
+          // Se a função não tinha permissões e nenhuma está marcada, não precisa salvar
+          // (já é negado por padrão e não há necessidade de customização)
+        } else {
+          // Se pelo menos uma ação está marcada, usar objeto com todas as ações explicitamente
+          const permObject: Record<string, boolean> = {
+            read: modulePerms.read || false,
+            create: modulePerms.create || false,
+            update: modulePerms.update || false,
+            delete: modulePerms.delete || false,
+          };
+          // Adicionar ações específicas do módulo
+          moduleSpecificActions.forEach((action) => {
+            permObject[action.key] = modulePerms[action.key] || false;
+          });
+          customPermissions[module.key] = permObject;
         }
-        // Se nenhuma ação está marcada, não incluir o módulo
       });
 
       // Salvar no banco de dados
@@ -227,6 +467,47 @@ export const EmployeePermissionsDialog = ({
       toast.error(error.message || "Erro ao salvar permissões");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSave = async () => {
+    // Se o funcionário não tiver função atribuída, permitir salvar diretamente
+    if (!employee.employee_roles) {
+      await performSave();
+      return;
+    }
+
+    // Verificar se há permissões que excedem as da função
+    const exceeded = checkExceededPermissions();
+    
+    // Verificar se há permissões que foram removidas além do que a função tinha
+    const removed = checkRemovedPermissions();
+    
+    if (exceeded.length > 0) {
+      // Se houver permissões excedentes, mostrar dialog de confirmação
+      setExceededPermissions(exceeded);
+      setPendingSave(() => performSave);
+      setShowExceedDialog(true);
+      return;
+    }
+    
+    if (removed.length > 0) {
+      // Se houver permissões removidas, mostrar dialog de confirmação
+      setRemovedPermissions(removed);
+      setPendingSave(() => performSave);
+      setShowRemovedDialog(true);
+      return;
+    }
+    
+    // Se não houver excedentes nem remoções, salvar diretamente
+    await performSave();
+  };
+
+  const handleConfirmExceed = async () => {
+    setShowExceedDialog(false);
+    if (pendingSave) {
+      await pendingSave();
+      setPendingSave(null);
     }
   };
 
@@ -370,6 +651,123 @@ export const EmployeePermissionsDialog = ({
           </div>
         )}
       </DialogContent>
+
+      {/* Dialog de confirmação para permissões excedentes */}
+      <AlertDialog open={showExceedDialog} onOpenChange={setShowExceedDialog}>
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Permissões Excedem a Função
+            </AlertDialogTitle>
+            <div className="space-y-4">
+              <AlertDialogDescription>
+                Você está tentando conceder permissões que <strong>excedem</strong> as permissões da função{" "}
+                <strong>{employee.employee_roles?.name || "N/A"}</strong> atribuída a este usuário.
+              </AlertDialogDescription>
+              
+              <div className="bg-muted p-4 rounded-lg space-y-2">
+                <p className="font-semibold text-sm">Permissões da Função:</p>
+                <ul className="list-disc list-inside space-y-1 text-sm">
+                  {getRolePermissionsSummary().length > 0 ? (
+                    getRolePermissionsSummary().map((perm, idx) => (
+                      <li key={idx}>{perm}</li>
+                    ))
+                  ) : (
+                    <li className="text-muted-foreground">Nenhuma permissão definida na função</li>
+                  )}
+                </ul>
+              </div>
+
+              <div className="bg-amber-50 dark:bg-amber-950/20 p-4 rounded-lg space-y-2 border border-amber-200 dark:border-amber-900">
+                <p className="font-semibold text-sm text-amber-900 dark:text-amber-100">
+                  Permissões que excedem a função:
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-sm text-amber-800 dark:text-amber-200">
+                  {exceededPermissions.map((perm, idx) => (
+                    <li key={idx}>{perm.label}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <p className="text-sm text-muted-foreground">
+                Deseja prosseguir e conceder essas permissões adicionais ao usuário? Isso permitirá que o usuário tenha
+                mais acesso do que sua função normalmente permite.
+              </p>
+            </div>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setShowExceedDialog(false);
+              setPendingSave(null);
+            }}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmExceed} className="bg-amber-600 hover:bg-amber-700">
+              Sim, Prosseguir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Dialog de confirmação para permissões removidas */}
+      <AlertDialog open={showRemovedDialog} onOpenChange={setShowRemovedDialog}>
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-blue-500" />
+              Removendo Mais Acessos do que o Normal
+            </AlertDialogTitle>
+            <div className="space-y-4">
+              <AlertDialogDescription>
+                Você está <strong>removendo</strong> permissões que a função{" "}
+                <strong>{employee.employee_roles?.name || "N/A"}</strong> normalmente possui. Isso restringirá o acesso
+                do usuário além do que é padrão para esta função.
+              </AlertDialogDescription>
+              
+              <div className="bg-muted p-4 rounded-lg space-y-2">
+                <p className="font-semibold text-sm">Permissões que a função normalmente tem:</p>
+                <ul className="list-disc list-inside space-y-1 text-sm">
+                  {getRolePermissionsSummary().length > 0 ? (
+                    getRolePermissionsSummary().map((perm, idx) => (
+                      <li key={idx}>{perm}</li>
+                    ))
+                  ) : (
+                    <li className="text-muted-foreground">Nenhuma permissão definida na função</li>
+                  )}
+                </ul>
+              </div>
+
+              <div className="bg-blue-50 dark:bg-blue-950/20 p-4 rounded-lg space-y-2 border border-blue-200 dark:border-blue-900">
+                <p className="font-semibold text-sm text-blue-900 dark:text-blue-100">
+                  Permissões que estão sendo removidas:
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-sm text-blue-800 dark:text-blue-200">
+                  {removedPermissions.map((perm, idx) => (
+                    <li key={idx}>{perm.label}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <p className="text-sm text-muted-foreground">
+                Deseja prosseguir e remover esses acessos do usuário? Isso restringirá o acesso do usuário além do que
+                sua função normalmente permite.
+              </p>
+            </div>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setShowRemovedDialog(false);
+              setPendingSave(null);
+            }}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmExceed} className="bg-blue-600 hover:bg-blue-700">
+              Sim, Prosseguir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 };
