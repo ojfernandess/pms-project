@@ -283,7 +283,10 @@ export const RateCalendarGrid = ({
             <Button variant="outline" size="icon">
               <Download className="h-4 w-4" />
             </Button>
-            <Button variant="outline" onClick={() => setCreateRateOpen(true)}>
+            <Button 
+              onClick={() => setCreateRateOpen(true)}
+              className="bg-purple-600 hover:bg-purple-700 text-white shadow-md hover:shadow-lg transition-all duration-200"
+            >
               Criar Tarifário
             </Button>
             <Button onClick={() => setBulkEditOpen(true)}>

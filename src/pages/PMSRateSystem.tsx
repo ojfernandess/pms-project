@@ -176,7 +176,10 @@ const PMSRateSystem = () => {
         <div className="px-6">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-7">
-              <TabsTrigger value="pricing-dashboard" className="gap-2">
+              <TabsTrigger 
+                value="pricing-dashboard" 
+                className="gap-2 data-[state=active]:bg-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md"
+              >
                 <DollarSign className="w-4 h-4" />
                 Dashboard de Preços
               </TabsTrigger>
