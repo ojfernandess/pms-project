@@ -73,6 +73,9 @@ const actionTypeLabels: Record<string, string> = {
   amount_changed: "Valor Alterado",
   guest_changed: "Hóspede Alterado",
   resolved: "Resolvido",
+  price_applied: "Preço Aplicado",
+  bulk_updated: "Atualização em Lote",
+  rule_applied: "Regra Aplicada",
 };
 
 const entityTypeLabels: Record<string, string> = {
@@ -83,6 +86,10 @@ const entityTypeLabels: Record<string, string> = {
   payment: "Pagamento",
   block: "Bloqueio",
   pending: "Pendência",
+  rate_calendar: "Calendário de Tarifas",
+  pricing_plan: "Plano Tarifário",
+  dynamic_pricing_rule: "Regra Dinâmica",
+  rate_restriction: "Restrição de Tarifa",
 };
 
 const actionTypeColors: Record<string, string> = {

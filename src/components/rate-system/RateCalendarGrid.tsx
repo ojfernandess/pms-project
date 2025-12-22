@@ -14,10 +14,15 @@ import { formatCurrency, formatCurrencyWithoutZeroCents } from "@/lib/reservatio
 import { useRateSystem, RatePlan } from "@/hooks/useRateSystem";
 import { useRateMetrics } from "@/hooks/useRateMetrics";
 import { toast } from "sonner";
+import { logActivity } from "@/lib/activityLogger";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { RateEditDialog } from "./RateEditDialog";
 import { BulkEditDialog } from "./BulkEditDialog";
 import { RateMetricsSummary } from "./RateMetricsSummary";
 import { CreateRateDialog } from "./CreateRateDialog";
+import { PriceDetailsDialog } from "./PriceDetailsDialog";
 
 interface RateCalendarGridProps {
   ratePlans: RatePlan[];
@@ -50,6 +55,16 @@ export const RateCalendarGrid = ({
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [createRateOpen, setCreateRateOpen] = useState(false);
   const [calculatedPrices, setCalculatedPrices] = useState<Map<string, number>>(new Map());
+  const [priceDetailsOpen, setPriceDetailsOpen] = useState(false);
+  const [selectedPriceDetails, setSelectedPriceDetails] = useState<{
+    categoryId: string;
+    date: Date;
+    basePrice: number;
+    finalPrice: number;
+    adjustments: any[];
+    metrics?: any;
+    autoApplyEnabled: boolean;
+  } | null>(null);
 
   const {
     rateCalendar,
@@ -59,6 +74,7 @@ export const RateCalendarGrid = ({
     bulkUpdateRates,
     refetch: refetchRateCalendar,
     calculateRatePrice,
+    applyDynamicPricingRules,
   } = useRateSystem();
 
   const { getMetricsForDate, calculateOccupancy, calculatePickupRate } = useRateMetrics();
@@ -80,6 +96,24 @@ export const RateCalendarGrid = ({
     if (selectedCategory === 'all') return categories;
     return categories.filter(c => c.id === selectedCategory);
   }, [categories, selectedCategory]);
+
+  // Buscar configuração de uso de Edge Function
+  const establishmentId = getSelectedEstablishmentId();
+  const { data: hotelSettings } = useQuery({
+    queryKey: ["hotel_settings_edge_function", establishmentId],
+    queryFn: async () => {
+      if (!establishmentId) return null;
+      const { data } = await supabase
+        .from("hotel_settings")
+        .select("rate_system_settings")
+        .eq("establishment_id", establishmentId)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!establishmentId,
+  });
+
+  const useEdgeFunction = hotelSettings?.rate_system_settings?.use_edge_function ?? false;
 
   // Limpar cache quando o plano mudar
   useEffect(() => {
@@ -114,7 +148,7 @@ export const RateCalendarGrid = ({
           // Se não tem entrada, calcular usando a função
           if (!hasEntry) {
             try {
-              const price = await calculateRatePrice(category.id, selectedRatePlan, date);
+              const price = await calculateRatePrice(category.id, selectedRatePlan, date, 1, 0, useEdgeFunction);
               if (price > 0) {
                 newPrices.set(key, price);
               }
@@ -131,7 +165,7 @@ export const RateCalendarGrid = ({
     // Debounce para evitar muitas chamadas
     const timeoutId = setTimeout(calculateMissingPrices, 300);
     return () => clearTimeout(timeoutId);
-  }, [selectedRatePlan, filteredCategories, visibleDates, filteredRateCalendar, calculateRatePrice]);
+  }, [selectedRatePlan, filteredCategories, visibleDates, filteredRateCalendar, calculateRatePrice, useEdgeFunction]);
 
   const getRateForDate = async (planId: string, categoryId: string, date: Date) => {
     const dateStr = format(date, "yyyy-MM-dd");
@@ -163,6 +197,10 @@ export const RateCalendarGrid = ({
     childPrice?: number;
   }) => {
     try {
+      // Buscar informações para o log
+      const plan = ratePlans.find(p => p.id === data.planId);
+      const category = categories.find(c => c.id === data.categoryId);
+      
       await upsertRateCalendar([{
         pricing_plan_id: data.planId,
         category_id: data.categoryId,
@@ -171,6 +209,22 @@ export const RateCalendarGrid = ({
         adult_price: data.adultPrice,
         child_price: data.childPrice,
       }]);
+      
+      // Registrar log de atividade
+      await logActivity({
+        actionType: "updated",
+        entityType: "rate_calendar",
+        description: `Tarifa editada: ${category?.name || data.categoryId} - ${plan?.code || plan?.name || data.planId} (${format(data.date, "dd/MM/yyyy", { locale: ptBR })})`,
+        newValues: {
+          base_price: data.basePrice,
+          adult_price: data.adultPrice,
+          child_price: data.childPrice,
+          category: category?.name,
+          plan: plan?.code || plan?.name,
+          date: format(data.date, "yyyy-MM-dd"),
+        },
+      });
+      
       setEditingRate(null);
     } catch (error: any) {
       toast.error(error.message || "Erro ao salvar tarifa");
@@ -431,6 +485,39 @@ export const RateCalendarGrid = ({
                     const pickupRate = rateEntry?.pickup_rate || 0;
                     const isToday = isSameDay(date, new Date());
 
+                    const handleCellDoubleClick = async () => {
+                      try {
+                        // Tentar buscar detalhes via Edge Function
+                        const result = await applyDynamicPricingRules(
+                          category.id,
+                          selectedRatePlan,
+                          date
+                        );
+                        
+                        setSelectedPriceDetails({
+                          categoryId: category.id,
+                          date,
+                          basePrice: result.base_price,
+                          finalPrice: result.final_price,
+                          adjustments: result.adjustments_applied || [],
+                          metrics: result.metrics,
+                          autoApplyEnabled: result.auto_apply_enabled,
+                        });
+                        setPriceDetailsOpen(true);
+                      } catch (error) {
+                        // Se falhar, usar dados básicos
+                        setSelectedPriceDetails({
+                          categoryId: category.id,
+                          date,
+                          basePrice: Number(category.base_price) || 0,
+                          finalPrice: price,
+                          adjustments: [],
+                          autoApplyEnabled: false,
+                        });
+                        setPriceDetailsOpen(true);
+                      }
+                    };
+
                     return (
                       <div
                         key={date.toISOString()}
@@ -439,6 +526,8 @@ export const RateCalendarGrid = ({
                           isToday && "bg-blue-50"
                         )}
                         onClick={() => handleCellClick(selectedRatePlan, category.id, date)}
+                        onDoubleClick={handleCellDoubleClick}
+                        title="Clique para editar | Duplo clique para ver detalhes"
                         style={{
                           minWidth: viewDays <= 14 ? '90px' : viewDays <= 30 ? '70px' : viewDays <= 60 ? '50px' : '40px'
                         }}
@@ -530,6 +619,9 @@ export const RateCalendarGrid = ({
           }));
 
           await upsertRateCalendar(entries);
+          
+          // O log será registrado automaticamente pelo upsertRateCalendar
+          queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
         }}
       />
 
@@ -562,6 +654,19 @@ export const RateCalendarGrid = ({
           }
         }}
       />
+
+      {/* Price Details Dialog */}
+      {selectedPriceDetails && (
+        <PriceDetailsDialog
+          open={priceDetailsOpen}
+          onOpenChange={setPriceDetailsOpen}
+          basePrice={selectedPriceDetails.basePrice}
+          finalPrice={selectedPriceDetails.finalPrice}
+          adjustments={selectedPriceDetails.adjustments}
+          metrics={selectedPriceDetails.metrics}
+          autoApplyEnabled={selectedPriceDetails.autoApplyEnabled}
+        />
+      )}
     </div>
   );
 };

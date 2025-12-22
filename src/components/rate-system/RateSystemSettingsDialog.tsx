@@ -23,6 +23,7 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
 
   const [settings, setSettings] = useState({
     auto_apply_dynamic_rules: false,
+    use_edge_function: false, // Nova opção para usar Edge Function
     auto_sync_channels: false,
     sync_interval_hours: 24,
     default_rate_plan: "",
@@ -261,6 +262,22 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
                   onCheckedChange={(checked) => setSettings({ ...settings, auto_apply_dynamic_rules: checked })}
                 />
               </div>
+
+              {settings.auto_apply_dynamic_rules && (
+                <div className="flex items-center justify-between pl-4 border-l-2 border-purple-200 dark:border-purple-800">
+                  <div>
+                    <Label htmlFor="use_edge_function">Usar Edge Function para Cálculo</Label>
+                    <p className="text-sm text-gray-500">
+                      Usar Edge Function para garantir cálculo mais preciso e confiável das regras dinâmicas
+                    </p>
+                  </div>
+                  <Switch
+                    id="use_edge_function"
+                    checked={settings.use_edge_function}
+                    onCheckedChange={(checked) => setSettings({ ...settings, use_edge_function: checked })}
+                  />
+                </div>
+              )}
 
               <div className="flex items-center justify-between">
                 <div>

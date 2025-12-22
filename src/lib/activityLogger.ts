@@ -27,7 +27,10 @@ export type ActionType =
   | "dates_changed"
   | "amount_changed"
   | "guest_changed"
-  | "resolved";
+  | "resolved"
+  | "price_applied"
+  | "bulk_updated"
+  | "rule_applied";
 
 export type EntityType =
   | "reservation"
@@ -37,7 +40,11 @@ export type EntityType =
   | "payment"
   | "block"
   | "pending"
-  | "service_fee";
+  | "service_fee"
+  | "rate_calendar"
+  | "pricing_plan"
+  | "dynamic_pricing_rule"
+  | "rate_restriction";
 
 export interface ActivityLogParams {
   actionType: ActionType;

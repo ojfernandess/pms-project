@@ -4,6 +4,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { toast } from "sonner";
 import { format, eachDayOfInterval, startOfDay, addDays } from "date-fns";
+import { logActivity } from "@/lib/activityLogger";
 
 export interface RatePlan {
   id: string;
@@ -104,10 +105,27 @@ export const useRateSystem = () => {
         .single();
 
       if (error) throw error;
+      
+      // Registrar log de atividade
+      await logActivity({
+        actionType: "created",
+        entityType: "pricing_plan",
+        entityId: data.id,
+        entityCode: data.code || data.name,
+        description: `Plano tarifário "${data.name}" criado`,
+        newValues: {
+          name: data.name,
+          code: data.code,
+          plan_type: data.plan_type,
+          is_active: data.is_active,
+        },
+      });
+      
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_plans"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Plano tarifário criado com sucesso!");
     },
     onError: (error: any) => {
@@ -117,6 +135,13 @@ export const useRateSystem = () => {
 
   const updateRatePlan = useMutation({
     mutationFn: async ({ id, ...updates }: { id: string } & Partial<RatePlan>) => {
+      // Buscar valores antigos antes de atualizar
+      const { data: oldData } = await supabase
+        .from("pricing_plans")
+        .select("*")
+        .eq("id", id)
+        .single();
+
       const { data, error } = await supabase
         .from("pricing_plans")
         .update(updates)
@@ -125,10 +150,33 @@ export const useRateSystem = () => {
         .single();
 
       if (error) throw error;
+      
+      // Registrar log de atividade
+      await logActivity({
+        actionType: "updated",
+        entityType: "pricing_plan",
+        entityId: data.id,
+        entityCode: data.code || data.name,
+        description: `Plano tarifário "${data.name}" atualizado`,
+        oldValues: oldData ? {
+          name: oldData.name,
+          code: oldData.code,
+          plan_type: oldData.plan_type,
+          is_active: oldData.is_active,
+        } : undefined,
+        newValues: {
+          name: data.name,
+          code: data.code,
+          plan_type: data.plan_type,
+          is_active: data.is_active,
+        },
+      });
+      
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_plans"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Plano tarifário atualizado com sucesso!");
     },
     onError: (error: any) => {
@@ -138,12 +186,36 @@ export const useRateSystem = () => {
 
   const deleteRatePlan = useMutation({
     mutationFn: async (id: string) => {
+      // Buscar dados antes de deletar para o log
+      const { data: oldData } = await supabase
+        .from("pricing_plans")
+        .select("*")
+        .eq("id", id)
+        .single();
+
       const { error } = await supabase
         .from("pricing_plans")
         .delete()
         .eq("id", id);
 
       if (error) throw error;
+      
+      // Registrar log de atividade
+      if (oldData) {
+        await logActivity({
+          actionType: "deleted",
+          entityType: "pricing_plan",
+          entityId: id,
+          entityCode: oldData.code || oldData.name,
+          description: `Plano tarifário "${oldData.name}" excluído`,
+          oldValues: {
+            name: oldData.name,
+            code: oldData.code,
+            plan_type: oldData.plan_type,
+            is_active: oldData.is_active,
+          },
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_plans"] });
@@ -218,6 +290,20 @@ export const useRateSystem = () => {
         establishment_id: establishmentId,
       }));
 
+      // Buscar informações das categorias e planos para o log
+      const categoryIds = [...new Set(entries.map(e => e.category_id))];
+      const planIds = [...new Set(entries.map(e => e.pricing_plan_id))];
+      
+      const { data: categories } = await supabase
+        .from("room_categories")
+        .select("id, name")
+        .in("id", categoryIds);
+      
+      const { data: plans } = await supabase
+        .from("pricing_plans")
+        .select("id, name, code")
+        .in("id", planIds);
+
       const { data, error } = await supabase
         .from("rate_calendar")
         .upsert(entriesWithEstablishment, {
@@ -226,10 +312,40 @@ export const useRateSystem = () => {
         .select();
 
       if (error) throw error;
+      
+      // Registrar log de atividade
+      const dates = [...new Set(entries.map(e => e.date))].sort();
+      const dateRange = dates.length > 0 
+        ? dates.length === 1 
+          ? dates[0] 
+          : `${dates[0]} até ${dates[dates.length - 1]}`
+        : "";
+      
+      const categoryNames = categories?.map(c => c.name).join(", ") || "";
+      const planNames = plans?.map(p => p.code || p.name).join(", ") || "";
+      
+      await logActivity({
+        actionType: "updated",
+        entityType: "rate_calendar",
+        description: `Tarifas atualizadas: ${categoryNames} - ${planNames} (${entries.length} entrada(s), ${dateRange})`,
+        newValues: {
+          entries_count: entries.length,
+          categories: categoryNames,
+          plans: planNames,
+          date_range: dateRange,
+        },
+        metadata: {
+          categories_count: categoryIds.length,
+          plans_count: planIds.length,
+          dates_count: dates.length,
+        },
+      });
+      
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Tarifas atualizadas com sucesso!");
     },
     onError: (error: any) => {
@@ -309,6 +425,40 @@ export const useRateSystem = () => {
 
       if (error) throw error;
       
+      // Buscar informações para o log
+      const { data: category } = await supabase
+        .from("room_categories")
+        .select("name")
+        .eq("id", categoryId)
+        .single();
+      
+      const { data: plan } = await supabase
+        .from("pricing_plans")
+        .select("name, code")
+        .eq("id", planId)
+        .single();
+      
+      // Registrar log de atividade
+      await logActivity({
+        actionType: "bulk_updated",
+        entityType: "rate_calendar",
+        description: `Tarifas atualizadas em lote: ${category?.name || categoryId} - ${plan?.code || plan?.name || planId} (${format(startDate, "dd/MM/yyyy")} até ${format(endDate, "dd/MM/yyyy")})`,
+        newValues: {
+          adjustment_type: adjustmentType,
+          adjustment_value: adjustmentValue,
+          category: category?.name,
+          plan: plan?.code || plan?.name,
+          date_range: `${format(startDate, "dd/MM/yyyy")} até ${format(endDate, "dd/MM/yyyy")}`,
+          entries_count: entries.length,
+        },
+        metadata: {
+          category_id: categoryId,
+          plan_id: planId,
+          start_date: format(startDate, "yyyy-MM-dd"),
+          end_date: format(endDate, "yyyy-MM-dd"),
+        },
+      });
+      
       // Invalidar cache (incluindo establishment_id para garantir)
       queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
       queryClient.invalidateQueries({ queryKey: ["rate_calendar", establishmentId] });
@@ -316,6 +466,7 @@ export const useRateSystem = () => {
       return data;
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Tarifas atualizadas com sucesso!");
     },
     onError: (error: any) => {
@@ -354,10 +505,29 @@ export const useRateSystem = () => {
         .single();
 
       if (error) throw error;
+      
+      // Registrar log de atividade
+      await logActivity({
+        actionType: "created",
+        entityType: "dynamic_pricing_rule",
+        entityId: data.id,
+        entityCode: data.name,
+        description: `Regra dinâmica "${data.name}" criada`,
+        newValues: {
+          name: data.name,
+          trigger_type: data.trigger_type,
+          adjustment_type: data.adjustment_type,
+          adjustment_value: data.adjustment_value,
+          priority: data.priority,
+          is_active: data.is_active,
+        },
+      });
+      
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dynamic_pricing_rules"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica criada com sucesso!");
     },
     onError: (error: any) => {
@@ -367,6 +537,13 @@ export const useRateSystem = () => {
 
   const updateDynamicRule = useMutation({
     mutationFn: async ({ id, ...updates }: { id: string } & Partial<DynamicPricingRule>) => {
+      // Buscar valores antigos antes de atualizar
+      const { data: oldData } = await supabase
+        .from("dynamic_pricing_rules")
+        .select("*")
+        .eq("id", id)
+        .single();
+
       const { data, error } = await supabase
         .from("dynamic_pricing_rules")
         .update(updates)
@@ -375,10 +552,37 @@ export const useRateSystem = () => {
         .single();
 
       if (error) throw error;
+      
+      // Registrar log de atividade
+      await logActivity({
+        actionType: "updated",
+        entityType: "dynamic_pricing_rule",
+        entityId: data.id,
+        entityCode: data.name,
+        description: `Regra dinâmica "${data.name}" atualizada`,
+        oldValues: oldData ? {
+          name: oldData.name,
+          trigger_type: oldData.trigger_type,
+          adjustment_type: oldData.adjustment_type,
+          adjustment_value: oldData.adjustment_value,
+          priority: oldData.priority,
+          is_active: oldData.is_active,
+        } : undefined,
+        newValues: {
+          name: data.name,
+          trigger_type: data.trigger_type,
+          adjustment_type: data.adjustment_type,
+          adjustment_value: data.adjustment_value,
+          priority: data.priority,
+          is_active: data.is_active,
+        },
+      });
+      
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dynamic_pricing_rules"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica atualizada com sucesso!");
     },
     onError: (error: any) => {
@@ -388,15 +592,42 @@ export const useRateSystem = () => {
 
   const deleteDynamicRule = useMutation({
     mutationFn: async (id: string) => {
+      // Buscar dados antes de deletar para o log
+      const { data: oldData } = await supabase
+        .from("dynamic_pricing_rules")
+        .select("*")
+        .eq("id", id)
+        .single();
+
       const { error } = await supabase
         .from("dynamic_pricing_rules")
         .delete()
         .eq("id", id);
 
       if (error) throw error;
+      
+      // Registrar log de atividade
+      if (oldData) {
+        await logActivity({
+          actionType: "deleted",
+          entityType: "dynamic_pricing_rule",
+          entityId: id,
+          entityCode: oldData.name,
+          description: `Regra dinâmica "${oldData.name}" excluída`,
+          oldValues: {
+            name: oldData.name,
+            trigger_type: oldData.trigger_type,
+            adjustment_type: oldData.adjustment_type,
+            adjustment_value: oldData.adjustment_value,
+            priority: oldData.priority,
+            is_active: oldData.is_active,
+          },
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dynamic_pricing_rules"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica excluída com sucesso!");
     },
     onError: (error: any) => {
@@ -434,10 +665,27 @@ export const useRateSystem = () => {
         .single();
 
       if (error) throw error;
+      
+      // Registrar log de atividade
+      await logActivity({
+        actionType: "created",
+        entityType: "rate_restriction",
+        entityId: data.id,
+        description: `Restrição de tarifa criada: ${data.restriction_type} (${format(new Date(data.start_date), "dd/MM/yyyy")} até ${format(new Date(data.end_date), "dd/MM/yyyy")})`,
+        newValues: {
+          restriction_type: data.restriction_type,
+          start_date: data.start_date,
+          end_date: data.end_date,
+          value: data.value,
+          is_active: data.is_active,
+        },
+      });
+      
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_restrictions"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição criada com sucesso!");
     },
     onError: (error: any) => {
@@ -447,6 +695,13 @@ export const useRateSystem = () => {
 
   const updateRestriction = useMutation({
     mutationFn: async ({ id, ...updates }: { id: string } & Partial<RateRestriction>) => {
+      // Buscar valores antigos antes de atualizar
+      const { data: oldData } = await supabase
+        .from("rate_restrictions")
+        .select("*")
+        .eq("id", id)
+        .single();
+
       const { data, error } = await supabase
         .from("rate_restrictions")
         .update(updates)
@@ -455,10 +710,34 @@ export const useRateSystem = () => {
         .single();
 
       if (error) throw error;
+      
+      // Registrar log de atividade
+      await logActivity({
+        actionType: "updated",
+        entityType: "rate_restriction",
+        entityId: data.id,
+        description: `Restrição de tarifa atualizada: ${data.restriction_type} (${format(new Date(data.start_date), "dd/MM/yyyy")} até ${format(new Date(data.end_date), "dd/MM/yyyy")})`,
+        oldValues: oldData ? {
+          restriction_type: oldData.restriction_type,
+          start_date: oldData.start_date,
+          end_date: oldData.end_date,
+          value: oldData.value,
+          is_active: oldData.is_active,
+        } : undefined,
+        newValues: {
+          restriction_type: data.restriction_type,
+          start_date: data.start_date,
+          end_date: data.end_date,
+          value: data.value,
+          is_active: data.is_active,
+        },
+      });
+      
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_restrictions"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição atualizada com sucesso!");
     },
     onError: (error: any) => {
@@ -468,15 +747,40 @@ export const useRateSystem = () => {
 
   const deleteRestriction = useMutation({
     mutationFn: async (id: string) => {
+      // Buscar dados antes de deletar para o log
+      const { data: oldData } = await supabase
+        .from("rate_restrictions")
+        .select("*")
+        .eq("id", id)
+        .single();
+
       const { error } = await supabase
         .from("rate_restrictions")
         .delete()
         .eq("id", id);
 
       if (error) throw error;
+      
+      // Registrar log de atividade
+      if (oldData) {
+        await logActivity({
+          actionType: "deleted",
+          entityType: "rate_restriction",
+          entityId: id,
+          description: `Restrição de tarifa excluída: ${oldData.restriction_type} (${format(new Date(oldData.start_date), "dd/MM/yyyy")} até ${format(new Date(oldData.end_date), "dd/MM/yyyy")})`,
+          oldValues: {
+            restriction_type: oldData.restriction_type,
+            start_date: oldData.start_date,
+            end_date: oldData.end_date,
+            value: oldData.value,
+            is_active: oldData.is_active,
+          },
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_restrictions"] });
+      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição excluída com sucesso!");
     },
     onError: (error: any) => {
@@ -490,11 +794,24 @@ export const useRateSystem = () => {
     planId: string,
     date: Date,
     adults: number = 1,
-    children: number = 0
+    children: number = 0,
+    useEdgeFunction: boolean = false
   ): Promise<number> => {
     const establishmentId = getEstablishmentId();
     if (!establishmentId) return 0;
 
+    // Se useEdgeFunction for true, usar Edge Function
+    if (useEdgeFunction) {
+      try {
+        const result = await applyDynamicPricingRules(categoryId, planId, date, adults, children);
+        return result.final_price;
+      } catch (error) {
+        console.error("Erro ao usar Edge Function, usando fallback:", error);
+        // Fallback para função PostgreSQL
+      }
+    }
+
+    // Usar função PostgreSQL (padrão)
     const { data, error } = await supabase.rpc("calculate_rate_price", {
       p_establishment_id: establishmentId,
       p_category_id: categoryId,
@@ -510,6 +827,68 @@ export const useRateSystem = () => {
     }
 
     return Number(data || 0);
+  };
+
+  // Função para aplicar regras dinâmicas via Edge Function (com informações detalhadas)
+  const applyDynamicPricingRules = async (
+    categoryId: string,
+    planId: string,
+    date: Date | string,
+    adults: number = 1,
+    children: number = 0
+  ): Promise<{
+    final_price: number;
+    base_price: number;
+    adjustments_applied: Array<{
+      rule_id: string;
+      rule_name: string;
+      adjustment_type: string;
+      adjustment_value: number;
+      final_adjustment: number;
+    }>;
+    auto_apply_enabled: boolean;
+    metrics?: {
+      occupancy: number;
+      pickup_rate: number;
+      has_local_event: boolean;
+      event_impact: number;
+    };
+  }> => {
+    const establishmentId = getEstablishmentId();
+    if (!establishmentId) {
+      throw new Error("Establishment ID não encontrado");
+    }
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!supabaseUrl) {
+      throw new Error("VITE_SUPABASE_URL não configurado");
+    }
+
+    const functionUrl = `${supabaseUrl}/functions/v1/apply-dynamic-pricing-rules`;
+    const response = await fetch(functionUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": session ? `Bearer ${session.access_token}` : "",
+      },
+      body: JSON.stringify({
+        establishment_id: establishmentId,
+        category_id: categoryId,
+        pricing_plan_id: planId,
+        date: format(date, "yyyy-MM-dd"),
+        adults,
+        children,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: "Erro desconhecido" }));
+      throw new Error(errorData.error || `Erro ${response.status}: ${response.statusText}`);
+    }
+
+    return await response.json();
   };
 
   return {
@@ -543,6 +922,7 @@ export const useRateSystem = () => {
 
     // Calculate Price
     calculateRatePrice,
+    applyDynamicPricingRules,
 
     // Loading states
     isLoading: ratePlansQuery.isLoading || rateCalendarQuery.isLoading || dynamicRulesQuery.isLoading || restrictionsQuery.isLoading,
