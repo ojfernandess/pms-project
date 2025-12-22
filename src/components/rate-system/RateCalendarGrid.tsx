@@ -185,6 +185,11 @@ export const RateCalendarGrid = ({
     return 'bg-blue-500';
   };
 
+  // Obter informações do plano selecionado
+  const selectedPlanInfo = useMemo(() => {
+    return ratePlans.find(p => p.id === selectedRatePlan);
+  }, [ratePlans, selectedRatePlan]);
+
   if (!selectedRatePlan) {
     return (
       <Card className="p-8 text-center">
@@ -200,18 +205,32 @@ export const RateCalendarGrid = ({
         <div className="flex items-center gap-4">
           <div className="flex-1">
             <Label className="mb-1">Plano Tarifário</Label>
-            <Select value={selectedRatePlan} onValueChange={onPlanChange}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ratePlans.filter(p => p.is_active).map(plan => (
-                  <SelectItem key={plan.id} value={plan.id}>
-                    {plan.name} {plan.code && `(${plan.code})`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2">
+              <Select value={selectedRatePlan} onValueChange={onPlanChange}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ratePlans.filter(p => p.is_active).map(plan => (
+                    <SelectItem key={plan.id} value={plan.id}>
+                      {plan.name} {plan.code && `(${plan.code})`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedPlanInfo && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 rounded-md border border-purple-200 dark:border-purple-800">
+                  <div 
+                    className="w-3 h-3 rounded-full" 
+                    style={{ backgroundColor: selectedPlanInfo.color || '#9333EA' }}
+                  ></div>
+                  <span className="text-sm font-semibold text-purple-900 dark:text-purple-100">
+                    Visualizando: {selectedPlanInfo.name}
+                    {selectedPlanInfo.code && ` (${selectedPlanInfo.code})`}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex-1">
@@ -300,6 +319,38 @@ export const RateCalendarGrid = ({
       <Card className="p-0 overflow-x-auto">
         <div className="min-w-full">
           <div className="bg-slate-100 border-b-2 border-slate-300">
+            {/* Plan Info Header */}
+            {selectedPlanInfo && (
+              <div className="bg-purple-50 dark:bg-purple-950/20 border-b border-purple-200 dark:border-purple-800 px-4 py-2">
+                <div className="flex items-center gap-3">
+                  <div 
+                    className="w-4 h-4 rounded-full" 
+                    style={{ backgroundColor: selectedPlanInfo.color || '#9333EA' }}
+                  ></div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-purple-900 dark:text-purple-100 text-sm">
+                        Plano Tarifário:
+                      </span>
+                      <span className="font-bold text-purple-900 dark:text-purple-100">
+                        {selectedPlanInfo.name}
+                        {selectedPlanInfo.code && ` (${selectedPlanInfo.code})`}
+                      </span>
+                      {selectedPlanInfo.plan_type && (
+                        <span className="text-xs text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 rounded">
+                          {selectedPlanInfo.plan_type}
+                        </span>
+                      )}
+                    </div>
+                    {selectedPlanInfo.description && (
+                      <p className="text-xs text-purple-700 dark:text-purple-300 mt-0.5">
+                        {selectedPlanInfo.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             {/* Header Row */}
             <div className="flex border-b border-slate-200">
               <div className="w-48 sm:w-56 flex-shrink-0 p-2 border-r border-slate-300 bg-slate-200 font-semibold text-xs flex items-center">

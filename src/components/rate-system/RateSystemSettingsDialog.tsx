@@ -76,21 +76,62 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
     mutationFn: async (newSettings: typeof settings) => {
       if (!establishmentId) throw new Error("Establishment ID não encontrado");
 
-      // Atualizar ou criar configurações
-      const { data, error } = await supabase
+      // Verificar se já existe um registro para este estabelecimento
+      const { data: existing, error: checkError } = await supabase
         .from("hotel_settings")
-        .upsert({
-          establishment_id: establishmentId,
-          rate_system_settings: newSettings,
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: "establishment_id",
-        })
-        .select()
-        .single();
+        .select("id")
+        .eq("establishment_id", establishmentId)
+        .maybeSingle();
 
-      if (error) throw error;
-      return data;
+      if (checkError && checkError.code !== "PGRST116") {
+        throw checkError;
+      }
+
+      // Preparar dados para inserção/atualização
+      const updateData: any = {
+        establishment_id: establishmentId,
+        rate_system_settings: newSettings,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Se já existe, fazer update; caso contrário, fazer insert
+      if (existing) {
+        const { data, error } = await supabase
+          .from("hotel_settings")
+          .update(updateData)
+          .eq("establishment_id", establishmentId)
+          .select()
+          .single();
+
+        if (error) {
+          console.error("Erro ao atualizar hotel_settings:", error);
+          throw error;
+        }
+        return data;
+      } else {
+        // Buscar nome do estabelecimento para usar como name
+        const { data: establishment, error: estError } = await supabase
+          .from("establishments")
+          .select("name")
+          .eq("id", establishmentId)
+          .single();
+
+        // Adicionar campos obrigatórios para criação
+        updateData.name = establishment?.name || "Configurações do Estabelecimento";
+        updateData.created_at = new Date().toISOString();
+
+        const { data, error } = await supabase
+          .from("hotel_settings")
+          .insert(updateData)
+          .select()
+          .single();
+
+        if (error) {
+          console.error("Erro ao inserir hotel_settings:", error);
+          throw error;
+        }
+        return data;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_system_settings"] });

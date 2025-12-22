@@ -816,7 +816,12 @@ export const PriceDashboardView = () => {
                         max="30"
                         value={planData.adjustment}
                         onChange={(e) => handleRatePlanAdjustmentChange(plan.id, parseInt(e.target.value))}
-                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary"
+                        className={cn(
+                          "w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500",
+                          "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-green-500 [&::-webkit-slider-thumb]:cursor-pointer",
+                          "[&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-green-500 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer",
+                          !planData.active && "opacity-50 cursor-not-allowed"
+                        )}
                         disabled={!planData.active}
                       />
                     </div>
@@ -829,12 +834,15 @@ export const PriceDashboardView = () => {
                       className="w-16 text-center"
                       disabled={!planData.active}
                     />
-                    <Input
-                      type="text"
-                      value={`${planData.adjustment}%`}
-                      readOnly
-                      className="w-16 text-center bg-muted"
-                    />
+                    <div className="w-16 text-center">
+                      <span className={cn(
+                        "text-sm font-semibold text-green-600 dark:text-green-500",
+                        !planData.active && "opacity-50"
+                      )}>
+                        {planData.adjustment > 0 && "+"}
+                        {planData.adjustment}%
+                      </span>
+                    </div>
                   </div>
                 );
               })}
