@@ -561,26 +561,26 @@ const Employees = () => {
           <p className="text-muted-foreground">Gerencie os funcionários e funções do estabelecimento</p>
         </div>
         {activeTab === "employees" && (
-          <Button
-            onClick={() => {
-              setSelectedEmployeeId(undefined);
-              setCreateNewUser(false);
-              setFormData({
-                user_id: "",
-                role_id: "",
-                full_name: "",
-                cpf: "",
-                phone: "",
-                email: "",
-                password: "",
-                is_active: true,
-              });
-              setDialogOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Novo Funcionário
-          </Button>
+        <Button
+          onClick={() => {
+            setSelectedEmployeeId(undefined);
+            setCreateNewUser(false);
+            setFormData({
+              user_id: "",
+              role_id: "",
+              full_name: "",
+              cpf: "",
+              phone: "",
+              email: "",
+              password: "",
+              is_active: true,
+            });
+            setDialogOpen(true);
+          }}
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Novo Funcionário
+        </Button>
         )}
       </div>
 

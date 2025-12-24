@@ -67,8 +67,8 @@ export const DynamicRulesView = ({
   };
 
   const handleSave = (rule: Partial<DynamicPricingRule>) => {
-    if (selectedRule) {
-      onUpdate(selectedRule.id, rule);
+    if (selectedRule && selectedRule.id) {
+      onUpdate({ id: selectedRule.id, ...rule });
     } else {
       onCreate(rule);
     }
@@ -89,6 +89,29 @@ export const DynamicRulesView = ({
   };
 
   const getAdjustmentLabel = (rule: DynamicPricingRule) => {
+    // Verificar se tem o novo formato de faixas de ocupação
+    if (rule.trigger_type === "occupancy" && rule.trigger_condition?.occupancy_ranges) {
+      const ranges = rule.trigger_condition.occupancy_ranges;
+      if (Array.isArray(ranges) && ranges.length > 0) {
+        // Mostrar resumo das faixas
+        const adjustments = ranges
+          .map((r: any) => {
+            const adj = r.adjustment || 0;
+            const min = r.min || 0;
+            const max = r.max || 100;
+            if (adj === 0) return null;
+            return `${min}-${max}%: ${adj > 0 ? "+" : ""}${adj}%`;
+          })
+          .filter(Boolean);
+        
+        if (adjustments.length > 0) {
+          return adjustments.join(", ");
+        }
+        return "0% (sem ajustes)";
+      }
+    }
+    
+    // Formato antigo ou outros tipos
     if (rule.adjustment_type === "percentage") {
       return `${rule.adjustment_value > 0 ? "+" : ""}${rule.adjustment_value}%`;
     } else if (rule.adjustment_type === "fixed") {
@@ -165,16 +188,55 @@ export const DynamicRulesView = ({
                       <Badge variant="outline">{getTriggerTypeLabel(rule.trigger_type)}</Badge>
                     </td>
                     <td className="px-6 py-4">
-                      <Badge variant={rule.adjustment_value > 0 ? "default" : "secondary"}>
-                        {getAdjustmentLabel(rule)}
-                      </Badge>
+                      {rule.trigger_type === "occupancy" && rule.trigger_condition?.occupancy_ranges ? (
+                        <div className="space-y-1">
+                          {rule.trigger_condition.occupancy_ranges.map((range: any, idx: number) => {
+                            const adj = range.adjustment || 0;
+                            if (adj === 0 && idx > 0) return null; // Omitir média ocupação se for 0
+                            return (
+                              <Badge 
+                                key={idx}
+                                variant={adj > 0 ? "default" : adj < 0 ? "destructive" : "secondary"}
+                                className="mr-1"
+                              >
+                                {range.min}-{range.max}%: {adj > 0 ? "+" : ""}{adj}%
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <Badge variant={rule.adjustment_value > 0 ? "default" : "secondary"}>
+                          {getAdjustmentLabel(rule)}
+                        </Badge>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm text-gray-600">
                         {rule.start_date && rule.end_date ? (
                           <>
-                            {format(new Date(rule.start_date), "dd/MM/yyyy", { locale: ptBR })} -{" "}
-                            {format(new Date(rule.end_date), "dd/MM/yyyy", { locale: ptBR })}
+                            {(() => {
+                              // Parse date string without timezone conversion
+                              const parseDateStr = (dateStr: string) => {
+                                if (typeof dateStr === 'string') {
+                                  const dateParts = dateStr.split('T')[0].split('-');
+                                  if (dateParts.length === 3) {
+                                    const year = parseInt(dateParts[0], 10);
+                                    const month = parseInt(dateParts[1], 10) - 1;
+                                    const day = parseInt(dateParts[2], 10);
+                                    return new Date(year, month, day);
+                                  }
+                                }
+                                return new Date(dateStr);
+                              };
+                              const startDate = parseDateStr(rule.start_date);
+                              const endDate = parseDateStr(rule.end_date);
+                              return (
+                                <>
+                                  {format(startDate, "dd/MM/yyyy", { locale: ptBR })} -{" "}
+                                  {format(endDate, "dd/MM/yyyy", { locale: ptBR })}
+                                </>
+                              );
+                            })()}
                           </>
                         ) : (
                           <span className="text-gray-400">Sem limite</span>

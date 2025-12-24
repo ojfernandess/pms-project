@@ -254,39 +254,6 @@ export const CreateRateDialog = ({
       );
 
       if (savedCount > 0) {
-        // Registrar log de atividade
-        const establishmentId = getSelectedEstablishmentId();
-        if (establishmentId) {
-          const categoryNames = selectedCategories.map(catId => 
-            categories.find(c => c.id === catId)?.name || catId
-          ).join(", ");
-          const planNames = selectedCategories.flatMap(catId => 
-            (categoryPlans[catId] || []).map(planId => {
-              const plan = ratePlans.find(p => p.id === planId);
-              return plan?.code || plan?.name || planId;
-            })
-          ).filter((v, i, a) => a.indexOf(v) === i).join(", ");
-          
-          await logActivity({
-            actionType: "created",
-            entityType: "rate_calendar",
-            description: `Tarifários criados: ${categoryNames} - ${planNames} (${format(startDate, "dd/MM/yyyy", { locale: ptBR })} até ${format(endDate, "dd/MM/yyyy", { locale: ptBR })})`,
-            newValues: {
-              categories: categoryNames,
-              plans: planNames,
-              date_range: `${format(startDate, "dd/MM/yyyy", { locale: ptBR })} até ${format(endDate, "dd/MM/yyyy", { locale: ptBR })}`,
-              entries_count: savedCount,
-            },
-            metadata: {
-              start_date: format(startDate, "yyyy-MM-dd"),
-              end_date: format(endDate, "yyyy-MM-dd"),
-              categories_count: selectedCategories.length,
-              total_combinations: totalCombinations,
-              days_count: daysCount,
-            },
-          });
-        }
-        
         if (errors.length > 0) {
           toast.warning(`${savedCount} de ${totalCombinations} tarifário(s) criado(s). ${errors.length} falharam.`);
         } else {

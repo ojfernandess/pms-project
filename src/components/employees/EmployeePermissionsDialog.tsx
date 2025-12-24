@@ -413,18 +413,18 @@ export const EmployeePermissionsDialog = ({
           // (já é negado por padrão e não há necessidade de customização)
         } else {
           // Se pelo menos uma ação está marcada, usar objeto com todas as ações explicitamente
-          const permObject: Record<string, boolean> = {
-            read: modulePerms.read || false,
-            create: modulePerms.create || false,
-            update: modulePerms.update || false,
-            delete: modulePerms.delete || false,
-          };
-          // Adicionar ações específicas do módulo
-          moduleSpecificActions.forEach((action) => {
-            permObject[action.key] = modulePerms[action.key] || false;
-          });
-          customPermissions[module.key] = permObject;
-        }
+            const permObject: Record<string, boolean> = {
+              read: modulePerms.read || false,
+              create: modulePerms.create || false,
+              update: modulePerms.update || false,
+              delete: modulePerms.delete || false,
+            };
+            // Adicionar ações específicas do módulo
+            moduleSpecificActions.forEach((action) => {
+              permObject[action.key] = modulePerms[action.key] || false;
+            });
+            customPermissions[module.key] = permObject;
+          }
       });
 
       // Salvar no banco de dados

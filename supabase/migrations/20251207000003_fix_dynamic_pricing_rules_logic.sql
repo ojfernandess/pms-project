@@ -161,15 +161,15 @@ BEGIN
         -- Obter trigger_condition
         v_trigger_condition := v_rule.trigger_condition;
         
-        -- Verificar condições do trigger baseado no trigger_type
+        -- Verificar condições do trigger baseado no trigger_type e métricas habilitadas
         DECLARE
           v_should_apply BOOLEAN := false;
         BEGIN
           -- Trigger: Ocupação
           IF v_rule.trigger_type = 'occupancy' THEN
-            -- Verificar se use_occupancy está habilitado (se a coluna existir)
-            IF v_rule.use_occupancy IS NULL OR v_rule.use_occupancy = true THEN
-              IF v_occupancy IS NOT NULL THEN
+            -- Verificar se use_occupancy está habilitado
+            IF (v_rule.use_occupancy IS NULL OR v_rule.use_occupancy = true) THEN
+              IF v_occupancy IS NOT NULL AND v_occupancy >= 0 THEN
                 -- Verificar condições específicas do trigger_condition
                 v_min_occupancy := (v_trigger_condition->>'min_occupancy')::DECIMAL;
                 v_max_occupancy := (v_trigger_condition->>'max_occupancy')::DECIMAL;
@@ -194,9 +194,9 @@ BEGIN
 
           -- Trigger: Pickup Rate (Booking Velocity)
           IF v_rule.trigger_type = 'booking_velocity' THEN
-            -- Verificar se use_pickup_rate está habilitado (se a coluna existir)
-            IF v_rule.use_pickup_rate IS NULL OR v_rule.use_pickup_rate = true THEN
-              IF v_pickup_rate IS NOT NULL THEN
+            -- Verificar se use_pickup_rate está habilitado
+            IF (v_rule.use_pickup_rate IS NULL OR v_rule.use_pickup_rate = true) THEN
+              IF v_pickup_rate IS NOT NULL AND v_pickup_rate >= 0 THEN
                 -- Verificar condições específicas do trigger_condition
                 v_min_bookings := (v_trigger_condition->>'min_bookings')::INTEGER;
                 
@@ -268,19 +268,19 @@ BEGIN
 
           -- Trigger: Eventos Locais
           IF v_rule.trigger_type = 'local_event' THEN
-            -- Verificar se use_local_events está habilitado (se a coluna existir)
-            IF v_rule.use_local_events IS NULL OR v_rule.use_local_events = true THEN
+            -- Verificar se use_local_events está habilitado
+            IF (v_rule.use_local_events IS NULL OR v_rule.use_local_events = true) THEN
               IF v_has_local_event THEN
                 v_should_apply := true;
               END IF;
             END IF;
           END IF;
 
-          -- Trigger: Histórico de Demanda
+          -- Trigger: Histórico de Demanda (Custom)
           IF v_rule.trigger_type = 'custom' THEN
-            -- Verificar se use_demand_history está habilitado (se a coluna existir)
-            IF v_rule.use_demand_history IS NULL OR v_rule.use_demand_history = true THEN
-              IF v_demand_score IS NOT NULL THEN
+            -- Verificar se use_demand_history está habilitado
+            IF (v_rule.use_demand_history IS NULL OR v_rule.use_demand_history = true) THEN
+              IF v_demand_score IS NOT NULL AND v_demand_score >= 0 THEN
                 -- Verificar condições específicas do trigger_condition
                 DECLARE
                   v_min_score DECIMAL(5,2);

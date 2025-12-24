@@ -63,10 +63,10 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
       setTimeout(() => {
         navigate("/user-dashboard", { replace: true });
       }, 2000);
-      return;
-    }
+        return;
+      }
 
-    // Verificar permissão baseada no role (usando customPermissions se disponível)
+      // Verificar permissão baseada no role (usando customPermissions se disponível)
     const access = checkPermission(role, feature, undefined, customPermissions);
     setHasAccess(access);
     setHasChecked(true);
@@ -100,7 +100,7 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
   }
 
   // Se não tem acesso, mostrar mensagem de erro
-  if (!hasAccess) {
+    if (!hasAccess) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <Card className="p-8 max-w-md w-full text-center">

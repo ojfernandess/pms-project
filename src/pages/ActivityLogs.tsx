@@ -73,9 +73,8 @@ const actionTypeLabels: Record<string, string> = {
   amount_changed: "Valor Alterado",
   guest_changed: "Hóspede Alterado",
   resolved: "Resolvido",
-  price_applied: "Preço Aplicado",
-  bulk_updated: "Atualização em Lote",
-  rule_applied: "Regra Aplicada",
+  rate_updated: "Tarifa Atualizada",
+  dynamic_rule_applied: "Regra Dinâmica Aplicada",
 };
 
 const entityTypeLabels: Record<string, string> = {
@@ -86,10 +85,8 @@ const entityTypeLabels: Record<string, string> = {
   payment: "Pagamento",
   block: "Bloqueio",
   pending: "Pendência",
-  rate_calendar: "Calendário de Tarifas",
-  pricing_plan: "Plano Tarifário",
+  rate_calendar: "Tarifário",
   dynamic_pricing_rule: "Regra Dinâmica",
-  rate_restriction: "Restrição de Tarifa",
 };
 
 const actionTypeColors: Record<string, string> = {
@@ -111,6 +108,8 @@ const actionTypeColors: Record<string, string> = {
   service_fee_updated: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
   service_fee_removed: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
   resolved: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+  rate_updated: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
+  dynamic_rule_applied: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100",
 };
 
 const ActivityLogs = () => {

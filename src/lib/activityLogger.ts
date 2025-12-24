@@ -28,9 +28,8 @@ export type ActionType =
   | "amount_changed"
   | "guest_changed"
   | "resolved"
-  | "price_applied"
-  | "bulk_updated"
-  | "rule_applied";
+  | "rate_updated"
+  | "dynamic_rule_applied";
 
 export type EntityType =
   | "reservation"
@@ -42,9 +41,7 @@ export type EntityType =
   | "pending"
   | "service_fee"
   | "rate_calendar"
-  | "pricing_plan"
-  | "dynamic_pricing_rule"
-  | "rate_restriction";
+  | "dynamic_pricing_rule";
 
 export interface ActivityLogParams {
   actionType: ActionType;
@@ -55,6 +52,7 @@ export interface ActivityLogParams {
   oldValues?: Record<string, any>;
   newValues?: Record<string, any>;
   metadata?: Record<string, any>;
+  userId?: string | null; // Permite especificar user_id (null = Sistema)
 }
 
 /**
@@ -62,7 +60,6 @@ export interface ActivityLogParams {
  */
 export async function logActivity(params: ActivityLogParams): Promise<void> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
     const establishmentId = getSelectedEstablishmentId();
 
     if (!establishmentId) {
@@ -70,11 +67,21 @@ export async function logActivity(params: ActivityLogParams): Promise<void> {
       return;
     }
 
+    // Se userId foi especificado, usar ele (permite null para "Sistema")
+    // Caso contrário, buscar o usuário atual
+    let userId: string | null = null;
+    if (params.userId !== undefined) {
+      userId = params.userId;
+    } else {
+      const { data: { user } } = await supabase.auth.getUser();
+      userId = user?.id || null;
+    }
+
     // Chamar a função do banco de dados
     // Ordem dos parâmetros: obrigatórios primeiro, depois opcionais
     const { error } = await supabase.rpc("log_activity", {
       p_establishment_id: establishmentId,
-      p_user_id: user?.id || null,
+      p_user_id: userId,
       p_action_type: params.actionType,
       p_entity_type: params.entityType,
       p_description: params.description,
@@ -93,6 +100,16 @@ export async function logActivity(params: ActivityLogParams): Promise<void> {
     console.error("❌ Erro ao registrar log de atividade:", error);
     // Não lançar erro para não interromper o fluxo principal
   }
+}
+
+/**
+ * Registra uma atividade do sistema (usuário = "Sistema")
+ */
+export async function logSystemActivity(params: Omit<ActivityLogParams, 'userId'>): Promise<void> {
+  return logActivity({
+    ...params,
+    userId: null, // Sistema
+  });
 }
 
 /**

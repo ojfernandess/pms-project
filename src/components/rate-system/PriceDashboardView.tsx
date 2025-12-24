@@ -453,32 +453,6 @@ export const PriceDashboardView = () => {
       if (errors.length > 0) {
         throw new Error(`Erros ao aplicar preços:\n${errors.join('\n')}`);
       }
-
-      // Calcular totais para o log
-      const totalEntries = ratePlans.filter(p => ratePlanAdjustments[p.id]?.active).length * categories.length * dates.length;
-      const activePlansCount = ratePlans.filter(p => ratePlanAdjustments[p.id]?.active).length;
-      const planNames = ratePlans.filter(p => ratePlanAdjustments[p.id]?.active).map(p => p.code || p.name).join(", ");
-      const categoryNames = categories.map(c => c.name).join(", ");
-
-      // Registrar log de atividade
-      await logActivity({
-        actionType: "price_applied",
-        entityType: "rate_calendar",
-        description: `Preços aplicados via Dashboard: ${planNames} - ${categoryNames} (${format(startDate, "dd/MM/yyyy", { locale: ptBR })} até ${format(endDate, "dd/MM/yyyy", { locale: ptBR })})`,
-        newValues: {
-          base_price: basePrice,
-          period: `${format(startDate, "dd/MM/yyyy", { locale: ptBR })} até ${format(endDate, "dd/MM/yyyy", { locale: ptBR })}`,
-          plans_count: activePlansCount,
-          categories_count: categories.length,
-          entries_count: totalEntries,
-        },
-        metadata: {
-          start_date: format(startDate, "yyyy-MM-dd"),
-          end_date: format(endDate, "yyyy-MM-dd"),
-          plans: planNames,
-          categories: categoryNames,
-        },
-      });
     },
     onSuccess: () => {
       const periodText = `${format(startDate, "dd/MM/yyyy", { locale: ptBR })} até ${format(endDate, "dd/MM/yyyy", { locale: ptBR })}`;
@@ -486,7 +460,6 @@ export const PriceDashboardView = () => {
       queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
       queryClient.invalidateQueries({ queryKey: ["room_categories"] });
       queryClient.invalidateQueries({ queryKey: ["rate_system_categories"] });
-      queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao aplicar preços");

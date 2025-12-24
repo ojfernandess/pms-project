@@ -128,7 +128,11 @@ export const ReservationCalendarMap = ({
   const navigate = useNavigate();
   const { establishmentId: establishmentIdFromParams } = useParams<{ establishmentId?: string }>();
   const { selectedEstablishment, establishments, setSelectedEstablishment } = useEstablishment();
-  const { rateCalendar, ratePlans } = useRateSystem();
+  const { rateCalendar, ratePlans, calculateRatePrice } = useRateSystem();
+  
+  // Cache de preços calculados para evitar recálculos desnecessários
+  const [calculatedPricesCache, setCalculatedPricesCache] = useState<Map<string, number>>(new Map());
+  
   const { canCreate, canUpdate, canDelete, canAccess } = usePermissions();
   
   // Obter o UUID do establishment (não o numeric_id)
@@ -355,6 +359,71 @@ export const ReservationCalendarMap = ({
     },
     enabled: !!establishmentId,
   });
+
+  // Função para obter preço com regras dinâmicas aplicadas
+  const getPriceWithDynamicRules = useCallback(async (
+    categoryId: string,
+    planId: string | null,
+    date: Date
+  ): Promise<number> => {
+    if (!planId) {
+      // Se não há plano, usar preço base da categoria
+      const category = categories.find((c: any) => c.id === categoryId);
+      return Number(category?.base_price) || 0;
+    }
+    
+    const dateStr = format(date, "yyyy-MM-dd");
+    const cacheKey = `${planId}-${categoryId}-${dateStr}`;
+    
+    // Verificar cache primeiro
+    const cachedPrice = calculatedPricesCache.get(cacheKey);
+    if (cachedPrice !== undefined && cachedPrice > 0) {
+      return cachedPrice;
+    }
+    
+    // Buscar do rate_calendar
+    const rateEntry = rateCalendar.find(
+      r => r.pricing_plan_id === planId &&
+      r.category_id === categoryId &&
+      r.date === dateStr
+    );
+    
+    if (rateEntry?.base_price && rateEntry.base_price > 0) {
+      // Calcular com regras dinâmicas em background e atualizar cache
+      calculateRatePrice(categoryId, planId, date).then(calculatedPrice => {
+        if (calculatedPrice > 0 && Math.abs(calculatedPrice - rateEntry.base_price) > 0.01) {
+          setCalculatedPricesCache(prev => {
+            const updated = new Map(prev);
+            updated.set(cacheKey, calculatedPrice);
+            return updated;
+          });
+        }
+      }).catch(() => {
+        // Ignorar erros no cálculo em background
+      });
+      
+      return rateEntry.base_price;
+    }
+    
+    // Calcular com regras dinâmicas
+    try {
+      const calculatedPrice = await calculateRatePrice(categoryId, planId, date);
+      if (calculatedPrice > 0) {
+        setCalculatedPricesCache(prev => {
+          const updated = new Map(prev);
+          updated.set(cacheKey, calculatedPrice);
+          return updated;
+        });
+        return calculatedPrice;
+      }
+    } catch (error) {
+      console.warn(`Erro ao calcular preço para categoria ${categoryId} e plano ${planId} em ${dateStr}:`, error);
+    }
+    
+    // Fallback: preço base da categoria
+    const category = categories.find((c: any) => c.id === categoryId);
+    return Number(category?.base_price) || 0;
+  }, [rateCalendar, calculateRatePrice, calculatedPricesCache, categories]);
 
   // Expandir todas as categorias e prédios por padrão quando forem carregadas
   useEffect(() => {
@@ -2315,8 +2384,33 @@ export const ReservationCalendarMap = ({
                           }
                         ) : null;
                         
-                        // Se não encontrar, usar preço base da categoria como fallback
-                        const price = rateEntry?.base_price || Number(category.base_price) || 0;
+                        // Obter preço com regras dinâmicas aplicadas
+                        // Usar cache de preços calculados se disponível
+                        const cacheKey = planId ? `${planId}-${category.id}-${dateStr}` : null;
+                        const cachedPrice = cacheKey ? calculatedPricesCache.get(cacheKey) : undefined;
+                        const price = cachedPrice !== undefined && cachedPrice > 0 
+                          ? cachedPrice 
+                          : (rateEntry?.base_price || Number(category.base_price) || 0);
+                        
+                        // Calcular preço com regras dinâmicas em background se houver plano
+                        if (planId && cacheKey && (!cachedPrice || cachedPrice === 0)) {
+                          // Calcular em background e atualizar cache
+                          calculateRatePrice(category.id, planId, date).then(calculatedPrice => {
+                            if (calculatedPrice > 0) {
+                              const currentPrice = rateEntry?.base_price || Number(category.base_price) || 0;
+                              // Só atualizar se for diferente
+                              if (Math.abs(calculatedPrice - currentPrice) > 0.01) {
+                                setCalculatedPricesCache(prev => {
+                                  const updated = new Map(prev);
+                                  updated.set(cacheKey, calculatedPrice);
+                                  return updated;
+                                });
+                              }
+                            }
+                          }).catch(() => {
+                            // Ignorar erros no cálculo em background
+                          });
+                        }
                         
                         // Calcular disponibilidade da categoria
                         const totalRooms = rooms.length;

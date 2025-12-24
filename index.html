@@ -146,28 +146,28 @@
             
             // Fazer requisição com timeout curto para não bloquear
             try {
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 segundos timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 segundos timeout
+            
+            const response = await fetch(edgeFunctionUrl, {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              signal: controller.signal,
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+              const settings = await response.json();
+              applySettings(settings);
               
-              const response = await fetch(edgeFunctionUrl, {
-                method: 'GET',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                signal: controller.signal,
-              });
-              
-              clearTimeout(timeoutId);
-              
-              if (response.ok) {
-                const settings = await response.json();
-                applySettings(settings);
-                
-                // Salvar URL no localStorage para próximas vezes
-                if (supabaseUrl && !localStorage.getItem('__supabase_url__')) {
-                  localStorage.setItem('__supabase_url__', supabaseUrl);
-                }
-              } else {
+              // Salvar URL no localStorage para próximas vezes
+              if (supabaseUrl && !localStorage.getItem('__supabase_url__')) {
+                localStorage.setItem('__supabase_url__', supabaseUrl);
+              }
+            } else {
                 console.debug('Edge Function retornou erro:', response.status, response.statusText);
               }
             } catch (fetchError) {
