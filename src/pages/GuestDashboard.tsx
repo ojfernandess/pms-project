@@ -759,7 +759,7 @@ export default function GuestDashboard() {
       
       const { data, error } = await supabase
         .from("hotel_settings")
-        .select("whatsapp, whatsapp_ddi, whatsapp_number, phone")
+        .select("whatsapp, whatsapp_ddi, whatsapp_number, phone, phone_ddi, phone_number")
         .eq("establishment_id", currentReservation.establishment_id)
         .maybeSingle();
 
@@ -775,7 +775,13 @@ export default function GuestDashboard() {
             ? `${data.whatsapp_ddi}${data.whatsapp_number}`.trim()
             : data.whatsapp_number || null);
         
-        return { whatsapp, phone: data.phone };
+        // Montar telefone: priorizar campo único 'phone', senão montar dos campos antigos
+        const phone = data.phone || 
+          (data.phone_ddi && data.phone_number 
+            ? `${data.phone_ddi} ${data.phone_number}`.trim()
+            : data.phone_number || null);
+        
+        return { whatsapp, phone };
       }
       
       return null;
@@ -1009,6 +1015,17 @@ export default function GuestDashboard() {
       window.open(`https://wa.me/${whatsappNumber}`, '_blank');
     } else {
       toast.error("WhatsApp do estabelecimento não disponível");
+    }
+  };
+
+  // Função para abrir telefone
+  const handleOpenPhone = () => {
+    const phone = hotelSettings?.phone;
+    if (phone) {
+      const phoneNumber = phone.replace(/\D/g, '');
+      window.open(`tel:${phoneNumber}`, '_self');
+    } else {
+      toast.error("Telefone do estabelecimento não disponível");
     }
   };
 
@@ -1464,26 +1481,36 @@ export default function GuestDashboard() {
                             <ChevronRight className="w-3 h-3 text-slate-400 rotate-90" />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56">
-                          <DropdownMenuItem
-                            onClick={() => {
-                              if (currentReservation) {
-                                setSelectedReservationForTicket(currentReservation);
-                                setShowMaintenanceDialog(true);
-                              }
-                            }}
-                            className="cursor-pointer"
-                          >
-                            <FileText className="w-4 h-4 mr-2" />
-                            Abrir Chamado
-                          </DropdownMenuItem>
+                        <DropdownMenuContent align="end" className="w-64">
                           <DropdownMenuItem
                             onClick={handleOpenWhatsApp}
                             className="cursor-pointer"
                             disabled={!hotelSettings?.whatsapp}
                           >
                             <MessageCircle className="w-4 h-4 mr-2" />
-                            WhatsApp do Estabelecimento
+                            <div className="flex flex-col flex-1">
+                              <span>WhatsApp do Estabelecimento</span>
+                              {hotelSettings?.whatsapp && (
+                                <span className="text-xs text-slate-500 mt-0.5">
+                                  {hotelSettings.whatsapp}
+                                </span>
+                              )}
+                            </div>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={handleOpenPhone}
+                            className="cursor-pointer"
+                            disabled={!hotelSettings?.phone}
+                          >
+                            <Phone className="w-4 h-4 mr-2" />
+                            <div className="flex flex-col flex-1">
+                              <span>Telefone do Estabelecimento</span>
+                              {hotelSettings?.phone && (
+                                <span className="text-xs text-slate-500 mt-0.5">
+                                  {hotelSettings.phone}
+                                </span>
+                              )}
+                            </div>
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
