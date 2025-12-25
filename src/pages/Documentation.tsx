@@ -18,7 +18,8 @@ import {
   Zap,
   Globe,
   Lock,
-  Key
+  Key,
+  DollarSign
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -137,7 +138,7 @@ const RESERVATION_BODY_EXAMPLE = String.raw`{
   "establishment_id": "uuid-here"
 }`;
 
-const COMPLEX_QUERY_1 = `GET /rest/v1/reservations?select=*,
+const COMPLEX_QUERY_1 = String.raw`GET /rest/v1/reservations?select=*,
   guest:clients!guest_id(*),
   financial_responsible:clients!client_id(*),
   rooms(*,room_categories(*)),
@@ -147,7 +148,7 @@ const COMPLEX_QUERY_1 = `GET /rest/v1/reservations?select=*,
 &order=checkin_date.desc
 &limit=20`;
 
-const COMPLEX_QUERY_2 = `GET /rest/v1/clients?select=*,
+const COMPLEX_QUERY_2 = String.raw`GET /rest/v1/clients?select=*,
   reservations!guest_id(
     id,
     reservation_code,
@@ -158,7 +159,7 @@ const COMPLEX_QUERY_2 = `GET /rest/v1/clients?select=*,
   )
 &email=eq.cliente@email.com`;
 
-const COMPLEX_QUERY_3 = `GET /rest/v1/rooms?select=*,
+const COMPLEX_QUERY_3 = String.raw`GET /rest/v1/rooms?select=*,
   room_categories(*)
 &establishment_id=eq.[uuid]
 &status=eq.available
@@ -170,7 +171,7 @@ const COMPLEX_QUERY_3 = `GET /rest/v1/rooms?select=*,
   )
 )`;
 
-const RLS_POLICY_EXAMPLE = `CREATE POLICY "Users can only see their establishment's reservations"
+const RLS_POLICY_EXAMPLE = String.raw`CREATE POLICY "Users can only see their establishment's reservations"
 ON reservations
 FOR SELECT
 USING (
@@ -3342,6 +3343,608 @@ await logError({
                       </div>
                     </CollapsibleContent>
                   </Collapsible>
+
+                  {/* Sistema Tarifário */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.rateSystem}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, rateSystem: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Sistema Tarifário</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.rateSystem ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-4 text-sm text-slate-700">
+                        <div>
+                          <h4 className="font-semibold mb-2 text-slate-800">Funcionalidades Principais:</h4>
+                          <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Planos Tarifários:</strong> Criação e gestão de múltiplos planos (BAR, Promocional, Corporativo, etc.)</li>
+                            <li><strong>Calendário de Tarifas:</strong> Visualização e edição de preços por data, categoria e plano</li>
+                            <li><strong>Edição em Lote:</strong> Aplicação de ajustes de preço para múltiplas categorias, planos e períodos</li>
+                            <li><strong>Regras de Precificação Dinâmica:</strong> Ajuste automático de preços baseado em ocupação, demanda e histórico</li>
+                            <li><strong>Recomendações de Preços:</strong> Sugestões automáticas de ajuste baseadas em ocupação e métricas</li>
+                            <li><strong>Aplicação de Recomendações:</strong> Aplicar preços sugeridos diretamente ao tarifário com um clique</li>
+                            <li><strong>Análise e Métricas:</strong> Dashboard com ADR, RevPAR, ocupação e receita por categoria/plano</li>
+                            <li><strong>Restrições de Tarifa:</strong> Limites de estoque, fechamento de vendas e restrições por canal</li>
+                            <li><strong>Histórico de Demanda:</strong> Consideração de preços históricos do mesmo período do ano anterior</li>
+                            <li><strong>Ajustes Proporcionais:</strong> Ajuste automático proporcional ao número de quartos por categoria</li>
+                            <li><strong>Controle de Funcionalidades:</strong> Ativação/desativação por empresa via Super Admin</li>
+                            <li><strong>Logs de Atividades:</strong> Registro automático de todas as alterações de preço com usuário "Sistema"</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                          <h4 className="font-semibold mb-2 text-blue-900">Regras de Precificação Dinâmica - Detalhes:</h4>
+                          <ul className="space-y-1 text-xs text-blue-800">
+                            <li><strong>Tipos de Gatilho:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><strong>Ocupação:</strong> Ajustes baseados em faixas de ocupação (Baixa, Média, Alta)</li>
+                                <li><strong>Velocidade de Reservas:</strong> Ajustes baseados na velocidade de novas reservas</li>
+                                <li><strong>Dia da Semana:</strong> Ajustes específicos para diferentes dias da semana</li>
+                                <li><strong>Antecedência:</strong> Ajustes baseados na antecedência da reserva</li>
+                                <li><strong>Personalizado:</strong> Regras customizadas com condições específicas</li>
+                              </ul>
+                            </li>
+                            <li><strong>Faixas de Ocupação Personalizáveis:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li>Baixa Ocupação: Min/Max % configurável com ajuste e valor base opcional</li>
+                                <li>Média Ocupação: Min/Max % configurável com ajuste e valor base opcional</li>
+                                <li>Alta Ocupação: Min/Max % configurável com ajuste e valor base opcional</li>
+                              </ul>
+                            </li>
+                            <li><strong>Ajustes Proporcionais Automáticos:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><strong>1 quarto:</strong> 50% do ajuste aplicado</li>
+                                <li><strong>2-4 quartos:</strong> 60-75% do ajuste aplicado (escala linear: 2 quartos = 60%, 4 quartos = 75%)</li>
+                                <li><strong>5-9 quartos:</strong> 75-100% do ajuste aplicado (escala linear: 5 quartos = 75%, 9 quartos = 100%)</li>
+                                <li><strong>10+ quartos:</strong> 100% do ajuste aplicado</li>
+                                <li><strong>Fórmula:</strong> O sistema calcula automaticamente o fator de escala baseado no número exato de quartos na categoria</li>
+                              </ul>
+                            </li>
+                            <li><strong>Considerar Histórico de Demanda:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li>Busca preços do mesmo mês do ano anterior</li>
+                                <li>Usa como base para cálculos quando ativado</li>
+                                <li>Fallback para média do mês se data específica não encontrada</li>
+                              </ul>
+                            </li>
+                            <li><strong>Aplicação Automática:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li>Pode ser ativada/desativada nas configurações</li>
+                                <li>Aplica apenas quando há mudança significativa na ocupação</li>
+                                <li>Salva automaticamente no rate_calendar quando aplicada</li>
+                                <li>Registra todas as alterações nos logs de atividade</li>
+                              </ul>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-green-50 rounded border border-green-200">
+                          <h4 className="font-semibold mb-2 text-green-900">Recomendações de Preços - Detalhes:</h4>
+                          <ul className="space-y-1 text-xs text-green-800">
+                            <li><strong>Geração Automática:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li>Baseada em ocupação atual vs. ocupação alvo</li>
+                                <li>Considera configurações de threshold (alta/baixa ocupação)</li>
+                                <li>Calcula impacto estimado na receita</li>
+                                <li>Prioriza recomendações (alta/média) baseado no impacto</li>
+                              </ul>
+                            </li>
+                            <li><strong>Filtros:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li>Filtro por categoria</li>
+                                <li>Filtro por período (data inicial e final)</li>
+                                <li>Oculta datas passadas por padrão (opção para mostrar)</li>
+                                <li>Badge indicando quantas recomendações estão ocultas</li>
+                              </ul>
+                            </li>
+                            <li><strong>Aplicação de Recomendações:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li>Botão "Aplicar Preço Sugerido" em cada recomendação</li>
+                                <li>Aplica ao plano padrão (BAR) ou primeiro plano ativo</li>
+                                <li>Atualiza rate_calendar automaticamente</li>
+                                <li>Recarrega recomendações após aplicação</li>
+                                <li>Feedback visual durante o processo</li>
+                              </ul>
+                            </li>
+                            <li><strong>Configurações:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li>Habilitar/desabilitar recomendações</li>
+                                <li>Threshold de ocupação para recomendações</li>
+                                <li>Threshold de baixa ocupação</li>
+                                <li>Percentual de aumento de preço</li>
+                                <li>Percentual de redução de preço</li>
+                              </ul>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-purple-50 rounded border border-purple-200">
+                          <h4 className="font-semibold mb-2 text-purple-900">Edição em Lote - Detalhes:</h4>
+                          <ul className="space-y-1 text-xs text-purple-800">
+                            <li><strong>Processo Multi-Etapas:</strong>
+                              <ol className="list-decimal list-inside mt-1 ml-4">
+                                <li>Seleção de categorias e planos tarifários</li>
+                                <li>Definição do período (data inicial e final)</li>
+                                <li>Configuração individual de ajustes por categoria/plano</li>
+                              </ol>
+                            </li>
+                            <li><strong>Tipos de Ajuste:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><strong>Percentual:</strong> Aumento/redução percentual do preço atual</li>
+                                <li><strong>Valor Fixo:</strong> Adição/subtração de valor fixo</li>
+                                <li><strong>Multiplicador:</strong> Multiplicação do preço por um fator</li>
+                                <li><strong>Valor Absoluto:</strong> Definir preço exato</li>
+                              </ul>
+                            </li>
+                            <li><strong>Validações:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li>Validação de período (data inicial &lt; data final)</li>
+                                <li>Validação de valores (não negativos, dentro de limites)</li>
+                                <li>Confirmação antes de aplicar em lote</li>
+                              </ul>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded">
+                          <h4 className="font-semibold mb-2 text-slate-800">Estrutura Técnica Detalhada:</h4>
+                          <div className="text-xs space-y-4">
+                            <div><strong>Tabelas Principais - Estrutura e Propósito:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4 space-y-2">
+                                <li><code>pricing_plans</code> - Planos tarifários (BAR, Promocional, Corporativo, etc.)
+                                  <ul className="list-disc list-inside ml-4 mt-1 text-xs text-slate-600">
+                                    <li><strong>Campos:</strong> id, establishment_id, name, code, description, is_default, is_active, created_at, updated_at</li>
+                                    <li><strong>Uso:</strong> Define diferentes estratégias de precificação para o mesmo estabelecimento</li>
+                                    <li><strong>Relacionamento:</strong> Um plano pode ter múltiplas entradas em rate_calendar</li>
+                                  </ul>
+                                </li>
+                                <li><code>rate_calendar</code> - Calendário de preços por data, categoria e plano
+                                  <ul className="list-disc list-inside ml-4 mt-1 text-xs text-slate-600">
+                                    <li><strong>Campos principais:</strong> establishment_id, category_id, pricing_plan_id, date, base_price, adult_price, child_price, occupancy_percentage, projected_occupancy, pickup_rate</li>
+                                    <li><strong>Chave única:</strong> (establishment_id, category_id, pricing_plan_id, date)</li>
+                                    <li><strong>Uso:</strong> Armazena preços específicos por data. Se não existir entrada, usa base_price da categoria</li>
+                                    <li><strong>Atualização:</strong> Pode ser atualizado manualmente ou via regras dinâmicas/recomendações</li>
+                                  </ul>
+                                </li>
+                                <li><code>dynamic_pricing_rules</code> - Regras de precificação dinâmica
+                                  <ul className="list-disc list-inside ml-4 mt-1 text-xs text-slate-600">
+                                    <li><strong>Campos principais:</strong> id, establishment_id, name, trigger_type, trigger_condition (JSONB), adjustment_type, adjustment_value, consider_demand_history, is_active, priority</li>
+                                    <li><strong>trigger_type:</strong> 'occupancy', 'booking_velocity', 'day_of_week', 'advance_booking', 'custom'</li>
+                                      <li><strong>trigger_condition:</strong> JSONB com condições específicas do tipo de gatilho (ex: {`{"min": 0, "max": 30, "adjustment": 10, "base_value": null}`} para ocupação)</li>
+                                    <li><strong>adjustment_type:</strong> 'percentage', 'fixed', 'multiplier'</li>
+                                    <li><strong>Uso:</strong> Define quando e como ajustar preços automaticamente</li>
+                                  </ul>
+                                </li>
+                                <li><code>hotel_settings.rate_system_settings</code> - Configurações do sistema tarifário (JSONB)
+                                  <ul className="list-disc list-inside ml-4 mt-1 text-xs text-slate-600">
+                                    <li><strong>Estrutura JSONB:</strong>
+                                      <pre className="bg-slate-100 p-1 rounded mt-1 text-xs overflow-x-auto">{`{
+  "auto_apply_dynamic_rules": boolean,
+  "enable_recommendations": boolean,
+  "high_occupancy_threshold": number (default: 90),
+  "low_occupancy_threshold": number (default: 30),
+  "price_increase_percentage": number (default: 15),
+  "price_decrease_percentage": number (default: 10)
+}`}</pre>
+                                    </li>
+                                    <li><strong>Uso:</strong> Controla comportamento global do sistema tarifário por estabelecimento</li>
+                                    <li><strong>Acesso:</strong> Via interface "Configurações do Sistema Tarifário"</li>
+                                  </ul>
+                                </li>
+                                <li><code>site_settings.features_enabled</code> - Controle de funcionalidades globais (JSONB)
+                                  <ul className="list-disc list-inside ml-4 mt-1 text-xs text-slate-600">
+                                      <li><strong>Estrutura:</strong> Pode ser boolean (global) ou objeto {`{enabled: boolean, company_ids: string[]}`}</li>
+                                      <li><strong>Exemplo:</strong> <code>{`{"dynamic_pricing_automation": {"enabled": true, "company_ids": ["uuid1", "uuid2"]}}`}</code></li>
+                                    <li><strong>Uso:</strong> Controla quais empresas podem usar automação de regras dinâmicas</li>
+                                    <li><strong>Acesso:</strong> Via Super Admin → Controle de Funcionalidades</li>
+                                  </ul>
+                                </li>
+                                <li><code>room_categories</code> - Categorias de quartos
+                                  <ul className="list-disc list-inside ml-4 mt-1 text-xs text-slate-600">
+                                    <li><strong>Campos:</strong> id, establishment_id, name, base_price, description</li>
+                                    <li><strong>Uso:</strong> Define categorias e preço base (fallback quando não há entrada em rate_calendar)</li>
+                                  </ul>
+                                </li>
+                                <li><code>rooms</code> - Quartos físicos
+                                  <ul className="list-disc list-inside ml-4 mt-1 text-xs text-slate-600">
+                                    <li><strong>Relacionamento:</strong> Cada quarto pertence a uma category_id</li>
+                                    <li><strong>Uso:</strong> Usado para calcular ocupação por categoria (occupied_rooms / total_rooms)</li>
+                                  </ul>
+                                </li>
+                                <li><code>reservations</code> - Reservas
+                                  <ul className="list-disc list-inside ml-4 mt-1 text-xs text-slate-600">
+                                    <li><strong>Uso:</strong> Usado para calcular ocupação atual e projetada</li>
+                                    <li><strong>Campos relevantes:</strong> category_id, checkin_date, checkout_date, status</li>
+                                  </ul>
+                                </li>
+                              </ul>
+                            </div>
+                            <div><strong>Funções SQL - Detalhamento:</strong>
+                              <div className="mt-2 space-y-3 ml-4">
+                                <div className="border-l-2 border-blue-300 pl-3">
+                                  <div className="font-semibold text-blue-900">calculate_rate_price</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Parâmetros:</strong></div>
+                                    <ul className="list-disc list-inside ml-4 mt-1">
+                                      <li><code>p_establishment_id UUID</code> - ID do estabelecimento</li>
+                                      <li><code>p_category_id UUID</code> - ID da categoria de quarto</li>
+                                      <li><code>p_pricing_plan_id UUID</code> - ID do plano tarifário</li>
+                                      <li><code>p_date DATE</code> - Data para calcular o preço</li>
+                                      <li><code>p_adults INTEGER DEFAULT 1</code> - Número de adultos</li>
+                                      <li><code>p_children INTEGER DEFAULT 0</code> - Número de crianças</li>
+                                    </ul>
+                                    <div className="mt-2"><strong>Retorno:</strong> <code>DECIMAL(10,2)</code> - Preço final calculado</div>
+                                    <div className="mt-2"><strong>Fluxo de Execução Detalhado:</strong></div>
+                                    <ol className="list-decimal list-inside ml-4 mt-1 space-y-1">
+                                      <li><strong>Busca Preço Base:</strong> Procura em <code>rate_calendar</code> para a data/categoria/plano. Se não encontrar, usa <code>base_price</code> de <code>room_categories</code></li>
+                                      <li><strong>Cálculo de Ocupação:</strong> Calcula ocupação específica da categoria:
+                                        <pre className="bg-slate-100 p-1 rounded mt-1 text-xs overflow-x-auto">ocupação = (quartos_ocupados_na_data / total_quartos_categoria) * 100</pre>
+                                      </li>
+                                      <li><strong>Verificação de Feature Flag:</strong> Chama <code>company_has_feature_access('dynamic_pricing_automation', company_id)</code>. Se retornar false, pula regras dinâmicas</li>
+                                      <li><strong>Aplicação de Regras Dinâmicas:</strong> Para cada regra ativa do estabelecimento:
+                                        <ul className="list-disc list-inside ml-4 mt-1">
+                                          <li>Verifica <code>trigger_type</code> e avalia <code>trigger_condition</code></li>
+                                          <li><strong>occupancy:</strong> Verifica se ocupação está entre min/max das faixas (baixa/média/alta)</li>
+                                          <li><strong>booking_velocity:</strong> Conta reservas criadas nas últimas 24h e compara com min_bookings</li>
+                                          <li><strong>day_of_week:</strong> Verifica se dia da semana está em days_of_week array</li>
+                                          <li><strong>advance_booking:</strong> Calcula dias até a data e verifica se está entre min_days e max_days</li>
+                                          <li><strong>custom:</strong> Avalia condições customizadas do JSONB</li>
+                                        </ul>
+                                      </li>
+                                      <li><strong>Ajuste Proporcional:</strong> Aplica fator de escala baseado no número de quartos:
+                                        <ul className="list-disc list-inside ml-4 mt-1">
+                                          <li>1 quarto: 50% do ajuste</li>
+                                          <li>2-4 quartos: 60-75% (linear: 2=60%, 4=75%)</li>
+                                          <li>5-9 quartos: 75-100% (linear: 5=75%, 9=100%)</li>
+                                          <li>10+ quartos: 100% do ajuste</li>
+                                        </ul>
+                                      </li>
+                                      <li><strong>Histórico de Demanda:</strong> Se <code>consider_demand_history = true</code>:
+                                        <ul className="list-disc list-inside ml-4 mt-1">
+                                          <li>Busca preço do mesmo dia/mês do ano anterior em <code>rate_calendar</code></li>
+                                          <li>Se não encontrar, busca média do mês anterior</li>
+                                          <li>Usa como base para cálculo se disponível</li>
+                                        </ul>
+                                      </li>
+                                      <li><strong>Cálculo Final:</strong> Aplica <code>adult_price</code> e <code>child_price</code> ao preço base ajustado</li>
+                                    </ol>
+                                    <div className="mt-2"><strong>Como Configurar para Funcionar:</strong></div>
+                                    <ol className="list-decimal list-inside ml-4 mt-1 space-y-1">
+                                      <li>Super Admin deve habilitar <code>dynamic_pricing_automation</code> em Controle de Funcionalidades</li>
+                                      <li>Selecionar empresas que podem usar a funcionalidade</li>
+                                      <li>Criar regras dinâmicas em Regras de Precificação Dinâmica</li>
+                                      <li>Configurar <code>auto_apply_dynamic_rules</code> em Configurações do Sistema Tarifário (opcional)</li>
+                                    </ol>
+                                    <div className="mt-2"><strong>Exemplo de Uso (RPC):</strong></div>
+                                    <pre className="bg-slate-100 p-2 rounded mt-1 text-xs overflow-x-auto">{`const { data, error } = await supabase.rpc('calculate_rate_price', {
+  p_establishment_id: '123e4567-e89b-12d3-a456-426614174000',
+  p_category_id: '789e0123-e45b-67c8-d901-234567890abc',
+  p_pricing_plan_id: '456e7890-e12b-34c5-d678-901234567def',
+  p_date: '2024-12-25',
+  p_adults: 2,
+  p_children: 0
+});
+
+// Retorna: 250.50 (preço final calculado)
+console.log(data);`}</pre>
+                                  </div>
+                                </div>
+                                <div className="border-l-2 border-green-300 pl-3">
+                                  <div className="font-semibold text-green-900">generate_rate_recommendations</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Parâmetros:</strong></div>
+                                    <ul className="list-disc list-inside ml-4 mt-1">
+                                      <li><code>p_establishment_id UUID</code> - ID do estabelecimento</li>
+                                      <li><code>p_start_date DATE</code> - Data inicial do período</li>
+                                      <li><code>p_end_date DATE</code> - Data final do período</li>
+                                      <li><code>p_category_id UUID DEFAULT NULL</code> - ID da categoria (opcional, NULL para todas)</li>
+                                    </ul>
+                                    <div className="mt-2"><strong>Retorno:</strong> <code>TABLE</code> com colunas:</div>
+                                    <ul className="list-disc list-inside ml-4 mt-1">
+                                      <li><code>type TEXT</code> - Tipo de recomendação (increase/decrease)</li>
+                                      <li><code>priority TEXT</code> - Prioridade (high/medium)</li>
+                                      <li><code>message TEXT</code> - Mensagem descritiva</li>
+                                      <li><code>affected_dates DATE[]</code> - Array de datas afetadas</li>
+                                      <li><code>current_price NUMERIC</code> - Preço atual</li>
+                                      <li><code>suggested_price NUMERIC</code> - Preço sugerido</li>
+                                      <li><code>estimated_revenue_impact NUMERIC</code> - Impacto estimado na receita</li>
+                                      <li><code>auto_apply BOOLEAN</code> - Se pode ser aplicado automaticamente</li>
+                                      <li><code>category_id UUID</code> - ID da categoria</li>
+                                      <li><code>category_name TEXT</code> - Nome da categoria</li>
+                                      <li><code>date DATE</code> - Data específica da recomendação</li>
+                                    </ul>
+                                    <div className="mt-2"><strong>Fluxo de Execução Detalhado:</strong></div>
+                                    <ol className="list-decimal list-inside ml-4 mt-1 space-y-1">
+                                      <li><strong>Verificação de Habilitado:</strong> Busca <code>rate_system_settings</code> de <code>hotel_settings</code> e verifica se <code>enable_recommendations = true</code>. Se false, retorna vazio</li>
+                                      <li><strong>Carrega Configurações:</strong> Extrai thresholds e percentages:
+                                        <ul className="list-disc list-inside ml-4 mt-1">
+                                          <li><code>high_occupancy_threshold</code> (padrão: 90%)</li>
+                                          <li><code>low_occupancy_threshold</code> (padrão: 30%)</li>
+                                          <li><code>price_increase_percentage</code> (padrão: 15%)</li>
+                                          <li><code>price_decrease_percentage</code> (padrão: 10%)</li>
+                                        </ul>
+                                      </li>
+                                      <li><strong>Itera sobre Categorias:</strong> Para cada categoria (ou categoria específica se <code>p_category_id</code> fornecido):
+                                        <ul className="list-disc list-inside ml-4 mt-1">
+                                          <li>Conta total de quartos na categoria</li>
+                                          <li>Para cada data no período (p_start_date até p_end_date):</li>
+                                        </ul>
+                                      </li>
+                                      <li><strong>Cálculo de Ocupação por Data:</strong>
+                                        <pre className="bg-slate-100 p-1 rounded mt-1 text-xs overflow-x-auto">ocupação = (quartos_ocupados_na_data / total_quartos) * 100</pre>
+                                      </li>
+                                      <li><strong>Geração de Recomendações:</strong>
+                                        <ul className="list-disc list-inside ml-4 mt-1">
+                                          <li><strong>Alta Ocupação:</strong> Se ocupação &gt; high_occupancy_threshold:
+                                            <ul className="list-disc list-inside ml-4 mt-1">
+                                              <li>type = 'increase'</li>
+                                              <li>suggested_price = current_price * (1 + price_increase_percentage / 100)</li>
+                                              <li>priority = 'high' se impacto &gt; 1000, senão 'medium'</li>
+                                            </ul>
+                                          </li>
+                                          <li><strong>Baixa Ocupação:</strong> Se ocupação &lt; low_occupancy_threshold:
+                                            <ul className="list-disc list-inside ml-4 mt-1">
+                                              <li>type = 'decrease'</li>
+                                              <li>suggested_price = current_price * (1 - price_decrease_percentage / 100)</li>
+                                              <li>priority = 'high' se impacto &gt; 1000, senão 'medium'</li>
+                                            </ul>
+                                          </li>
+                                        </ul>
+                                      </li>
+                                      <li><strong>Cálculo de Impacto na Receita:</strong>
+                                        <pre className="bg-slate-100 p-1 rounded mt-1 text-xs overflow-x-auto">impacto = (suggested_price - current_price) * quartos_disponíveis</pre>
+                                      </li>
+                                    </ol>
+                                    <div className="mt-2"><strong>Como Configurar para Funcionar:</strong></div>
+                                    <ol className="list-decimal list-inside ml-4 mt-1 space-y-1">
+                                      <li>Acessar "Configurações do Sistema Tarifário" no menu</li>
+                                      <li>Ativar "Habilitar Recomendações"</li>
+                                      <li>Configurar thresholds e percentages conforme necessário</li>
+                                      <li>Salvar configurações</li>
+                                      <li>Acessar aba "Recomendações" em Análise e Métricas</li>
+                                    </ol>
+                                    <div className="mt-2"><strong>Exemplo de Uso (RPC):</strong></div>
+                                    <pre className="bg-slate-100 p-2 rounded mt-1 text-xs overflow-x-auto">{`const { data, error } = await supabase.rpc('generate_rate_recommendations', {
+  p_establishment_id: '123e4567-e89b-12d3-a456-426614174000',
+  p_start_date: '2024-12-01',
+  p_end_date: '2024-12-31',
+  p_category_id: null // null para todas as categorias
+});
+
+// Retorna array de recomendações:
+// [
+//   {
+//     type: 'increase',
+//     priority: 'high',
+//     message: 'Ocupação alta detectada...',
+//     current_price: 200.00,
+//     suggested_price: 230.00,
+//     estimated_revenue_impact: 1500.00,
+//     category_id: '...',
+//     category_name: 'Standard',
+//     date: '2024-12-25'
+//   },
+//   ...
+// ]
+console.log(data);`}</pre>
+                                  </div>
+                                </div>
+                                <div className="border-l-2 border-purple-300 pl-3">
+                                  <div className="font-semibold text-purple-900">apply_recommendation_price</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Parâmetros:</strong></div>
+                                    <ul className="list-disc list-inside ml-4 mt-1">
+                                      <li><code>p_establishment_id UUID</code> - ID do estabelecimento</li>
+                                      <li><code>p_category_id UUID</code> - ID da categoria</li>
+                                      <li><code>p_pricing_plan_id UUID</code> - ID do plano tarifário</li>
+                                      <li><code>p_date DATE</code> - Data para aplicar o preço</li>
+                                      <li><code>p_suggested_price NUMERIC</code> - Preço sugerido a aplicar</li>
+                                    </ul>
+                                    <div className="mt-2"><strong>Retorno:</strong> <code>BOOLEAN</code> - true se sucesso, false se erro (exceção capturada)</div>
+                                    <div className="mt-2"><strong>Fluxo de Execução Detalhado:</strong></div>
+                                    <ol className="list-decimal list-inside ml-4 mt-1 space-y-1">
+                                      <li><strong>Verificação de Entrada Existente:</strong> Busca em <code>rate_calendar</code> usando chave única (establishment_id, category_id, pricing_plan_id, date)</li>
+                                      <li><strong>Atualização ou Inserção:</strong>
+                                        <ul className="list-disc list-inside ml-4 mt-1">
+                                          <li><strong>Se existe:</strong> Executa UPDATE em <code>base_price</code> e <code>updated_at = NOW()</code></li>
+                                          <li><strong>Se não existe:</strong> Executa INSERT com todos os campos obrigatórios e timestamps</li>
+                                        </ul>
+                                      </li>
+                                      <li><strong>Tratamento de Erros:</strong> Captura exceções e retorna false em caso de erro (ex: violação de constraint, dados inválidos)</li>
+                                    </ol>
+                                    <div className="mt-2"><strong>Como Configurar para Funcionar:</strong></div>
+                                    <ol className="list-decimal list-inside ml-4 mt-1 space-y-1">
+                                      <li>Gerar recomendações usando <code>generate_rate_recommendations</code></li>
+                                      <li>Exibir recomendações na interface (aba Recomendações)</li>
+                                      <li>Ao clicar em "Aplicar Preço Sugerido", chamar esta função</li>
+                                      <li>Recarregar recomendações após aplicação para atualizar lista</li>
+                                    </ol>
+                                    <div className="mt-2"><strong>Exemplo de Uso (RPC):</strong></div>
+                                    <pre className="bg-slate-100 p-2 rounded mt-1 text-xs overflow-x-auto">{`const { data, error } = await supabase.rpc('apply_recommendation_price', {
+  p_establishment_id: '123e4567-e89b-12d3-a456-426614174000',
+  p_category_id: '789e0123-e45b-67c8-d901-234567890abc',
+  p_pricing_plan_id: '456e7890-e12b-34c5-d678-901234567def', // ID do plano BAR
+  p_date: '2024-12-25',
+  p_suggested_price: 230.00
+});
+
+// Retorna: true (sucesso) ou false (erro)
+if (data) {
+  console.log('Preço aplicado com sucesso!');
+  // Recarregar recomendações e calendário
+} else {
+  console.error('Erro ao aplicar preço:', error);
+}`}</pre>
+                                  </div>
+                                </div>
+                                <div className="border-l-2 border-amber-300 pl-3">
+                                  <div className="font-semibold text-amber-900">company_has_feature_access</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Parâmetros:</strong></div>
+                                    <ul className="list-disc list-inside ml-4 mt-1">
+                                      <li><code>p_feature_key TEXT</code> - Chave da funcionalidade (ex: 'dynamic_pricing_automation')</li>
+                                      <li><code>p_company_id UUID</code> - ID da empresa</li>
+                                    </ul>
+                                    <div className="mt-2"><strong>Retorno:</strong> <code>BOOLEAN</code> - true se a empresa tem acesso, false caso contrário</div>
+                                    <div className="mt-2"><strong>Fluxo de Execução Detalhado:</strong></div>
+                                    <ol className="list-decimal list-inside ml-4 mt-1 space-y-1">
+                                      <li><strong>Busca Configuração Global:</strong> Busca <code>features_enabled</code> de <code>site_settings</code> (id fixo: '00000000-0000-0000-0000-000000000001')</li>
+                                      <li><strong>Verificação de Existência:</strong> Se <code>features_enabled</code> é NULL ou não contém a chave, retorna false</li>
+                                      <li><strong>Avaliação do Tipo:</strong>
+                                        <ul className="list-disc list-inside ml-4 mt-1">
+                                          <li><strong>Se boolean:</strong> Retorna o valor diretamente (funcionalidade global)</li>
+                                          <li><strong>Se objeto:</strong> Verifica estrutura {`{enabled: boolean, company_ids: string[]}`}
+                                            <ul className="list-disc list-inside ml-4 mt-1">
+                                              <li>Se <code>enabled = false</code>, retorna false</li>
+                                              <li>Se <code>company_ids</code> existe e não está vazio, verifica se <code>p_company_id</code> está na lista</li>
+                                              <li>Se <code>company_ids</code> não existe ou está vazio, retorna true (habilitado para todas)</li>
+                                            </ul>
+                                          </li>
+                                        </ul>
+                                      </li>
+                                    </ol>
+                                    <div className="mt-2"><strong>Como Configurar para Funcionar:</strong></div>
+                                    <ol className="list-decimal list-inside ml-4 mt-1 space-y-1">
+                                      <li>Acessar Super Admin → Controle de Funcionalidades</li>
+                                      <li>Ativar "Automação de Regras de Precificação Dinâmica"</li>
+                                      <li>Selecionar empresas que podem usar a funcionalidade</li>
+                                      <li>Salvar configurações (atualiza <code>site_settings.features_enabled</code>)</li>
+                                    </ol>
+                                    <div className="mt-2"><strong>Exemplo de Uso (RPC):</strong></div>
+                                    <pre className="bg-slate-100 p-2 rounded mt-1 text-xs overflow-x-auto">{`const { data, error } = await supabase.rpc('company_has_feature_access', {
+  p_feature_key: 'dynamic_pricing_automation',
+  p_company_id: '123e4567-e89b-12d3-a456-426614174000'
+});
+
+// Retorna: true (tem acesso) ou false (não tem acesso)
+if (data) {
+  console.log('Empresa tem acesso à funcionalidade');
+  // Permitir uso de regras dinâmicas
+} else {
+  console.log('Empresa não tem acesso');
+  // Ocultar/desabilitar funcionalidade
+}`}</pre>
+                                    <div className="mt-2"><strong>Estrutura de features_enabled:</strong></div>
+                                    <pre className="bg-slate-100 p-2 rounded mt-1 text-xs overflow-x-auto">{`{
+  "api_integrations": true,  // Boolean: global
+  "stripe": true,           // Boolean: global
+  "dynamic_pricing_automation": {  // Objeto: por empresa
+    "enabled": true,
+    "company_ids": [
+      "uuid-empresa-1",
+      "uuid-empresa-2"
+    ]
+  }
+}`}</pre>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div><strong>Rota Frontend:</strong> <code>/:establishmentId/tarifario</code></div>
+                            <div><strong>Componentes React - Detalhamento:</strong>
+                              <div className="mt-2 space-y-2 ml-4">
+                                <div className="border-l-2 border-indigo-300 pl-3">
+                                  <div className="font-semibold text-indigo-900">RateCalendarGrid</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Localização:</strong> <code>src/components/rate-system/RateCalendarGrid.tsx</code></div>
+                                    <div className="mt-1"><strong>Funcionalidade:</strong> Grid interativo de calendário de tarifas com edição inline, aplicação de regras dinâmicas, e logs de atividade</div>
+                                    <div className="mt-1"><strong>Props:</strong> categories, ratePlans, selectedDate, onDateChange</div>
+                                  </div>
+                                </div>
+                                <div className="border-l-2 border-indigo-300 pl-3">
+                                  <div className="font-semibold text-indigo-900">DynamicRuleDialog</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Localização:</strong> <code>src/components/rate-system/DynamicRuleDialog.tsx</code></div>
+                                    <div className="mt-1"><strong>Funcionalidade:</strong> Dialog para criar/editar regras dinâmicas com seleção de trigger_type e configuração de condições específicas</div>
+                                    <div className="mt-1"><strong>Props:</strong> open, onOpenChange, rule, onSave</div>
+                                  </div>
+                                </div>
+                                <div className="border-l-2 border-indigo-300 pl-3">
+                                  <div className="font-semibold text-indigo-900">BulkEditDialog</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Localização:</strong> <code>src/components/rate-system/BulkEditDialog.tsx</code></div>
+                                    <div className="mt-1"><strong>Funcionalidade:</strong> Dialog multi-etapas para edição em lote: seleção de categorias/planos, período, e ajustes individuais por combinação</div>
+                                    <div className="mt-1"><strong>Props:</strong> open, onOpenChange, categories, ratePlans, onSave</div>
+                                  </div>
+                                </div>
+                                <div className="border-l-2 border-indigo-300 pl-3">
+                                  <div className="font-semibold text-indigo-900">RateSystemSettingsDialog</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Localização:</strong> <code>src/components/rate-system/RateSystemSettingsDialog.tsx</code></div>
+                                    <div className="mt-1"><strong>Funcionalidade:</strong> Configurações do sistema tarifário: auto_apply_dynamic_rules, enable_recommendations, thresholds, percentages. Verifica acesso a funcionalidades.</div>
+                                    <div className="mt-1"><strong>Props:</strong> open, onOpenChange, establishmentId</div>
+                                  </div>
+                                </div>
+                                <div className="border-l-2 border-indigo-300 pl-3">
+                                  <div className="font-semibold text-indigo-900">RateAnalyticsView</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Localização:</strong> <code>src/components/rate-system/RateAnalyticsView.tsx</code></div>
+                                    <div className="mt-1"><strong>Funcionalidade:</strong> Visualização de analytics (ADR, RevPAR, ocupação) e aba de recomendações com filtros e aplicação de preços sugeridos</div>
+                                    <div className="mt-1"><strong>Props:</strong> categories, ratePlans</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div><strong>Hooks Customizados - Detalhamento:</strong>
+                              <div className="mt-2 space-y-2 ml-4">
+                                <div className="border-l-2 border-cyan-300 pl-3">
+                                  <div className="font-semibold text-cyan-900">useRateSystem</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Localização:</strong> <code>src/hooks/useRateSystem.ts</code></div>
+                                    <div className="mt-1"><strong>Funcionalidade:</strong> Hook principal para gestão de dados do sistema tarifário. Fornece queries e mutations para:</div>
+                                    <ul className="list-disc list-inside ml-4 mt-1">
+                                      <li>Buscar planos tarifários (<code>usePricingPlans</code>)</li>
+                                      <li>Buscar calendário de tarifas (<code>useRateCalendar</code>)</li>
+                                      <li>Buscar regras dinâmicas (<code>useDynamicPricingRules</code>)</li>
+                                      <li>Salvar tarifas (<code>useSaveRate</code>)</li>
+                                      <li>Buscar configurações (<code>useRateSystemSettings</code>)</li>
+                                      <li>Salvar configurações (<code>useSaveRateSystemSettings</code>)</li>
+                                    </ul>
+                                  </div>
+                                </div>
+                                <div className="border-l-2 border-cyan-300 pl-3">
+                                  <div className="font-semibold text-cyan-900">useRateRecommendations</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Localização:</strong> <code>src/hooks/useRateSystem.ts</code></div>
+                                    <div className="mt-1"><strong>Funcionalidade:</strong> Hook para buscar recomendações de preços usando <code>generate_rate_recommendations</code>. Retorna dados, loading, error, e função refetch.</div>
+                                    <div className="mt-1"><strong>Uso:</strong> <code>{`const { data, isLoading, error, refetch } = useRateRecommendations(establishmentId, startDate, endDate, categoryId)`}</code></div>
+                                  </div>
+                                </div>
+                                <div className="border-l-2 border-cyan-300 pl-3">
+                                  <div className="font-semibold text-cyan-900">applyRecommendationPrice</div>
+                                  <div className="text-xs text-slate-600 mt-1">
+                                    <div><strong>Localização:</strong> <code>src/hooks/useRateSystem.ts</code></div>
+                                    <div className="mt-1"><strong>Funcionalidade:</strong> Função assíncrona para aplicar preço sugerido usando <code>apply_recommendation_price</code>. Retorna Promise&lt;boolean&gt;.</div>
+                                    <div className="mt-1"><strong>Uso:</strong> <code>await applyRecommendationPrice(establishmentId, categoryId, planId, date, price)</code></div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div><strong>Pré-requisitos e Dependências:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4 space-y-1">
+                                <li><strong>Feature Flag:</strong> <code>dynamic_pricing_automation</code> deve estar habilitado em <code>site_settings.features_enabled</code> e na empresa específica (se aplicável)</li>
+                                <li><strong>Configurações:</strong> <code>hotel_settings.rate_system_settings</code> deve existir com estrutura JSONB válida</li>
+                                <li><strong>Tabelas:</strong> Todas as tabelas mencionadas devem existir e ter estrutura correta</li>
+                                <li><strong>Permissões RLS:</strong> Usuário deve ter permissões SELECT/INSERT/UPDATE nas tabelas relevantes</li>
+                                <li><strong>Dados:</strong> Categorias, planos tarifários e quartos devem estar cadastrados</li>
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="p-3 bg-amber-50 rounded border border-amber-200">
+                          <h4 className="font-semibold mb-2 text-amber-900">Controle de Funcionalidades:</h4>
+                          <ul className="space-y-1 text-xs text-amber-800">
+                            <li><strong>Super Admin:</strong> Pode ativar/desativar "Automação de Regras de Precificação Dinâmica"</li>
+                            <li><strong>Seleção por Empresa:</strong> Permite escolher quais empresas podem usar a funcionalidade</li>
+                            <li><strong>Verificação Automática:</strong> Sistema verifica acesso antes de aplicar regras dinâmicas</li>
+                            <li><strong>Mensagem Informativa:</strong> Exibe mensagem quando funcionalidade não está disponível</li>
+                            <li><strong>Armazenamento:</strong> Configuração salva em <code>companies.features_enabled</code> (JSONB)</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
                 </div>
               </div>
             </Card>
@@ -3978,7 +4581,7 @@ const data = await apiRequest("booking_engine", "/reservations", {
       </div>
     </div>
   );
-};
+}
 
 export default Documentation;
 

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar, DollarSign, Settings, BarChart3, Users, RefreshCw, AlertCircle, TrendingUp, Package, Lock, Plus, Edit, Trash2, Copy, Download, Upload, Search, Filter, Eye, Check, X, Tag } from "lucide-react";
@@ -11,6 +11,8 @@ import { useRateSystem } from "@/hooks/useRateSystem";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { checkEstablishmentFeatureAccess } from "@/lib/featureAccess";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { format, addDays, eachDayOfInterval, startOfDay, isSameDay, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { formatCurrency } from "@/lib/reservationUtils";
@@ -32,6 +34,8 @@ const PMSRateSystem = () => {
   const [startDate, setStartDate] = useState(startOfDay(new Date()));
   const [channelSyncOpen, setChannelSyncOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hasDynamicPricingAccess, setHasDynamicPricingAccess] = useState<boolean | null>(null);
+  const { selectedEstablishment } = useEstablishment();
 
   const {
     ratePlans,
@@ -124,6 +128,29 @@ const PMSRateSystem = () => {
     },
   });
 
+  // Verificar se a empresa tem acesso à funcionalidade de automação de regras dinâmicas
+  useEffect(() => {
+    const checkAccess = async () => {
+      if (!selectedEstablishment?.id) {
+        setHasDynamicPricingAccess(false);
+        return;
+      }
+
+      try {
+        const access = await checkEstablishmentFeatureAccess(
+          'dynamic_pricing_automation',
+          selectedEstablishment.id
+        );
+        setHasDynamicPricingAccess(access);
+      } catch (error) {
+        console.error('Erro ao verificar acesso à funcionalidade:', error);
+        setHasDynamicPricingAccess(false);
+      }
+    };
+
+    checkAccess();
+  }, [selectedEstablishment?.id]);
+
   // Selecionar primeiro plano ativo por padrão
   const activePlans = useMemo(() => {
     return ratePlans.filter(p => p.is_active);
@@ -175,7 +202,7 @@ const PMSRateSystem = () => {
         {/* Navigation Tabs */}
         <div className="px-6">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-7">
+            <TabsList className={`grid w-full ${hasDynamicPricingAccess ? 'grid-cols-7' : 'grid-cols-6'}`}>
               <TabsTrigger 
                 value="pricing-dashboard" 
                 className="gap-2 data-[state=active]:bg-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md"
@@ -195,10 +222,12 @@ const PMSRateSystem = () => {
                 <Tag className="w-4 h-4" />
                 Tipos de Planos
               </TabsTrigger>
+              {hasDynamicPricingAccess && (
               <TabsTrigger value="dynamic" className="gap-2">
                 <TrendingUp className="w-4 h-4" />
                 Regras Dinâmicas
               </TabsTrigger>
+              )}
               <TabsTrigger value="restrictions" className="gap-2">
                 <Lock className="w-4 h-4" />
                 Restrições
@@ -251,6 +280,7 @@ const PMSRateSystem = () => {
           </TabsContent>
 
           {/* Dynamic Rules View */}
+          {hasDynamicPricingAccess && (
           <TabsContent value="dynamic" className="space-y-4">
             <DynamicRulesView
               rules={dynamicRules}
@@ -262,6 +292,7 @@ const PMSRateSystem = () => {
               onDelete={deleteDynamicRule}
             />
           </TabsContent>
+          )}
 
           {/* Restrictions View */}
           <TabsContent value="restrictions" className="space-y-4">

@@ -7,11 +7,15 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { BarChart3, TrendingUp, DollarSign, Users, Download, Calendar as CalendarIcon } from "lucide-react";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useRateMetrics } from "@/hooks/useRateMetrics";
+import { useRateRecommendations, applyRecommendationPrice } from "@/hooks/useRateSystem";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
@@ -43,14 +47,91 @@ export const RateAnalyticsView = ({
   categories,
   ratePlans,
 }: RateAnalyticsViewProps) => {
+  const queryClient = useQueryClient();
+  const establishmentId = getSelectedEstablishmentId();
   const [dateRange, setDateRange] = useState({
     start: startOfDay(subDays(new Date(), 30)),
     end: endOfDay(new Date()),
   });
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedPlan, setSelectedPlan] = useState<string>("all");
+  const [applyingRecommendation, setApplyingRecommendation] = useState<string | null>(null);
+  const [showPastRecommendations, setShowPastRecommendations] = useState<boolean>(false);
 
   const { getMetricsForPeriod } = useRateMetrics();
+  
+  // Buscar recomendações
+  const { data: allRecommendations, isLoading: recommendationsLoading, refetch: refetchRecommendations } = useRateRecommendations(
+    dateRange.start,
+    dateRange.end,
+    selectedCategory !== "all" ? selectedCategory : undefined
+  );
+
+  // Filtrar recomendações por data (ocultar passadas por padrão)
+  const recommendations = useMemo(() => {
+    if (!allRecommendations) return [];
+    
+    const today = startOfDay(new Date());
+    
+    if (showPastRecommendations) {
+      return allRecommendations;
+    }
+    
+    // Filtrar apenas datas atuais e futuras
+    return allRecommendations.filter((rec: any) => {
+      if (!rec.date) return false;
+      const recDate = startOfDay(new Date(rec.date));
+      return recDate >= today;
+    });
+  }, [allRecommendations, showPastRecommendations]);
+
+  // Função para aplicar recomendação
+  const handleApplyRecommendation = async (rec: any) => {
+    if (!rec.category_id || !rec.date) {
+      toast.error('Informações incompletas na recomendação');
+      return;
+    }
+
+    // Buscar plano padrão (BAR) ou primeiro plano ativo
+    const defaultPlan = ratePlans.find(p => p.code === 'BAR' && p.is_active) || 
+                       ratePlans.find(p => p.is_active);
+    
+    if (!defaultPlan) {
+      toast.error('Nenhum plano tarifário ativo encontrado');
+      return;
+    }
+
+    if (!establishmentId) {
+      toast.error('Estabelecimento não selecionado');
+      return;
+    }
+
+    setApplyingRecommendation(`${rec.category_id}-${rec.date}`);
+    
+    try {
+      await applyRecommendationPrice(
+        establishmentId,
+        rec.category_id,
+        defaultPlan.id,
+        new Date(rec.date),
+        rec.suggested_price
+      );
+
+      toast.success('Preço sugerido aplicado com sucesso!');
+      
+      // Invalidar queries relacionadas
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      queryClient.invalidateQueries({ queryKey: ["rate_recommendations"] });
+      
+      // Recarregar recomendações
+      refetchRecommendations();
+    } catch (error: any) {
+      console.error('Erro ao aplicar recomendação:', error);
+      toast.error(error.message || 'Erro ao aplicar preço sugerido');
+    } finally {
+      setApplyingRecommendation(null);
+    }
+  };
 
   // Buscar dados de reservas para analytics
   const { data: reservationsData, isLoading: reservationsLoading } = useQuery({
@@ -314,10 +395,113 @@ export const RateAnalyticsView = ({
       <Tabs defaultValue="overview" className="w-full">
         <TabsList>
           <TabsTrigger value="overview">Visão Geral</TabsTrigger>
+          <TabsTrigger value="recommendations">Recomendações</TabsTrigger>
           <TabsTrigger value="revenue">Receita</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
           <TabsTrigger value="forecast">Forecast</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="recommendations" className="space-y-4">
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-4">
+                <h3 className="text-lg font-semibold text-gray-900">Recomendações de Preços</h3>
+                <Badge variant={recommendations && recommendations.length > 0 ? "default" : "secondary"}>
+                  {recommendations?.length || 0} recomendações
+                </Badge>
+                {allRecommendations && allRecommendations.length > recommendations.length && (
+                  <Badge variant="outline" className="text-xs">
+                    {allRecommendations.length - recommendations.length} ocultas (datas passadas)
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="show-past" className="text-sm text-gray-600 cursor-pointer">
+                  Mostrar datas passadas
+                </Label>
+                <Switch
+                  id="show-past"
+                  checked={showPastRecommendations}
+                  onCheckedChange={setShowPastRecommendations}
+                />
+              </div>
+            </div>
+            
+            {recommendationsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <p className="text-gray-500">Carregando recomendações...</p>
+              </div>
+            ) : recommendations && recommendations.length > 0 ? (
+              <div className="space-y-4">
+                {recommendations.map((rec: any, index: number) => (
+                  <Card key={index} className="p-4 border-l-4 border-l-blue-500">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge variant={rec.priority === 'high' ? 'destructive' : 'default'}>
+                            {rec.priority === 'high' ? 'Alta Prioridade' : 'Média Prioridade'}
+                          </Badge>
+                          {rec.category_name && (
+                            <span className="text-sm text-gray-600">Categoria: {rec.category_name}</span>
+                          )}
+                          {rec.date && (
+                            <span className="text-sm text-gray-600">
+                              Data: {format(new Date(rec.date), 'dd/MM/yyyy', { locale: ptBR })}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-700 mb-3">{rec.message}</p>
+                        <div className="grid grid-cols-3 gap-4 text-sm mb-4">
+                          <div>
+                            <span className="text-gray-500">Preço Atual:</span>
+                            <p className="font-semibold text-gray-900">{formatCurrency(rec.current_price)}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Preço Sugerido:</span>
+                            <p className="font-semibold text-green-600">{formatCurrency(rec.suggested_price)}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Impacto na Receita:</span>
+                            <p className={`font-semibold ${rec.estimated_revenue_impact >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {formatCurrency(rec.estimated_revenue_impact)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            onClick={() => handleApplyRecommendation(rec)}
+                            disabled={applyingRecommendation === `${rec.category_id}-${rec.date}`}
+                            className="gap-2"
+                          >
+                            {applyingRecommendation === `${rec.category_id}-${rec.date}` ? (
+                              <>
+                                <Download className="w-4 h-4 animate-spin" />
+                                Aplicando...
+                              </>
+                            ) : (
+                              <>
+                                <DollarSign className="w-4 h-4" />
+                                Aplicar Preço Sugerido
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-gray-500 mb-2">Nenhuma recomendação disponível no período selecionado.</p>
+                <p className="text-sm text-gray-400">
+                  As recomendações são geradas automaticamente com base na ocupação e nas configurações do sistema.
+                </p>
+              </div>
+            )}
+          </Card>
+        </TabsContent>
 
         <TabsContent value="overview" className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

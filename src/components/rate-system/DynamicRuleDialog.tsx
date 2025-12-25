@@ -58,7 +58,7 @@ export const DynamicRuleDialog = ({
   });
 
   const previousRuleIdRef = useRef<string | null>(null);
-  
+
   useEffect(() => {
     if (open) {
       // Só atualizar o form se for uma regra diferente ou se o dialog acabou de abrir
@@ -68,7 +68,7 @@ export const DynamicRuleDialog = ({
       if (isNewRule || !previousRuleIdRef.current) {
         previousRuleIdRef.current = currentRuleId;
         
-        if (rule) {
+      if (rule) {
           // Parse dates without timezone conversion - treat as local dates
           let ruleStartDate: Date | undefined = undefined;
           let ruleEndDate: Date | undefined = undefined;
@@ -151,28 +151,28 @@ export const DynamicRuleDialog = ({
             };
           }
           
-          setFormData({
-            name: rule.name || "",
-            description: rule.description || "",
-            trigger_type: rule.trigger_type || "occupancy",
+        setFormData({
+          name: rule.name || "",
+          description: rule.description || "",
+          trigger_type: rule.trigger_type || "occupancy",
             trigger_condition: triggerCondition,
-            adjustment_type: rule.adjustment_type || "percentage",
-            adjustment_value: rule.adjustment_value || 0,
-            priority: rule.priority || 1,
-            is_active: rule.is_active ?? true,
-            applicable_categories: rule.applicable_categories || [],
-            applicable_plans: rule.applicable_plans || [],
+          adjustment_type: rule.adjustment_type || "percentage",
+          adjustment_value: rule.adjustment_value || 0,
+          priority: rule.priority || 1,
+          is_active: rule.is_active ?? true,
+          applicable_categories: rule.applicable_categories || [],
+          applicable_plans: rule.applicable_plans || [],
             start_date: ruleStartDate,
             end_date: ruleEndDate,
-            use_occupancy: rule.use_occupancy ?? false,
-            use_pickup_rate: rule.use_pickup_rate ?? false,
-            use_demand_history: rule.use_demand_history ?? false,
-          });
-        } else {
-          setFormData({
-            name: "",
-            description: "",
-            trigger_type: "occupancy",
+          use_occupancy: rule.use_occupancy ?? false,
+          use_pickup_rate: rule.use_pickup_rate ?? false,
+          use_demand_history: rule.use_demand_history ?? false,
+        });
+      } else {
+        setFormData({
+          name: "",
+          description: "",
+          trigger_type: "occupancy",
             trigger_condition: {
               occupancy_ranges: [
                 { name: "Baixa Ocupação", min: 0, max: 30, adjustment: -15, base_value: null },
@@ -180,19 +180,19 @@ export const DynamicRuleDialog = ({
                 { name: "Alta Ocupação", min: 61, max: 80, adjustment: 10, base_value: null },
               ]
             },
-            adjustment_type: "percentage",
-            adjustment_value: 0,
-            priority: 1,
-            is_active: true,
-            applicable_categories: [],
-            applicable_plans: [],
-            start_date: undefined,
-            end_date: undefined,
-            use_occupancy: false,
-            use_pickup_rate: false,
-            use_demand_history: false,
-          });
-        }
+          adjustment_type: "percentage",
+          adjustment_value: 0,
+          priority: 1,
+          is_active: true,
+          applicable_categories: [],
+          applicable_plans: [],
+          start_date: undefined,
+          end_date: undefined,
+          use_occupancy: false,
+          use_pickup_rate: false,
+          use_demand_history: false,
+        });
+      }
       }
     } else {
       // Reset quando o dialog fecha
@@ -425,31 +425,31 @@ export const DynamicRuleDialog = ({
                     {index === 2 && "Aumentar preços quando a ocupação está alta para maximizar receita"}
                   </p>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                       <Label>Mínimo (%)</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
                         step="0.1"
                         value={range.min ?? ""}
                         onChange={(e) => {
                           const newRanges = [...(formData.trigger_condition?.occupancy_ranges || [])];
                           newRanges[index] = { ...newRanges[index], min: parseFloat(e.target.value) || 0 };
                           setFormData({
-                            ...formData,
+                      ...formData,
                             trigger_condition: { ...formData.trigger_condition, occupancy_ranges: newRanges },
                           });
                         }}
-                      />
-                    </div>
-                    <div>
+                  />
+                </div>
+                <div>
                       <Label>Máximo (%)</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
                         step="0.1"
                         value={range.max ?? ""}
                         onChange={(e) => {
@@ -512,11 +512,11 @@ export const DynamicRuleDialog = ({
                             base_value: e.target.value === "" ? null : parseFloat(e.target.value) || null 
                           };
                           setFormData({
-                            ...formData,
+                      ...formData,
                             trigger_condition: { ...formData.trigger_condition, occupancy_ranges: newRanges },
                           });
                         }}
-                      />
+                  />
                       <p className="text-xs text-muted-foreground mt-1">
                         Deixe vazio para usar o valor base da tarifa
                       </p>
@@ -534,17 +534,17 @@ export const DynamicRuleDialog = ({
             {/* Velocidade de Reservas */}
             {formData.trigger_type === "booking_velocity" && (
               <div className="space-y-4">
-                <div>
-                  <Label>Reservas por Dia (mínimo)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={formData.trigger_condition.min_bookings || ""}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      trigger_condition: { ...formData.trigger_condition, min_bookings: parseInt(e.target.value) || 0 },
-                    })}
-                  />
+              <div>
+                <Label>Reservas por Dia (mínimo)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={formData.trigger_condition.min_bookings || ""}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    trigger_condition: { ...formData.trigger_condition, min_bookings: parseInt(e.target.value) || 0 },
+                  })}
+                />
                   <p className="text-xs text-muted-foreground mt-1">
                     Aplicar quando houver pelo menos este número de reservas por dia
                   </p>
@@ -586,33 +586,33 @@ export const DynamicRuleDialog = ({
             {/* Antecedência de Reserva */}
             {formData.trigger_type === "advance_booking" && (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Dias Antecedência (mínimo)</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={formData.trigger_condition.min_days || ""}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        trigger_condition: { ...formData.trigger_condition, min_days: parseInt(e.target.value) || 0 },
-                      })}
-                    />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Dias Antecedência (mínimo)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={formData.trigger_condition.min_days || ""}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      trigger_condition: { ...formData.trigger_condition, min_days: parseInt(e.target.value) || 0 },
+                    })}
+                  />
                     <p className="text-xs text-muted-foreground mt-1">
                       Aplicar para reservas com pelo menos este número de dias de antecedência
                     </p>
-                  </div>
-                  <div>
-                    <Label>Dias Antecedência (máximo)</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={formData.trigger_condition.max_days || ""}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        trigger_condition: { ...formData.trigger_condition, max_days: parseInt(e.target.value) || 365 },
-                      })}
-                    />
+                </div>
+                <div>
+                  <Label>Dias Antecedência (máximo)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={formData.trigger_condition.max_days || ""}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      trigger_condition: { ...formData.trigger_condition, max_days: parseInt(e.target.value) || 365 },
+                    })}
+                  />
                     <p className="text-xs text-muted-foreground mt-1">
                       Aplicar para reservas com no máximo este número de dias de antecedência
                     </p>
@@ -723,7 +723,7 @@ export const DynamicRuleDialog = ({
                   <p className="text-xs text-muted-foreground mt-1">
                     Busca valores do mesmo mês do ano anterior no tarifário para ajustar preços
                   </p>
-                </div>
+              </div>
                 <Switch
                   id="use_demand_history"
                   checked={formData.use_demand_history}

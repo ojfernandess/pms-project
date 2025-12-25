@@ -205,9 +205,9 @@ export const DynamicRulesView = ({
                           })}
                         </div>
                       ) : (
-                        <Badge variant={rule.adjustment_value > 0 ? "default" : "secondary"}>
-                          {getAdjustmentLabel(rule)}
-                        </Badge>
+                      <Badge variant={rule.adjustment_value > 0 ? "default" : "secondary"}>
+                        {getAdjustmentLabel(rule)}
+                      </Badge>
                       )}
                     </td>
                     <td className="px-6 py-4">

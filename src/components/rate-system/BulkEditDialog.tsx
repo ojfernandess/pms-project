@@ -24,7 +24,7 @@ interface BulkEditDialogProps {
   onSave: (data: {
     categoryPlans: Array<{
       categoryId: string;
-      planId: string;
+    planId: string;
       adjustmentType: 'percentage' | 'fixed' | 'replace';
       adjustmentValue: number;
     }>;
@@ -135,11 +135,11 @@ export const BulkEditDialog = memo(({
   const handleSelectAllCategories = useCallback(() => {
     const allCategoryIds = categories.map((c) => c.id);
     const allSelected = allCategoryIds.every((id) => categoryPlans[id] !== undefined);
-
-    if (allSelected) {
+      
+      if (allSelected) {
       setCategoryPlans({});
       setPrices({});
-    } else {
+      } else {
       const newState: Record<string, string[]> = {};
       allCategoryIds.forEach((id) => {
         newState[id] = [];
@@ -162,7 +162,7 @@ export const BulkEditDialog = memo(({
     if (categoriesWithoutPlans.length > 0) {
       toast.error("Todas as categorias selecionadas devem ter pelo menos um plano tarifário");
       return;
-    }
+      }
 
     setStep(2);
   };
@@ -254,12 +254,12 @@ export const BulkEditDialog = memo(({
     }
 
     try {
-      await onSave({
+    await onSave({
         categoryPlans: categoryPlansData,
-        startDate: bulkStartDate,
-        endDate: bulkEndDate,
-      });
-      onOpenChange(false);
+      startDate: bulkStartDate,
+      endDate: bulkEndDate,
+    });
+    onOpenChange(false);
     } catch (error: any) {
       console.error("Erro ao salvar edição em lote:", error);
       toast.error(error.message || "Erro ao atualizar tarifas");
@@ -388,55 +388,55 @@ export const BulkEditDialog = memo(({
 
           {/* Step 2: Selecionar Período */}
           {step === 2 && (
-            <div className="space-y-4">
-              <div>
+        <div className="space-y-4">
+          <div>
                 <Label>Data Inicial *</Label>
-                <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
+              <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
                       className="w-full justify-start text-left font-normal mt-1"
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(bulkStartDate, "dd/MM/yyyy", { locale: ptBR })}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={bulkStartDate}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {format(bulkStartDate, "dd/MM/yyyy", { locale: ptBR })}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={bulkStartDate}
                       onSelect={(selectedDate) => {
                         if (selectedDate) {
                           setBulkStartDate(startOfDay(selectedDate));
-                          setStartDateOpen(false);
+                        setStartDateOpen(false);
                           if (selectedDate > bulkEndDate) {
                             setBulkEndDate(startOfDay(addDays(selectedDate, 1)));
                           }
-                        }
-                      }}
-                      initialFocus
-                      locale={ptBR}
-                    />
-                  </PopoverContent>
-                </Popover>
+                      }
+                    }}
+                    initialFocus
+                    locale={ptBR}
+                  />
+                </PopoverContent>
+              </Popover>
               </div>
 
               <div>
                 <Label>Data Final *</Label>
-                <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
+              <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
                       className="w-full justify-start text-left font-normal mt-1"
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(bulkEndDate, "dd/MM/yyyy", { locale: ptBR })}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={bulkEndDate}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {format(bulkEndDate, "dd/MM/yyyy", { locale: ptBR })}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={bulkEndDate}
                       onSelect={(selectedDate) => {
                         if (selectedDate) {
                           if (selectedDate < bulkStartDate) {
@@ -444,16 +444,16 @@ export const BulkEditDialog = memo(({
                             return;
                           }
                           setBulkEndDate(startOfDay(selectedDate));
-                          setEndDateOpen(false);
-                        }
-                      }}
-                      initialFocus
-                      locale={ptBR}
+                        setEndDateOpen(false);
+                      }
+                    }}
+                    initialFocus
+                    locale={ptBR}
                       disabled={(date) => date < bulkStartDate}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
+                  />
+                </PopoverContent>
+              </Popover>
+          </div>
 
               <div className="p-3 bg-muted rounded-md">
                 <p className="text-sm font-medium">
@@ -464,7 +464,7 @@ export const BulkEditDialog = memo(({
                   {daysCount} dia(s) - {totalCombinations} combinação(ões) × {daysCount} dia(s) ={" "}
                   {totalCombinations * daysCount} tarifário(s) serão atualizados
                 </p>
-              </div>
+            </div>
             </div>
           )}
 
@@ -487,27 +487,27 @@ export const BulkEditDialog = memo(({
                   <p>
                     <strong>Total de tarifários:</strong> {totalCombinations * daysCount}
                   </p>
-                </div>
-              </div>
+            </div>
+          </div>
 
-              <div>
+          <div>
                 <div className="flex items-center justify-between mb-2">
                   <Label>Tipo de Ajuste Padrão</Label>
                   <p className="text-xs text-muted-foreground">Pode ser alterado individualmente abaixo</p>
                 </div>
-                <Select value={adjustmentType} onValueChange={(v: any) => setAdjustmentType(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
+            <Select value={adjustmentType} onValueChange={(v: any) => setAdjustmentType(v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
                     <SelectItem value="percentage">Percentual (%)</SelectItem>
                     <SelectItem value="fixed">Valor Fixo (R$)</SelectItem>
                     <SelectItem value="replace">Substituir Valor (R$)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              </SelectContent>
+            </Select>
+          </div>
 
-              <div>
+          <div>
                 <Label className="mb-3 block">Valores por Categoria e Plano Tarifário *</Label>
                 <div className="space-y-4 border rounded-md p-4 max-h-96 overflow-y-auto">
                   {selectedCategories.map((categoryId) => {
@@ -560,7 +560,7 @@ export const BulkEditDialog = memo(({
                                   </div>
                                   <div>
                                     <Label className="text-xs">Valor *</Label>
-                                    <Input
+            <Input
                                       type="text"
                                       inputMode="decimal"
                                       value={priceData.adjustmentValue}
@@ -571,10 +571,10 @@ export const BulkEditDialog = memo(({
                                         const finalValue = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : cleanValue;
                                         handlePriceChange(categoryId, planId, 'adjustmentValue', finalValue);
                                       }}
-                                      placeholder={getPlaceholder()}
+              placeholder={getPlaceholder()}
                                       className="h-9"
-                                    />
-                                  </div>
+            />
+          </div>
                                 </div>
                               </div>
                             );
@@ -601,9 +601,9 @@ export const BulkEditDialog = memo(({
             )}
           </div>
           <div className="flex gap-3">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancelar
-            </Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
             {step === 1 && (
               <Button onClick={handleNextToPeriod} disabled={totalCombinations === 0}>
                 Próximo
@@ -615,9 +615,9 @@ export const BulkEditDialog = memo(({
               </Button>
             )}
             {step === 3 && (
-              <Button onClick={handleSave}>
+          <Button onClick={handleSave}>
                 Salvar ({totalCombinations * daysCount})
-              </Button>
+          </Button>
             )}
           </div>
         </div>

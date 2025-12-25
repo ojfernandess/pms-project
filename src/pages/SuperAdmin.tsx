@@ -2602,29 +2602,54 @@ const SuperAdmin = () => {
 // Componente de Gerenciamento de Feature Flags (Funcionalidades)
 const FeatureFlagsManager = () => {
   const { settings, isLoading, updateSettings, isUpdating } = useSiteSettings();
-  const [features, setFeatures] = useState({
+  const { companies } = useCompanies();
+  const [features, setFeatures] = useState<any>({
     api_integrations: true,
     stripe: true,
     email: true,
     web_checkin: true,
     channel_manager: true,
+    dynamic_pricing_automation: { enabled: false, company_ids: [] },
   });
+  const [expandedFeature, setExpandedFeature] = useState<string | null>(null);
 
   useEffect(() => {
     if (settings?.features_enabled) {
+      const fe = settings.features_enabled;
       setFeatures({
-        api_integrations: settings.features_enabled.api_integrations ?? true,
-        stripe: settings.features_enabled.stripe ?? true,
-        email: settings.features_enabled.email ?? true,
-        web_checkin: settings.features_enabled.web_checkin ?? true,
-        channel_manager: settings.features_enabled.channel_manager ?? true,
+        api_integrations: typeof fe.api_integrations === 'boolean' ? fe.api_integrations : (fe.api_integrations?.enabled ?? true),
+        stripe: typeof fe.stripe === 'boolean' ? fe.stripe : (fe.stripe?.enabled ?? true),
+        email: typeof fe.email === 'boolean' ? fe.email : (fe.email?.enabled ?? true),
+        web_checkin: typeof fe.web_checkin === 'boolean' ? fe.web_checkin : (fe.web_checkin?.enabled ?? true),
+        channel_manager: typeof fe.channel_manager === 'boolean' ? fe.channel_manager : (fe.channel_manager?.enabled ?? true),
+        dynamic_pricing_automation: typeof fe.dynamic_pricing_automation === 'boolean' 
+          ? { enabled: fe.dynamic_pricing_automation, company_ids: [] }
+          : (fe.dynamic_pricing_automation || { enabled: false, company_ids: [] }),
       });
     }
   }, [settings]);
 
-  const handleToggle = async (feature: keyof typeof features, value: boolean) => {
-    const newFeatures = { ...features, [feature]: value };
-    setFeatures(newFeatures);
+  const handleToggle = async (feature: string, value: boolean) => {
+    const currentFeatures = settings?.features_enabled || {};
+    const newFeatures = { ...currentFeatures };
+    
+    // Se for dynamic_pricing_automation, manter estrutura de objeto
+    if (feature === 'dynamic_pricing_automation') {
+      const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
+        ? newFeatures[feature]
+        : { enabled: false, company_ids: [] };
+      newFeatures[feature] = { ...currentConfig, enabled: value };
+    } else {
+      // Para outras funcionalidades, manter como boolean
+      newFeatures[feature] = value;
+    }
+    
+    setFeatures((prev: any) => ({
+      ...prev,
+      [feature]: feature === 'dynamic_pricing_automation' 
+        ? { enabled: value, company_ids: prev[feature]?.company_ids || [] }
+        : value
+    }));
     
     try {
       await updateSettings({
@@ -2634,6 +2659,43 @@ const FeatureFlagsManager = () => {
       // Reverter em caso de erro
       setFeatures(features);
       console.error("Erro ao atualizar funcionalidade:", error);
+    }
+  };
+
+  const handleCompanyToggle = async (feature: string, companyId: string, isSelected: boolean) => {
+    const currentFeatures = settings?.features_enabled || {};
+    const newFeatures = { ...currentFeatures };
+    const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
+      ? newFeatures[feature]
+      : { enabled: false, company_ids: [] };
+    
+    let companyIds = Array.isArray(currentConfig.company_ids) ? [...currentConfig.company_ids] : [];
+    
+    if (isSelected) {
+      if (!companyIds.includes(companyId)) {
+        companyIds.push(companyId);
+      }
+    } else {
+      companyIds = companyIds.filter((id: string) => id !== companyId);
+    }
+    
+    newFeatures[feature] = {
+      ...currentConfig,
+      company_ids: companyIds,
+    };
+    
+    setFeatures((prev: any) => ({
+      ...prev,
+      [feature]: { ...prev[feature], company_ids: companyIds }
+    }));
+    
+    try {
+      await updateSettings({
+        features_enabled: newFeatures,
+      });
+    } catch (error) {
+      console.error("Erro ao atualizar empresas da funcionalidade:", error);
+      toast.error("Erro ao atualizar empresas");
     }
   };
 
@@ -2653,30 +2715,42 @@ const FeatureFlagsManager = () => {
       label: "Integrações de API",
       description: "Permite que estabelecimentos configurem integrações com APIs externas (Booking Engine, Channel Manager, etc.)",
       icon: Key,
+      supportsCompanies: false,
     },
     {
       key: "stripe" as const,
       label: "Stripe",
       description: "Habilita a integração com Stripe para processamento de pagamentos",
       icon: CreditCard,
+      supportsCompanies: false,
     },
     {
       key: "email" as const,
       label: "Sistema de E-mail",
       description: "Habilita o sistema de envio de e-mails (templates, fila, logs)",
       icon: Mail,
+      supportsCompanies: false,
     },
     {
       key: "web_checkin" as const,
       label: "Web Check-in",
       description: "Permite que hóspedes façam check-in online antes da chegada",
       icon: Zap,
+      supportsCompanies: false,
     },
     {
       key: "channel_manager" as const,
       label: "Channel Manager",
       description: "Habilita a sincronização com canais de distribuição (OTAs)",
       icon: Link2,
+      supportsCompanies: false,
+    },
+    {
+      key: "dynamic_pricing_automation" as const,
+      label: "Automação de Regras de Precificação Dinâmica",
+      description: "Permite que empresas utilizem a automação de regras de precificação dinâmica para ajustar tarifas automaticamente",
+      icon: TrendingUp,
+      supportsCompanies: true,
     },
   ];
 
@@ -2698,13 +2772,20 @@ const FeatureFlagsManager = () => {
         <div className="space-y-4">
           {featureList.map((feature) => {
             const Icon = feature.icon;
-            const isEnabled = features[feature.key];
+            const isEnabled = feature.supportsCompanies 
+              ? features[feature.key]?.enabled ?? false
+              : features[feature.key] ?? false;
+            const isExpanded = expandedFeature === feature.key;
+            const selectedCompanyIds = feature.supportsCompanies 
+              ? (features[feature.key]?.company_ids || [])
+              : [];
 
             return (
               <div
                 key={feature.key}
-                className="flex items-start justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                className="border rounded-lg hover:bg-muted/50 transition-colors"
               >
+                <div className="flex items-start justify-between p-4">
                 <div className="flex items-start gap-4 flex-1">
                   <div className="p-2 rounded-lg bg-primary/10">
                     <Icon className="h-5 w-5 text-primary" />
@@ -2715,6 +2796,11 @@ const FeatureFlagsManager = () => {
                       <Badge variant={isEnabled ? "default" : "secondary"}>
                         {isEnabled ? "Ativado" : "Desativado"}
                       </Badge>
+                        {feature.supportsCompanies && isEnabled && selectedCompanyIds.length > 0 && (
+                          <Badge variant="outline">
+                            {selectedCompanyIds.length} empresa{selectedCompanyIds.length !== 1 ? 's' : ''}
+                          </Badge>
+                        )}
                     </div>
                     <p className="text-sm text-muted-foreground">
                       {feature.description}
@@ -2722,12 +2808,55 @@ const FeatureFlagsManager = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-3 ml-4">
+                    {feature.supportsCompanies && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setExpandedFeature(isExpanded ? null : feature.key)}
+                        disabled={!isEnabled}
+                      >
+                        {isExpanded ? "Ocultar" : "Selecionar Empresas"}
+                      </Button>
+                    )}
                   <Switch
                     checked={isEnabled}
                     onCheckedChange={(checked) => handleToggle(feature.key, checked)}
                     disabled={isUpdating}
                   />
                 </div>
+                </div>
+                {feature.supportsCompanies && isExpanded && isEnabled && (
+                  <div className="px-4 pb-4 border-t bg-muted/30">
+                    <div className="mt-4 space-y-2">
+                      <Label className="text-sm font-medium">Selecionar Empresas:</Label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-60 overflow-y-auto">
+                        {companies.map((company) => {
+                          const isSelected = selectedCompanyIds.includes(company.id);
+                          return (
+                            <div
+                              key={company.id}
+                              className="flex items-center space-x-2 p-2 rounded border hover:bg-muted/50 cursor-pointer"
+                              onClick={() => handleCompanyToggle(feature.key, company.id, !isSelected)}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleCompanyToggle(feature.key, company.id, !isSelected)}
+                                className="rounded"
+                              />
+                              <Label className="text-sm cursor-pointer flex-1">
+                                {company.name}
+                              </Label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {companies.length === 0 && (
+                        <p className="text-sm text-muted-foreground">Nenhuma empresa cadastrada</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}

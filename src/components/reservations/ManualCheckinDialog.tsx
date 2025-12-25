@@ -151,13 +151,14 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
   const [webCheckinToken, setWebCheckinToken] = useState<string | null>(null);
 
   // Obter email/CPF/document_number do hóspede principal para buscar dados anteriores
-  // Usar valor da busca inicial ou dados preenchidos no formulário
-  const mainGuestEmail = searchType === "email" && searchValue ? searchValue : (guests?.[0]?.email || null);
-  const mainGuestCpf = searchType === "cpf" && searchValue ? searchValue : (guests?.[0]?.cpf || null);
-  const mainGuestDocumentNumber = guests?.[0]?.document_number || null;
+  // IMPORTANTE: Quando há busca inicial, usar APENAS o campo específico da busca
+  // Isso garante que a busca seja feita apenas pelo documento informado
+  const mainGuestEmail = searchType === "email" && searchValue && hasSearchedGuest ? searchValue.trim() : null;
+  const mainGuestCpf = searchType === "cpf" && searchValue && hasSearchedGuest ? searchValue.trim() : null;
+  const mainGuestDocumentNumber = null; // Não usar document_number na busca inicial, apenas CPF ou email
   
-  // Usar o hook getPreviousCheckinData quando houver busca inicial ou dados preenchidos
-  const shouldSearchPreviousData = !!(mainGuestEmail || mainGuestCpf || mainGuestDocumentNumber) && !skipSearch;
+  // Usar o hook getPreviousCheckinData apenas quando houver busca inicial com valor válido
+  const shouldSearchPreviousData = !!(mainGuestEmail || mainGuestCpf) && !skipSearch && hasSearchedGuest;
   
   const { data: previousCheckinData, refetch: refetchPreviousCheckinData } = getPreviousCheckinData(
     null, // guestAccountId (não disponível no check-in manual)

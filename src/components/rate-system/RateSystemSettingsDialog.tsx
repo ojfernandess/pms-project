@@ -11,6 +11,9 @@ import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { checkEstablishmentFeatureAccess } from "@/lib/featureAccess";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
 
 interface RateSystemSettingsDialogProps {
   open: boolean;
@@ -20,6 +23,9 @@ interface RateSystemSettingsDialogProps {
 export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSettingsDialogProps) => {
   const queryClient = useQueryClient();
   const establishmentId = getSelectedEstablishmentId();
+  const { selectedEstablishment } = useEstablishment();
+  const { settings: siteSettings } = useSiteSettings();
+  const [hasDynamicPricingAccess, setHasDynamicPricingAccess] = useState<boolean | null>(null);
 
   const [settings, setSettings] = useState({
     auto_apply_dynamic_rules: false,
@@ -63,6 +69,31 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
     enabled: open && !!establishmentId,
   });
 
+  // Verificar se a empresa tem acesso à funcionalidade de automação de regras dinâmicas
+  useEffect(() => {
+    const checkAccess = async () => {
+      if (!selectedEstablishment?.id) {
+        setHasDynamicPricingAccess(false);
+        return;
+      }
+
+      try {
+        const access = await checkEstablishmentFeatureAccess(
+          'dynamic_pricing_automation',
+          selectedEstablishment.id
+        );
+        setHasDynamicPricingAccess(access);
+      } catch (error) {
+        console.error('Erro ao verificar acesso à funcionalidade:', error);
+        setHasDynamicPricingAccess(false);
+      }
+    };
+
+    if (open) {
+      checkAccess();
+    }
+  }, [selectedEstablishment?.id, open]);
+
   useEffect(() => {
     if (existingSettings && existingSettings.rate_system_settings) {
       console.log("RateSystemSettings: Carregando configurações existentes:", {
@@ -94,9 +125,9 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
 
       // Preparar dados para inserção/atualização
       const updateData: any = {
-        establishment_id: establishmentId,
-        rate_system_settings: newSettings,
-        updated_at: new Date().toISOString(),
+          establishment_id: establishmentId,
+          rate_system_settings: newSettings,
+          updated_at: new Date().toISOString(),
       };
 
       // Se já existe, fazer update; caso contrário, fazer insert
@@ -128,14 +159,14 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
         const { data, error } = await supabase
           .from("hotel_settings")
           .insert(updateData)
-          .select()
-          .single();
+        .select()
+        .single();
 
         if (error) {
           console.error("Erro ao inserir hotel_settings:", error);
           throw error;
         }
-        return data;
+      return data;
       }
     },
     onSuccess: (data) => {
@@ -260,6 +291,7 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
 
           <TabsContent value="automation" className="space-y-6 mt-6">
             <div className="space-y-4">
+              {hasDynamicPricingAccess ? (
               <div className="flex items-center justify-between">
                 <div>
                   <Label htmlFor="auto_apply_rules">Aplicar Regras Dinâmicas Automaticamente</Label>
@@ -271,6 +303,28 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
                   onCheckedChange={(checked) => setSettings({ ...settings, auto_apply_dynamic_rules: checked })}
                 />
               </div>
+              ) : (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-amber-900">
+                      Funcionalidade Indisponível
+                    </p>
+                    <p className="text-sm text-amber-800">
+                      A <strong>Automação de Regras de Precificação Dinâmica</strong> não está habilitada para sua empresa no momento. 
+                      Esta funcionalidade permite ajustar automaticamente as tarifas com base em condições como ocupação, 
+                      demanda histórica e outros fatores, otimizando a receita do estabelecimento.
+                    </p>
+                    <p className="text-sm text-amber-800 mt-3">
+                      Para ativar esta funcionalidade e começar a utilizar a automação de precificação dinâmica, 
+                      entre em contato com o <strong>suporte do {siteSettings?.site_title || 'sistema'}</strong>.
+                    </p>
+                    <p className="text-sm text-amber-700 mt-2 italic">
+                      Nossa equipe de suporte está pronta para ajudá-lo a configurar e ativar esta funcionalidade 
+                      de forma adequada para o seu estabelecimento.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center justify-between">
                 <div>

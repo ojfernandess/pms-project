@@ -555,7 +555,7 @@
       "hotelInfo": "Información del Hotel",
       "hotelInfoDescription": "Comodidades, horarios y ubicación",
       "specialRequests": "Solicitudes Especiales",
-      "specialRequestsDescription": "Almohada extra, desayuno, late checkout",
+      "specialRequestsDescription": "Almohada extra, early check-in, late checkout u otros pedidos",
       "preferences": "Preferencias",
       "preferencesDescription": "Configura tus preferencias de alojamiento"
     },

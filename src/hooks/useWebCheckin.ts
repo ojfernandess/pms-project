@@ -1308,15 +1308,11 @@ export const useWebCheckin = () => {
         }
 
         // 2. Buscar por email, CPF ou document_number nos hóspedes (incluindo todos, não só principal)
+        // IMPORTANTE: Buscar apenas pelo campo específico informado, não usar OR
+        // Isso garante que cada busca retorne apenas hóspedes com o documento específico
+        // E apenas de check-ins completos (status = "completed")
         if (guestEmail || guestCpf || guestDocumentNumber) {
-          // Construir query OR para buscar por qualquer um dos identificadores
-          const conditions: string[] = [];
-          if (guestEmail) conditions.push(`email.eq.${guestEmail}`);
-          if (guestCpf) conditions.push(`cpf.eq.${guestCpf}`);
-          if (guestDocumentNumber) conditions.push(`document_number.eq.${guestDocumentNumber}`);
-
-          if (conditions.length > 0) {
-            const { data: previousGuests, error: guestsError } = await supabase
+          let query = supabase
               .from("web_checkin_guests")
               .select(`
                 web_checkin_id,
@@ -1326,18 +1322,37 @@ export const useWebCheckin = () => {
                   status,
                   completed_at
                 )
-              `)
-              .or(conditions.join(","))
-              .limit(20);
+            `);
+
+          // Buscar apenas pelo campo específico informado (não usar OR)
+          // Prioridade: email > CPF > document_number
+          if (guestEmail) {
+            query = query.eq("email", guestEmail.trim());
+          } else if (guestCpf) {
+            query = query.eq("cpf", guestCpf.trim());
+          } else if (guestDocumentNumber) {
+            query = query.eq("document_number", guestDocumentNumber.trim());
+          }
+
+          // Filtrar apenas check-ins completos na query
+          query = query.eq("web_checkin.status", "completed");
+
+          const { data: previousGuests, error: guestsError } = await query.limit(20);
 
             if (guestsError) {
               console.error("Erro ao buscar hóspedes anteriores:", guestsError);
-            } else if (previousGuests) {
-              // Ordenar por completed_at manualmente (já que não podemos ordenar por campo aninhado no Supabase)
-              const sortedGuests = previousGuests.sort((a: any, b: any) => {
+          } else if (previousGuests && previousGuests.length > 0) {
+            // Filtrar apenas check-ins completos e ordenar por completed_at
+            const validGuests = previousGuests.filter((g: any) => 
+              g.web_checkin?.status === "completed" && 
+              g.web_checkin?.completed_at
+            );
+            
+            // Ordenar por completed_at (mais recente primeiro)
+            const sortedGuests = validGuests.sort((a: any, b: any) => {
                 const dateA = a.web_checkin?.completed_at ? new Date(a.web_checkin.completed_at).getTime() : 0;
                 const dateB = b.web_checkin?.completed_at ? new Date(b.web_checkin.completed_at).getTime() : 0;
-                return dateB - dateA; // Ordenar descendente (mais recente primeiro)
+              return dateB - dateA;
               });
               
               sortedGuests.forEach((g: any) => {
@@ -1346,7 +1361,6 @@ export const useWebCheckin = () => {
                   reservationIdSet.add(reservationId);
                 }
               });
-            }
           }
         }
 

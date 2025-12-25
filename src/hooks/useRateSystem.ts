@@ -937,3 +937,58 @@ export const useRateSystem = () => {
   };
 };
 
+// Hook para buscar recomendações de preços
+export const useRateRecommendations = (startDate: Date, endDate: Date, categoryId?: string) => {
+  const { selectedEstablishment } = useEstablishment();
+  
+  return useQuery({
+    queryKey: ["rate_recommendations", selectedEstablishment?.id, startDate, endDate, categoryId],
+    queryFn: async () => {
+      if (!selectedEstablishment?.id) return [];
+
+      const { data, error } = await supabase.rpc('generate_rate_recommendations', {
+        p_establishment_id: selectedEstablishment.id,
+        p_start_date: format(startDate, 'yyyy-MM-dd'),
+        p_end_date: format(endDate, 'yyyy-MM-dd'),
+        p_category_id: categoryId || null,
+      });
+
+      if (error) {
+        console.error('Erro ao buscar recomendações:', error);
+        throw error;
+      }
+
+      return data || [];
+    },
+    enabled: !!selectedEstablishment?.id,
+  });
+};
+
+// Função para aplicar preço sugerido de uma recomendação
+export const applyRecommendationPrice = async (
+  establishmentId: string,
+  categoryId: string,
+  pricingPlanId: string,
+  date: Date,
+  suggestedPrice: number
+): Promise<boolean> => {
+  if (!establishmentId) {
+    throw new Error('Estabelecimento não selecionado');
+  }
+
+  const { data, error } = await supabase.rpc('apply_recommendation_price', {
+    p_establishment_id: establishmentId,
+    p_category_id: categoryId,
+    p_pricing_plan_id: pricingPlanId,
+    p_date: format(date, 'yyyy-MM-dd'),
+    p_suggested_price: suggestedPrice,
+  });
+
+  if (error) {
+    console.error('Erro ao aplicar preço sugerido:', error);
+    throw error;
+  }
+
+  return data === true;
+};
+
