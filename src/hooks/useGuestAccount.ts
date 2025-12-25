@@ -12,6 +12,7 @@ export interface GuestAccount {
   birth_date?: string;
   is_verified: boolean;
   two_factor_enabled: boolean;
+  is_active?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -91,6 +92,11 @@ export const useGuestAccount = () => {
 
       if (fetchError || !account) {
         throw new Error("Email ou senha incorretos");
+      }
+
+      // Verificar se conta está ativa (LGPD - exclusão de conta)
+      if (account.is_active === false) {
+        throw new Error("Esta conta foi excluída. Entre em contato com o suporte para mais informações.");
       }
 
       // Verificar se conta está bloqueada
@@ -518,6 +524,31 @@ export const useGuestAccount = () => {
     toast.success("Logout realizado com sucesso!");
   };
 
+  // Excluir conta (LGPD - remove acesso ao guest-dashboard, mas mantém dados de reservas e histórico fiscal)
+  const deactivateAccount = useMutation({
+    mutationFn: async (accountId: string) => {
+      const { data, error } = await supabase.rpc("deactivate_guest_account", {
+        p_account_id: accountId,
+      });
+
+      if (error) {
+        throw new Error(error.message || "Erro ao excluir conta");
+      }
+
+      return data;
+    },
+    onSuccess: () => {
+      // Limpar sessão após excluir conta
+      localStorage.removeItem("guest_session_token");
+      localStorage.removeItem("guest_account_id");
+      queryClient.clear();
+      toast.success("Conta excluída com sucesso. Você será redirecionado.");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao excluir conta");
+    },
+  });
+
   return {
     createAccount,
     login,
@@ -528,6 +559,7 @@ export const useGuestAccount = () => {
     updateProfile,
     updatePassword,
     logout,
+    deactivateAccount,
   };
 };
 

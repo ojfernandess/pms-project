@@ -34,9 +34,12 @@ import {
   CheckCircle,
   Circle,
   Upload,
-  Receipt
+  Receipt,
+  Check,
+  Trash2,
+  CheckCheck
 } from "lucide-react";
-import { format, parseISO, isAfter, startOfDay } from "date-fns";
+import { format, parseISO, isAfter, startOfDay, differenceInDays, isBefore, addDays } from "date-fns";
 import { useGuestAccount } from "@/hooks/useGuestAccount";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -351,7 +354,34 @@ export default function GuestDashboard() {
   const [showSpecialRequestsDialog, setShowSpecialRequestsDialog] = useState(false);
   const [showSpecialRequestsReservationSelector, setShowSpecialRequestsReservationSelector] = useState(false);
   const [selectedReservationForSpecialRequests, setSelectedReservationForSpecialRequests] = useState<any>(null);
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
+  const [readNotifications, setReadNotifications] = useState<Set<string>>(new Set());
+  const [deletedNotifications, setDeletedNotifications] = useState<Set<string>>(new Set());
   
+  // Carregar notificações lidas/excluídas do localStorage
+  useEffect(() => {
+    if (accountId) {
+      const storedRead = localStorage.getItem(`guest_notifications_read_${accountId}`);
+      const storedDeleted = localStorage.getItem(`guest_notifications_deleted_${accountId}`);
+      
+      if (storedRead) {
+        try {
+          setReadNotifications(new Set(JSON.parse(storedRead)));
+        } catch (e) {
+          console.error("Erro ao carregar notificações lidas:", e);
+        }
+      }
+      
+      if (storedDeleted) {
+        try {
+          setDeletedNotifications(new Set(JSON.parse(storedDeleted)));
+        } catch (e) {
+          console.error("Erro ao carregar notificações excluídas:", e);
+        }
+      }
+    }
+  }, [accountId]);
+
   // Debug: monitorar mudanças no estado do diálogo fiscal
   useEffect(() => {
     console.log("🔍 Estado showFiscalReservationSelector mudou:", showFiscalReservationSelector);
@@ -758,6 +788,219 @@ export default function GuestDashboard() {
     navigate("/web-checkin");
   };
 
+  // Buscar notificações (check-in próximo, check-out próximo, chamados respondidos)
+  const { data: notifications, isLoading: isLoadingNotifications } = useQuery({
+    queryKey: ["guest_notifications", accountId, currentReservation?.id],
+    refetchInterval: 60000, // Refetch a cada 1 minuto
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      if (!accountId) return [];
+
+      const notificationsList: any[] = [];
+      const today = startOfDay(new Date());
+      const twoDaysFromNow = addDays(today, 2);
+
+      // 1. Verificar check-in próximo (próximos 2 dias)
+      if (currentReservation?.checkin_date) {
+        const checkinDateOnly = startOfDay(parseISO(currentReservation.checkin_date));
+        const daysUntilCheckin = differenceInDays(checkinDateOnly, today);
+        
+        if (daysUntilCheckin >= 0 && daysUntilCheckin <= 2 && isBefore(today, checkinDateOnly)) {
+          const establishmentName = (currentReservation?.establishment as any)?.name || "Hotel";
+          
+          // Combinar data com horário de check-in
+          let checkinDateTime = new Date(parseISO(currentReservation.checkin_date));
+          if ((currentReservation as any).checkin_time) {
+            const timeStr = (currentReservation as any).checkin_time;
+            // Formato TIME do PostgreSQL: "HH:MM:SS" ou "HH:MM"
+            const timeParts = timeStr.split(':');
+            if (timeParts.length >= 2) {
+              checkinDateTime.setHours(parseInt(timeParts[0]) || 14, parseInt(timeParts[1]) || 0, 0, 0);
+            } else {
+              checkinDateTime.setHours(14, 0, 0, 0); // Horário padrão
+            }
+          } else {
+            // Se não houver horário específico, usar horário padrão (14:00)
+            checkinDateTime.setHours(14, 0, 0, 0);
+          }
+          
+          notificationsList.push({
+            id: `checkin-${currentReservation.id}`,
+            type: "checkin_reminder",
+            title: "Check-in chegando!",
+            message: `Sua reserva no ${establishmentName} está chegando. Check-in em ${daysUntilCheckin === 0 ? "hoje" : `${daysUntilCheckin} ${daysUntilCheckin === 1 ? "dia" : "dias"}`}.`,
+            date: checkinDateTime,
+            reservationId: currentReservation.id,
+            priority: daysUntilCheckin === 0 ? "high" : "medium",
+          });
+        }
+      }
+
+      // 2. Verificar check-out próximo (próximos 2 dias)
+      if (currentReservation?.checkout_date) {
+        const checkoutDateOnly = startOfDay(parseISO(currentReservation.checkout_date));
+        const daysUntilCheckout = differenceInDays(checkoutDateOnly, today);
+        
+        if (daysUntilCheckout >= 0 && daysUntilCheckout <= 2 && isBefore(today, checkoutDateOnly)) {
+          const establishmentName = (currentReservation?.establishment as any)?.name || "Hotel";
+          
+          // Combinar data com horário de check-out
+          let checkoutDateTime = new Date(parseISO(currentReservation.checkout_date));
+          if ((currentReservation as any).checkout_time) {
+            const timeStr = (currentReservation as any).checkout_time;
+            // Formato TIME do PostgreSQL: "HH:MM:SS" ou "HH:MM"
+            const timeParts = timeStr.split(':');
+            if (timeParts.length >= 2) {
+              checkoutDateTime.setHours(parseInt(timeParts[0]) || 12, parseInt(timeParts[1]) || 0, 0, 0);
+            } else {
+              checkoutDateTime.setHours(12, 0, 0, 0); // Horário padrão
+            }
+          } else {
+            // Se não houver horário específico, usar horário padrão (12:00)
+            checkoutDateTime.setHours(12, 0, 0, 0);
+          }
+          
+          notificationsList.push({
+            id: `checkout-${currentReservation.id}`,
+            type: "checkout_reminder",
+            title: "Check-out se aproxima",
+            message: `Seu check-out no ${establishmentName} é ${daysUntilCheckout === 0 ? "hoje" : `em ${daysUntilCheckout} ${daysUntilCheckout === 1 ? "dia" : "dias"}`}.`,
+            date: checkoutDateTime,
+            reservationId: currentReservation.id,
+            priority: daysUntilCheckout === 0 ? "high" : "medium",
+          });
+        }
+      }
+
+      // 3. Buscar chamados de manutenção (completados ou atualizados recentemente)
+      if (accountId) {
+        try {
+          // Buscar tickets do hóspede que foram atualizados recentemente (últimos 7 dias)
+          const sevenDaysAgo = addDays(today, -7);
+          const sevenDaysAgoISO = sevenDaysAgo.toISOString();
+          
+          // Buscar tickets completados
+          const { data: completedTickets, error: completedError } = await supabase
+            .from("maintenance_tickets")
+            .select("id, title, description, status, resolved_at, completed_at, updated_at, ticket_type")
+            .eq("guest_account_id", accountId)
+            .eq("status", "completed")
+            .gte("updated_at", sevenDaysAgoISO)
+            .order("updated_at", { ascending: false })
+            .limit(10);
+
+          // Buscar tickets em progresso (para notificar que estão sendo trabalhados)
+          const { data: inProgressTickets, error: inProgressError } = await supabase
+            .from("maintenance_tickets")
+            .select("id, title, description, status, resolved_at, completed_at, updated_at, ticket_type")
+            .eq("guest_account_id", accountId)
+            .eq("status", "in_progress")
+            .gte("updated_at", sevenDaysAgoISO)
+            .order("updated_at", { ascending: false })
+            .limit(5);
+
+          if (!completedError && completedTickets && completedTickets.length > 0) {
+            completedTickets.forEach((ticket: any) => {
+              // Tentar usar completed_at, depois updated_at
+              const completedDateStr = ticket.completed_at || ticket.updated_at;
+              if (completedDateStr) {
+                const completedDate = parseISO(completedDateStr);
+                notificationsList.push({
+                  id: `maintenance-completed-${ticket.id}`,
+                  type: "maintenance_resolved",
+                  title: "Chamado completado",
+                  message: `Seu chamado "${ticket.title}" foi completado.`,
+                  date: completedDate,
+                  ticketId: ticket.id,
+                  priority: "medium",
+                });
+              }
+            });
+          }
+
+          // Adicionar notificações para tickets em progresso (apenas se não foram notificados recentemente)
+          if (!inProgressError && inProgressTickets && inProgressTickets.length > 0) {
+            inProgressTickets.forEach((ticket: any) => {
+              const updatedDate = parseISO(ticket.updated_at);
+              // Notificar apenas se foi atualizado nas últimas 24 horas
+              const oneDayAgo = addDays(today, -1);
+              if (isAfter(updatedDate, oneDayAgo)) {
+                notificationsList.push({
+                  id: `maintenance-progress-${ticket.id}`,
+                  type: "maintenance_progress",
+                  title: "Chamado em andamento",
+                  message: `Seu chamado "${ticket.title}" está sendo atendido.`,
+                  date: updatedDate,
+                  ticketId: ticket.id,
+                  priority: "low",
+                });
+              }
+            });
+          }
+        } catch (error) {
+          console.error("Erro ao buscar chamados de manutenção:", error);
+          // Não adicionar notificação de erro, apenas logar
+        }
+      }
+
+      // Ordenar por prioridade e data
+      return notificationsList.sort((a, b) => {
+        const priorityOrder = { high: 0, medium: 1, low: 2 };
+        if (priorityOrder[a.priority as keyof typeof priorityOrder] !== priorityOrder[b.priority as keyof typeof priorityOrder]) {
+          return priorityOrder[a.priority as keyof typeof priorityOrder] - priorityOrder[b.priority as keyof typeof priorityOrder];
+        }
+        return isAfter(a.date, b.date) ? -1 : 1;
+      });
+    },
+    enabled: !!accountId,
+  });
+
+  // Filtrar notificações excluídas e contar não lidas
+  const filteredNotifications = notifications?.filter(
+    (notif) => !deletedNotifications.has(notif.id)
+  ) || [];
+  
+  const unreadNotificationsCount = filteredNotifications.filter(
+    (notif) => !readNotifications.has(notif.id)
+  ).length;
+
+  // Funções para gerenciar notificações
+  const markAsRead = (notificationId: string) => {
+    if (!accountId) return;
+    
+    const newRead = new Set(readNotifications);
+    newRead.add(notificationId);
+    setReadNotifications(newRead);
+    
+    localStorage.setItem(`guest_notifications_read_${accountId}`, JSON.stringify(Array.from(newRead)));
+  };
+
+  const markAllAsRead = () => {
+    if (!accountId || !filteredNotifications.length) return;
+    
+    const newRead = new Set(readNotifications);
+    filteredNotifications.forEach((notif) => newRead.add(notif.id));
+    setReadNotifications(newRead);
+    
+    localStorage.setItem(`guest_notifications_read_${accountId}`, JSON.stringify(Array.from(newRead)));
+  };
+
+  const deleteNotification = (notificationId: string) => {
+    if (!accountId) return;
+    
+    const newDeleted = new Set(deletedNotifications);
+    newDeleted.add(notificationId);
+    setDeletedNotifications(newDeleted);
+    
+    // Remover também da lista de lidas se estiver lá
+    const newRead = new Set(readNotifications);
+    newRead.delete(notificationId);
+    setReadNotifications(newRead);
+    
+    localStorage.setItem(`guest_notifications_deleted_${accountId}`, JSON.stringify(Array.from(newDeleted)));
+    localStorage.setItem(`guest_notifications_read_${accountId}`, JSON.stringify(Array.from(newRead)));
+  };
+
   // Função para abrir WhatsApp
   const handleOpenWhatsApp = () => {
     const whatsapp = hotelSettings?.whatsapp;
@@ -856,10 +1099,155 @@ export default function GuestDashboard() {
                 </div>
 
                 {/* Notificações */}
-                <button className="relative p-2 rounded-full hover:bg-slate-100 transition-colors">
-                  <Bell className="w-5 h-5 text-slate-600" />
-                  <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-                </button>
+                <DropdownMenu open={showNotificationsDropdown} onOpenChange={setShowNotificationsDropdown}>
+                  <DropdownMenuTrigger asChild>
+                    <button className="relative p-2 rounded-full hover:bg-slate-100 transition-colors">
+                      <Bell className="w-5 h-5 text-slate-600" />
+                      {unreadNotificationsCount > 0 && (
+                        <span className="absolute top-1 right-1 h-5 w-5 bg-red-500 rounded-full flex items-center justify-center text-xs text-white font-semibold">
+                          {unreadNotificationsCount > 9 ? "9+" : unreadNotificationsCount}
+                        </span>
+                      )}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-[calc(100vw-2rem)] sm:w-[380px] max-w-[380px] p-0">
+                    <div className="flex items-center justify-between gap-3 p-4 border-b">
+                      <h3 className="font-semibold text-base">Notificações</h3>
+                      <div className="flex items-center gap-2">
+                        {unreadNotificationsCount > 0 && (
+                          <Badge variant="secondary" className="text-xs">
+                            {unreadNotificationsCount} {unreadNotificationsCount === 1 ? "nova" : "novas"}
+                          </Badge>
+                        )}
+                        {filteredNotifications.length > 0 && unreadNotificationsCount > 0 && (
+                          <button
+                            onClick={markAllAsRead}
+                            className="text-xs text-blue-600 hover:text-blue-700 font-medium px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+                            title="Marcar todas como lidas"
+                          >
+                            <CheckCheck className="h-3 w-3 inline mr-1" />
+                            Marcar todas
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="max-h-[400px] overflow-y-auto">
+                      {isLoadingNotifications ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                        </div>
+                      ) : filteredNotifications && filteredNotifications.length > 0 ? (
+                        <div className="divide-y">
+                          {filteredNotifications.map((notification) => {
+                            const isRead = readNotifications.has(notification.id);
+                            const getNotificationIcon = () => {
+                              switch (notification.type) {
+                                case "checkin_reminder":
+                                  return <Key className="h-4 w-4 text-blue-600" />;
+                                case "checkout_reminder":
+                                  return <LogOut className="h-4 w-4 text-orange-600" />;
+                                case "maintenance_resolved":
+                                  return <CheckCircle className="h-4 w-4 text-green-600" />;
+                                case "maintenance_progress":
+                                  return <Clock className="h-4 w-4 text-yellow-600" />;
+                                default:
+                                  return <Bell className="h-4 w-4 text-slate-600" />;
+                              }
+                            };
+
+                            const getNotificationColor = () => {
+                              switch (notification.priority) {
+                                case "high":
+                                  return "border-l-4 border-l-red-500 bg-red-50";
+                                case "medium":
+                                  return "border-l-4 border-l-blue-500 bg-blue-50";
+                                default:
+                                  return "border-l-4 border-l-slate-500 bg-slate-50";
+                              }
+                            };
+
+                            return (
+                              <div
+                                key={notification.id}
+                                className={`p-4 hover:bg-slate-50 transition-colors ${getNotificationColor()} ${isRead ? "opacity-75" : ""}`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <div 
+                                    className="mt-0.5 cursor-pointer flex-shrink-0"
+                                    onClick={() => {
+                                      if (notification.reservationId) {
+                                        setShowCurrentReservation(true);
+                                      }
+                                      if (!isRead) {
+                                        markAsRead(notification.id);
+                                      }
+                                      setShowNotificationsDropdown(false);
+                                    }}
+                                  >
+                                    {getNotificationIcon()}
+                                  </div>
+                                  <div 
+                                    className="flex-1 min-w-0 cursor-pointer"
+                                    onClick={() => {
+                                      if (notification.reservationId) {
+                                        setShowCurrentReservation(true);
+                                      }
+                                      if (!isRead) {
+                                        markAsRead(notification.id);
+                                      }
+                                      setShowNotificationsDropdown(false);
+                                    }}
+                                  >
+                                    <p className={`font-semibold text-sm mb-1 ${isRead ? "text-slate-600" : "text-slate-900"}`}>
+                                      {notification.title}
+                                    </p>
+                                    <p className="text-sm text-slate-600 mb-2">
+                                      {notification.message}
+                                    </p>
+                                    <p className="text-xs text-slate-500">
+                                      {format(notification.date, "dd/MM/yyyy 'às' HH:mm", { locale })}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    {!isRead && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          markAsRead(notification.id);
+                                        }}
+                                        className="p-1.5 rounded hover:bg-blue-100 text-blue-600 transition-colors"
+                                        title="Marcar como lida"
+                                      >
+                                        <Check className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        deleteNotification(notification.id);
+                                      }}
+                                      className="p-1.5 rounded hover:bg-red-100 text-red-600 transition-colors"
+                                      title="Excluir notificação"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center py-12 px-4">
+                          <Bell className="h-12 w-12 text-slate-300 mb-3" />
+                          <p className="text-sm text-slate-500 text-center">
+                            Nenhuma notificação no momento
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 {/* Idioma */}
                 <LanguageSelector />

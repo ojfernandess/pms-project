@@ -9,9 +9,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Eye, EyeOff, User, Mail, Phone, Lock } from "lucide-react";
+import { Loader2, Eye, EyeOff, User, Mail, Phone, Lock, AlertTriangle, Trash2 } from "lucide-react";
 import { useGuestAccount } from "@/hooks/useGuestAccount";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
+import {
+  Alert,
+  AlertDescription,
+} from "@/components/ui/alert";
 
 interface GuestProfileDialogProps {
   open: boolean;
@@ -24,7 +29,8 @@ export function GuestProfileDialog({
   onOpenChange,
   accountId,
 }: GuestProfileDialogProps) {
-  const { getCurrentAccount, updateProfile, updatePassword } = useGuestAccount();
+  const navigate = useNavigate();
+  const { getCurrentAccount, updateProfile, updatePassword, deactivateAccount } = useGuestAccount();
   const { data: account, isLoading } = getCurrentAccount(accountId);
 
   // Estados do formulário de perfil
@@ -39,6 +45,7 @@ export function GuestProfileDialog({
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false);
 
   // Carregar dados do perfil quando o diálogo abrir
   useEffect(() => {
@@ -341,8 +348,143 @@ export function GuestProfileDialog({
               </Button>
             </form>
           </div>
+
+          {/* Divisor */}
+          <div className="border-t border-slate-200 my-6"></div>
+
+          {/* Seção de Exclusão de Conta - LGPD */}
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2 text-red-600">
+                <Trash2 className="h-5 w-5" />
+                Excluir Conta
+              </h3>
+              <p className="text-sm text-slate-600 mt-2">
+                Você pode solicitar a exclusão do acesso à sua conta conforme a LGPD.
+              </p>
+            </div>
+
+            <Alert className="border-amber-200 bg-amber-50">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <AlertDescription className="text-sm text-amber-800">
+                <strong>Importante:</strong> Ao solicitar a exclusão, seu acesso ao portal do hóspede será removido, 
+                mas os dados de suas reservas e histórico fiscal serão mantidos para cumprimento de obrigações legais 
+                (ex: notas fiscais, registros contábeis).
+              </AlertDescription>
+            </Alert>
+
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => setShowDeleteConfirmDialog(true)}
+              className="w-full"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Solicitar Exclusão de Conta
+            </Button>
+          </div>
         </div>
       </DialogContent>
+
+      {/* Dialog de Confirmação de Exclusão */}
+      <Dialog open={showDeleteConfirmDialog} onOpenChange={setShowDeleteConfirmDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              Confirmar Exclusão de Conta
+            </DialogTitle>
+            <DialogDescription>
+              Esta ação não pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <Alert className="border-amber-200 bg-amber-50">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <AlertDescription className="text-sm text-amber-800">
+                <strong>O que será feito:</strong>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  <li>Seu acesso ao portal do hóspede será removido</li>
+                  <li>Você não poderá mais fazer login</li>
+                  <li>Seus dados pessoais de acesso serão desativados</li>
+                </ul>
+              </AlertDescription>
+            </Alert>
+
+            <Alert className="border-blue-200 bg-blue-50">
+              <AlertDescription className="text-sm text-blue-800">
+                <strong>O que será mantido (obrigações legais):</strong>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  <li>Dados de suas reservas</li>
+                  <li>Histórico fiscal e notas fiscais</li>
+                  <li>Registros contábeis necessários</li>
+                </ul>
+                <p className="mt-2 text-xs">
+                  Estes dados são mantidos para cumprimento de obrigações legais e fiscais conforme a legislação brasileira.
+                </p>
+              </AlertDescription>
+            </Alert>
+
+            <div className="flex items-start gap-2 p-3 bg-slate-50 rounded-lg">
+              <input
+                type="checkbox"
+                id="confirmDelete"
+                className="w-4 h-4 text-red-600 border-slate-300 rounded focus:ring-red-500 mt-0.5"
+              />
+              <label htmlFor="confirmDelete" className="text-sm text-slate-700 cursor-pointer">
+                Entendo que meu acesso será removido e que os dados de reservas e histórico fiscal serão mantidos.
+              </label>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteConfirmDialog(false)}
+              className="flex-1"
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                const checkbox = document.getElementById("confirmDelete") as HTMLInputElement;
+                if (!checkbox?.checked) {
+                  toast.error("Por favor, confirme que entendeu as consequências");
+                  return;
+                }
+
+                try {
+                  await deactivateAccount.mutateAsync(accountId);
+                  setShowDeleteConfirmDialog(false);
+                  onOpenChange(false);
+                  // Redirecionar após um breve delay
+                  setTimeout(() => {
+                    navigate("/web-checkin");
+                  }, 2000);
+                } catch (error) {
+                  // Erro já é tratado no hook
+                }
+              }}
+              disabled={deactivateAccount.isPending}
+              className="flex-1"
+            >
+              {deactivateAccount.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Excluindo...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Confirmar Exclusão
+                </>
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

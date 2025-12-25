@@ -23,6 +23,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { logActivity } from "@/lib/activityLogger";
+import { useGuestAccount } from "@/hooks/useGuestAccount";
 
 interface MaintenanceTicketDialogProps {
   open: boolean;
@@ -42,6 +43,9 @@ export function MaintenanceTicketDialog({
   onSuccess,
 }: MaintenanceTicketDialogProps) {
   const queryClient = useQueryClient();
+  const { getCurrentSession } = useGuestAccount();
+  const session = getCurrentSession();
+  const accountId = session?.accountId;
   const [loading, setLoading] = useState(false);
   const [ticketType, setTicketType] = useState<string>("general");
   const [priority, setPriority] = useState<string>("medium");
@@ -147,6 +151,7 @@ export function MaintenanceTicketDialog({
           reservation_id: reservation.id,
           establishment_id: establishmentId,
           room_id: reservation.room_id,
+          guest_account_id: accountId || null, // Adicionar guest_account_id para permitir notificações
           ticket_type: ticketType,
           priority: priority,
           title: title.trim(),
