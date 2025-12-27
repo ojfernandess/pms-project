@@ -77,7 +77,7 @@ export function MaintenanceTicketDialog({
         const fileName = `maintenance/${ticketId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
         const { error: uploadError } = await supabase.storage
-          .from("documents")
+          .from("maintenance")
           .upload(fileName, file, {
             cacheControl: "3600",
             upsert: false,
@@ -88,13 +88,39 @@ export function MaintenanceTicketDialog({
           continue;
         }
 
-        const { data } = supabase.storage.from("documents").getPublicUrl(fileName);
-        uploadedUrls.push(data.publicUrl);
+        // Verificar se o bucket é público ou privado para gerar URL correta
+        const { data: buckets } = await supabase.storage.listBuckets();
+        const maintenanceBucket = buckets?.find((b) => b.name === "maintenance");
+        const isPublic = maintenanceBucket?.public ?? true; // Default para público se não conseguir verificar
+
+        let fileUrl: string;
+        
+        if (isPublic) {
+          // Se for público, usar URL pública
+          const { data } = supabase.storage.from("maintenance").getPublicUrl(fileName);
+          fileUrl = data.publicUrl;
+        } else {
+          // Se for privado, gerar signed URL válida por 1 ano
+          const { data: signedData, error: signedError } = await supabase.storage
+            .from("maintenance")
+            .createSignedUrl(fileName, 31536000); // 1 ano em segundos
+          
+          if (signedError) {
+            console.error("Erro ao gerar signed URL:", signedError);
+            // Fallback: usar URL pública mesmo sendo privado
+            const { data } = supabase.storage.from("maintenance").getPublicUrl(fileName);
+            fileUrl = data.publicUrl;
+          } else {
+            fileUrl = signedData.signedUrl;
+          }
+        }
+
+        uploadedUrls.push(fileUrl);
 
         // Criar registro de anexo
         await supabase.from("maintenance_ticket_attachments").insert({
           ticket_id: ticketId,
-          file_url: data.publicUrl,
+          file_url: fileUrl,
           file_type: file.type,
           file_name: file.name,
         });

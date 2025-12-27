@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
+import type React from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,7 +39,118 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 import { format, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { supabase } from "@/integrations/supabase/client";
+
+// Função para converter URL antiga de "documents" para "maintenance"
+// Também garante que URLs do bucket maintenance estejam corretas
+const convertUrlToMaintenanceBucket = (url: string): string => {
+  if (!url) return url;
+  
+  // Se a URL contém "/documents/", substituir por "/maintenance/"
+  if (url.includes('/documents/')) {
+    return url.replace(/\/documents\//g, '/maintenance/');
+  }
+  
+  // Se já é uma URL do maintenance, retornar como está
+  if (url.includes('/maintenance/')) {
+    return url;
+  }
+  
+  // Se for uma URL do Supabase Storage mas sem o bucket específico, tentar adicionar
+  // Exemplo: /storage/v1/object/public/... -> /storage/v1/object/public/maintenance/...
+  if (url.includes('/storage/v1/object/public/') && !url.includes('/maintenance/') && !url.includes('/documents/')) {
+    // Tentar extrair o caminho após /public/ e adicionar maintenance/
+    const match = url.match(/\/storage\/v1\/object\/public\/(.+)$/);
+    if (match && match[1] && !match[1].startsWith('maintenance/')) {
+      return url.replace(/\/storage\/v1\/object\/public\//, '/storage/v1/object/public/maintenance/');
+    }
+  }
+  
+  return url;
+};
+
+// Componente para exibir thumbnail com tratamento de erro
+const AttachmentThumbnail = ({ attachment }: { attachment: any }) => {
+  const [imageError, setImageError] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string>(convertUrlToMaintenanceBucket(attachment.file_url));
+  
+  // Tentar gerar signed URL se a URL pública falhar
+  useEffect(() => {
+    const tryGenerateSignedUrl = async () => {
+      if (imageError && attachment.file_url) {
+        try {
+          // Extrair o caminho do arquivo da URL
+          const extractFilePath = (url: string): string | null => {
+            if (!url) return null;
+            // Se já for um caminho relativo, retornar direto
+            if (url.startsWith("maintenance/")) return url;
+            // Tentar extrair o caminho após /maintenance/
+            const match = url.match(/\/maintenance\/(.+)$/);
+            if (match) return `maintenance/${match[1]}`;
+            return null;
+          };
+          
+          const filePath = extractFilePath(attachment.file_url);
+          if (filePath) {
+            const { data: signedData, error } = await supabase.storage
+              .from("maintenance")
+              .createSignedUrl(filePath, 3600); // 1 hora
+            
+            if (!error && signedData) {
+              setImageUrl(signedData.signedUrl);
+              setImageError(false);
+            }
+          }
+        } catch (error) {
+          console.error("Erro ao gerar signed URL:", error);
+        }
+      }
+    };
+    
+    if (imageError) {
+      tryGenerateSignedUrl();
+    }
+  }, [imageError, attachment.file_url]);
+  
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    // Silenciar o erro e apenas marcar como erro para mostrar placeholder
+    e.preventDefault();
+    setImageError(true);
+  };
+  
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    // Sempre permitir tentar abrir a URL, mesmo se a imagem falhou
+    if (imageError) {
+      e.preventDefault();
+      window.open(imageUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+  
+  return (
+    <a
+      href={imageUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="relative group"
+      onClick={handleClick}
+    >
+      {imageError ? (
+        <div className="h-12 w-12 flex flex-col items-center justify-center bg-slate-100 rounded border border-slate-200 hover:border-blue-300 transition-colors">
+          <ImageIcon className="h-4 w-4 text-slate-400 mb-0.5" />
+          <span className="text-[8px] text-slate-500 text-center px-1">Foto</span>
+        </div>
+      ) : (
+        <img
+          src={imageUrl}
+          alt={attachment.file_name || "Anexo"}
+          className="h-12 w-12 object-cover rounded border border-slate-200 hover:border-blue-300 transition-colors"
+          onError={handleImageError}
+          loading="lazy"
+        />
+      )}
+      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors rounded" />
+    </a>
+  );
+};
 
 const Maintenance = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -46,121 +159,9 @@ const Maintenance = () => {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [selectedKPI, setSelectedKPI] = useState<string | null>(null);
-  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
 
   const { tickets, isLoading, refetch, startTicket, completeTicket, cancelTicket } = useMaintenance();
   const { canCreate, canUpdate } = usePermissions();
-
-  // Função para gerar URL correta da imagem (signed URL se necessário)
-  const getImageUrl = async (attachment: any): Promise<string> => {
-    if (!attachment?.file_url) return "";
-
-    // Se já temos a URL em cache, retornar
-    if (imageUrls[attachment.id]) {
-      return imageUrls[attachment.id];
-    }
-
-    try {
-      // Extrair o caminho do arquivo da URL
-      const extractFilePath = (url: string): string | null => {
-        if (!url) return null;
-        // Se já for um caminho relativo, retornar direto
-        if (url.startsWith("maintenance/")) return url;
-        // Se for uma URL completa, extrair o caminho após /documents/
-        const match = url.match(/\/documents\/(.+)$/);
-        if (match) return match[1];
-        // Se não encontrar, tentar usar a URL como está
-        return url;
-      };
-
-      const filePath = extractFilePath(attachment.file_url);
-      if (!filePath) return attachment.file_url;
-
-      // Verificar se o bucket existe e se é público ou privado
-      let documentsBucket;
-      try {
-        const { data: buckets } = await supabase.storage.listBuckets();
-        documentsBucket = buckets?.find((b) => b.name === "documents");
-      } catch (error) {
-        console.error("Erro ao listar buckets:", error);
-        // Se não conseguir listar buckets, tentar usar signed URL
-        try {
-          const { data: signedUrlData } = await supabase.storage
-            .from("documents")
-            .createSignedUrl(filePath, 3600);
-          if (signedUrlData) {
-            const url = signedUrlData.signedUrl;
-            setImageUrls((prev) => ({ ...prev, [attachment.id]: url }));
-            return url;
-          }
-        } catch (signedError) {
-          console.error("Erro ao gerar signed URL:", signedError);
-        }
-        return attachment.file_url; // Fallback para URL original
-      }
-
-      // Se o bucket não existir, retornar URL original
-      if (!documentsBucket) {
-        console.warn("Bucket 'documents' não encontrado");
-        return attachment.file_url;
-      }
-
-      const isPublic = documentsBucket.public ?? false;
-
-      if (isPublic) {
-        // Se for público, usar URL pública
-        const { data } = supabase.storage.from("documents").getPublicUrl(filePath);
-        const url = data.publicUrl;
-        setImageUrls((prev) => ({ ...prev, [attachment.id]: url }));
-        return url;
-      } else {
-        // Se for privado, gerar signed URL válida por 1 hora
-        const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-          .from("documents")
-          .createSignedUrl(filePath, 3600); // 1 hora
-
-        if (signedUrlError) {
-          console.error("Erro ao gerar signed URL:", signedUrlError);
-          // Fallback: tentar usar public URL mesmo sendo privado
-          const { data } = supabase.storage.from("documents").getPublicUrl(filePath);
-          const url = data.publicUrl;
-          setImageUrls((prev) => ({ ...prev, [attachment.id]: url }));
-          return url;
-        }
-
-        const url = signedUrlData.signedUrl;
-        setImageUrls((prev) => ({ ...prev, [attachment.id]: url }));
-        return url;
-      }
-    } catch (error) {
-      console.error("Erro ao gerar URL da imagem:", error);
-      return attachment.file_url; // Retornar URL original como fallback
-    }
-  };
-
-  // Carregar URLs das imagens automaticamente
-  useEffect(() => {
-    const loadImageUrls = async () => {
-      const allAttachments = tickets
-        .flatMap((ticket: any) => ticket.maintenance_ticket_attachments || [])
-        .filter((att: any) => att && att.file_url && !imageUrls[att.id]);
-
-      if (allAttachments.length === 0) return;
-
-      for (const attachment of allAttachments) {
-        try {
-          await getImageUrl(attachment);
-        } catch (error) {
-          console.error("Erro ao carregar URL:", error);
-        }
-      }
-    };
-
-    if (tickets.length > 0) {
-      loadImageUrls();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickets]);
 
   // Estatísticas
   const stats = useMemo(() => {
@@ -527,40 +528,9 @@ const Maintenance = () => {
                         <div className="flex items-center gap-2 mt-2 mb-2">
                           <ImageIcon className="h-4 w-4 text-slate-400" />
                           <div className="flex gap-1.5">
-                            {ticket.maintenance_ticket_attachments.slice(0, 3).map((attachment: any) => {
-                              const imageUrl = imageUrls[attachment.id] || attachment.file_url;
-                              return (
-                                <a
-                                  key={attachment.id}
-                                  href={imageUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="relative group"
-                                  onClick={async (e) => {
-                                    // Gerar signed URL se necessário ao clicar
-                                    if (!imageUrls[attachment.id]) {
-                                      e.preventDefault();
-                                      const url = await getImageUrl(attachment);
-                                      window.open(url, '_blank');
-                                    }
-                                  }}
-                                >
-                                  <img
-                                    src={imageUrl}
-                                    alt={attachment.file_name || "Anexo"}
-                                    className="h-12 w-12 object-cover rounded border border-slate-200 hover:border-blue-300 transition-colors"
-                                    onError={async (e) => {
-                                      // Se a imagem falhar ao carregar, tentar gerar signed URL
-                                      const url = await getImageUrl(attachment);
-                                      if (url && url !== attachment.file_url) {
-                                        (e.target as HTMLImageElement).src = url;
-                                      }
-                                    }}
-                                  />
-                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors rounded" />
-                                </a>
-                              );
-                            })}
+                            {ticket.maintenance_ticket_attachments.slice(0, 3).map((attachment: any) => (
+                              <AttachmentThumbnail key={attachment.id} attachment={attachment} />
+                            ))}
                             {ticket.maintenance_ticket_attachments.length > 3 && (
                               <div className="h-12 w-12 flex items-center justify-center bg-slate-100 rounded border border-slate-200 text-xs text-slate-600 font-medium">
                                 +{ticket.maintenance_ticket_attachments.length - 3}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import React from "react";
+import type React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -14,136 +14,114 @@ import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { Loader2, ChevronRight, ChevronLeft, CheckCircle, Upload, X, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// Componente para exibir thumbnail de anexo com URL correta
+// Função para converter URL antiga de "documents" para "maintenance"
+// Também garante que URLs do bucket maintenance estejam corretas
+const convertUrlToMaintenanceBucket = (url: string): string => {
+  if (!url) return url;
+  
+  // Se a URL contém "/documents/", substituir por "/maintenance/"
+  if (url.includes('/documents/')) {
+    return url.replace(/\/documents\//g, '/maintenance/');
+  }
+  
+  // Se já é uma URL do maintenance, retornar como está
+  if (url.includes('/maintenance/')) {
+    return url;
+  }
+  
+  // Se for uma URL do Supabase Storage mas sem o bucket específico, tentar adicionar
+  if (url.includes('/storage/v1/object/public/') && !url.includes('/maintenance/') && !url.includes('/documents/')) {
+    const match = url.match(/\/storage\/v1\/object\/public\/(.+)$/);
+    if (match && match[1] && !match[1].startsWith('maintenance/')) {
+      return url.replace(/\/storage\/v1\/object\/public\//, '/storage/v1/object/public/maintenance/');
+    }
+  }
+  
+  return url;
+};
+
+// Componente para exibir thumbnail com tratamento de erro
 const AttachmentThumbnail = ({ attachment }: { attachment: any }) => {
-  const [imageUrl, setImageUrl] = useState<string>(attachment.file_url);
-  const [loading, setLoading] = useState(false);
-
+  const [imageError, setImageError] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string>(convertUrlToMaintenanceBucket(attachment.file_url));
+  
+  // Tentar gerar signed URL se a URL pública falhar
   useEffect(() => {
-    const loadUrl = async () => {
-      try {
-        setLoading(true);
-        // Extrair o caminho do arquivo da URL
-        const extractFilePath = (url: string): string | null => {
-          if (!url) return null;
-          if (url.startsWith("maintenance/")) return url;
-          const match = url.match(/\/documents\/(.+)$/);
-          if (match) return match[1];
-          return url;
-        };
-
-                          const filePath = extractFilePath(attachment.file_url);
-                          if (!filePath) {
-                            setImageUrl(attachment.file_url);
-                            return;
-                          }
-
-                          // Verificar se o bucket existe e se é público ou privado
-                          let documentsBucket;
-                          try {
-                            const { data: buckets } = await supabase.storage.listBuckets();
-                            documentsBucket = buckets?.find((b) => b.name === "documents");
-                          } catch (error) {
-                            console.error("Erro ao listar buckets:", error);
-                            // Se não conseguir listar buckets, tentar usar signed URL
-                            try {
-                              const { data: signedUrlData } = await supabase.storage
-                                .from("documents")
-                                .createSignedUrl(filePath, 3600);
-                              if (signedUrlData) {
-                                setImageUrl(signedUrlData.signedUrl);
-                                return;
-                              }
-                            } catch (signedError) {
-                              console.error("Erro ao gerar signed URL:", signedError);
-                            }
-                            setImageUrl(attachment.file_url);
-                            return;
-                          }
-
-                          // Se o bucket não existir, usar URL original
-                          if (!documentsBucket) {
-                            console.warn("Bucket 'documents' não encontrado");
-                            setImageUrl(attachment.file_url);
-                            return;
-                          }
-
-                          const isPublic = documentsBucket.public ?? false;
-
-        if (isPublic) {
-          const { data } = supabase.storage.from("documents").getPublicUrl(filePath);
-          setImageUrl(data.publicUrl);
-        } else {
-          const { data: signedUrlData, error } = await supabase.storage
-            .from("documents")
-            .createSignedUrl(filePath, 3600);
+    const tryGenerateSignedUrl = async () => {
+      if (imageError && attachment.file_url) {
+        try {
+          // Extrair o caminho do arquivo da URL
+          const extractFilePath = (url: string): string | null => {
+            if (!url) return null;
+            // Se já for um caminho relativo, retornar direto
+            if (url.startsWith("maintenance/")) return url;
+            // Tentar extrair o caminho após /maintenance/
+            const match = url.match(/\/maintenance\/(.+)$/);
+            if (match) return `maintenance/${match[1]}`;
+            return null;
+          };
           
-          if (error) {
-            const { data } = supabase.storage.from("documents").getPublicUrl(filePath);
-            setImageUrl(data.publicUrl);
-          } else {
-            setImageUrl(signedUrlData.signedUrl);
+          const filePath = extractFilePath(attachment.file_url);
+          if (filePath) {
+            const { data: signedData, error } = await supabase.storage
+              .from("maintenance")
+              .createSignedUrl(filePath, 3600); // 1 hora
+            
+            if (!error && signedData) {
+              setImageUrl(signedData.signedUrl);
+              setImageError(false);
+            }
           }
+        } catch (error) {
+          console.error("Erro ao gerar signed URL:", error);
         }
-      } catch (error) {
-        console.error("Erro ao gerar URL:", error);
-        setImageUrl(attachment.file_url);
-      } finally {
-        setLoading(false);
       }
     };
-
-    loadUrl();
-  }, [attachment.file_url]);
-
-  const handleImageError = async () => {
-    // Se falhar, tentar gerar signed URL novamente
-    try {
-      const extractFilePath = (url: string): string | null => {
-        if (!url) return null;
-        if (url.startsWith("maintenance/")) return url;
-        const match = url.match(/\/documents\/(.+)$/);
-        if (match) return match[1];
-        return url;
-      };
-      const filePath = extractFilePath(attachment.file_url);
-      if (filePath) {
-        const { data: signedUrlData } = await supabase.storage
-          .from("documents")
-          .createSignedUrl(filePath, 3600);
-        if (signedUrlData) {
-          setImageUrl(signedUrlData.signedUrl);
-        }
-      }
-    } catch (error) {
-      console.error("Erro ao recarregar imagem:", error);
+    
+    if (imageError) {
+      tryGenerateSignedUrl();
+    }
+  }, [imageError, attachment.file_url]);
+  
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    // Silenciar o erro e apenas marcar como erro para mostrar placeholder
+    e.preventDefault();
+    setImageError(true);
+  };
+  
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    // Sempre permitir tentar abrir a URL, mesmo se a imagem falhou
+    if (imageError) {
+      e.preventDefault();
+      window.open(imageUrl, '_blank', 'noopener,noreferrer');
     }
   };
-
+  
   return (
     <div className="relative group">
-      {loading ? (
-        <div className="w-full h-24 flex items-center justify-center bg-slate-100 rounded-md border border-slate-200">
-          <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+      {imageError ? (
+        <div className="w-full h-24 flex flex-col items-center justify-center bg-slate-100 rounded-md border border-slate-200">
+          <ImageIcon className="h-5 w-5 text-slate-400 mb-1" />
+          <span className="text-[10px] text-slate-500">Foto</span>
         </div>
       ) : (
-        <>
-          <img
-            src={imageUrl}
-            alt={attachment.file_name || "Anexo"}
-            className="w-full h-24 object-cover rounded-md border border-slate-200"
-            onError={handleImageError}
-          />
-          <a
-            href={imageUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-md"
-          >
-            <ImageIcon className="h-6 w-6 text-white" />
-          </a>
-        </>
+        <img
+          src={imageUrl}
+          alt={attachment.file_name || "Anexo"}
+          className="w-full h-24 object-cover rounded-md border border-slate-200"
+          onError={handleImageError}
+          loading="lazy"
+        />
       )}
+      <a
+        href={imageUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-md"
+        onClick={handleClick}
+      >
+        <ImageIcon className="h-6 w-6 text-white" />
+      </a>
     </div>
   );
 };
@@ -266,7 +244,7 @@ export const MaintenanceTicketDialog = ({
         const fileName = `maintenance/${ticketId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
         const { error: uploadError } = await supabase.storage
-          .from("documents")
+          .from("maintenance")
           .upload(fileName, file, {
             cacheControl: "3600",
             upsert: false,
@@ -274,15 +252,41 @@ export const MaintenanceTicketDialog = ({
 
         if (uploadError) {
           console.error("Erro ao fazer upload:", uploadError);
+          toast.error(`Erro ao fazer upload de ${file.name}: ${uploadError.message}`);
           continue;
         }
 
-        const { data } = supabase.storage.from("documents").getPublicUrl(fileName);
+        // Verificar se o bucket é público ou privado para gerar URL correta
+        const { data: buckets } = await supabase.storage.listBuckets();
+        const maintenanceBucket = buckets?.find((b) => b.name === "maintenance");
+        const isPublic = maintenanceBucket?.public ?? true; // Default para público se não conseguir verificar
+
+        let fileUrl: string;
+        
+        if (isPublic) {
+          // Se for público, usar URL pública
+          const { data } = supabase.storage.from("maintenance").getPublicUrl(fileName);
+          fileUrl = data.publicUrl;
+        } else {
+          // Se for privado, gerar signed URL válida por 1 ano
+          const { data: signedData, error: signedError } = await supabase.storage
+            .from("maintenance")
+            .createSignedUrl(fileName, 31536000); // 1 ano em segundos
+          
+          if (signedError) {
+            console.error("Erro ao gerar signed URL:", signedError);
+            // Fallback: usar URL pública mesmo sendo privado
+            const { data } = supabase.storage.from("maintenance").getPublicUrl(fileName);
+            fileUrl = data.publicUrl;
+          } else {
+            fileUrl = signedData.signedUrl;
+          }
+        }
 
         // Criar registro de anexo
         await supabase.from("maintenance_ticket_attachments").insert({
           ticket_id: ticketId,
-          file_url: data.publicUrl,
+          file_url: fileUrl,
           file_type: file.type,
           file_name: file.name,
         });
