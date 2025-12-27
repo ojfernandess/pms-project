@@ -1,16 +1,152 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useMaintenance } from "@/hooks/useMaintenance";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
-import { Loader2 } from "lucide-react";
+import { Loader2, ChevronRight, ChevronLeft, CheckCircle, Upload, X, Image as ImageIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+// Componente para exibir thumbnail de anexo com URL correta
+const AttachmentThumbnail = ({ attachment }: { attachment: any }) => {
+  const [imageUrl, setImageUrl] = useState<string>(attachment.file_url);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const loadUrl = async () => {
+      try {
+        setLoading(true);
+        // Extrair o caminho do arquivo da URL
+        const extractFilePath = (url: string): string | null => {
+          if (!url) return null;
+          if (url.startsWith("maintenance/")) return url;
+          const match = url.match(/\/documents\/(.+)$/);
+          if (match) return match[1];
+          return url;
+        };
+
+                          const filePath = extractFilePath(attachment.file_url);
+                          if (!filePath) {
+                            setImageUrl(attachment.file_url);
+                            return;
+                          }
+
+                          // Verificar se o bucket existe e se é público ou privado
+                          let documentsBucket;
+                          try {
+                            const { data: buckets } = await supabase.storage.listBuckets();
+                            documentsBucket = buckets?.find((b) => b.name === "documents");
+                          } catch (error) {
+                            console.error("Erro ao listar buckets:", error);
+                            // Se não conseguir listar buckets, tentar usar signed URL
+                            try {
+                              const { data: signedUrlData } = await supabase.storage
+                                .from("documents")
+                                .createSignedUrl(filePath, 3600);
+                              if (signedUrlData) {
+                                setImageUrl(signedUrlData.signedUrl);
+                                return;
+                              }
+                            } catch (signedError) {
+                              console.error("Erro ao gerar signed URL:", signedError);
+                            }
+                            setImageUrl(attachment.file_url);
+                            return;
+                          }
+
+                          // Se o bucket não existir, usar URL original
+                          if (!documentsBucket) {
+                            console.warn("Bucket 'documents' não encontrado");
+                            setImageUrl(attachment.file_url);
+                            return;
+                          }
+
+                          const isPublic = documentsBucket.public ?? false;
+
+        if (isPublic) {
+          const { data } = supabase.storage.from("documents").getPublicUrl(filePath);
+          setImageUrl(data.publicUrl);
+        } else {
+          const { data: signedUrlData, error } = await supabase.storage
+            .from("documents")
+            .createSignedUrl(filePath, 3600);
+          
+          if (error) {
+            const { data } = supabase.storage.from("documents").getPublicUrl(filePath);
+            setImageUrl(data.publicUrl);
+          } else {
+            setImageUrl(signedUrlData.signedUrl);
+          }
+        }
+      } catch (error) {
+        console.error("Erro ao gerar URL:", error);
+        setImageUrl(attachment.file_url);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUrl();
+  }, [attachment.file_url]);
+
+  const handleImageError = async () => {
+    // Se falhar, tentar gerar signed URL novamente
+    try {
+      const extractFilePath = (url: string): string | null => {
+        if (!url) return null;
+        if (url.startsWith("maintenance/")) return url;
+        const match = url.match(/\/documents\/(.+)$/);
+        if (match) return match[1];
+        return url;
+      };
+      const filePath = extractFilePath(attachment.file_url);
+      if (filePath) {
+        const { data: signedUrlData } = await supabase.storage
+          .from("documents")
+          .createSignedUrl(filePath, 3600);
+        if (signedUrlData) {
+          setImageUrl(signedUrlData.signedUrl);
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao recarregar imagem:", error);
+    }
+  };
+
+  return (
+    <div className="relative group">
+      {loading ? (
+        <div className="w-full h-24 flex items-center justify-center bg-slate-100 rounded-md border border-slate-200">
+          <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+        </div>
+      ) : (
+        <>
+          <img
+            src={imageUrl}
+            alt={attachment.file_name || "Anexo"}
+            className="w-full h-24 object-cover rounded-md border border-slate-200"
+            onError={handleImageError}
+          />
+          <a
+            href={imageUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-md"
+          >
+            <ImageIcon className="h-6 w-6 text-white" />
+          </a>
+        </>
+      )}
+    </div>
+  );
+};
 
 interface MaintenanceTicketDialogProps {
   open: boolean;
@@ -30,6 +166,10 @@ export const MaintenanceTicketDialog = ({
   const { createTicket, updateTicket, isCreating, isUpdating } = useMaintenance();
   const { selectedEstablishment } = useEstablishment();
   const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState(1); // Para modal simplificado em 3 passos
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [existingAttachments, setExistingAttachments] = useState<any[]>([]);
 
   const [formData, setFormData] = useState({
     room_id: "",
@@ -38,21 +178,122 @@ export const MaintenanceTicketDialog = ({
     priority: "medium" as "low" | "medium" | "high" | "urgent",
     status: "open" as "open" | "in_progress" | "completed" | "cancelled",
     notes: "",
+    ticket_type: "" as "" | "water" | "electrical" | "cleaning" | "other",
   });
 
-  // Buscar quartos
-  const { data: rooms } = useQuery({
-    queryKey: ["rooms"],
+  // Buscar quartos com categorias
+  const { data: roomsData } = useQuery({
+    queryKey: ["rooms_with_categories", selectedEstablishment?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const establishmentId = selectedEstablishment?.id;
+      
+      // Buscar quartos com suas categorias
+      let query = supabase
         .from("rooms")
-        .select("*")
+        .select(`
+          *,
+          room_categories (*)
+        `)
         .order("room_number");
+
+      if (establishmentId) {
+        query = query.eq("establishment_id", establishmentId);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       return data;
     },
   });
+
+  // Agrupar quartos por categoria
+  const roomsByCategory = useMemo(() => {
+    if (!roomsData) return [];
+
+    const grouped: Record<string, { category: any; rooms: any[] }> = {};
+
+    roomsData.forEach((room: any) => {
+      const categoryId = room.category_id || "uncategorized";
+      const category = room.room_categories;
+
+      if (!grouped[categoryId]) {
+        grouped[categoryId] = {
+          category: category || { id: "uncategorized", name: "Sem Categoria" },
+          rooms: [],
+        };
+      }
+
+      grouped[categoryId].rooms.push(room);
+    });
+
+    // Ordenar quartos dentro de cada categoria por número
+    Object.keys(grouped).forEach((categoryId) => {
+      grouped[categoryId].rooms.sort((a, b) => {
+        const numA = parseInt(a.room_number) || 0;
+        const numB = parseInt(b.room_number) || 0;
+        return numA - numB;
+      });
+    });
+
+    // Converter para array e ordenar por nome da categoria
+    return Object.values(grouped).sort((a, b) => {
+      const nameA = a.category?.name || "";
+      const nameB = b.category?.name || "";
+      return nameA.localeCompare(nameB);
+    });
+  }, [roomsData]);
+
+  // Funções de upload de arquivos
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const newFiles = Array.from(e.target.files);
+      setFiles((prev) => [...prev, ...newFiles]);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadFiles = async (ticketId: string): Promise<void> => {
+    if (files.length === 0) return;
+
+    setUploadingFiles(true);
+    try {
+      for (const file of files) {
+        const fileExt = file.name.split(".").pop();
+        const fileName = `maintenance/${ticketId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("documents")
+          .upload(fileName, file, {
+            cacheControl: "3600",
+            upsert: false,
+          });
+
+        if (uploadError) {
+          console.error("Erro ao fazer upload:", uploadError);
+          continue;
+        }
+
+        const { data } = supabase.storage.from("documents").getPublicUrl(fileName);
+
+        // Criar registro de anexo
+        await supabase.from("maintenance_ticket_attachments").insert({
+          ticket_id: ticketId,
+          file_url: data.publicUrl,
+          file_type: file.type,
+          file_name: file.name,
+        });
+      }
+    } catch (error) {
+      console.error("Erro ao fazer upload de arquivos:", error);
+      toast.error("Erro ao fazer upload de algumas fotos");
+    } finally {
+      setUploadingFiles(false);
+    }
+  };
 
   // Buscar ticket para edição
   useEffect(() => {
@@ -60,7 +301,10 @@ export const MaintenanceTicketDialog = ({
       const fetchTicket = async () => {
         const { data, error } = await supabase
           .from("maintenance_tickets")
-          .select("*")
+          .select(`
+            *,
+            maintenance_ticket_attachments (*)
+          `)
           .eq("id", ticketId)
           .single();
 
@@ -78,6 +322,7 @@ export const MaintenanceTicketDialog = ({
             status: data.status,
             notes: data.notes || "",
           });
+          setExistingAttachments(data.maintenance_ticket_attachments || []);
         }
       };
 
@@ -91,7 +336,11 @@ export const MaintenanceTicketDialog = ({
         priority: "medium",
         status: "open",
         notes: "",
+        ticket_type: "",
       });
+      setStep(1); // Reset para primeiro passo
+      setFiles([]);
+      setExistingAttachments([]);
     }
   }, [ticketId, open, initialRoomId]);
 
@@ -115,11 +364,17 @@ export const MaintenanceTicketDialog = ({
         return;
       }
 
+      // Garantir que title esteja preenchido (pode ter sido preenchido automaticamente no passo 2)
+      const finalTitle = formData.title || formData.description.substring(0, 50);
+
+      let createdTicketId: string | undefined;
+
       if (ticketId) {
         await updateTicket({
           id: ticketId,
           ...formData,
         });
+        createdTicketId = ticketId;
       } else {
         // Buscar establishment_id do contexto ou do quarto selecionado
         let establishmentId = selectedEstablishment?.id || null;
@@ -137,18 +392,25 @@ export const MaintenanceTicketDialog = ({
           }
         }
         
-        await createTicket({
+        const ticket = await createTicket({
           room_id: formData.room_id,
           establishment_id: establishmentId,
-          title: formData.title,
+          title: finalTitle,
           description: formData.description,
           priority: formData.priority,
           notes: formData.notes || null,
         });
+        createdTicketId = (ticket as any)?.id;
+      }
+
+      // Fazer upload de arquivos se houver
+      if (files.length > 0 && createdTicketId) {
+        await uploadFiles(createdTicketId);
       }
 
       onSuccess();
       onOpenChange(false);
+      setFiles([]);
     } catch (error: any) {
       toast.error(error.message || "Erro ao salvar ticket");
     } finally {
@@ -156,13 +418,284 @@ export const MaintenanceTicketDialog = ({
     }
   };
 
+  // Sugerir prioridade baseado no tipo de problema
+  const getSuggestedPriority = (type: string): "low" | "medium" | "high" | "urgent" => {
+    if (type === "water") return "urgent";
+    if (type === "electrical") return "high";
+    if (type === "cleaning") return "low";
+    return "medium";
+  };
+
+  // Modal simplificado em 3 passos (apenas para criação)
+  if (!ticketId) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Abrir Chamado</DialogTitle>
+            <DialogDescription>
+              Passo {step} de 3
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Indicador de Progresso */}
+          <div className="flex items-center justify-center gap-2 mb-6">
+            {[1, 2, 3].map((s) => (
+              <div key={s} className="flex items-center">
+                <div
+                  className={cn(
+                    "h-2 w-2 rounded-full transition-all",
+                    s === step
+                      ? "bg-blue-600 w-8"
+                      : s < step
+                      ? "bg-blue-600"
+                      : "bg-slate-200"
+                  )}
+                />
+                {s < 3 && (
+                  <div
+                    className={cn(
+                      "h-0.5 w-8 transition-all",
+                      s < step ? "bg-blue-600" : "bg-slate-200"
+                    )}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Passo 1: Selecionar Quarto */}
+            {step === 1 && (
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="room_id" className="text-base font-semibold">
+                    Selecione o Quarto
+                  </Label>
+                  <Select
+                    value={formData.room_id}
+                    onValueChange={(value) => {
+                      setFormData({ ...formData, room_id: value });
+                      setTimeout(() => setStep(2), 300);
+                    }}
+                    required
+                  >
+                    <SelectTrigger className="mt-2 h-12">
+                      <SelectValue placeholder="Escolha um quarto..." />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[300px]">
+                      {roomsByCategory.map((group) => (
+                        <SelectGroup key={group.category?.id || "uncategorized"}>
+                          <SelectLabel className="text-xs font-semibold text-slate-500 px-2 py-1.5">
+                            {group.category?.name || "Sem Categoria"}
+                          </SelectLabel>
+                          {group.rooms.map((room) => (
+                            <SelectItem key={room.id} value={room.id} className="pl-6">
+                              Quarto {room.room_number}
+                              {room.floor && ` - Andar ${room.floor}`}
+                              {room.status === "maintenance" && " (Em manutenção)"}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    disabled={!formData.room_id}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    Próximo
+                    <ChevronRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Passo 2: Tipo do Problema */}
+            {step === 2 && (
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="ticket_type" className="text-base font-semibold">
+                    Tipo do Problema
+                  </Label>
+                  <Select
+                    value={formData.ticket_type}
+                    onValueChange={(value: "water" | "electrical" | "cleaning" | "other") => {
+                      const priority = getSuggestedPriority(value);
+                      setFormData({
+                        ...formData,
+                        ticket_type: value,
+                        priority,
+                        title: value === "water" ? "Problema com água"
+                          : value === "electrical" ? "Problema elétrico"
+                          : value === "cleaning" ? "Necessita limpeza"
+                          : "Outro problema",
+                      });
+                    }}
+                    required
+                  >
+                    <SelectTrigger className="mt-2 h-12">
+                      <SelectValue placeholder="Selecione o tipo..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="water">💧 Água</SelectItem>
+                      <SelectItem value="electrical">⚡ Elétrica</SelectItem>
+                      <SelectItem value="cleaning">🧹 Limpeza</SelectItem>
+                      <SelectItem value="other">🔧 Outros</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-between">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setStep(1)}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-2" />
+                    Voltar
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => setStep(3)}
+                    disabled={!formData.ticket_type}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    Próximo
+                    <ChevronRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Passo 3: Descrição e Prioridade */}
+            {step === 3 && (
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="description" className="text-base font-semibold">
+                    Descrição do Problema
+                  </Label>
+                  <Textarea
+                    id="description"
+                    value={formData.description}
+                    onChange={(e) =>
+                      setFormData({ ...formData, description: e.target.value })
+                    }
+                    placeholder="Descreva brevemente o problema..."
+                    rows={4}
+                    className="mt-2"
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="priority" className="text-base font-semibold">
+                    Prioridade
+                  </Label>
+                  <Select
+                    value={formData.priority}
+                    onValueChange={(value: "low" | "medium" | "high" | "urgent") =>
+                      setFormData({ ...formData, priority: value })
+                    }
+                    required
+                  >
+                    <SelectTrigger className="mt-2 h-12">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">⚪ Baixa</SelectItem>
+                      <SelectItem value="medium">🔵 Média</SelectItem>
+                      <SelectItem value="high">🟠 Alta</SelectItem>
+                      <SelectItem value="urgent">🔴 Urgente</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="photos" className="text-base font-semibold">
+                    Anexar Fotos (Opcional)
+                  </Label>
+                  <div className="mt-2">
+                    <Input
+                      id="photos"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => document.getElementById("photos")?.click()}
+                      className="w-full"
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Adicionar Fotos
+                    </Button>
+                    {files.length > 0 && (
+                      <div className="mt-2 space-y-2">
+                        {files.map((file, index) => (
+                          <div key={index} className="flex items-center gap-2 text-sm text-slate-600">
+                            <ImageIcon className="h-4 w-4" />
+                            <span className="flex-1 truncate">{file.name}</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeFile(index)}
+                              className="h-6 w-6 p-0"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex justify-between pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setStep(2)}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-2" />
+                    Voltar
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={loading || isCreating || uploadingFiles || !formData.description.trim()}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {loading || isCreating || uploadingFiles ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        {uploadingFiles ? "Enviando fotos..." : "Criando..."}
+                      </>
+                    ) : (
+                      <>
+                        Criar Chamado
+                        <CheckCircle className="h-4 w-4 ml-2" />
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </form>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  // Modal completo para edição
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>
-            {ticketId ? "Editar Ticket de Manutenção" : "Novo Ticket de Manutenção"}
-          </DialogTitle>
+          <DialogTitle>Editar Ticket de Manutenção</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -180,12 +713,19 @@ export const MaintenanceTicketDialog = ({
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione um quarto" />
                 </SelectTrigger>
-                <SelectContent>
-                  {rooms?.map((room) => (
-                    <SelectItem key={room.id} value={room.id}>
-                      {room.room_number} {room.floor && `- Andar ${room.floor}`}
-                      {room.status === "maintenance" && " (Em manutenção)"}
-                    </SelectItem>
+                <SelectContent className="max-h-[300px]">
+                  {roomsByCategory.map((group) => (
+                    <SelectGroup key={group.category?.id || "uncategorized"}>
+                      <SelectLabel className="text-xs font-semibold text-slate-500 px-2 py-1.5">
+                        {group.category?.name || "Sem Categoria"}
+                      </SelectLabel>
+                      {group.rooms.map((room) => (
+                        <SelectItem key={room.id} value={room.id} className="pl-6">
+                          {room.room_number} {room.floor && `- Andar ${room.floor}`}
+                          {room.status === "maintenance" && " (Em manutenção)"}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   ))}
                 </SelectContent>
               </Select>
@@ -278,6 +818,61 @@ export const MaintenanceTicketDialog = ({
                 rows={3}
               />
             </div>
+
+            {/* Anexos Existentes */}
+            {existingAttachments.length > 0 && (
+              <div className="col-span-2">
+                <Label>Fotos Anexadas</Label>
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  {existingAttachments.map((attachment) => (
+                    <AttachmentThumbnail key={attachment.id} attachment={attachment} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Upload de Novas Fotos */}
+            <div className="col-span-2">
+              <Label htmlFor="photos_edit">Adicionar Fotos</Label>
+              <div className="mt-2">
+                <Input
+                  id="photos_edit"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => document.getElementById("photos_edit")?.click()}
+                  className="w-full"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Adicionar Fotos
+                </Button>
+                {files.length > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {files.map((file, index) => (
+                      <div key={index} className="flex items-center gap-2 text-sm text-slate-600">
+                        <ImageIcon className="h-4 w-4" />
+                        <span className="flex-1 truncate">{file.name}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFile(index)}
+                          className="h-6 w-6 p-0"
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="flex justify-end gap-2">
@@ -290,12 +885,12 @@ export const MaintenanceTicketDialog = ({
             </Button>
             <Button
               type="submit"
-              disabled={loading || isCreating || isUpdating}
+              disabled={loading || isCreating || isUpdating || uploadingFiles}
             >
-              {loading || isCreating || isUpdating ? (
+              {loading || isCreating || isUpdating || uploadingFiles ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Salvando...
+                  {uploadingFiles ? "Enviando fotos..." : "Salvando..."}
                 </>
               ) : ticketId ? (
                 "Atualizar"

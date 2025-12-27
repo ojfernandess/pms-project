@@ -99,8 +99,11 @@ export const useOccupancyMap = (selectedDate?: Date) => {
 
       // Buscar reservas que podem afetar o status na data selecionada
       // Buscar reservas onde a data está entre checkin e checkout (inclusive checkin, exclusivo checkout)
-      // OU reservas futuras (checkin > dateStr) para mostrar status "reserved"
-      let reservationsQuery = supabase
+      // OU reservas futuras (checkin >= dateStr) para mostrar status "reserved"
+      // IMPORTANTE: Fazer duas queries separadas e combinar para garantir que todas sejam encontradas
+      
+      // Query 1: Reservas ativas (checkin_date <= dateStr AND checkout_date >= dateStr)
+      let activeReservationsQuery = supabase
         .from("reservations")
         .select(`
           *,
@@ -109,15 +112,47 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           rooms (*),
           room_categories (*)
         `)
-        .or(`and(checkin_date.lte.${dateStr},checkout_date.gte.${dateStr}),checkin_date.gte.${dateStr}`)
+        .lte("checkin_date", dateStr)
+        .gte("checkout_date", dateStr)
         .in("status", ["pending", "confirmed", "checkedin", "checkedout", "blocked", "preregistration"])
-        .neq("status", "cancelled"); // Excluir explicitamente reservas canceladas
+        .neq("status", "cancelled");
       
       if (establishmentId) {
-        reservationsQuery = reservationsQuery.eq("establishment_id", establishmentId);
+        activeReservationsQuery = activeReservationsQuery.eq("establishment_id", establishmentId);
       }
       
-      const { data: reservations, error: reservationsError } = await reservationsQuery;
+      const { data: activeReservations, error: activeError } = await activeReservationsQuery;
+      
+      // Query 2: Reservas futuras (checkin_date >= dateStr)
+      let futureReservationsQuery = supabase
+        .from("reservations")
+        .select(`
+          *,
+          financial_responsible:clients!client_id(*),
+          guest:clients!guest_id(*),
+          rooms (*),
+          room_categories (*)
+        `)
+        .gte("checkin_date", dateStr)
+        .in("status", ["pending", "confirmed", "checkedin", "checkedout", "blocked", "preregistration"])
+        .neq("status", "cancelled");
+      
+      if (establishmentId) {
+        futureReservationsQuery = futureReservationsQuery.eq("establishment_id", establishmentId);
+      }
+      
+      const { data: futureReservations, error: futureReservationsError } = await futureReservationsQuery;
+      
+      // Combinar resultados, removendo duplicatas
+      const reservationMap = new Map();
+      [...(activeReservations || []), ...(futureReservations || [])].forEach((res) => {
+        if (!reservationMap.has(res.id)) {
+          reservationMap.set(res.id, res);
+        }
+      });
+      const reservations = Array.from(reservationMap.values());
+      
+      const reservationsError = activeError || futureReservationsError;
 
       if (reservationsError) {
         console.error("Erro ao buscar reservas:", reservationsError);
@@ -172,7 +207,8 @@ export const useOccupancyMap = (selectedDate?: Date) => {
       // Buscar reservas futuras (próximos hóspedes) para cada quarto
       // Buscar reservas com check-in futuro (após a data selecionada)
       // IMPORTANTE: Excluir canceladas
-      let futureReservationsQuery = supabase
+      // NOTA: Renomeado para nextReservationsQuery para evitar conflito com futureReservationsQuery acima
+      let nextReservationsQuery = supabase
         .from("reservations")
         .select(`
           *,
@@ -185,13 +221,13 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         .order("checkin_date", { ascending: true });
       
       if (establishmentId) {
-        futureReservationsQuery = futureReservationsQuery.eq("establishment_id", establishmentId);
+        nextReservationsQuery = nextReservationsQuery.eq("establishment_id", establishmentId);
       }
       
-      const { data: futureReservations, error: futureError } = await futureReservationsQuery;
+      const { data: nextReservations, error: nextError } = await nextReservationsQuery;
       
-      if (futureError) {
-        console.error("Erro ao buscar reservas futuras:", futureError);
+      if (nextError) {
+        console.error("Erro ao buscar próximas reservas:", nextError);
       }
 
       // Buscar reservas recentes de check-out (últimos 3 dias) para mostrar hóspede anterior
@@ -237,11 +273,51 @@ export const useOccupancyMap = (selectedDate?: Date) => {
       }
 
       // Mapear reservas por quarto
+      // IMPORTANTE: Considerar todas as reservas ativas, não apenas as que têm room_id atribuído
+      // Se uma reserva não tem room_id mas está na data selecionada, ela ainda pode ser relevante
       const reservationsByRoom: Record<string, any> = {};
       reservations?.forEach((reservation) => {
         // Ignorar reservas canceladas
-        if (reservation.room_id && reservation.status !== "cancelled") {
-          reservationsByRoom[reservation.room_id] = reservation;
+        if (reservation.status !== "cancelled") {
+          // Se a reserva tem room_id, mapear diretamente
+          if (reservation.room_id) {
+            // Se já existe uma reserva para este quarto, priorizar a que está mais ativa
+            // (checkedin > confirmed > pending)
+            const existing = reservationsByRoom[reservation.room_id];
+            if (!existing) {
+              reservationsByRoom[reservation.room_id] = reservation;
+            } else {
+              // Priorizar reservas com status mais ativo
+              const statusPriority: Record<string, number> = {
+                checkedin: 3,
+                confirmed: 2,
+                pending: 1,
+                preregistration: 1,
+                blocked: 0,
+              };
+              const currentPriority = statusPriority[reservation.status] || 0;
+              const existingPriority = statusPriority[existing.status] || 0;
+              
+              // Se a nova reserva tem prioridade maior, substituir
+              if (currentPriority > existingPriority) {
+                reservationsByRoom[reservation.room_id] = reservation;
+              }
+              // Se tem mesma prioridade, verificar qual está mais próxima da data selecionada
+              else if (currentPriority === existingPriority) {
+                const currentCheckin = parseISO(reservation.checkin_date);
+                const existingCheckin = parseISO(existing.checkin_date);
+                const selectedDateObj = parseISO(dateStr);
+                
+                // Priorizar a que está mais próxima da data selecionada
+                const currentDiff = Math.abs(differenceInDays(currentCheckin, selectedDateObj));
+                const existingDiff = Math.abs(differenceInDays(existingCheckin, selectedDateObj));
+                
+                if (currentDiff < existingDiff) {
+                  reservationsByRoom[reservation.room_id] = reservation;
+                }
+              }
+            }
+          }
         }
       });
 
@@ -264,10 +340,18 @@ export const useOccupancyMap = (selectedDate?: Date) => {
       });
 
       // Mapear próximas reservas por quarto (apenas a primeira/próxima)
+      // IMPORTANTE: Excluir reservas que já estão ativas (são a reserva atual)
       const nextReservationsByRoom: Record<string, any> = {};
-      futureReservations?.forEach((reservation) => {
+      const activeReservationIds = new Set(reservations?.map(r => r.id) || []);
+      
+      nextReservations?.forEach((reservation) => {
+        // Ignorar se já é uma reserva ativa
+        if (activeReservationIds.has(reservation.id)) {
+          return;
+        }
+        
         if (reservation.room_id && !nextReservationsByRoom[reservation.room_id]) {
-          // Pegar apenas a primeira reserva futura (próxima)
+          // Pegar apenas a primeira reserva futura (próxima) que não seja a atual
           nextReservationsByRoom[reservation.room_id] = reservation;
         }
       });
@@ -305,6 +389,12 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         // Determinar status do quarto
         let status: RoomOccupancyStatus = "available";
         let reservationData: any = null;
+        
+        // IMPORTANTE: Se há reserva ativa, sempre definir reservationData
+        // Isso garante que as informações do hóspede sejam sempre exibidas
+        if (reservation) {
+          reservationData = reservation;
+        }
 
         // PRIORIDADE MÁXIMA: Status manual do quarto (campo status da tabela rooms)
         // Este status é definido manualmente pelo usuário e deve ter prioridade sobre tudo
@@ -347,7 +437,20 @@ export const useOccupancyMap = (selectedDate?: Date) => {
            room.status === 'cleaning' || 
            (room.status === 'occupied' && !reservation));
 
+        // IMPORTANTE: Se não há reserva e não há status manual, garantir que o status seja 'available'
+        // (a menos que haja manutenção ativa)
+        if (!reservation && !manualStatusSet) {
+          // Se há manutenção ativa, mostrar como manutenção
+          if (maintenance) {
+            status = "maintenance";
+          } else {
+            // Sem reserva e sem manutenção = disponível
+            status = "available";
+          }
+        }
+
         // Prioridade 1: Manutenção (sobrescreve tudo, exceto status manual)
+        // Se há manutenção ativa, mostrar como manutenção (independente de ter reserva)
         if (!manualStatusSet && maintenance) {
           status = "maintenance";
         }
@@ -396,13 +499,71 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           }
         }
         
-        // Prioridade 4: Check-in realizado (ocupado) - verificar se check-in ocorreu na data selecionada
+        // Prioridade 4: Verificar se há reserva ativa para este quarto
         // (apenas se não houver status manual definido)
-        if (!manualStatusSet && status === "available" && reservation?.status === "checkedin") {
-          // Se check-in é hoje ou passado e status é checkedin, considerar ocupado
-          if (reservation.checkin_date <= dateStr) {
-            status = "occupied";
+        if (!manualStatusSet && reservation) {
+          // reservationData já foi definido acima, garantir que está correto
+          if (!reservationData) {
             reservationData = reservation;
+          }
+          
+          // Verificar status da reserva
+          if (reservation.status === "checkedin") {
+            // Check-in realizado - quarto está ocupado
+            if (reservation.checkin_date <= dateStr) {
+              status = "occupied";
+            }
+          } else if (reservation.status === "blocked") {
+            // Bloqueio
+            status = "blocked";
+          } else if (reservation.status === "confirmed" || reservation.status === "pending" || reservation.status === "preregistration") {
+            // Reserva confirmada/pendente - verificar se check-in já deveria ter ocorrido
+            const checkinDate = parseISO(reservation.checkin_date);
+            const checkoutDate = parseISO(reservation.checkout_date);
+            const selectedDateObj = parseISO(dateStr);
+            
+            // Se a data selecionada está dentro do período da reserva (checkin <= date <= checkout)
+            if (checkinDate <= selectedDateObj && checkoutDate >= selectedDateObj) {
+              // Verificar se já passou do horário de check-in
+              const now = new Date();
+              let checkinHour = 14; // Horário padrão
+              let checkinMinute = 0;
+              
+              if (reservation.checkin_time) {
+                const timeParts = reservation.checkin_time.split(':');
+                checkinHour = parseInt(timeParts[0]) || 14;
+                checkinMinute = parseInt(timeParts[1]) || 0;
+              }
+              
+              // Se check-in é hoje e já passou do horário, considerar ocupado
+              if (isToday(checkinDate)) {
+                const checkinTime = new Date();
+                checkinTime.setHours(checkinHour, checkinMinute, 0, 0);
+                
+                if (now >= checkinTime) {
+                  status = "occupied";
+                } else {
+                  status = "reserved";
+                }
+              } 
+              // Se check-in é passado, considerar ocupado (mesmo sem check-in formal)
+              else if (checkinDate < selectedDateObj) {
+                status = "occupied";
+              }
+              // Se check-in é futuro, está reservado
+              else {
+                status = "reserved";
+              }
+            } 
+            // Se check-in é futuro (fora do período)
+            else if (checkinDate > selectedDateObj) {
+              status = "reserved";
+            }
+            // Se está dentro do período mas checkout já passou
+            else if (checkoutDate < selectedDateObj) {
+              // Checkout já passou - quarto deveria estar sujo
+              status = "dirty";
+            }
           }
         }
         
@@ -416,53 +577,27 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           
           if (hasNewReservationToday) {
             status = "dirty_priority"; // 🟤 Sujo com prioridade
+            if (!reservationData) {
+              reservationData = reservation;
+            }
           } else {
             status = "dirty"; // 🟡 Sujo
+            if (!reservationData && checkoutToday) {
+              reservationData = checkoutToday;
+            }
           }
         }
-        // Prioridade 5: Reserva confirmada mas check-in não realizado (reservado)
-        // (apenas se não houver status manual definido)
-        else if (!manualStatusSet && reservation && 
-                 (reservation.status === "confirmed" || reservation.status === "preregistration")) {
-          // Se check-in é futuro, está reservado
-          if (reservation.checkin_date > dateStr) {
-            status = "reserved";
-            reservationData = reservation;
-          }
-          // Se check-in é hoje ou passado mas ainda não fez check-in
-          else if (reservation.checkin_date <= dateStr && reservation.status !== "checkedin") {
-            // Verificar se já passou do horário de check-in
-            const now = new Date();
-            let checkinHour = 14; // Horário padrão
-            let checkinMinute = 0;
-            
-            // Se a reserva tem horário específico, usar ele
-            if (reservation.checkin_time) {
-              const timeParts = reservation.checkin_time.split(':');
-              checkinHour = parseInt(timeParts[0]) || 14;
-              checkinMinute = parseInt(timeParts[1]) || 0;
-            }
-            
-            // Se é hoje e já passou do horário de check-in, considerar ocupado
-            if (isToday(parseISO(reservation.checkin_date))) {
-              const checkinTime = new Date();
-              checkinTime.setHours(checkinHour, checkinMinute, 0, 0);
-              
-              if (now >= checkinTime) {
-                status = "occupied";
-              } else {
-                status = "reserved";
-              }
-            } else {
-              // Se check-in é passado mas não fez check-in, considerar ocupado
-              status = "occupied";
-            }
-            reservationData = reservation;
-          }
-        }
-        // Prioridade 7: Disponível
-        else {
+        
+        // Prioridade 7: Garantir que quartos sem reserva sejam 'available' (a menos que haja status manual ou manutenção)
+        // Esta verificação já foi feita acima, mas garantir novamente no final
+        if (!reservation && !manualStatusSet && !maintenance && status !== "maintenance") {
           status = "available";
+        }
+        
+        // IMPORTANTE: Se não há reserva, limpar reservationData para não mostrar informações incorretas
+        // EXCETO se houver status manual 'occupied' (que pode ter sido definido manualmente)
+        if (!reservation && room.status !== 'occupied') {
+          reservationData = null;
         }
 
         // Calcular informações da reserva
@@ -509,13 +644,46 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         const previousReservationCode = previousGuestToUse?.reservation_code;
 
         // Informações do próximo hóspede (que vai entrar)
-        const nextGuestName = nextReservation 
-          ? (nextReservation.guest?.full_name || nextReservation.financial_responsible?.full_name)
+        // IMPORTANTE: Garantir que nextReservation seja diferente da reserva atual
+        const actualNextReservation = nextReservation && nextReservation.id !== reservation?.id 
+          ? nextReservation 
+          : null;
+        
+        const nextGuestName = actualNextReservation 
+          ? (actualNextReservation.guest?.full_name || actualNextReservation.financial_responsible?.full_name || actualNextReservation.guest_name)
           : undefined;
-        const nextCheckinDate = nextReservation?.checkin_date;
-        const nextReservationCode = nextReservation?.reservation_code;
-        const nextCheckinTime = nextReservation?.checkin_time;
+        const nextCheckinDate = actualNextReservation?.checkin_date;
+        const nextReservationCode = actualNextReservation?.reservation_code;
+        const nextCheckinTime = actualNextReservation?.checkin_time;
 
+        // Garantir que reservationData seja usado quando há reserva ativa
+        // Se há reserva mas reservationData não foi definido, usar a reserva encontrada
+        if (reservation && !reservationData) {
+          reservationData = reservation;
+        }
+        
+        // Extrair nome do hóspede de forma mais robusta
+        const getGuestName = (res: any): string | undefined => {
+          if (!res) return undefined;
+          
+          // Prioridade 1: guest_name desnormalizado (mais rápido e confiável)
+          if (res.guest_name && res.guest_name.trim() !== "") {
+            return res.guest_name.trim();
+          }
+          
+          // Prioridade 2: guest.full_name (join com clients via guest_id)
+          if (res.guest?.full_name && res.guest.full_name.trim() !== "") {
+            return res.guest.full_name.trim();
+          }
+          
+          // Prioridade 3: financial_responsible.full_name (join com clients via client_id)
+          if (res.financial_responsible?.full_name && res.financial_responsible.full_name.trim() !== "") {
+            return res.financial_responsible.full_name.trim();
+          }
+          
+          return undefined;
+        };
+        
         return {
           id: room.id,
           room_number: room.room_number,
@@ -526,24 +694,24 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           reservation_id: reservationData?.id,
           reservation_code: reservationData?.reservation_code,
           identification_number: reservationData?.identification_number,
-          guest_name: reservationData?.guest?.full_name || reservationData?.financial_responsible?.full_name,
-          checkin_date: reservationData?.checkin_date,
-          checkout_date: reservationData?.checkout_date,
-          checkin_time: reservationData?.checkin_time,
-          checkout_time: reservationData?.checkout_time,
+          guest_name: getGuestName(reservationData) || getGuestName(reservation),
+          checkin_date: reservationData?.checkin_date || reservation?.checkin_date,
+          checkout_date: reservationData?.checkout_date || reservation?.checkout_date,
+          checkin_time: reservationData?.checkin_time || reservation?.checkin_time,
+          checkout_time: reservationData?.checkout_time || reservation?.checkout_time,
           nights_remaining: nightsRemaining,
-          adults: reservationData?.adults,
-          children: reservationData?.children,
-          total_amount: reservationData?.total_amount,
-          paid_amount: reservationData?.paid_amount,
-          payment_status: reservationData?.payment_status,
-          reservation_status: reservationData?.status,
+          adults: reservationData?.adults || reservation?.adults,
+          children: reservationData?.children || reservation?.children,
+          total_amount: reservationData?.total_amount || reservation?.total_amount,
+          paid_amount: reservationData?.paid_amount || reservation?.paid_amount,
+          payment_status: reservationData?.payment_status || reservation?.payment_status,
+          reservation_status: reservationData?.status || reservation?.status,
           // Informações do hóspede anterior
           previous_guest_name: previousGuestName,
           previous_checkout_date: previousCheckoutDate,
           previous_checkout_time: previousCheckoutTime,
           previous_reservation_code: previousReservationCode,
-          // Informações do próximo hóspede
+          // Informações do próximo hóspede (apenas se for diferente do atual)
           next_guest_name: nextGuestName,
           next_checkin_date: nextCheckinDate,
           next_reservation_code: nextReservationCode,

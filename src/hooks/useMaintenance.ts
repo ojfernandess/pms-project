@@ -31,7 +31,8 @@ export const useMaintenance = () => {
         .from("maintenance_tickets")
         .select(`
           *,
-          rooms (*)
+          rooms (*),
+          maintenance_ticket_attachments (*)
         `);
 
       // Filtrar por establishment_id se disponível

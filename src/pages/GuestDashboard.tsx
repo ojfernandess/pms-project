@@ -381,7 +381,7 @@ export default function GuestDashboard() {
       }
     }
   }, [accountId]);
-
+  
   // Debug: monitorar mudanças no estado do diálogo fiscal
   useEffect(() => {
     console.log("🔍 Estado showFiscalReservationSelector mudou:", showFiscalReservationSelector);
@@ -1089,22 +1089,22 @@ export default function GuestDashboard() {
             <div className="flex items-center justify-between">
               {/* Logo e Nome do App */}
               <div className="flex items-center gap-3">
-                {siteSettings?.logo_url ? (
-                  <img 
-                    src={siteSettings.logo_url} 
-                    alt="Logo" 
+                  {siteSettings?.logo_url ? (
+                    <img 
+                      src={siteSettings.logo_url} 
+                      alt="Logo" 
                     className="h-10 w-10 sm:h-12 sm:w-12 object-contain rounded-lg flex-shrink-0"
-                  />
-                ) : (
+                    />
+                  ) : (
                   <div className="h-10 w-10 sm:h-12 sm:w-12 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center flex-shrink-0">
                     <Home className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                   </div>
-                )}
+                  )}
                 <div className="hidden sm:block">
                   <h1 className="text-lg font-bold text-slate-900">Meu Check-in</h1>
                   <p className="text-xs text-slate-500">Guest Portal</p>
-                </div>
-              </div>
+            </div>
+          </div>
 
               {/* Direita: Saudação, Notificações, Idioma, Avatar */}
               <div className="flex items-center gap-3">
@@ -1137,14 +1137,14 @@ export default function GuestDashboard() {
                           </Badge>
                         )}
                         {filteredNotifications.length > 0 && unreadNotificationsCount > 0 && (
-                          <button
+                <button 
                             onClick={markAllAsRead}
                             className="text-xs text-blue-600 hover:text-blue-700 font-medium px-2 py-1 rounded hover:bg-blue-50 transition-colors"
                             title="Marcar todas como lidas"
-                          >
+                >
                             <CheckCheck className="h-3 w-3 inline mr-1" />
                             Marcar todas
-                          </button>
+                </button>
                         )}
                       </div>
                     </div>
@@ -1395,7 +1395,7 @@ export default function GuestDashboard() {
                     <div className="absolute inset-0 opacity-10">
                       <div className="absolute top-0 right-0 w-64 h-64 bg-white rounded-full -mr-32 -mt-32"></div>
                       <div className="absolute bottom-0 left-0 w-48 h-48 bg-white rounded-full -ml-24 -mb-24"></div>
-                    </div>
+                      </div>
                     
                     <div className="relative z-10">
                       {/* Status Badge */}
@@ -1418,37 +1418,37 @@ export default function GuestDashboard() {
                             {t("guestDashboard.reservation.locatorLabel")} {currentReservation.reservation_code}
                           </p>
                         )}
-                      </div>
-
+                  </div>
+                  
                       {/* Datas e Noites */}
                       <div className="grid grid-cols-2 gap-4 mb-6">
                         <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-4 border border-white/20">
                           <div className="flex items-center gap-2 text-blue-100 mb-2">
-                            <Calendar className="w-4 h-4" />
+                        <Calendar className="w-4 h-4" />
                             <span className="text-xs font-medium">Check-in</span>
-                          </div>
+                      </div>
                           <p className="text-xl font-bold">
                             {currentReservation.checkin_date ? format(parseISO(currentReservation.checkin_date), "dd/MM/yyyy", { locale }) : "-"}
-                          </p>
-                        </div>
+                      </p>
+                    </div>
                         <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-4 border border-white/20">
                           <div className="flex items-center gap-2 text-blue-100 mb-2">
-                            <Calendar className="w-4 h-4" />
+                        <Calendar className="w-4 h-4" />
                             <span className="text-xs font-medium">Check-out</span>
-                          </div>
+                      </div>
                           <p className="text-xl font-bold">
                             {currentReservation.checkout_date ? format(parseISO(currentReservation.checkout_date), "dd/MM/yyyy", { locale }) : "-"}
-                          </p>
-                        </div>
-                      </div>
+                      </p>
+                    </div>
+                  </div>
 
-                      {currentReservation.checkin_date && currentReservation.checkout_date && (
-                        <div className="flex items-center gap-2 text-blue-100 mb-6">
+                  {currentReservation.checkin_date && currentReservation.checkout_date && (
+                    <div className="flex items-center gap-2 text-blue-100 mb-6">
                           <Clock className="w-5 h-5" />
                           <span className="text-base font-semibold">
-                            {calculateNights(currentReservation.checkin_date, currentReservation.checkout_date)} {t("guestDashboard.reservation.nights")}
-                          </span>
-                        </div>
+                        {calculateNights(currentReservation.checkin_date, currentReservation.checkout_date)} {t("guestDashboard.reservation.nights")}
+                      </span>
+                    </div>
                       )}
 
                       {/* CTA Principal */}
@@ -1657,7 +1657,7 @@ export default function GuestDashboard() {
                     {/* Decorative Pattern Sutil */}
                     <div className="absolute inset-0 opacity-5">
                       <div className="absolute top-0 right-0 w-32 h-32 bg-red-500 rounded-full -mr-16 -mt-16"></div>
-                    </div>
+                        </div>
                     
                     <div className="relative z-10">
                       {/* Status Badge */}
@@ -1683,85 +1683,85 @@ export default function GuestDashboard() {
                         <p className="text-sm text-slate-500">
                           {t("guestDashboard.reservation.cancelledMessage")}
                         </p>
-                      </div>
-
+                    </div>
+                    
                       {/* Datas */}
                       <div className="grid grid-cols-2 gap-4 mb-6">
                         <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
                           <div className="flex items-center gap-2 text-slate-600 mb-2">
                             <Calendar className="w-4 h-4" />
                             <span className="text-xs font-medium">Check-in</span>
-                          </div>
-                          <p className="text-base font-bold text-slate-900">
-                            {mostRecentCancelled.checkin_date ? format(parseISO(mostRecentCancelled.checkin_date), "dd/MM/yyyy", { locale }) : "-"}
-                          </p>
                         </div>
+                          <p className="text-base font-bold text-slate-900">
+                          {mostRecentCancelled.checkin_date ? format(parseISO(mostRecentCancelled.checkin_date), "dd/MM/yyyy", { locale }) : "-"}
+                        </p>
+                      </div>
                         <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
                           <div className="flex items-center gap-2 text-slate-600 mb-2">
                             <Calendar className="w-4 h-4" />
                             <span className="text-xs font-medium">Check-out</span>
-                          </div>
-                          <p className="text-base font-bold text-slate-900">
-                            {mostRecentCancelled.checkout_date ? format(parseISO(mostRecentCancelled.checkout_date), "dd/MM/yyyy", { locale }) : "-"}
-                          </p>
                         </div>
+                          <p className="text-base font-bold text-slate-900">
+                          {mostRecentCancelled.checkout_date ? format(parseISO(mostRecentCancelled.checkout_date), "dd/MM/yyyy", { locale }) : "-"}
+                        </p>
                       </div>
+                    </div>
 
                       {/* Contato */}
-                      {(() => {
-                        const phone = mostRecentCancelled.contact_phone;
-                        const whatsapp = mostRecentCancelled.contact_whatsapp;
-                        const whatsappUrl = whatsapp ? `https://wa.me/${whatsapp.replace(/\D/g, '')}` : null;
-                        const phoneUrl = phone ? `tel:${phone.replace(/\D/g, '')}` : null;
-                        
-                        if (!phone && !whatsapp) return null;
-                        
-                        return (
+                    {(() => {
+                      const phone = mostRecentCancelled.contact_phone;
+                      const whatsapp = mostRecentCancelled.contact_whatsapp;
+                      const whatsappUrl = whatsapp ? `https://wa.me/${whatsapp.replace(/\D/g, '')}` : null;
+                      const phoneUrl = phone ? `tel:${phone.replace(/\D/g, '')}` : null;
+                      
+                      if (!phone && !whatsapp) return null;
+                      
+                      return (
                           <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 mb-6">
                             <p className="text-xs text-slate-600 text-center mb-3 font-medium">
                               {t("guestDashboard.cancelledReservations.contactMessage")}
                             </p>
                             <div className="flex flex-col gap-2">
-                              {phone && (
-                                <a
-                                  href={phoneUrl || '#'}
+                          {phone && (
+                            <a
+                              href={phoneUrl || '#'}
                                   className="flex items-center justify-center gap-2 px-3 py-2 bg-white rounded-lg border border-slate-200 hover:border-red-300 hover:bg-red-50 text-sm text-slate-700 hover:text-red-700 transition-all"
-                                >
+                            >
                                   <Phone className="w-4 h-4" />
-                                  {phone}
-                                </a>
-                              )}
-                              {whatsapp && (
-                                <a
-                                  href={whatsappUrl || '#'}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                              {phone}
+                            </a>
+                          )}
+                          {whatsapp && (
+                            <a
+                              href={whatsappUrl || '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
                                   className="flex items-center justify-center gap-2 px-3 py-2 bg-white rounded-lg border border-slate-200 hover:border-green-300 hover:bg-green-50 text-sm text-slate-700 hover:text-green-700 transition-all"
-                                >
+                            >
                                   <MessageCircle className="w-4 h-4" />
-                                  WhatsApp: {whatsapp}
-                                </a>
-                              )}
+                              WhatsApp: {whatsapp}
+                            </a>
+                          )}
                             </div>
-                          </div>
-                        );
-                      })()}
+                        </div>
+                      );
+                    })()}
 
                       {/* Botão Ver Detalhes */}
                       <button
-                        onClick={() => {
-                          setSelectedCancelledReservation(mostRecentCancelled);
-                          setShowCurrentReservation(true);
-                        }}
+                    onClick={() => {
+                      setSelectedCancelledReservation(mostRecentCancelled);
+                      setShowCurrentReservation(true);
+                    }}
                         className="w-full bg-slate-900 text-white font-semibold py-3 rounded-2xl hover:bg-slate-800 transition-all transform hover:scale-[1.02] shadow-sm hover:shadow-md flex items-center justify-center gap-2"
-                      >
+                  >
                         <FileText className="w-4 h-4" />
-                        {t("guestDashboard.reservation.viewDetails")}
+                    {t("guestDashboard.reservation.viewDetails")}
                       </button>
                     </div>
-                  </div>
-                );
-              })()}
+                </div>
+              );
+            })()}
             </div>
           )}
 
@@ -1769,48 +1769,48 @@ export default function GuestDashboard() {
           <div className="mb-8">
             <h3 className="text-lg font-bold text-slate-900 mb-4">Ações Rápidas</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-              <ActionCard
-                icon={<CheckCircle2 className="w-6 h-6" />}
-                title={t("guestDashboard.actions.newCheckin")}
-                description={t("guestDashboard.actions.newCheckinDescription")}
-                color="from-emerald-500 to-teal-600"
-                onClick={() => navigate("/web-checkin")}
-              />
-              <ActionCard
-                icon={<History className="w-6 h-6" />}
-                title={t("guestDashboard.actions.history")}
-                description={t("guestDashboard.actions.historyDescription")}
-                color="from-purple-500 to-pink-600"
-                onClick={() => setShowHistoryDialog(true)}
-              />
-              <ActionCard
-                icon={<MessageCircle className="w-6 h-6" />}
-                title={t("guestDashboard.actions.support")}
-                description={t("guestDashboard.actions.supportDescription")}
-                color="from-orange-500 to-red-600"
-                onClick={() => {
-                  if (!allReservations || allReservations.length === 0) {
-                    toast.info(t("guestDashboard.messages.needReservationForTicket"));
-                    return;
-                  }
+            <ActionCard
+              icon={<CheckCircle2 className="w-6 h-6" />}
+              title={t("guestDashboard.actions.newCheckin")}
+              description={t("guestDashboard.actions.newCheckinDescription")}
+              color="from-emerald-500 to-teal-600"
+              onClick={() => navigate("/web-checkin")}
+            />
+            <ActionCard
+              icon={<History className="w-6 h-6" />}
+              title={t("guestDashboard.actions.history")}
+              description={t("guestDashboard.actions.historyDescription")}
+              color="from-purple-500 to-pink-600"
+              onClick={() => setShowHistoryDialog(true)}
+            />
+            <ActionCard
+              icon={<MessageCircle className="w-6 h-6" />}
+              title={t("guestDashboard.actions.support")}
+              description={t("guestDashboard.actions.supportDescription")}
+              color="from-orange-500 to-red-600"
+              onClick={() => {
+                if (!allReservations || allReservations.length === 0) {
+                  toast.info(t("guestDashboard.messages.needReservationForTicket"));
+                  return;
+                }
 
-                  // Se houver apenas uma reserva, abrir diretamente
-                  if (allReservations.length === 1) {
-                    setSelectedReservationForTicket(allReservations[0]);
-                    setShowMaintenanceDialog(true);
-                  } else {
-                    // Se houver múltiplas, mostrar seletor
-                    setShowReservationSelector(true);
-                  }
-                }}
-              />
-              <ActionCard
-                icon={<User className="w-6 h-6" />}
-                title={t("guestDashboard.actions.profile")}
-                description={t("guestDashboard.actions.profileDescription")}
-                color="from-blue-500 to-cyan-600"
-                onClick={() => setShowProfileDialog(true)}
-              />
+                // Se houver apenas uma reserva, abrir diretamente
+                if (allReservations.length === 1) {
+                  setSelectedReservationForTicket(allReservations[0]);
+                  setShowMaintenanceDialog(true);
+                } else {
+                  // Se houver múltiplas, mostrar seletor
+                  setShowReservationSelector(true);
+                }
+              }}
+            />
+            <ActionCard
+              icon={<User className="w-6 h-6" />}
+              title={t("guestDashboard.actions.profile")}
+              description={t("guestDashboard.actions.profileDescription")}
+              color="from-blue-500 to-cyan-600"
+              onClick={() => setShowProfileDialog(true)}
+            />
             </div>
           </div>
 

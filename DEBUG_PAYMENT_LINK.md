@@ -118,9 +118,9 @@ Procure por logs no console:
   pending_amount: 100
 }
 [Stripe] Pagamento necessário: { pendingAmount: 100 }
-[Stripe] ✅ Link de pagamento gerado com sucesso: https://app.vivakey.com.br/payment/pi_xxx
-[Stripe] 🔗 Payment Link final: https://app.vivakey.com.br/payment/pi_xxx
-✅ Payment link disponível nas variáveis: https://app.vivakey.com.br/payment/pi_xxx
+[Stripe] ✅ Link de pagamento gerado com sucesso: https://app.stayOs.com.br/payment/pi_xxx
+[Stripe] 🔗 Payment Link final: https://app.stayOs.com.br/payment/pi_xxx
+✅ Payment link disponível nas variáveis: https://app.stayOs.com.br/payment/pi_xxx
 ```
 
 ## Se o problema persistir
