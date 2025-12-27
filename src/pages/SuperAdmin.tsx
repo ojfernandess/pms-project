@@ -33,7 +33,9 @@ import {
   Upload,
   Image as ImageIcon,
   Globe,
-  Eye
+  Eye,
+  ChevronDown,
+  ChevronRight
 } from "lucide-react";
 import {
   Table,
@@ -485,9 +487,22 @@ const SuperAdmin = () => {
   
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
   
   const [userDetailsDialogOpen, setUserDetailsDialogOpen] = useState(false);
   const [selectedUserDetails, setSelectedUserDetails] = useState<any>(null);
+  
+  const toggleCompany = (companyId: string) => {
+    setExpandedCompanies((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(companyId)) {
+        newSet.delete(companyId);
+      } else {
+        newSet.add(companyId);
+      }
+      return newSet;
+    });
+  };
   
   const [companyFormData, setCompanyFormData] = useState({
     name: "",
@@ -657,6 +672,125 @@ const SuperAdmin = () => {
       return false;
     });
   }, [users, allEmployees, superAdmins]);
+
+  // Listar super admins com dados completos
+  const superAdminsList = useMemo(() => {
+    if (!users || !superAdmins || superAdmins.length === 0) return [];
+
+    const superAdminUserIds = new Set(superAdmins || []);
+    const usersMap = new Map(users.map((u: any) => [u.id, u]));
+
+    return Array.from(superAdminUserIds)
+      .map((userId) => {
+        const user = usersMap.get(userId);
+        if (!user) return null;
+
+        // Buscar funcionários deste usuário
+        const userEmployees = (allEmployees || []).filter(
+          (emp: any) => emp.user_id === userId
+        );
+
+        return {
+          user,
+          employees: userEmployees,
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) =>
+        (a.user.full_name || a.user.email || "").localeCompare(
+          b.user.full_name || b.user.email || ""
+        )
+      );
+  }, [users, superAdmins, allEmployees]);
+
+  // Agrupar usuários por empresa (excluindo super admins)
+  const usersByCompany = useMemo(() => {
+    if (!companies || !allUserCompanies || !users || !allEmployees) return [];
+
+    // Buscar user_ids que são super admins (para excluir)
+    const superAdminUserIds = new Set(superAdmins || []);
+
+    // Buscar user_ids que são gerentes
+    const managerUserIds = new Set(
+      allEmployees
+        .filter((emp: any) => emp.employee_roles?.code === "manager")
+        .map((emp: any) => emp.user_id)
+    );
+
+    // Criar mapa de usuários por ID para acesso rápido
+    const usersMap = new Map(users.map((u: any) => [u.id, u]));
+
+    // Agrupar associações por empresa
+    const companyMap = new Map<string, {
+      company: any;
+      users: Array<{
+        user: any;
+        userCompany: any;
+        isManager: boolean;
+        employees: any[];
+      }>;
+    }>();
+
+    companies.forEach((company: any) => {
+      // Buscar associações desta empresa
+      const companyAssociations = allUserCompanies.filter(
+        (uc: any) => uc.company_id === company.id && uc.is_active !== false
+      );
+
+      if (companyAssociations.length === 0) return;
+
+      const companyUsers: Array<{
+        user: any;
+        userCompany: any;
+        isManager: boolean;
+        employees: any[];
+      }> = [];
+
+      companyAssociations.forEach((uc: any) => {
+        const userId = uc.user_id;
+        
+        // Excluir super admins
+        if (superAdminUserIds.has(userId)) return;
+
+        const user = usersMap.get(userId);
+        if (!user) return;
+
+        // Verificar se é gerente
+        const userEmployees = (allEmployees || []).filter(
+          (emp: any) => emp.user_id === userId
+        );
+        const isManager = userEmployees.some(
+          (emp: any) => emp.employee_roles?.code === "manager"
+        );
+
+        companyUsers.push({
+          user,
+          userCompany: uc,
+          isManager,
+          employees: userEmployees,
+        });
+      });
+
+      if (companyUsers.length > 0) {
+        companyMap.set(company.id, {
+          company,
+          users: companyUsers.sort((a, b) => {
+            // Gerentes primeiro
+            if (a.isManager && !b.isManager) return -1;
+            if (!a.isManager && b.isManager) return 1;
+            // Depois por nome
+            return (a.user.full_name || a.user.email || "").localeCompare(
+              b.user.full_name || b.user.email || ""
+            );
+          }),
+        });
+      }
+    });
+
+    return Array.from(companyMap.values()).sort((a, b) =>
+      (a.company.name || "").localeCompare(b.company.name || "")
+    );
+  }, [companies, allUserCompanies, users, allEmployees, superAdmins]);
   
   // Carregar limites do usuário quando selecionado para edição
   useEffect(() => {
@@ -1386,52 +1520,307 @@ const SuperAdmin = () => {
         <TabsContent value="users" className="space-y-4">
           <Tabs defaultValue="managers" className="space-y-4">
             <TabsList>
-              <TabsTrigger value="managers">Gerentes e Super Admins</TabsTrigger>
-              <TabsTrigger value="employees">Funcionários</TabsTrigger>
+              <TabsTrigger value="managers">Gerentes e Usuários</TabsTrigger>
+              <TabsTrigger value="superAdmins">Super Admins</TabsTrigger>
             </TabsList>
 
             {/* Tab: Gerentes e Super Admins */}
             <TabsContent value="managers" className="space-y-4">
               <Card>
-                <div className="p-6 border-b flex items-center justify-between">
-                  <div>
-                    <h2 className="text-xl font-semibold">Gerentes e Super Admins</h2>
+                <div className="p-6 border-b flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <h2 className="text-xl font-semibold">Gerentes e Usuários</h2>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Gerencie os gerentes e super administradores do sistema
+                      Gerencie os gerentes e usuários organizados por empresa
                     </p>
                   </div>
-              <Button onClick={() => {
-                setSelectedUserId(undefined);
-                setUserFormData({ 
-                  email: "", 
-                  password: "",
-                  full_name: "",
-                  cpf: "",
-                  phone: "",
-                  address: "",
-                  city: "",
-                  state: "",
-                  postal_code: "",
-                  country: "Brasil",
-                  birth_date: "",
-                });
-                setUserDialogOpen(true);
-              }}>
-                <Plus className="h-4 w-4 mr-2" />
-                Novo Usuário
-              </Button>
-            </div>
+                  <Button onClick={() => {
+                    setSelectedUserId(undefined);
+                    setUserFormData({ 
+                      email: "", 
+                      password: "",
+                      full_name: "",
+                      cpf: "",
+                      phone: "",
+                      address: "",
+                      city: "",
+                      state: "",
+                      postal_code: "",
+                      country: "Brasil",
+                      birth_date: "",
+                    });
+                    setUserDialogOpen(true);
+                  }}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Novo Usuário
+                  </Button>
+                </div>
 
-                  {isLoadingUsers || isLoadingEmployees ? (
+                {/* Campo de busca */}
+                <div className="p-6 border-b">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar por empresa, nome ou email..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
+
+                {isLoadingUsers || isLoadingEmployees || isLoadingAssociations ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : usersByCompany.length === 0 ? (
+                  <div className="p-12 text-center">
+                    <Building2 className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <p className="text-muted-foreground font-medium">Nenhuma empresa com usuários encontrada</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {searchTerm ? "Tente ajustar os filtros de busca" : "Os usuários serão exibidos quando associados a empresas"}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-6 space-y-3">
+                    {usersByCompany
+                      .filter((companyData) => {
+                        if (!searchTerm) return true;
+                        const searchLower = searchTerm.toLowerCase();
+                        return (
+                          companyData.company.name?.toLowerCase().includes(searchLower) ||
+                          companyData.users.some((u) =>
+                            u.user.email?.toLowerCase().includes(searchLower) ||
+                            u.user.full_name?.toLowerCase().includes(searchLower)
+                          )
+                        );
+                      })
+                      .map((companyData) => {
+                        const isExpanded = expandedCompanies.has(companyData.company.id);
+                        const managersCount = companyData.users.filter((u) => u.isManager).length;
+                        const usersCount = companyData.users.filter((u) => !u.isManager).length;
+                        
+                        return (
+                          <Card key={companyData.company.id} className="overflow-hidden">
+                            <div 
+                              className="p-4 hover:bg-muted/30 transition-colors cursor-pointer"
+                              onClick={() => toggleCompany(companyData.company.id)}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3 flex-1">
+                                  {isExpanded ? (
+                                    <ChevronDown className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                                  ) : (
+                                    <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                                  )}
+                                  <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                    <Building2 className="h-5 w-5 text-primary" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <h3 className="font-semibold text-base truncate">{companyData.company.name}</h3>
+                                    <div className="flex items-center gap-3 mt-1">
+                                      <p className="text-xs text-muted-foreground truncate">
+                                        {companyData.company.cnpj || companyData.company.email || "Sem informações"}
+                                      </p>
+                                      <span className="text-xs text-muted-foreground">•</span>
+                                      <div className="flex items-center gap-2 text-xs">
+                                        {managersCount > 0 && (
+                                          <Badge variant="outline" className="text-xs py-0 px-1.5 h-5">
+                                            {managersCount} {managersCount === 1 ? "gerente" : "gerentes"}
+                                          </Badge>
+                                        )}
+                                        {usersCount > 0 && (
+                                          <Badge variant="secondary" className="text-xs py-0 px-1.5 h-5">
+                                            {usersCount} {usersCount === 1 ? "usuário" : "usuários"}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <Badge variant="outline" className="text-sm flex-shrink-0 ml-2">
+                                  {companyData.users.length} {companyData.users.length === 1 ? "total" : "totais"}
+                                </Badge>
+                              </div>
+                            </div>
+
+                            {isExpanded && (
+                              <div className="border-t p-4 bg-muted/20">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>Usuário</TableHead>
+                                      <TableHead>CPF</TableHead>
+                                      <TableHead>Telefone</TableHead>
+                                      <TableHead>Tipo</TableHead>
+                                      <TableHead>Limite Empresas</TableHead>
+                                      <TableHead>Limite Estabelecimentos</TableHead>
+                                      <TableHead>Data de Cadastro</TableHead>
+                                      <TableHead className="text-right">Ações</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {companyData.users.map(({ user, userCompany, isManager, employees }) => {
+                                      return (
+                                        <TableRow key={user.id} className="hover:bg-muted/50">
+                                          <TableCell>
+                                            <div className="flex items-center gap-3">
+                                              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                                <Users className="h-5 w-5 text-primary" />
+                                              </div>
+                                              <div>
+                                                <p className="font-medium">{user.full_name || user.email}</p>
+                                                <p className="text-xs text-muted-foreground">{user.email}</p>
+                                              </div>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell>
+                                            <span className="text-sm">{user.cpf || "-"}</span>
+                                          </TableCell>
+                                          <TableCell>
+                                            <span className="text-sm">{user.phone || "-"}</span>
+                                          </TableCell>
+                                          <TableCell>
+                                            {isManager ? (
+                                              <Badge variant="outline" className="border-blue-500 text-blue-700">
+                                                <Shield className="h-3 w-3 mr-1" />
+                                                Gerente
+                                              </Badge>
+                                            ) : (
+                                              <Badge variant="secondary">Usuário</Badge>
+                                            )}
+                                          </TableCell>
+                                          <TableCell>
+                                            <Badge variant="outline">
+                                              {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_companies || userCompany.max_companies || 1}
+                                            </Badge>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Badge variant="outline">
+                                              {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_establishments || 1}
+                                            </Badge>
+                                          </TableCell>
+                                          <TableCell>
+                                            <span className="text-sm">
+                                              {user.created_at ? new Date(user.created_at).toLocaleDateString("pt-BR", {
+                                                day: "2-digit",
+                                                month: "2-digit",
+                                                year: "numeric",
+                                              }) : "-"}
+                                            </span>
+                                          </TableCell>
+                                          <TableCell className="text-right">
+                                            <div className="flex items-center justify-end gap-2">
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                  setSelectedUserDetails({
+                                                    user,
+                                                    employees,
+                                                  });
+                                                  setUserDetailsDialogOpen(true);
+                                                }}
+                                                title="Ver detalhes"
+                                              >
+                                                <Eye className="h-4 w-4" />
+                                              </Button>
+                                              <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                  <Button variant="ghost" size="sm">
+                                                    <MoreVertical className="h-4 w-4" />
+                                                  </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                  <DropdownMenuItem
+                                                    onClick={() => {
+                                                      setSelectedUserId(user.id);
+                                                      setUserFormData({
+                                                        email: user.email || "",
+                                                        password: "",
+                                                        full_name: (user as any).full_name || "",
+                                                        cpf: (user as any).cpf || "",
+                                                        phone: (user as any).phone || "",
+                                                        address: (user as any).address || "",
+                                                        city: (user as any).city || "",
+                                                        state: (user as any).state || "",
+                                                        postal_code: (user as any).postal_code || "",
+                                                        country: (user as any).country || "Brasil",
+                                                        birth_date: (user as any).birth_date || "",
+                                                        max_companies: 1,
+                                                        max_establishments: 1,
+                                                      });
+                                                      setUserDialogOpen(true);
+                                                    }}
+                                                  >
+                                                    <Edit className="h-4 w-4 mr-2" />
+                                                    Editar
+                                                  </DropdownMenuItem>
+                                                  <DropdownMenuItem
+                                                    onClick={() => {
+                                                      setDeleteType("user");
+                                                      setDeleteId(user.id);
+                                                      setDeleteDialogOpen(true);
+                                                    }}
+                                                    className="text-destructive"
+                                                  >
+                                                    <Trash2 className="h-4 w-4 mr-2" />
+                                                    Excluir
+                                                  </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                              </DropdownMenu>
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            )}
+                          </Card>
+                        );
+                      })}
+                  </div>
+                )}
+              </Card>
+              </TabsContent>
+
+              {/* Tab: Super Admins */}
+              <TabsContent value="superAdmins" className="space-y-4">
+                <Card>
+                  <div className="p-6 border-b flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <h2 className="text-xl font-semibold">Super Administradores</h2>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Gerencie os super administradores do sistema
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Campo de busca */}
+                  <div className="p-6 border-b">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Buscar por nome ou email..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+
+                  {isLoadingUsers ? (
                     <div className="flex items-center justify-center py-12">
                       <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                     </div>
-                  ) : filteredManagersAndAdmins.length === 0 ? (
+                  ) : superAdminsList.length === 0 ? (
                     <div className="p-12 text-center">
-                      <Users className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-                      <p className="text-muted-foreground font-medium">Nenhum gerente ou super admin encontrado</p>
+                      <Shield className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                      <p className="text-muted-foreground font-medium">Nenhum super admin encontrado</p>
                       <p className="text-sm text-muted-foreground mt-1">
-                        {searchTerm ? "Tente ajustar os filtros de busca" : "Os usuários serão sincronizados automaticamente"}
+                        {searchTerm ? "Tente ajustar os filtros de busca" : "Não há super administradores cadastrados"}
                       </p>
                     </div>
                   ) : (
@@ -1450,254 +1839,126 @@ const SuperAdmin = () => {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {filteredManagersAndAdmins.map((user: any) => {
-                            // Buscar funcionários deste usuário
-                            const userEmployees = (allEmployees || []).filter((emp: any) => emp.user_id === user.id);
-                            const isManager = userEmployees.some((emp: any) => emp.employee_roles?.code === "manager");
-                            const isSuperAdmin = (superAdmins || []).includes(user.id);
-                            
-                            return (
-                              <TableRow key={user.id} className="hover:bg-muted/50">
-                                <TableCell>
-                                  <div className="flex items-center gap-3">
-                                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                                      <Users className="h-5 w-5 text-primary" />
+                          {superAdminsList
+                            .filter((item: any) => {
+                              if (!searchTerm) return true;
+                              const searchLower = searchTerm.toLowerCase();
+                              return (
+                                item.user.email?.toLowerCase().includes(searchLower) ||
+                                item.user.full_name?.toLowerCase().includes(searchLower)
+                              );
+                            })
+                            .map((item: any) => {
+                              const { user, employees } = item;
+                              return (
+                                <TableRow key={user.id} className="hover:bg-muted/50">
+                                  <TableCell>
+                                    <div className="flex items-center gap-3">
+                                      <div className="h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center">
+                                        <Shield className="h-5 w-5 text-purple-600" />
+                                      </div>
+                                      <div>
+                                        <p className="font-medium">{user.full_name || user.email}</p>
+                                        <p className="text-xs text-muted-foreground">{user.email}</p>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <p className="font-medium">{user.full_name || user.email}</p>
-                                      <p className="text-xs text-muted-foreground">{user.email}</p>
-                                    </div>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <span className="text-sm">{user.cpf || "-"}</span>
-                                </TableCell>
-                                <TableCell>
-                                  <span className="text-sm">{user.phone || "-"}</span>
-                                </TableCell>
-                                <TableCell>
-                                  {isSuperAdmin ? (
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="text-sm">{user.cpf || "-"}</span>
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="text-sm">{user.phone || "-"}</span>
+                                  </TableCell>
+                                  <TableCell>
                                     <Badge variant="default" className="bg-purple-600">
                                       <Shield className="h-3 w-3 mr-1" />
                                       Super Admin
                                     </Badge>
-                                  ) : isManager ? (
+                                  </TableCell>
+                                  <TableCell>
                                     <Badge variant="outline">
-                                      <Shield className="h-3 w-3 mr-1" />
-                                      Gerente
+                                      {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_companies || "Ilimitado"}
                                     </Badge>
-                                  ) : (
-                                    <Badge variant="secondary">Usuário</Badge>
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant="outline">
-                                    {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_companies || 1}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant="outline">
-                                    {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_establishments || 1}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell>
-                                  <span className="text-sm">
-                                    {user.created_at ? new Date(user.created_at).toLocaleDateString("pt-BR", {
-                                      day: "2-digit",
-                                      month: "2-digit",
-                                      year: "numeric",
-                                    }) : "-"}
-                                  </span>
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <div className="flex items-center justify-end gap-2">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => {
-                                        setSelectedUserDetails({
-                                          user,
-                                          employees: userEmployees,
-                                        });
-                                        setUserDetailsDialogOpen(true);
-                                      }}
-                                      title="Ver detalhes"
-                                    >
-                                      <Eye className="h-4 w-4" />
-                                    </Button>
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="sm">
-                                          <MoreVertical className="h-4 w-4" />
-                                        </Button>
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end">
-                                        <DropdownMenuItem
-                                          onClick={() => {
-                                            setSelectedUserId(user.id);
-                                            // Os limites serão carregados pelo hook useUserLimits
-                                            setUserFormData({
-                                              email: user.email || "",
-                                              password: "",
-                                              full_name: (user as any).full_name || "",
-                                              cpf: (user as any).cpf || "",
-                                              phone: (user as any).phone || "",
-                                              address: (user as any).address || "",
-                                              city: (user as any).city || "",
-                                              state: (user as any).state || "",
-                                              postal_code: (user as any).postal_code || "",
-                                              country: (user as any).country || "Brasil",
-                                              birth_date: (user as any).birth_date || "",
-                                              max_companies: 1,
-                                              max_establishments: 1,
-                                            });
-                                            setUserDialogOpen(true);
-                                          }}
-                                        >
-                                          <Edit className="h-4 w-4 mr-2" />
-                                          Editar
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem
-                                          onClick={() => {
-                                            setDeleteType("user");
-                                            setDeleteId(user.id);
-                                            setDeleteDialogOpen(true);
-                                          }}
-                                          className="text-destructive"
-                                        >
-                                          <Trash2 className="h-4 w-4 mr-2" />
-                                          Excluir
-                                        </DropdownMenuItem>
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                </Card>
-              </TabsContent>
-
-              {/* Tab: Funcionários */}
-              <TabsContent value="employees" className="space-y-4">
-                <Card>
-                  <div className="p-6 border-b">
-                    <div>
-                      <h2 className="text-xl font-semibold">Funcionários</h2>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Visualize todos os funcionários e seus gerentes responsáveis
-                      </p>
-                    </div>
-                  </div>
-
-                  {isLoadingEmployees ? (
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : groupedEmployees.length === 0 ? (
-                    <div className="p-12 text-center">
-                      <Users className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-                      <p className="text-muted-foreground font-medium">Nenhum funcionário encontrado</p>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {searchTerm ? "Tente ajustar os filtros de busca" : "Não há funcionários cadastrados"}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="p-6">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Funcionário</TableHead>
-                            <TableHead>Cargos</TableHead>
-                            <TableHead>Estabelecimentos</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead className="text-right">Ações</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {groupedEmployees.map((groupedEmp: any) => {
-                            // Buscar todos os funcionários deste usuário para o modal
-                            const userEmployees = (allEmployees || []).filter(
-                              (emp: any) => emp.user_id === groupedEmp.user_id
-                            );
-                            
-                            return (
-                              <TableRow key={groupedEmp.user_id} className="hover:bg-muted/50">
-                                <TableCell>
-                                  <div className="flex items-center gap-3">
-                                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                                      <Users className="h-5 w-5 text-primary" />
-                                    </div>
-                                    <div>
-                                      <p className="font-medium">{groupedEmp.user?.full_name || groupedEmp.user?.email || "-"}</p>
-                                      <p className="text-xs text-muted-foreground">{groupedEmp.user?.email || "-"}</p>
-                                    </div>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex flex-col gap-1">
-                                    {groupedEmp.roles.map((roleName: string) => (
-                                      <Badge key={roleName} variant="outline" className="w-fit">
-                                        <Shield className="h-3 w-3 mr-1" />
-                                        {roleName}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex flex-col gap-2 max-w-xs">
-                                    {groupedEmp.establishments.map((est: any) => (
-                                      <div key={est.id} className="flex flex-col gap-1">
-                                        <div className="flex items-center gap-1">
-                                          <Hotel className="h-3 w-3 text-muted-foreground" />
-                                          <span className="text-sm font-medium">{est.establishment?.name || "-"}</span>
-                                        </div>
-                                        {est.establishment?.companies?.name && (
-                                          <div className="flex items-center gap-1 ml-4">
-                                            <Building2 className="h-3 w-3 text-muted-foreground" />
-                                            <span className="text-xs text-muted-foreground">{est.establishment.companies.name}</span>
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex flex-col gap-1">
-                                    {groupedEmp.establishments.map((est: any) => (
-                                      <Badge 
-                                        key={est.id} 
-                                        variant={est.is_active ? "default" : "secondary"}
-                                        className="w-fit"
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline">
+                                      {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_establishments || "Ilimitado"}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="text-sm">
+                                      {user.created_at ? new Date(user.created_at).toLocaleDateString("pt-BR", {
+                                        day: "2-digit",
+                                        month: "2-digit",
+                                        year: "numeric",
+                                      }) : "-"}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <div className="flex items-center justify-end gap-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          setSelectedUserDetails({
+                                            user,
+                                            employees,
+                                          });
+                                          setUserDetailsDialogOpen(true);
+                                        }}
+                                        title="Ver detalhes"
                                       >
-                                        {est.is_active ? "Ativo" : "Inativo"}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      setSelectedUserDetails({
-                                        user: groupedEmp.user,
-                                        employees: userEmployees,
-                                      });
-                                      setUserDetailsDialogOpen(true);
-                                    }}
-                                    title="Ver detalhes"
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button variant="ghost" size="sm">
+                                            <MoreVertical className="h-4 w-4" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end">
+                                          <DropdownMenuItem
+                                            onClick={() => {
+                                              setSelectedUserId(user.id);
+                                              setUserFormData({
+                                                email: user.email || "",
+                                                password: "",
+                                                full_name: (user as any).full_name || "",
+                                                cpf: (user as any).cpf || "",
+                                                phone: (user as any).phone || "",
+                                                address: (user as any).address || "",
+                                                city: (user as any).city || "",
+                                                state: (user as any).state || "",
+                                                postal_code: (user as any).postal_code || "",
+                                                country: (user as any).country || "Brasil",
+                                                birth_date: (user as any).birth_date || "",
+                                                max_companies: 1,
+                                                max_establishments: 1,
+                                              });
+                                              setUserDialogOpen(true);
+                                            }}
+                                          >
+                                            <Edit className="h-4 w-4 mr-2" />
+                                            Editar
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={() => {
+                                              setDeleteType("user");
+                                              setDeleteId(user.id);
+                                              setDeleteDialogOpen(true);
+                                            }}
+                                            className="text-destructive"
+                                          >
+                                            <Trash2 className="h-4 w-4 mr-2" />
+                                            Excluir
+                                          </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
                         </TableBody>
                       </Table>
                     </div>
