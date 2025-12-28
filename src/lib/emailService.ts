@@ -217,20 +217,23 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
       bcc_emails: queueItem.bcc_emails || 'Nenhum'
     });
 
+    // Extrair nome do hotel das variáveis salvas (se disponível)
+    const hotelName = queueItem.variables?.hotel_name || undefined;
+    
     try {
       switch (settings.provider) {
         case 'smtp':
           console.log('📧 Usando SMTP para enviar email');
-          success = await sendViaSMTP(queueItem, settings);
+          success = await sendViaSMTP(queueItem, settings, hotelName);
           break;
         case 'sendgrid':
           console.log('📧 Usando SendGrid para enviar email');
-          success = await sendViaSendGrid(queueItem, settings);
+          success = await sendViaSendGrid(queueItem, settings, hotelName);
           // sendViaSendGrid já lança exceção em caso de erro
           break;
         case 'mailgun':
           console.log('📧 Usando Mailgun para enviar email');
-          success = await sendViaMailgun(queueItem, settings);
+          success = await sendViaMailgun(queueItem, settings, hotelName);
           // sendViaMailgun já lança exceção em caso de erro
           break;
         case 'ses':
@@ -239,7 +242,7 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
           break;
         case 'resend':
           console.log('📧 Usando Resend para enviar email');
-          success = await sendViaResend(queueItem, settings);
+          success = await sendViaResend(queueItem, settings, hotelName);
           // sendViaResend já lança exceção em caso de erro, então se chegou aqui é sucesso
           break;
         default:
@@ -349,7 +352,7 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
 /**
  * Envia e-mail via SMTP (usando API do Supabase Edge Function ou serviço externo)
  */
-async function sendViaSMTP(queueItem: any, settings: EmailSettings): Promise<boolean> {
+async function sendViaSMTP(queueItem: any, settings: EmailSettings, hotelName?: string): Promise<boolean> {
   // Para SMTP, precisamos de uma Edge Function do Supabase
   // Tentar chamar a Edge Function, se não existir, retornar erro claro
   
@@ -363,11 +366,14 @@ async function sendViaSMTP(queueItem: any, settings: EmailSettings): Promise<boo
     const ccEmails = parseEmailList(queueItem.cc_emails);
     const bccEmails = parseEmailList(queueItem.bcc_emails);
     
+    // Garantir que sender_name não esteja vazio - usar nome do hotel como fallback
+    const senderName = settings.sender_name?.trim() || hotelName || 'PMS System';
+    
     const smtpPayload = {
       to: queueItem.recipient_email,
       to_name: queueItem.recipient_name,
       from: settings.sender_email,
-      from_name: settings.sender_name,
+      from_name: senderName,
       reply_to: settings.reply_to_email || settings.sender_email,
       subject: queueItem.subject,
       html: queueItem.body_html,
@@ -387,6 +393,8 @@ async function sendViaSMTP(queueItem: any, settings: EmailSettings): Promise<boo
     
     console.log('📧 SMTP - Payload completo sendo enviado:', {
       ...smtpPayload,
+      from_name: senderName,
+      original_sender_name: settings.sender_name,
       smtp_config: { ...smtpPayload.smtp_config, auth: { user: smtpPayload.smtp_config.auth.user, pass: '***' } }
     });
     
@@ -478,7 +486,7 @@ async function sendViaSMTP(queueItem: any, settings: EmailSettings): Promise<boo
 /**
  * Envia e-mail via SendGrid
  */
-async function sendViaSendGrid(queueItem: any, settings: EmailSettings): Promise<boolean> {
+async function sendViaSendGrid(queueItem: any, settings: EmailSettings, hotelName?: string): Promise<boolean> {
   try {
     if (!settings.api_key) {
       throw new Error('API Key do SendGrid não configurada');
@@ -522,9 +530,12 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings): Promise
         'Content-Type': 'application/json',
       },
       body: (() => {
+        // Garantir que sender_name não esteja vazio - usar nome do hotel como fallback
+        const senderName = settings.sender_name?.trim() || hotelName || 'PMS System';
+        
         const payload = {
           personalizations: [personalizations],
-          from: { email: settings.sender_email, name: settings.sender_name || undefined },
+          from: { email: settings.sender_email, name: senderName },
           reply_to: { email: settings.reply_to_email || settings.sender_email },
           subject: queueItem.subject,
           content: [
@@ -532,7 +543,11 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings): Promise
             ...(queueItem.body_text ? [{ type: 'text/plain', value: queueItem.body_text }] : []),
           ],
         };
-        console.log('📧 SendGrid - Payload completo sendo enviado:', JSON.stringify(payload, null, 2));
+        console.log('📧 SendGrid - Payload completo sendo enviado:', {
+          ...payload,
+          from: { ...payload.from, name: senderName },
+          original_sender_name: settings.sender_name
+        });
         return JSON.stringify(payload);
       })(),
     });
@@ -574,7 +589,7 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings): Promise
 /**
  * Envia e-mail via Mailgun
  */
-async function sendViaMailgun(queueItem: any, settings: EmailSettings): Promise<boolean> {
+async function sendViaMailgun(queueItem: any, settings: EmailSettings, hotelName?: string): Promise<boolean> {
   try {
     if (!settings.api_key) {
       throw new Error('API Key do Mailgun não configurada');
@@ -603,16 +618,23 @@ async function sendViaMailgun(queueItem: any, settings: EmailSettings): Promise<
       bcc_count: bccEmails.length
     });
     
+    // Garantir que sender_name não esteja vazio - usar nome do hotel como fallback
+    const senderName = settings.sender_name?.trim() || hotelName || 'PMS System';
+    
     const params: Record<string, string> = {
-      from: settings.sender_name 
-        ? `${settings.sender_name} <${settings.sender_email}>`
-        : settings.sender_email,
+      from: `${senderName} <${settings.sender_email}>`,
       to: queueItem.recipient_email,
       subject: queueItem.subject,
       html: queueItem.body_html,
       ...(queueItem.body_text ? { text: queueItem.body_text } : {}),
       ...(settings.reply_to_email ? { 'h:Reply-To': settings.reply_to_email } : {}),
     };
+    
+    console.log('📧 Mailgun - Nome do remetente:', {
+      sender_name: senderName,
+      original_sender_name: settings.sender_name,
+      from_field: params.from
+    });
     
     if (ccEmails.length > 0) {
       params.cc = ccEmails.join(',');
@@ -679,7 +701,7 @@ async function sendViaSES(queueItem: any, settings: EmailSettings): Promise<bool
 /**
  * Envia e-mail via Resend (usando Edge Function para evitar CORS)
  */
-async function sendViaResend(queueItem: any, settings: EmailSettings): Promise<boolean> {
+async function sendViaResend(queueItem: any, settings: EmailSettings, hotelName?: string): Promise<boolean> {
   try {
     // Validar configurações
     if (!settings.api_key) {
@@ -717,13 +739,22 @@ async function sendViaResend(queueItem: any, settings: EmailSettings): Promise<b
       bcc_count: bccEmails.length
     });
     
+    // Garantir que sender_name não esteja vazio - usar nome do hotel como fallback
+    const senderName = settings.sender_name?.trim() || hotelName || 'PMS System';
+    
+    console.log('📧 Resend - Nome do remetente:', {
+      sender_name: senderName,
+      original_sender_name: settings.sender_name,
+      from_email: settings.sender_email
+    });
+    
     // Usar Edge Function para evitar problemas de CORS
     const result = await supabase.functions.invoke('send-email-resend', {
       body: {
         to: queueItem.recipient_email,
         to_name: queueItem.recipient_name || undefined,
         from: settings.sender_email,
-        from_name: settings.sender_name || undefined,
+        from_name: senderName,
         reply_to: settings.reply_to_email || settings.sender_email,
         subject: queueItem.subject,
         html: queueItem.body_html,
@@ -1659,13 +1690,26 @@ export async function sendCheckoutReminderEmail(
       hotelSettings = settings;
     }
 
+    // Buscar site_settings como fallback para logo
+    let siteSettings = null;
+    try {
+      const { data: siteData } = await supabase
+        .from('site_settings')
+        .select('logo_url')
+        .maybeSingle();
+      siteSettings = siteData;
+    } catch (error) {
+      console.warn('⚠️ Erro ao buscar site_settings:', error);
+    }
+    
     // Gerar variáveis do template
     const { generateReservationVariables } = await import('./emailTemplateEngine');
     const variables = await generateReservationVariables(
       fullReservation,
       fullReservation.financial_responsible,
       fullReservation.guest,
-      hotelSettings
+      hotelSettings,
+      siteSettings
     );
 
     // Adicionar/atualizar variáveis específicas
@@ -1938,18 +1982,48 @@ export async function triggerEmail(
       console.log('✅ Configurações do hotel:', { 
         hasSettings: !!hotelSettings,
         hotelName: hotelSettings?.name,
-        hasAddress: !!(hotelSettings?.street || hotelSettings?.city)
+        hasAddress: !!(hotelSettings?.street || hotelSettings?.city),
+        hasLogoUrl: !!hotelSettings?.logo_url,
+        logoUrl: hotelSettings?.logo_url ? (hotelSettings.logo_url.substring(0, 100) + '...') : 'N/A',
+        logoUrlLength: hotelSettings?.logo_url?.length || 0,
+        allSettingsKeys: hotelSettings ? Object.keys(hotelSettings) : []
       });
     } else {
       console.warn('⚠️ Reserva sem establishment_id');
     }
+
+    // Buscar site_settings como fallback para logo
+    let siteSettings = null;
+    try {
+      const { data: siteData, error: siteError } = await supabase
+        .from('site_settings')
+        .select('logo_url')
+        .maybeSingle();
+      
+      if (siteError) {
+        console.warn('⚠️ Erro ao buscar site_settings:', siteError);
+      } else {
+        siteSettings = siteData;
+        console.log('✅ Site settings:', {
+          hasSiteSettings: !!siteSettings,
+          hasLogoUrl: !!siteSettings?.logo_url,
+          logoUrl: siteSettings?.logo_url ? (siteSettings.logo_url.substring(0, 100) + '...') : 'N/A'
+        });
+      }
+    } catch (error) {
+      console.warn('⚠️ Erro ao buscar site_settings:', error);
+    }
+
+    // Obter nome do hotel para usar como fallback no sender_name
+    const hotelName = hotelSettings?.name || undefined;
 
     // Gerar variáveis do template
     const variables = await generateReservationVariables(
       fullReservation,
       fullReservation.financial_responsible,
       fullReservation.guest,
-      hotelSettings
+      hotelSettings,
+      siteSettings
     );
 
     // Mesclar com variáveis adicionais
@@ -1998,9 +2072,23 @@ export async function triggerEmail(
       hotel_phone: allVariables.hotel_phone || 'N/A',
       hotel_whatsapp: allVariables.hotel_whatsapp || 'N/A',
       hotel_contact: allVariables.hotel_contact || 'N/A',
-      hotel_logo: allVariables.hotel_logo ? 'Sim' : 'Não',
-      logo_url: allVariables.logo_url ? 'Sim' : 'Não',
+      hotel_logo: allVariables.hotel_logo ? (allVariables.hotel_logo.substring(0, 150) + (allVariables.hotel_logo.length > 150 ? '...' : '')) : 'Não configurado',
+      logo_url: allVariables.logo_url ? (allVariables.logo_url.substring(0, 150) + (allVariables.logo_url.length > 150 ? '...' : '')) : 'Não configurado',
+      hotel_logo_length: allVariables.hotel_logo?.length || 0,
+      logo_url_length: allVariables.logo_url?.length || 0,
+      hotel_logo_is_url: allVariables.hotel_logo ? (allVariables.hotel_logo.startsWith('http://') || allVariables.hotel_logo.startsWith('https://')) : false,
+      logo_url_is_url: allVariables.logo_url ? (allVariables.logo_url.startsWith('http://') || allVariables.logo_url.startsWith('https://')) : false,
       new_checkout_date: allVariables.new_checkout_date || 'N/A'
+    });
+    
+    // Verificar se o template contém referências à logo
+    const templateHasLogo = template.body_html?.includes('{{logo_url}}') || template.body_html?.includes('{{hotel_logo}}');
+    console.log('📧 Template contém referência à logo?', {
+      hasLogoReference: templateHasLogo,
+      hasLogoUrl: template.body_html?.includes('{{logo_url}}'),
+      hasHotelLogo: template.body_html?.includes('{{hotel_logo}}'),
+      logoUrlInProcessed: bodyHtml.includes(allVariables.logo_url || ''),
+      hotelLogoInProcessed: bodyHtml.includes(allVariables.hotel_logo || '')
     });
 
     // Determinar destinatário

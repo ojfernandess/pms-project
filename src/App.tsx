@@ -126,6 +126,7 @@ const AppContent = () => {
             <Route path="/payment/:paymentIntentId" element={<PaymentPage />} />
             <Route path="/payment/success/:paymentIntentId" element={<PaymentSuccess />} />
             <Route path="/payment/return" element={<PaymentSuccess />} />
+            <Route path="/policies/:slug/:token" element={<PublicPolicies />} />
             <Route path="/policies/:token" element={<PublicPolicies />} />
             <Route path="/documentation" element={<ProtectedRoute><AppLayout><Documentation /></AppLayout></ProtectedRoute>} />
             <Route path="/:establishmentId/documentation" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Documentation /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />

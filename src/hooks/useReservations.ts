@@ -769,7 +769,7 @@ export const useReservations = () => {
 
   // Check-in
   const checkIn = useMutation({
-    mutationFn: async ({ id, roomId }: { id: string; roomId?: string }) => {
+    mutationFn: async ({ id, roomId, skipEmail }: { id: string; roomId?: string; skipEmail?: boolean }) => {
       const updates: ReservationUpdate = {
         status: "checkedin",
       };
@@ -797,7 +797,7 @@ export const useReservations = () => {
         .single();
 
       if (error) throw error;
-      return data;
+      return { ...data, _skipEmail: skipEmail };
     },
         onSuccess: async (updatedReservation) => {
           // Registrar log de check-in
@@ -825,13 +825,18 @@ export const useReservations = () => {
           await queryClient.refetchQueries({ queryKey: ["reservations"] });
           await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
           
-          // Disparar e-mail de check-in confirmado
-          try {
-            const { triggerEmail } = await import("@/lib/emailService");
-            await triggerEmail('checkin.confirmed', updatedReservation);
-          } catch (emailError) {
-            console.error("Erro ao disparar e-mail de check-in confirmado:", emailError);
-            // Não bloquear o check-in se o e-mail falhar
+          // Disparar e-mail de check-in confirmado apenas se não foi solicitado para pular
+          // (o email já foi enviado pelo web check-in)
+          if (!updatedReservation._skipEmail) {
+            try {
+              const { triggerEmail } = await import("@/lib/emailService");
+              await triggerEmail('checkin.confirmed', updatedReservation);
+            } catch (emailError) {
+              console.error("Erro ao disparar e-mail de check-in confirmado:", emailError);
+              // Não bloquear o check-in se o e-mail falhar
+            }
+          } else {
+            console.log('ℹ️ Email de check-in confirmado não será enviado (já foi enviado pelo web check-in)');
           }
           
           toast.success("Check-in realizado com sucesso!");

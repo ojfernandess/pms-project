@@ -6,11 +6,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 
 export default function PublicPolicies() {
-  const { token } = useParams<{ token: string }>();
+  const { token, slug } = useParams<{ token: string; slug?: string }>();
   const [policiesType, setPoliciesType] = useState<'establishment' | 'building' | null>(null);
   const [entityId, setEntityId] = useState<string | null>(null);
 
   // Decodificar o token para obter o tipo e ID
+  // Suporta dois formatos:
+  // 1. /policies/:slug/:token (novo formato amigável)
+  // 2. /policies/:token (formato antigo para compatibilidade)
   useEffect(() => {
     if (token) {
       try {

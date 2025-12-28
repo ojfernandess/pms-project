@@ -934,7 +934,17 @@ async function sendPaymentConfirmedEmail(
       try {
         const tokenData = `${type}:${id}`;
         const token = btoa(tokenData);
-        return `${baseUrl}/policies/${token}`;
+        // Criar URL amigável usando o nome do hotel como slug
+        const hotelName = hotelSettings?.name || 'hotel';
+        // Criar slug simples (remover acentos, espaços, caracteres especiais)
+        const slug = hotelName
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+          .replace(/[^a-z0-9]+/g, '-') // Substitui não-alfanuméricos por hífen
+          .replace(/^-+|-+$/g, ''); // Remove hífens no início/fim
+        // URL amigável: /policies/{slug}/{token}
+        return `${baseUrl}/policies/${slug}/${token}`;
       } catch {
         return '';
       }

@@ -205,35 +205,89 @@ export function processTemplate(template: string, variables: TemplateVariables):
   // Processar variáveis aninhadas primeiro (ex: {{main_guest.name}})
   const nestedVarRegex = /\{\{(\w+(?:\.\w+)+)\}\}/g;
   let nestedMatch;
-  while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
-    const fullMatch = nestedMatch[0];
-    const path = nestedMatch[1];
-    const value = getNestedValue(variables, path);
-    const stringValue = value !== null && value !== undefined ? String(value) : '';
-    processed = processed.replace(fullMatch, stringValue);
+  let nestedChanged = true;
+  let nestedIterations = 0;
+  while (nestedChanged && nestedIterations < 10) {
+    nestedIterations++;
+    nestedChanged = false;
+    nestedVarRegex.lastIndex = 0; // Reset regex
+    while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
+      const fullMatch = nestedMatch[0];
+      const path = nestedMatch[1];
+      const value = getNestedValue(variables, path);
+      const stringValue = value !== null && value !== undefined ? String(value) : '';
+      if (processed.includes(fullMatch)) {
+        processed = processed.replace(fullMatch, stringValue);
+        nestedChanged = true;
+      }
+    }
   }
 
   // Depois, substituir variáveis simples no formato {{variable_name}}
-  Object.keys(variables).forEach((key) => {
-    const value = variables[key];
+  // Fazer múltiplas passadas para garantir que todas as variáveis sejam substituídas
+  let varChanged = true;
+  let varIterations = 0;
+  while (varChanged && varIterations < 20) {
+    varIterations++;
+    varChanged = false;
     
-    // Pular objetos e arrays (já foram processados nos loops)
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      // Processar propriedades do objeto como variáveis aninhadas
-      Object.keys(value).forEach((prop) => {
-        const nestedPath = `${key}.${prop}`;
-        const nestedValue = value[prop];
-        const stringValue = nestedValue !== null && nestedValue !== undefined ? String(nestedValue) : '';
-        const regex = new RegExp(`\\{\\{${nestedPath.replace(/\./g, '\\.')}\\}\\}`, 'g');
-        processed = processed.replace(regex, stringValue);
-      });
-    } else {
-      // Converter para string, tratando null/undefined como string vazia
+    // Substituir variáveis aninhadas primeiro (formato {{variable.path}})
+    const nestedVarRegex = /\{\{(\w+(?:\.\w+)+)\}\}/g;
+    let nestedMatch;
+    nestedVarRegex.lastIndex = 0;
+    while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
+      const fullMatch = nestedMatch[0];
+      const path = nestedMatch[1];
+      const value = getNestedValue(variables, path);
       const stringValue = value !== null && value !== undefined ? String(value) : '';
-      const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
-      processed = processed.replace(regex, stringValue);
+      processed = processed.replace(fullMatch, stringValue);
+      varChanged = true;
     }
-  });
+    
+    // Substituir variáveis com três chaves {{{variable}}} (HTML não escapado)
+    Object.keys(variables).forEach((key) => {
+      const value = variables[key];
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        const stringValue = value !== null && value !== undefined ? String(value) : '';
+        const tripleBraceRegex = new RegExp(`\\{\\{\\{${key}\\}\\}\\}`, 'g');
+        const beforeReplace = processed;
+        processed = processed.replace(tripleBraceRegex, stringValue);
+        if (beforeReplace !== processed) {
+          varChanged = true;
+        }
+      }
+    });
+    
+    // Depois substituir variáveis simples (formato {{variable}})
+    Object.keys(variables).forEach((key) => {
+      const value = variables[key];
+      
+      // Pular objetos e arrays (já foram processados nos loops e variáveis aninhadas)
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // Processar propriedades do objeto como variáveis aninhadas
+        Object.keys(value).forEach((prop) => {
+          const nestedPath = `${key}.${prop}`;
+          const nestedValue = value[prop];
+          const stringValue = nestedValue !== null && nestedValue !== undefined ? String(nestedValue) : '';
+          const regex = new RegExp(`\\{\\{${nestedPath.replace(/\./g, '\\.')}\\}\\}`, 'g');
+          if (regex.test(processed)) {
+            processed = processed.replace(regex, stringValue);
+            varChanged = true;
+          }
+        });
+      } else {
+        // Converter para string, tratando null/undefined como string vazia
+        const stringValue = value !== null && value !== undefined ? String(value) : '';
+        // Usar replace global para substituir todas as ocorrências
+        const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+        const beforeReplace = processed;
+        processed = processed.replace(regex, stringValue);
+        if (beforeReplace !== processed) {
+          varChanged = true;
+        }
+      }
+    });
+  }
   
   // Log de debug para variáveis não substituídas (apenas em desenvolvimento)
   if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
@@ -310,6 +364,11 @@ function processConditionals(template: string, variables: TemplateVariables): st
               // Separar conteúdo do if e do else
               ifContent = content.substring(0, elseIndex);
               elseContent = content.substring(elseIndex + 8); // {{else}} tem 8 caracteres
+              
+              // Processar condicionais recursivamente no conteúdo do else
+              if (elseContent.includes('{{#if')) {
+                elseContent = processConditionals(elseContent, variables);
+              }
             }
             
             // Verificar se a variável existe e é truthy
@@ -323,7 +382,12 @@ function processConditionals(template: string, variables: TemplateVariables): st
             
             if (isTruthy) {
               // Variável é truthy: manter o conteúdo do if, remover apenas as tags
-              processed = processed.replace(fullMatch, ifContent);
+              // Processar condicionais recursivamente no conteúdo do if se necessário
+              let finalIfContent = ifContent;
+              if (ifContent.includes('{{#if')) {
+                finalIfContent = processConditionals(ifContent, variables);
+              }
+              processed = processed.replace(fullMatch, finalIfContent);
             } else {
               // Variável é falsy: manter o conteúdo do else (se existir), remover apenas as tags
               if (elseContent) {
@@ -421,7 +485,8 @@ export async function generateReservationVariables(
   reservation: any,
   client?: any,
   guest?: any,
-  hotelSettings?: any
+  hotelSettings?: any,
+  siteSettings?: any
 ): Promise<TemplateVariables> {
   const checkinDate = formatDate(reservation.checkin_date);
   const checkoutDate = formatDate(reservation.checkout_date);
@@ -485,7 +550,18 @@ export async function generateReservationVariables(
       const token = btoa(tokenData);
       // Detectar URL base automaticamente
       const baseUrl = detectBaseUrl();
-      return `${baseUrl}/policies/${token}`;
+      // Criar URL amigável usando o nome do hotel como slug
+      const hotelName = hotelSettings?.name || 'hotel';
+      // Criar slug simples (remover acentos, espaços, caracteres especiais)
+      const slug = hotelName
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+        .replace(/[^a-z0-9]+/g, '-') // Substitui não-alfanuméricos por hífen
+        .replace(/^-+|-+$/g, ''); // Remove hífens no início/fim
+      // URL amigável: /politicas-do-hotel/{slug}/{token}
+      // O token ainda é necessário para decodificar e buscar as políticas
+      return `${baseUrl}/policies/${slug}/${token}`;
     } catch (error) {
       console.error('Erro ao gerar link de políticas:', error);
       return '';
@@ -791,6 +867,122 @@ export async function generateReservationVariables(
     console.log('[Stripe] ✅ Payment Link final gerado:', paymentLink);
   }
 
+  // Converter logo_url para URL pública se necessário
+  // Priorizar logo do hotel_settings, senão usar do site_settings
+  let logoUrl = hotelSettings?.logo_url || siteSettings?.logo_url || '';
+  
+  console.log('🔍 Processando logo_url:', {
+    hasHotelSettings: !!hotelSettings,
+    hasSiteSettings: !!siteSettings,
+    logoUrlFromHotel: hotelSettings?.logo_url || 'N/A',
+    logoUrlFromSite: siteSettings?.logo_url || 'N/A',
+    logoUrlFinal: logoUrl || 'vazio',
+    logoUrlLength: logoUrl?.length || 0,
+    logoUrlType: typeof logoUrl,
+    hotelSettingsKeys: hotelSettings ? Object.keys(hotelSettings) : [],
+    siteSettingsKeys: siteSettings ? Object.keys(siteSettings) : []
+  });
+  
+  if (logoUrl) {
+    try {
+      // Se a logo_url já é uma URL completa (http/https), verificar se é válida
+      if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
+        // Verificar se a URL contém o domínio do Supabase (pode precisar de ajuste)
+        // Se a URL contém "/storage/v1/object/public/", garantir que está correta
+        if (logoUrl.includes('/storage/v1/object/public/')) {
+          // URL do Supabase Storage - garantir que está completa e correta
+          console.log('✅ Logo já é uma URL completa do Supabase Storage:', logoUrl.substring(0, 100) + '...');
+        } else {
+          // URL externa - usar como está
+          console.log('✅ Logo já é uma URL completa (externa):', logoUrl.substring(0, 100) + '...');
+        }
+      } else if (logoUrl.startsWith('data:')) {
+        // Se for data URL, usar como está (não funciona em emails, mas manter para não quebrar)
+        console.log('⚠️ Logo é data URL (pode não funcionar em emails):', logoUrl.substring(0, 50) + '...');
+      } else {
+        // Se não começa com http/https, pode ser:
+        // 1. Um caminho relativo do Supabase Storage (ex: "hotel/logo_123.png")
+        // 2. Uma URL do Supabase Storage sem protocolo (ex: "//storage.supabase.co/...")
+        // 3. Um caminho que precisa ser convertido para URL pública
+        
+        // Se começa com "//", adicionar "https:"
+        if (logoUrl.startsWith('//')) {
+          logoUrl = 'https:' + logoUrl;
+          console.log('✅ Logo corrigida (adicionado https:):', logoUrl.substring(0, 100) + '...');
+        } else if (logoUrl.includes('/storage/v1/object/public/')) {
+          // Se já contém o caminho do Supabase Storage, adicionar protocolo se necessário
+          if (!logoUrl.startsWith('http')) {
+            logoUrl = 'https:' + (logoUrl.startsWith('/') ? '' : '//') + logoUrl;
+            console.log('✅ Logo corrigida (adicionado https ao caminho Supabase):', logoUrl.substring(0, 100) + '...');
+          }
+        } else {
+          // Tentar converter caminho relativo para URL pública
+          // O sistema salva logos no bucket "hotel-assets" com caminho "hotel/nome_arquivo.ext"
+          const { supabase: supabaseClient } = await import('@/integrations/supabase/client');
+          
+          // Tentar diferentes buckets comuns (incluindo hotel-assets que é usado pelo sistema)
+          const possibleBuckets = ['hotel-assets', 'logos', 'public', 'images', 'uploads', 'hotel-logos'];
+          let publicUrl = '';
+          
+          for (const bucket of possibleBuckets) {
+            try {
+              // Se o logoUrl já contém o caminho completo (ex: "hotel/logo_123.png"), usar direto
+              // Se não, tentar adicionar "hotel/" como prefixo para hotel-assets
+              let filePath = logoUrl;
+              
+              // Se for hotel-assets e o caminho não começar com "hotel/", adicionar
+              if (bucket === 'hotel-assets' && !filePath.startsWith('hotel/') && !filePath.includes('/')) {
+                filePath = `hotel/${filePath}`;
+              }
+              
+              // Se o caminho contém "/storage/v1/object/public/", extrair apenas o caminho do arquivo
+              if (filePath.includes('/storage/v1/object/public/')) {
+                const match = filePath.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
+                if (match && match[1]) {
+                  filePath = match[1];
+                }
+              }
+              
+              const { data } = supabaseClient.storage.from(bucket).getPublicUrl(filePath);
+              if (data?.publicUrl) {
+                publicUrl = data.publicUrl;
+                // Verificar se a URL é válida (começa com http)
+                if (publicUrl.startsWith('http://') || publicUrl.startsWith('https://')) {
+                  logoUrl = publicUrl;
+                  console.log(`✅ Logo convertida para URL pública do bucket "${bucket}":`, logoUrl.substring(0, 100) + '...');
+                  console.log(`📁 Caminho do arquivo usado:`, filePath);
+                  break;
+                }
+              }
+            } catch (error) {
+              // Continuar tentando outros buckets
+              console.warn(`⚠️ Erro ao tentar bucket "${bucket}":`, error);
+              continue;
+            }
+          }
+          
+          // Se não encontrou em nenhum bucket, manter a URL original
+          if (!publicUrl) {
+            console.warn('⚠️ Não foi possível converter logo_url para URL pública. Mantendo original:', logoUrl);
+            console.warn('⚠️ Logo URL original:', logoUrl);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Erro ao processar logo_url:', error);
+      // Em caso de erro, manter a URL original
+    }
+  } else {
+    console.log('ℹ️ Logo não configurada para este estabelecimento');
+  }
+  
+  // Log final para debug
+  console.log('📧 Logo URL final para email:', {
+    hasLogo: !!logoUrl,
+    logoUrl: logoUrl ? (logoUrl.substring(0, 150) + (logoUrl.length > 150 ? '...' : '')) : 'N/A',
+    isCompleteUrl: logoUrl ? (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) : false
+  });
+
   return {
     guest_name: guest?.full_name || client?.full_name || 'Hóspede',
     reservation_code: reservation.reservation_code || '',
@@ -819,8 +1011,8 @@ export async function generateReservationVariables(
     hotel_phone: hotelPhone,
     hotel_whatsapp: hotelWhatsApp,
     hotel_website: hotelSettings?.website || '',
-    hotel_logo: hotelSettings?.logo_url || '', // URL do logo do estabelecimento
-    logo_url: hotelSettings?.logo_url || '', // Alias para hotel_logo
+    hotel_logo: logoUrl, // URL do logo do estabelecimento (convertida para pública se necessário)
+    logo_url: logoUrl, // Alias para hotel_logo
     policies_link: policiesLink, // Link para página pública de políticas
     web_checkin_link: webCheckinLink, // Link para web check-in com localizador
     payment_link: paymentLink, // Link para pagamento da reserva (se necessário)

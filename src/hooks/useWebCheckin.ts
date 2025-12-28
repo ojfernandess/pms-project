@@ -1079,7 +1079,14 @@ export const useWebCheckin = () => {
               *,
               guest:clients!guest_id(*),
               financial_responsible:clients!client_id(*),
-              rooms(id, room_number, name, fixed_password, authentication_type),
+              rooms(
+                id, 
+                room_number, 
+                name, 
+                fixed_password, 
+                authentication_type,
+                room_categories(id, name, description, building_id)
+              ),
               room_categories(id, name, description, building_id)
             `)
             .eq("id", data.reservation_id)
@@ -1127,14 +1134,60 @@ export const useWebCheckin = () => {
                 }
 
                 // Se não encontrou no establishment, tentar buscar do building
-                if (!receptionEmail && reservation.rooms?.[0]?.room_categories?.building_id) {
-                  const { data: building } = await supabase
-                    .from("buildings")
-                    .select("reception_email")
-                    .eq("id", reservation.rooms[0].room_categories.building_id)
-                    .maybeSingle();
+                // O building_id pode estar em room_categories (direto da reserva ou através de rooms)
+                if (!receptionEmail) {
+                  let buildingId: string | null = null;
                   
-                  receptionEmail = building?.reception_email || null;
+                  // Forma 1: building_id direto de room_categories da reserva
+                  if (reservation.room_categories?.building_id) {
+                    buildingId = reservation.room_categories.building_id;
+                    console.log('🔍 building_id encontrado em room_categories da reserva:', buildingId);
+                  }
+                  // Forma 2: building_id através de rooms -> room_categories
+                  else if (reservation.rooms) {
+                    const room = Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms;
+                    if (room?.room_categories?.building_id) {
+                      buildingId = room.room_categories.building_id;
+                      console.log('🔍 building_id encontrado em rooms -> room_categories:', buildingId);
+                    }
+                  }
+                  
+                  // Forma 3: Se ainda não encontrou, buscar diretamente usando category_id da reserva
+                  if (!buildingId && reservation.category_id) {
+                    const { data: categoryData } = await supabase
+                      .from("room_categories")
+                      .select("building_id")
+                      .eq("id", reservation.category_id)
+                      .maybeSingle();
+                    
+                    buildingId = categoryData?.building_id || null;
+                    if (buildingId) {
+                      console.log('🔍 building_id encontrado através de category_id:', buildingId);
+                    }
+                  }
+                  
+                  if (buildingId) {
+                    console.log('🔍 Buscando email da portaria do building:', { buildingId });
+                    const { data: building } = await supabase
+                      .from("buildings")
+                      .select("reception_email")
+                      .eq("id", buildingId)
+                      .maybeSingle();
+                    
+                    receptionEmail = building?.reception_email || null;
+                    console.log('✅ Email da portaria encontrado no building:', { 
+                      buildingId, 
+                      receptionEmail,
+                      hasBuilding: !!building 
+                    });
+                  } else {
+                    console.warn('⚠️ building_id não encontrado na reserva:', {
+                      hasRoomCategories: !!reservation.room_categories,
+                      hasRooms: !!reservation.rooms,
+                      categoryId: reservation.category_id,
+                      roomId: reservation.room_id
+                    });
+                  }
                 }
 
                 if (receptionEmail) {

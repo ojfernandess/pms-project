@@ -890,10 +890,12 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
       await completeWebCheckin.mutateAsync(token!);
 
       // 6. Realizar check-in da reserva (atualizar status para checkedin)
+      // skipEmail: true porque o email já foi enviado pelo completeWebCheckin
       if (reservation.status !== "checkedin") {
         await checkIn({
           id: reservation.id,
           roomId: reservation.room_id || undefined,
+          skipEmail: true, // Email já foi enviado pelo completeWebCheckin
         });
       }
 
