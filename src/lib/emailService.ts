@@ -1701,7 +1701,7 @@ export async function sendCheckoutReminderEmail(
     } catch (error) {
       console.warn('⚠️ Erro ao buscar site_settings:', error);
     }
-    
+
     // Gerar variáveis do template
     const { generateReservationVariables } = await import('./emailTemplateEngine');
     const variables = await generateReservationVariables(

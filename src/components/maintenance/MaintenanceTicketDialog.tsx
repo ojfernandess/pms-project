@@ -50,14 +50,39 @@ const AttachmentThumbnail = ({ attachment }: { attachment: any }) => {
     const tryGenerateSignedUrl = async () => {
       if (imageError && attachment.file_url) {
         try {
-          // Extrair o caminho do arquivo da URL
+          // Extrair o caminho do arquivo da URL (sem o prefixo "maintenance/" porque já especificamos o bucket)
           const extractFilePath = (url: string): string | null => {
             if (!url) return null;
-            // Se já for um caminho relativo, retornar direto
-            if (url.startsWith("maintenance/")) return url;
-            // Tentar extrair o caminho após /maintenance/
+            
+            // Se já for um caminho relativo começando com "maintenance/", remover o prefixo
+            if (url.startsWith("maintenance/")) {
+              return url.replace(/^maintenance\//, "");
+            }
+            
+            // Tentar extrair o caminho após /maintenance/ (pode aparecer uma ou duas vezes)
+            // Formato esperado: /storage/v1/object/public/maintenance/maintenance/ticket_id/file.png
+            // ou: /storage/v1/object/public/maintenance/ticket_id/file.png
             const match = url.match(/\/maintenance\/(.+)$/);
-            if (match) return `maintenance/${match[1]}`;
+            if (match) {
+              let path = match[1];
+              // Se o path começa com "maintenance/", remover (duplicação)
+              if (path.startsWith("maintenance/")) {
+                path = path.replace(/^maintenance\//, "");
+              }
+              return path;
+            }
+            
+            // Tentar extrair o caminho após /storage/v1/object/public/maintenance/
+            const publicMatch = url.match(/\/storage\/v1\/object\/public\/maintenance\/(.+)$/);
+            if (publicMatch) {
+              let path = publicMatch[1];
+              // Se o path começa com "maintenance/", remover (duplicação)
+              if (path.startsWith("maintenance/")) {
+                path = path.replace(/^maintenance\//, "");
+              }
+              return path;
+            }
+            
             return null;
           };
           
@@ -157,6 +182,7 @@ export const MaintenanceTicketDialog = ({
     status: "open" as "open" | "in_progress" | "completed" | "cancelled",
     notes: "",
     ticket_type: "" as "" | "water" | "electrical" | "cleaning" | "other",
+    initial_comment: "", // Comentário inicial ao criar o ticket
   });
 
   // Buscar quartos com categorias
@@ -241,7 +267,8 @@ export const MaintenanceTicketDialog = ({
     try {
       for (const file of files) {
         const fileExt = file.name.split(".").pop();
-        const fileName = `maintenance/${ticketId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+        // Não incluir "maintenance/" no caminho porque já especificamos o bucket no .from("maintenance")
+        const fileName = `${ticketId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
         const { error: uploadError } = await supabase.storage
           .from("maintenance")
@@ -410,6 +437,26 @@ export const MaintenanceTicketDialog = ({
       // Fazer upload de arquivos se houver
       if (files.length > 0 && createdTicketId) {
         await uploadFiles(createdTicketId);
+      }
+
+      // Criar comentário inicial se fornecido
+      if (createdTicketId && formData.initial_comment?.trim() && !ticketId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          try {
+            await supabase
+              .from("maintenance_ticket_comments")
+              .insert([{
+                ticket_id: createdTicketId,
+                comment: formData.initial_comment.trim(),
+                created_by_user_id: user.id,
+                created_by_guest_id: null,
+              }]);
+          } catch (commentError) {
+            console.error("Erro ao criar comentário inicial:", commentError);
+            // Não falhar a criação do ticket por causa do comentário
+          }
+        }
       }
 
       onSuccess();
@@ -615,6 +662,21 @@ export const MaintenanceTicketDialog = ({
                       <SelectItem value="urgent">🔴 Urgente</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div>
+                  <Label htmlFor="initial_comment" className="text-base font-semibold">
+                    Comentário Inicial (Opcional)
+                  </Label>
+                  <Textarea
+                    id="initial_comment"
+                    value={formData.initial_comment}
+                    onChange={(e) =>
+                      setFormData({ ...formData, initial_comment: e.target.value })
+                    }
+                    placeholder="Adicione informações adicionais ou observações sobre o problema..."
+                    rows={3}
+                    className="mt-2"
+                  />
                 </div>
                 <div>
                   <Label htmlFor="photos" className="text-base font-semibold">

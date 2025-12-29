@@ -14,11 +14,13 @@ import {
   CheckCircle, 
   Clock, 
   Loader2,
-  MoreVertical,
   Play,
   CheckCircle2,
   XCircle,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Eye,
+  Edit,
+  BarChart3
 } from "lucide-react";
 import {
   Popover,
@@ -34,11 +36,15 @@ import {
 } from "@/components/ui/select";
 import { useMaintenance } from "@/hooks/useMaintenance";
 import { MaintenanceTicketDialog } from "@/components/maintenance/MaintenanceTicketDialog";
+import { MaintenanceTicketComments } from "@/components/maintenance/MaintenanceTicketComments";
 import { formatDate } from "@/lib/reservationUtils";
 import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 import { format, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
 
 // Função para converter URL antiga de "documents" para "maintenance"
 // Também garante que URLs do bucket maintenance estejam corretas
@@ -69,7 +75,13 @@ const convertUrlToMaintenanceBucket = (url: string): string => {
 };
 
 // Componente para exibir thumbnail com tratamento de erro
-const AttachmentThumbnail = ({ attachment }: { attachment: any }) => {
+const AttachmentThumbnail = ({ 
+  attachment, 
+  onImageClick 
+}: { 
+  attachment: any;
+  onImageClick?: (url: string, fileName: string) => void;
+}) => {
   const [imageError, setImageError] = useState(false);
   const [imageUrl, setImageUrl] = useState<string>(convertUrlToMaintenanceBucket(attachment.file_url));
   
@@ -78,14 +90,39 @@ const AttachmentThumbnail = ({ attachment }: { attachment: any }) => {
     const tryGenerateSignedUrl = async () => {
       if (imageError && attachment.file_url) {
         try {
-          // Extrair o caminho do arquivo da URL
+          // Extrair o caminho do arquivo da URL (sem o prefixo "maintenance/" porque já especificamos o bucket)
           const extractFilePath = (url: string): string | null => {
             if (!url) return null;
-            // Se já for um caminho relativo, retornar direto
-            if (url.startsWith("maintenance/")) return url;
-            // Tentar extrair o caminho após /maintenance/
+            
+            // Se já for um caminho relativo começando com "maintenance/", remover o prefixo
+            if (url.startsWith("maintenance/")) {
+              return url.replace(/^maintenance\//, "");
+            }
+            
+            // Tentar extrair o caminho após /maintenance/ (pode aparecer uma ou duas vezes)
+            // Formato esperado: /storage/v1/object/public/maintenance/maintenance/ticket_id/file.png
+            // ou: /storage/v1/object/public/maintenance/ticket_id/file.png
             const match = url.match(/\/maintenance\/(.+)$/);
-            if (match) return `maintenance/${match[1]}`;
+            if (match) {
+              let path = match[1];
+              // Se o path começa com "maintenance/", remover (duplicação)
+              if (path.startsWith("maintenance/")) {
+                path = path.replace(/^maintenance\//, "");
+              }
+              return path;
+            }
+            
+            // Tentar extrair o caminho após /storage/v1/object/public/maintenance/
+            const publicMatch = url.match(/\/storage\/v1\/object\/public\/maintenance\/(.+)$/);
+            if (publicMatch) {
+              let path = publicMatch[1];
+              // Se o path começa com "maintenance/", remover (duplicação)
+              if (path.startsWith("maintenance/")) {
+                path = path.replace(/^maintenance\//, "");
+              }
+              return path;
+            }
+            
             return null;
           };
           
@@ -117,21 +154,21 @@ const AttachmentThumbnail = ({ attachment }: { attachment: any }) => {
     setImageError(true);
   };
   
-  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    // Sempre permitir tentar abrir a URL, mesmo se a imagem falhou
-    if (imageError) {
-      e.preventDefault();
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (onImageClick) {
+      onImageClick(imageUrl, attachment.file_name || "Anexo");
+    } else {
+      // Fallback: abrir em nova aba se não houver handler
       window.open(imageUrl, '_blank', 'noopener,noreferrer');
     }
   };
   
   return (
-    <a
-      href={imageUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="relative group"
+    <button
+      type="button"
       onClick={handleClick}
+      className="relative group cursor-pointer"
     >
       {imageError ? (
         <div className="h-12 w-12 flex flex-col items-center justify-center bg-slate-100 rounded border border-slate-200 hover:border-blue-300 transition-colors">
@@ -148,20 +185,61 @@ const AttachmentThumbnail = ({ attachment }: { attachment: any }) => {
         />
       )}
       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors rounded" />
-    </a>
+    </button>
   );
 };
 
 const Maintenance = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<string | undefined>();
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [selectedTicketForDetails, setSelectedTicketForDetails] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [selectedKPI, setSelectedKPI] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("tickets");
+  const [selectedImage, setSelectedImage] = useState<{ url: string; fileName: string; ticketId?: string } | null>(null);
+  const [establishmentLogo, setEstablishmentLogo] = useState<string | null>(null);
 
   const { tickets, isLoading, refetch, startTicket, completeTicket, cancelTicket } = useMaintenance();
   const { canCreate, canUpdate } = usePermissions();
+  const { selectedEstablishment } = useEstablishment();
+
+  // Buscar logo do estabelecimento quando necessário
+  useEffect(() => {
+    const fetchLogo = async () => {
+      if (!selectedEstablishment?.id) return;
+
+      try {
+        // Buscar logo do hotel_settings
+        const { data: hotelSettings } = await supabase
+          .from("hotel_settings")
+          .select("logo_url")
+          .eq("establishment_id", selectedEstablishment.id)
+          .maybeSingle();
+
+        if (hotelSettings?.logo_url) {
+          setEstablishmentLogo(hotelSettings.logo_url);
+          return;
+        }
+
+        // Se não encontrou, buscar do site_settings como fallback
+        const { data: siteSettings } = await supabase
+          .from("site_settings")
+          .select("logo_url")
+          .maybeSingle();
+
+        if (siteSettings?.logo_url) {
+          setEstablishmentLogo(siteSettings.logo_url);
+        }
+      } catch (error) {
+        console.error("Erro ao buscar logo:", error);
+      }
+    };
+
+    fetchLogo();
+  }, [selectedEstablishment?.id]);
 
   // Estatísticas
   const stats = useMemo(() => {
@@ -209,7 +287,13 @@ const Maintenance = () => {
   // Filtrar tickets
   const filteredTickets = useMemo(() => {
     return tickets.filter((ticket: any) => {
+      // Buscar pelo número do ticket (primeiros 8 caracteres do UUID)
+      const ticketNumber = ticket.id?.substring(0, 8).toUpperCase() || "";
+      const searchTermUpper = searchTerm.toUpperCase();
+      const matchesTicketNumber = ticketNumber.includes(searchTermUpper);
+      
       const matchesSearch =
+        matchesTicketNumber ||
         ticket.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         ticket.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         ticket.rooms?.room_number?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -220,6 +304,192 @@ const Maintenance = () => {
       return matchesSearch && matchesStatus && matchesPriority;
     });
   }, [tickets, searchTerm, statusFilter, priorityFilter]);
+
+  // Estatísticas de quartos com mais chamados
+  const roomStatistics = useMemo(() => {
+    // Filtrar tickets abertos primeiro (open ou in_progress)
+    let ticketsToAnalyze = tickets.filter((t: any) => {
+      const status = (t.status || "").toLowerCase();
+      return status === "open" || status === "in_progress";
+    });
+
+    // Se não houver tickets abertos, usar todos os tickets (exceto cancelled)
+    // para mostrar estatísticas gerais dos quartos
+    if (ticketsToAnalyze.length === 0) {
+      ticketsToAnalyze = tickets.filter((t: any) => {
+        const status = (t.status || "").toLowerCase();
+        return status !== "cancelled";
+      });
+    }
+
+    console.log("📊 Estatísticas - Tickets para análise:", {
+      totalTickets: tickets.length,
+      ticketsToAnalyze: ticketsToAnalyze.length,
+      ticketsDetails: ticketsToAnalyze.map((t: any) => ({
+        id: t.id?.substring(0, 8),
+        status: t.status,
+        room_id: t.room_id,
+        room_number: Array.isArray(t.rooms) ? t.rooms[0]?.room_number : t.rooms?.room_number,
+        ticket_type: t.ticket_type
+      }))
+    });
+
+    // Função para extrair palavras-chave de um texto
+    const extractKeywords = (text: string): string[] => {
+      if (!text) return [];
+      
+      // Palavras comuns a ignorar (stop words em português)
+      const stopWords = new Set([
+        'o', 'a', 'os', 'as', 'um', 'uma', 'uns', 'umas',
+        'de', 'do', 'da', 'dos', 'das', 'em', 'no', 'na', 'nos', 'nas',
+        'para', 'por', 'com', 'sem', 'sob', 'sobre', 'entre',
+        'é', 'são', 'foi', 'ser', 'estar', 'ter', 'há',
+        'que', 'qual', 'quais', 'quando', 'onde', 'como',
+        'e', 'ou', 'mas', 'porém', 'entretanto',
+        'não', 'nunca', 'jamais',
+        'o', 'a', 'os', 'as', 'um', 'uma',
+        'meu', 'minha', 'meus', 'minhas',
+        'seu', 'sua', 'seus', 'suas',
+        'nosso', 'nossa', 'nossos', 'nossas',
+        'este', 'esta', 'estes', 'estas',
+        'esse', 'essa', 'esses', 'essas',
+        'aquele', 'aquela', 'aqueles', 'aquelas',
+        'muito', 'muita', 'muitos', 'muitas',
+        'pouco', 'pouca', 'poucos', 'poucas',
+        'mais', 'menos', 'muito', 'bem', 'mal',
+        'também', 'tampouco', 'ainda', 'já', 'sempre', 'nunca',
+        'aqui', 'ali', 'lá', 'aí', 'aqui', 'acolá',
+        'hoje', 'ontem', 'amanhã', 'agora', 'depois', 'antes',
+        'quarto', 'sala', 'banheiro', 'porta', 'janela', 'parede', 'teto', 'chão',
+        'problema', 'problemas', 'chamado', 'chamados', 'manutenção'
+      ]);
+
+      // Normalizar texto: remover acentos, converter para minúsculas
+      const normalize = (str: string) => {
+        return str
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^\w\s]/g, ' ');
+      };
+
+      const normalizedText = normalize(text);
+      
+      // Extrair palavras (mínimo 3 caracteres)
+      const words = normalizedText
+        .split(/\s+/)
+        .filter(word => word.length >= 3 && !stopWords.has(word))
+        .filter(word => !/^\d+$/.test(word)); // Remover números puros
+
+      // Contar frequência das palavras
+      const wordCount = new Map<string, number>();
+      words.forEach(word => {
+        wordCount.set(word, (wordCount.get(word) || 0) + 1);
+      });
+
+      // Retornar as palavras mais frequentes (top 5)
+      return Array.from(wordCount.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([word]) => word);
+    };
+
+    // Agrupar por quarto
+    const roomMap = new Map<string, {
+      room_number: string;
+      room_id: string;
+      totalTickets: number;
+      problems: Map<string, number>;
+      keywords: Map<string, number>; // Palavras-chave com contagem
+    }>();
+
+    ticketsToAnalyze.forEach((ticket: any) => {
+      const roomId = ticket.room_id;
+      // rooms pode ser um objeto ou um array
+      const roomsData = Array.isArray(ticket.rooms) ? ticket.rooms[0] : ticket.rooms;
+      const roomNumber = roomsData?.room_number || "N/A";
+      const ticketType = ticket.ticket_type || "general";
+
+      if (!roomId) {
+        console.warn("⚠️ Ticket sem room_id:", {
+          ticketId: ticket.id?.substring(0, 8),
+          status: ticket.status,
+          hasRooms: !!ticket.rooms
+        });
+        return; // Pular tickets sem quarto
+      }
+
+      if (!roomMap.has(roomId)) {
+        roomMap.set(roomId, {
+          room_number: roomNumber,
+          room_id: roomId,
+          totalTickets: 0,
+          problems: new Map(),
+          keywords: new Map(),
+        });
+      }
+
+      const room = roomMap.get(roomId)!;
+      room.totalTickets += 1;
+      
+      // Contar tipo de problema
+      const currentCount = room.problems.get(ticketType) || 0;
+      room.problems.set(ticketType, currentCount + 1);
+
+      // Extrair palavras-chave do título e descrição
+      const titleKeywords = extractKeywords(ticket.title || '');
+      const descriptionKeywords = extractKeywords(ticket.description || '');
+      const allKeywords = [...titleKeywords, ...descriptionKeywords];
+
+      // Adicionar palavras-chave ao quarto
+      allKeywords.forEach(keyword => {
+        const currentKeywordCount = room.keywords.get(keyword) || 0;
+        room.keywords.set(keyword, currentKeywordCount + 1);
+      });
+    });
+
+    // Converter para array e ordenar por total de tickets
+    const result = Array.from(roomMap.values())
+      .map(room => ({
+        ...room,
+        problems: Array.from(room.problems.entries()).map(([type, count]) => ({
+          type,
+          count,
+        })),
+        keywords: Array.from(room.keywords.entries())
+          .sort((a, b) => b[1] - a[1]) // Ordenar por frequência
+          .slice(0, 10) // Top 10 palavras-chave
+          .map(([word, count]) => ({
+            word,
+            count,
+          })),
+      }))
+      .sort((a, b) => b.totalTickets - a.totalTickets);
+
+    console.log("📊 Estatísticas - Resultado final:", {
+      roomsCount: result.length,
+      rooms: result.map(r => ({
+        room_number: r.room_number,
+        totalTickets: r.totalTickets,
+        problems: r.problems
+      }))
+    });
+
+    return result;
+  }, [tickets]);
+
+  const getTicketTypeLabel = (type: string) => {
+    const typeMap: Record<string, string> = {
+      general: "Geral",
+      electrical: "Elétrica",
+      plumbing: "Hidráulica",
+      hvac: "Ar Condicionado",
+      furniture: "Mobiliário",
+      cleaning: "Limpeza",
+      other: "Outro",
+    };
+    return typeMap[type] || type;
+  };
 
   const getPriorityBadge = (priority: string) => {
     const priorityMap: Record<string, { label: string; className: string }> = {
@@ -262,6 +532,11 @@ const Maintenance = () => {
   const handleEdit = (id: string) => {
     setSelectedTicketId(id);
     setDialogOpen(true);
+  };
+
+  const handleViewDetails = (ticket: any) => {
+    setSelectedTicketForDetails(ticket);
+    setDetailsDialogOpen(true);
   };
 
   const handleNew = () => {
@@ -312,17 +587,17 @@ const Maintenance = () => {
       {/* Top Bar */}
       <div className="bg-white border-b border-slate-200/60 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
-          <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <h1 className="text-2xl font-semibold text-slate-900">Manutenção</h1>
-            </div>
-            <Button 
+        </div>
+        <Button 
               onClick={handleNew}
               className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Abrir Chamado
-            </Button>
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Abrir Chamado
+        </Button>
           </div>
         </div>
       </div>
@@ -332,7 +607,7 @@ const Maintenance = () => {
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-slate-900 mb-1">Manutenção</h2>
           <p className="text-sm text-slate-500">Gerencie tickets de manutenção dos quartos</p>
-        </div>
+      </div>
 
         {/* KPIs Operacionais */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -343,16 +618,16 @@ const Maintenance = () => {
             )}
             onClick={() => handleKPIClick("open")}
           >
-            <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-yellow-100 flex items-center justify-center">
                 <Clock className="h-5 w-5 text-yellow-600" />
-              </div>
-              <div>
+            </div>
+            <div>
                 <p className="text-2xl font-bold text-slate-900">{stats.open}</p>
                 <p className="text-xs text-slate-500">Abertos</p>
-              </div>
             </div>
-          </Card>
+          </div>
+        </Card>
 
           <Card 
             className={cn(
@@ -361,16 +636,16 @@ const Maintenance = () => {
             )}
             onClick={() => handleKPIClick("inProgress")}
           >
-            <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
                 <Wrench className="h-5 w-5 text-blue-600" />
-              </div>
-              <div>
+            </div>
+            <div>
                 <p className="text-2xl font-bold text-slate-900">{stats.inProgress}</p>
                 <p className="text-xs text-slate-500">Em Progresso</p>
-              </div>
             </div>
-          </Card>
+          </div>
+        </Card>
 
           <Card 
             className={cn(
@@ -379,16 +654,16 @@ const Maintenance = () => {
             )}
             onClick={() => handleKPIClick("urgent")}
           >
-            <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
                 <AlertTriangle className="h-5 w-5 text-red-600" />
-              </div>
-              <div>
+            </div>
+            <div>
                 <p className="text-2xl font-bold text-slate-900">{stats.urgent}</p>
                 <p className="text-xs text-slate-500">Urgentes</p>
-              </div>
             </div>
-          </Card>
+          </div>
+        </Card>
 
           <Card 
             className={cn(
@@ -397,36 +672,36 @@ const Maintenance = () => {
             )}
             onClick={() => handleKPIClick("completed")}
           >
-            <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
                 <CheckCircle className="h-5 w-5 text-green-600" />
-              </div>
-              <div>
+            </div>
+            <div>
                 <p className="text-2xl font-bold text-slate-900">{stats.completed}</p>
                 <p className="text-xs text-slate-500">Concluídos</p>
-              </div>
             </div>
-          </Card>
-        </div>
+          </div>
+        </Card>
+      </div>
 
         {/* Busca e Filtros */}
         <Card className="p-4 mb-6 bg-white shadow-sm">
           <div className="flex items-center gap-4">
-            <div className="relative flex-1">
+          <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Buscar por quarto, problema ou status..."
+            <Input
+                placeholder="Buscar por número do ticket, quarto, problema ou status..."
                 className="pl-10 bg-white border-slate-200"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="border-slate-200">
-                  <Filter className="h-4 w-4 mr-2" />
-                  Filtros
-                </Button>
+                <Filter className="h-4 w-4 mr-2" />
+                Filtros
+              </Button>
               </PopoverTrigger>
               <PopoverContent className="w-64" align="end">
                 <div className="space-y-4">
@@ -444,7 +719,7 @@ const Maintenance = () => {
                         <SelectItem value="cancelled">Cancelado</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
+                </div>
                   <div>
                     <label className="text-sm font-medium text-slate-700 mb-2 block">Prioridade</label>
                     <Select value={priorityFilter} onValueChange={setPriorityFilter}>
@@ -459,13 +734,28 @@ const Maintenance = () => {
                         <SelectItem value="low">Baixa</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
+              </div>
                 </div>
               </PopoverContent>
             </Popover>
-          </div>
+              </div>
         </Card>
 
+        {/* Abas */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="tickets" className="gap-2">
+              <Wrench className="h-4 w-4" />
+              Chamados
+            </TabsTrigger>
+            <TabsTrigger value="statistics" className="gap-2">
+              <BarChart3 className="h-4 w-4" />
+              Estatísticas
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Aba: Chamados */}
+          <TabsContent value="tickets" className="space-y-4">
         {/* Lista de Chamados */}
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
@@ -493,6 +783,13 @@ const Maintenance = () => {
                     {/* Conteúdo Principal */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start gap-3 mb-2">
+                        {/* Número do Ticket - Minimalista */}
+                        <div className="flex-shrink-0">
+                          <span className="text-xs font-mono font-medium text-slate-500 tracking-wider">
+                            {ticket.id?.substring(0, 8).toUpperCase() || "N/A"}
+                          </span>
+                        </div>
+                        
                         {/* Prioridade Badge */}
                         <div className="flex-shrink-0 mt-0.5">
                           {getPriorityBadge(ticket.priority)}
@@ -519,8 +816,8 @@ const Maintenance = () => {
                       {/* Descrição */}
                       {ticket.description && (
                         <p className="text-sm text-slate-600 line-clamp-2 mb-2">
-                          {ticket.description}
-                        </p>
+                        {ticket.description}
+                      </p>
                       )}
 
                       {/* Fotos Anexadas */}
@@ -529,7 +826,11 @@ const Maintenance = () => {
                           <ImageIcon className="h-4 w-4 text-slate-400" />
                           <div className="flex gap-1.5">
                             {ticket.maintenance_ticket_attachments.slice(0, 3).map((attachment: any) => (
-                              <AttachmentThumbnail key={attachment.id} attachment={attachment} />
+                              <AttachmentThumbnail 
+                                key={attachment.id} 
+                                attachment={attachment}
+                                onImageClick={(url, fileName) => setSelectedImage({ url, fileName, ticketId: ticket.id })}
+                              />
                             ))}
                             {ticket.maintenance_ticket_attachments.length > 3 && (
                               <div className="h-12 w-12 flex items-center justify-center bg-slate-100 rounded border border-slate-200 text-xs text-slate-600 font-medium">
@@ -550,66 +851,69 @@ const Maintenance = () => {
                     </div>
 
                     {/* Ações Rápidas */}
-                    <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {ticket.status === "open" && (canUpdate("maintenance") || canCreate("maintenance")) && (
-                        <Button
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {/* Ver Detalhes */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 hover:bg-slate-100"
+                        onClick={() => handleViewDetails(ticket)}
+                        title="Ver Detalhes"
+                      >
+                        <Eye className="h-4 w-4 text-slate-600" />
+                      </Button>
+
+                      {/* Editar */}
+                      {(canUpdate("maintenance") || canCreate("maintenance")) && (
+                        <Button 
+                          variant="ghost" 
                           size="sm"
-                          variant="outline"
-                          className="border-blue-200 text-blue-700 hover:bg-blue-50"
-                          onClick={() => handleStart(ticket.id)}
+                          className="h-8 w-8 p-0 hover:bg-blue-50"
+                          onClick={() => handleEdit(ticket.id)}
+                          title="Editar"
                         >
-                          <Play className="h-3.5 w-3.5 mr-1.5" />
-                          Iniciar
-                        </Button>
-                      )}
-                      
-                      {ticket.status === "in_progress" && (canUpdate("maintenance") || canCreate("maintenance")) && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border-green-200 text-green-700 hover:bg-green-50"
-                          onClick={() => handleComplete(ticket.id)}
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
-                          Concluir
+                          <Edit className="h-4 w-4 text-blue-600" />
                         </Button>
                       )}
 
-                      {/* Menu de Ações */}
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-48 p-1" align="end">
-                          <div className="space-y-1">
-                            {(canUpdate("maintenance") || canCreate("maintenance")) && (
-                              <Button
-                                variant="ghost"
-                                className="w-full justify-start text-sm"
-                                onClick={() => handleEdit(ticket.id)}
-                              >
-                                Editar
-                              </Button>
-                            )}
-                            {(canUpdate("maintenance") || canCreate("maintenance")) && !["completed", "cancelled"].includes(ticket.status) && (
-                              <Button
-                                variant="ghost"
-                                className="w-full justify-start text-sm text-red-600 hover:text-red-700 hover:bg-red-50"
-                                onClick={() => handleCancel(ticket.id)}
-                              >
-                                <XCircle className="h-4 w-4 mr-2" />
-                                Cancelar
-                              </Button>
-                            )}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
+                      {/* Iniciar */}
+                      {ticket.status === "open" && (canUpdate("maintenance") || canCreate("maintenance")) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 hover:bg-blue-50"
+                          onClick={() => handleStart(ticket.id)}
+                          title="Iniciar"
+                        >
+                          <Play className="h-4 w-4 text-blue-600" />
+                        </Button>
+                      )}
+                      
+                      {/* Concluir */}
+                      {ticket.status === "in_progress" && (canUpdate("maintenance") || canCreate("maintenance")) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 hover:bg-green-50"
+                          onClick={() => handleComplete(ticket.id)}
+                          title="Concluir"
+                        >
+                          <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        </Button>
+                      )}
+
+                      {/* Cancelar */}
+                        {(canUpdate("maintenance") || canCreate("maintenance")) && !["completed", "cancelled"].includes(ticket.status) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 hover:bg-red-50"
+                          onClick={() => handleCancel(ticket.id)}
+                          title="Cancelar"
+                        >
+                          <XCircle className="h-4 w-4 text-red-600" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </Card>
@@ -617,7 +921,158 @@ const Maintenance = () => {
             })}
           </div>
         )}
+          </TabsContent>
+
+          {/* Aba: Estatísticas */}
+          <TabsContent value="statistics" className="space-y-4">
+            <Card className="p-6">
+              <div className="flex items-center gap-2 mb-6">
+                <BarChart3 className="h-5 w-5 text-slate-600" />
+                <h2 className="text-xl font-semibold text-slate-900">
+                  Quartos com Mais Chamados
+                </h2>
+              </div>
+
+              {isLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                </div>
+              ) : roomStatistics.length === 0 ? (
+                <div className="text-center py-12">
+                  <Wrench className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                  <p className="text-sm text-slate-500">
+                    Nenhum chamado encontrado
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {roomStatistics.map((room, index) => (
+                    <Card 
+                      key={room.room_id} 
+                      className={cn(
+                        "p-4 border",
+                        index === 0 && "border-blue-300 bg-blue-50/30"
+                      )}
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-lg font-bold text-slate-900">
+                              Quarto {room.room_number}
+                            </span>
+                            {index === 0 && (
+                              <Badge className="bg-blue-600 text-white text-xs">
+                                Mais Problemas
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-600">
+                            {room.totalTickets} chamado{room.totalTickets > 1 ? "s" : ""} aberto{room.totalTickets > 1 ? "s" : ""}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 pt-3 border-t border-slate-200 space-y-3">
+                        {/* Tipos de Problemas */}
+                        <div>
+                          <p className="text-xs font-semibold text-slate-700 mb-2">
+                            Tipos de Problemas:
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {room.problems.map((problem) => (
+                              <Badge
+                                key={problem.type}
+                                variant="outline"
+                                className="text-xs"
+                              >
+                                {getTicketTypeLabel(problem.type)}: {problem.count}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Palavras-chave */}
+                        {room.keywords && room.keywords.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-slate-700 mb-2">
+                              Palavras-chave mais mencionadas:
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {room.keywords.map((keyword, idx) => (
+                                <Badge
+                                  key={`${keyword.word}-${idx}`}
+                                  variant="outline"
+                                  className="text-xs bg-blue-50 text-blue-700 border-blue-200"
+                                  title={`Mencionada ${keyword.count} vez${keyword.count > 1 ? 'es' : ''}`}
+                                >
+                                  {keyword.word}
+                                  {keyword.count > 1 && (
+                                    <span className="ml-1 text-blue-600 font-semibold">
+                                      ({keyword.count})
+                                    </span>
+                                  )}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+        )}
+      </Card>
+          </TabsContent>
+        </Tabs>
       </div>
+
+      {/* Modal de Imagem */}
+      <Dialog open={!!selectedImage} onOpenChange={(open) => !open && setSelectedImage(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] p-0 rounded-xl overflow-hidden">
+          {selectedImage && (
+            <div className="relative">
+              <div className="p-4 border-b border-slate-200 bg-white rounded-t-xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {/* Logo do Estabelecimento */}
+                    {establishmentLogo && (
+                      <img
+                        src={establishmentLogo}
+                        alt="Logo"
+                        className="h-8 w-8 object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    )}
+                    {/* Número do Ticket */}
+                    {selectedImage.ticketId && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono font-medium text-slate-500 tracking-wider">
+                          {selectedImage.ticketId.substring(0, 8).toUpperCase()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="p-4 bg-slate-50 rounded-b-xl">
+                <div className="relative w-full max-h-[70vh] flex items-center justify-center">
+                  <img
+                    src={selectedImage.url}
+                    alt={selectedImage.fileName}
+                    className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23ddd' width='400' height='300'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='%23999' font-size='14'%3EImagem não encontrada%3C/text%3E%3C/svg%3E";
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <MaintenanceTicketDialog
         open={dialogOpen}
@@ -629,6 +1084,56 @@ const Maintenance = () => {
         }}
         ticketId={selectedTicketId}
       />
+
+      {/* Diálogo de Detalhes do Ticket */}
+      <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono font-medium text-slate-500 tracking-wider">
+                  {selectedTicketForDetails?.id?.substring(0, 8).toUpperCase() || "N/A"}
+                </span>
+                <span className="text-slate-400">•</span>
+                <span>{selectedTicketForDetails?.title}</span>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          
+          {selectedTicketForDetails && (
+            <div className="space-y-4">
+              {/* Informações do Ticket */}
+              <Card className="p-4">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-600">Quarto:</span>
+                    <span className="text-sm text-slate-900">
+                      {selectedTicketForDetails.rooms?.room_number || "N/A"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-600">Status:</span>
+                    {getStatusBadge(selectedTicketForDetails.status)}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-600">Prioridade:</span>
+                    {getPriorityBadge(selectedTicketForDetails.priority)}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-600">Descrição:</span>
+                    <span className="text-sm text-slate-900">
+                      {selectedTicketForDetails.description || "Sem descrição"}
+                    </span>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Comentários */}
+              <MaintenanceTicketComments ticketId={selectedTicketForDetails.id} />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -211,13 +211,13 @@ export function processTemplate(template: string, variables: TemplateVariables):
     nestedIterations++;
     nestedChanged = false;
     nestedVarRegex.lastIndex = 0; // Reset regex
-    while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
-      const fullMatch = nestedMatch[0];
-      const path = nestedMatch[1];
-      const value = getNestedValue(variables, path);
-      const stringValue = value !== null && value !== undefined ? String(value) : '';
+  while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
+    const fullMatch = nestedMatch[0];
+    const path = nestedMatch[1];
+    const value = getNestedValue(variables, path);
+    const stringValue = value !== null && value !== undefined ? String(value) : '';
       if (processed.includes(fullMatch)) {
-        processed = processed.replace(fullMatch, stringValue);
+    processed = processed.replace(fullMatch, stringValue);
         nestedChanged = true;
       }
     }
@@ -245,8 +245,8 @@ export function processTemplate(template: string, variables: TemplateVariables):
     }
     
     // Substituir variáveis com três chaves {{{variable}}} (HTML não escapado)
-    Object.keys(variables).forEach((key) => {
-      const value = variables[key];
+  Object.keys(variables).forEach((key) => {
+    const value = variables[key];
       if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         const stringValue = value !== null && value !== undefined ? String(value) : '';
         const tripleBraceRegex = new RegExp(`\\{\\{\\{${key}\\}\\}\\}`, 'g');
@@ -261,32 +261,32 @@ export function processTemplate(template: string, variables: TemplateVariables):
     // Depois substituir variáveis simples (formato {{variable}})
     Object.keys(variables).forEach((key) => {
       const value = variables[key];
-      
+    
       // Pular objetos e arrays (já foram processados nos loops e variáveis aninhadas)
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        // Processar propriedades do objeto como variáveis aninhadas
-        Object.keys(value).forEach((prop) => {
-          const nestedPath = `${key}.${prop}`;
-          const nestedValue = value[prop];
-          const stringValue = nestedValue !== null && nestedValue !== undefined ? String(nestedValue) : '';
-          const regex = new RegExp(`\\{\\{${nestedPath.replace(/\./g, '\\.')}\\}\\}`, 'g');
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // Processar propriedades do objeto como variáveis aninhadas
+      Object.keys(value).forEach((prop) => {
+        const nestedPath = `${key}.${prop}`;
+        const nestedValue = value[prop];
+        const stringValue = nestedValue !== null && nestedValue !== undefined ? String(nestedValue) : '';
+        const regex = new RegExp(`\\{\\{${nestedPath.replace(/\./g, '\\.')}\\}\\}`, 'g');
           if (regex.test(processed)) {
-            processed = processed.replace(regex, stringValue);
+        processed = processed.replace(regex, stringValue);
             varChanged = true;
           }
-        });
-      } else {
-        // Converter para string, tratando null/undefined como string vazia
-        const stringValue = value !== null && value !== undefined ? String(value) : '';
+      });
+    } else {
+      // Converter para string, tratando null/undefined como string vazia
+      const stringValue = value !== null && value !== undefined ? String(value) : '';
         // Usar replace global para substituir todas as ocorrências
-        const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+      const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
         const beforeReplace = processed;
-        processed = processed.replace(regex, stringValue);
+      processed = processed.replace(regex, stringValue);
         if (beforeReplace !== processed) {
           varChanged = true;
         }
-      }
-    });
+    }
+  });
   }
   
   // Log de debug para variáveis não substituídas (apenas em desenvolvimento)

@@ -1168,13 +1168,13 @@ export const useWebCheckin = () => {
                   
                   if (buildingId) {
                     console.log('🔍 Buscando email da portaria do building:', { buildingId });
-                    const { data: building } = await supabase
-                      .from("buildings")
-                      .select("reception_email")
+                  const { data: building } = await supabase
+                    .from("buildings")
+                    .select("reception_email")
                       .eq("id", buildingId)
-                      .maybeSingle();
-                    
-                    receptionEmail = building?.reception_email || null;
+                    .maybeSingle();
+                  
+                  receptionEmail = building?.reception_email || null;
                     console.log('✅ Email da portaria encontrado no building:', { 
                       buildingId, 
                       receptionEmail,

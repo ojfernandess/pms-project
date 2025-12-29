@@ -828,12 +828,12 @@ export const useReservations = () => {
           // Disparar e-mail de check-in confirmado apenas se não foi solicitado para pular
           // (o email já foi enviado pelo web check-in)
           if (!updatedReservation._skipEmail) {
-            try {
-              const { triggerEmail } = await import("@/lib/emailService");
-              await triggerEmail('checkin.confirmed', updatedReservation);
-            } catch (emailError) {
-              console.error("Erro ao disparar e-mail de check-in confirmado:", emailError);
-              // Não bloquear o check-in se o e-mail falhar
+          try {
+            const { triggerEmail } = await import("@/lib/emailService");
+            await triggerEmail('checkin.confirmed', updatedReservation);
+          } catch (emailError) {
+            console.error("Erro ao disparar e-mail de check-in confirmado:", emailError);
+            // Não bloquear o check-in se o e-mail falhar
             }
           } else {
             console.log('ℹ️ Email de check-in confirmado não será enviado (já foi enviado pelo web check-in)');

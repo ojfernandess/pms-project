@@ -37,7 +37,8 @@ import {
   Receipt,
   Check,
   Trash2,
-  CheckCheck
+  CheckCheck,
+  MessageSquare
 } from "lucide-react";
 import { format, parseISO, isAfter, startOfDay, differenceInDays, isBefore, addDays } from "date-fns";
 import { useGuestAccount } from "@/hooks/useGuestAccount";
@@ -47,6 +48,7 @@ import { GuestMenu } from "@/components/webcheckin/GuestMenu";
 import { GuestStayHistoryDialog } from "@/components/webcheckin/GuestStayHistoryDialog";
 import { GuestProfileDialog } from "@/components/webcheckin/GuestProfileDialog";
 import { MaintenanceTicketDialog } from "@/components/webcheckin/MaintenanceTicketDialog";
+import { GuestMaintenanceTickets } from "@/components/guest/GuestMaintenanceTickets";
 import { PoliciesViewDialog } from "@/components/webcheckin/PoliciesViewDialog";
 import { FiscalDocumentRequest } from "@/components/webcheckin/FiscalDocumentRequest";
 import { SpecialRequestsDialog } from "@/components/webcheckin/SpecialRequestsDialog";
@@ -943,6 +945,106 @@ export default function GuestDashboard() {
               }
             });
           }
+
+          // 4. Buscar comentários novos de usuários do PMS (últimos 7 dias)
+          // Primeiro buscar tickets do hóspede
+          const { data: guestTickets, error: ticketsError } = await supabase
+            .from("maintenance_tickets")
+            .select("id, title, guest_account_id")
+            .eq("guest_account_id", accountId)
+            .limit(50);
+
+          let recentComments: any[] = [];
+          let commentsError: any = null;
+          
+          if (!ticketsError && guestTickets && guestTickets.length > 0) {
+            const ticketIds = guestTickets.map((t: any) => t.id);
+            
+            // Buscar comentários desses tickets criados por usuários do PMS
+            const { data: commentsData, error: commentsErr } = await supabase
+              .from("maintenance_ticket_comments")
+              .select("id, ticket_id, comment, created_at, created_by_user_id")
+              .in("ticket_id", ticketIds)
+              .not("created_by_user_id", "is", null) // Apenas comentários de usuários do PMS
+              .is("created_by_guest_id", null) // Não comentários de hóspedes
+              .gte("created_at", sevenDaysAgoISO)
+              .order("created_at", { ascending: false })
+              .limit(20);
+
+            commentsError = commentsErr;
+            
+            if (!commentsError && commentsData) {
+              // Combinar com dados dos tickets
+              recentComments = commentsData.map((comment: any) => ({
+                ...comment,
+                maintenance_tickets: guestTickets.find((t: any) => t.id === comment.ticket_id)
+              }));
+            }
+          }
+
+          if (!commentsError && recentComments && recentComments.length > 0) {
+            // Buscar nomes dos usuários que comentaram
+            const userIds = [...new Set(recentComments.map((c: any) => c.created_by_user_id).filter(Boolean))];
+            let usersMap: Record<string, any> = {};
+            
+            if (userIds.length > 0) {
+              const { data: usersData } = await supabase
+                .from("users")
+                .select("id, full_name, email")
+                .in("id", userIds);
+              
+              if (usersData) {
+                usersData.forEach((user: any) => {
+                  usersMap[user.id] = user;
+                });
+              }
+            }
+
+            // Agrupar comentários por ticket e pegar o mais recente de cada ticket
+            const commentsByTicket = new Map();
+            recentComments.forEach((comment: any) => {
+              const ticket = comment.maintenance_tickets;
+              if (ticket) {
+                const ticketId = ticket.id;
+                // Usar o comentário mais recente de cada ticket
+                if (!commentsByTicket.has(ticketId) || 
+                    new Date(comment.created_at) > new Date(commentsByTicket.get(ticketId).comment.created_at)) {
+                  commentsByTicket.set(ticketId, {
+                    comment,
+                    ticket,
+                    userName: usersMap[comment.created_by_user_id]?.full_name || 
+                             usersMap[comment.created_by_user_id]?.email || 
+                             "Equipe de Manutenção"
+                  });
+                }
+              }
+            });
+
+            // Criar notificações para cada ticket com comentário novo
+            commentsByTicket.forEach(({ comment, ticket, userName }) => {
+              const commentDate = parseISO(comment.created_at);
+              const oneDayAgo = addDays(today, -1);
+              
+              // Notificar apenas se o comentário foi criado nas últimas 24 horas
+              if (isAfter(commentDate, oneDayAgo)) {
+                const commentPreview = comment.comment.substring(0, 80);
+                const message = comment.comment.length > 80 
+                  ? `${commentPreview}...` 
+                  : commentPreview;
+
+                notificationsList.push({
+                  id: `maintenance-comment-${comment.id}`,
+                  type: "maintenance_comment",
+                  title: `Nova resposta: ${ticket.title}`,
+                  message: `${userName} respondeu: "${message}"`,
+                  date: commentDate,
+                  ticketId: ticket.id,
+                  commentId: comment.id,
+                  priority: "medium",
+                });
+              }
+            });
+          }
         } catch (error) {
           console.error("Erro ao buscar chamados de manutenção:", error);
           // Não adicionar notificação de erro, apenas logar
@@ -1167,6 +1269,8 @@ export default function GuestDashboard() {
                                   return <CheckCircle className="h-4 w-4 text-green-600" />;
                                 case "maintenance_progress":
                                   return <Clock className="h-4 w-4 text-yellow-600" />;
+                                case "maintenance_comment":
+                                  return <MessageSquare className="h-4 w-4 text-blue-600" />;
                                 default:
                                   return <Bell className="h-4 w-4 text-slate-600" />;
                               }
@@ -1209,10 +1313,30 @@ export default function GuestDashboard() {
                                       if (notification.reservationId) {
                                         setShowCurrentReservation(true);
                                       }
-                                      if (!isRead) {
-                                        markAsRead(notification.id);
+                                      // Se for notificação de ticket de manutenção, rolar até a seção de tickets
+                                      if (notification.ticketId) {
+                                        // Marcar como lida e fechar dropdown
+                                        if (!isRead) {
+                                          markAsRead(notification.id);
+                                        }
+                                        setShowNotificationsDropdown(false);
+                                        // Rolar até a seção de tickets e abrir o ticket após um pequeno delay
+                                        setTimeout(() => {
+                                          const ticketsSection = document.getElementById("guest-maintenance-tickets");
+                                          if (ticketsSection) {
+                                            ticketsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+                                            // Disparar evento customizado para abrir o ticket
+                                            window.dispatchEvent(new CustomEvent('openMaintenanceTicket', { 
+                                              detail: { ticketId: notification.ticketId } 
+                                            }));
+                                          }
+                                        }, 300);
+                                      } else {
+                                        if (!isRead) {
+                                          markAsRead(notification.id);
+                                        }
+                                        setShowNotificationsDropdown(false);
                                       }
-                                      setShowNotificationsDropdown(false);
                                     }}
                                   >
                                     <p className={`font-semibold text-sm mb-1 ${isRead ? "text-slate-600" : "text-slate-900"}`}>
@@ -1813,6 +1937,19 @@ export default function GuestDashboard() {
             />
             </div>
           </div>
+
+          {/* Chamados de Manutenção */}
+          {accountId && (
+            <div className="mb-8">
+              <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-100">
+                <h3 className="text-xl font-bold text-slate-900 mb-4">Meus Chamados de Manutenção</h3>
+                <GuestMaintenanceTickets 
+                  guestAccountId={accountId}
+                  reservationId={currentReservation?.id}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Serviços Disponíveis - Design Premium */}
           <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-100">

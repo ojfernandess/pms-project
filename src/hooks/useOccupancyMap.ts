@@ -313,7 +313,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
                 const existingDiff = Math.abs(differenceInDays(existingCheckin, selectedDateObj));
                 
                 if (currentDiff < existingDiff) {
-                  reservationsByRoom[reservation.room_id] = reservation;
+          reservationsByRoom[reservation.room_id] = reservation;
                 }
               }
             }
@@ -683,7 +683,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           
           return undefined;
         };
-        
+
         return {
           id: room.id,
           room_number: room.room_number,

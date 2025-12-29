@@ -1534,27 +1534,27 @@ const SuperAdmin = () => {
                       Gerencie os gerentes e usuários organizados por empresa
                     </p>
                   </div>
-                  <Button onClick={() => {
-                    setSelectedUserId(undefined);
-                    setUserFormData({ 
-                      email: "", 
-                      password: "",
-                      full_name: "",
-                      cpf: "",
-                      phone: "",
-                      address: "",
-                      city: "",
-                      state: "",
-                      postal_code: "",
-                      country: "Brasil",
-                      birth_date: "",
-                    });
-                    setUserDialogOpen(true);
-                  }}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Novo Usuário
-                  </Button>
-                </div>
+              <Button onClick={() => {
+                setSelectedUserId(undefined);
+                setUserFormData({ 
+                  email: "", 
+                  password: "",
+                  full_name: "",
+                  cpf: "",
+                  phone: "",
+                  address: "",
+                  city: "",
+                  state: "",
+                  postal_code: "",
+                  country: "Brasil",
+                  birth_date: "",
+                });
+                setUserDialogOpen(true);
+              }}>
+                <Plus className="h-4 w-4 mr-2" />
+                Novo Usuário
+              </Button>
+            </div>
 
                 {/* Campo de busca */}
                 <div className="p-6 border-b">
@@ -1570,18 +1570,18 @@ const SuperAdmin = () => {
                 </div>
 
                 {isLoadingUsers || isLoadingEmployees || isLoadingAssociations ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                  </div>
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
                 ) : usersByCompany.length === 0 ? (
-                  <div className="p-12 text-center">
+                    <div className="p-12 text-center">
                     <Building2 className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
                     <p className="text-muted-foreground font-medium">Nenhuma empresa com usuários encontrada</p>
-                    <p className="text-sm text-muted-foreground mt-1">
+                      <p className="text-sm text-muted-foreground mt-1">
                       {searchTerm ? "Tente ajustar os filtros de busca" : "Os usuários serão exibidos quando associados a empresas"}
-                    </p>
-                  </div>
-                ) : (
+                      </p>
+                    </div>
+                  ) : (
                   <div className="p-6 space-y-3">
                     {usersByCompany
                       .filter((companyData) => {
@@ -1646,144 +1646,144 @@ const SuperAdmin = () => {
 
                             {isExpanded && (
                               <div className="border-t p-4 bg-muted/20">
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow>
-                                      <TableHead>Usuário</TableHead>
-                                      <TableHead>CPF</TableHead>
-                                      <TableHead>Telefone</TableHead>
-                                      <TableHead>Tipo</TableHead>
-                                      <TableHead>Limite Empresas</TableHead>
-                                      <TableHead>Limite Estabelecimentos</TableHead>
-                                      <TableHead>Data de Cadastro</TableHead>
-                                      <TableHead className="text-right">Ações</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Usuário</TableHead>
+                            <TableHead>CPF</TableHead>
+                            <TableHead>Telefone</TableHead>
+                            <TableHead>Tipo</TableHead>
+                            <TableHead>Limite Empresas</TableHead>
+                            <TableHead>Limite Estabelecimentos</TableHead>
+                            <TableHead>Data de Cadastro</TableHead>
+                            <TableHead className="text-right">Ações</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
                                     {companyData.users.map(({ user, userCompany, isManager, employees }) => {
-                                      return (
-                                        <TableRow key={user.id} className="hover:bg-muted/50">
-                                          <TableCell>
-                                            <div className="flex items-center gap-3">
-                                              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                                                <Users className="h-5 w-5 text-primary" />
-                                              </div>
-                                              <div>
-                                                <p className="font-medium">{user.full_name || user.email}</p>
-                                                <p className="text-xs text-muted-foreground">{user.email}</p>
-                                              </div>
-                                            </div>
-                                          </TableCell>
-                                          <TableCell>
-                                            <span className="text-sm">{user.cpf || "-"}</span>
-                                          </TableCell>
-                                          <TableCell>
-                                            <span className="text-sm">{user.phone || "-"}</span>
-                                          </TableCell>
-                                          <TableCell>
+                            return (
+                              <TableRow key={user.id} className="hover:bg-muted/50">
+                                <TableCell>
+                                  <div className="flex items-center gap-3">
+                                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                      <Users className="h-5 w-5 text-primary" />
+                                    </div>
+                                    <div>
+                                      <p className="font-medium">{user.full_name || user.email}</p>
+                                      <p className="text-xs text-muted-foreground">{user.email}</p>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-sm">{user.cpf || "-"}</span>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-sm">{user.phone || "-"}</span>
+                                </TableCell>
+                                <TableCell>
                                             {isManager ? (
                                               <Badge variant="outline" className="border-blue-500 text-blue-700">
-                                                <Shield className="h-3 w-3 mr-1" />
-                                                Gerente
-                                              </Badge>
-                                            ) : (
-                                              <Badge variant="secondary">Usuário</Badge>
-                                            )}
-                                          </TableCell>
-                                          <TableCell>
-                                            <Badge variant="outline">
+                                      <Shield className="h-3 w-3 mr-1" />
+                                      Gerente
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="secondary">Usuário</Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">
                                               {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_companies || userCompany.max_companies || 1}
-                                            </Badge>
-                                          </TableCell>
-                                          <TableCell>
-                                            <Badge variant="outline">
-                                              {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_establishments || 1}
-                                            </Badge>
-                                          </TableCell>
-                                          <TableCell>
-                                            <span className="text-sm">
-                                              {user.created_at ? new Date(user.created_at).toLocaleDateString("pt-BR", {
-                                                day: "2-digit",
-                                                month: "2-digit",
-                                                year: "numeric",
-                                              }) : "-"}
-                                            </span>
-                                          </TableCell>
-                                          <TableCell className="text-right">
-                                            <div className="flex items-center justify-end gap-2">
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => {
-                                                  setSelectedUserDetails({
-                                                    user,
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">
+                                    {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_establishments || 1}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-sm">
+                                    {user.created_at ? new Date(user.created_at).toLocaleDateString("pt-BR", {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      year: "numeric",
+                                    }) : "-"}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSelectedUserDetails({
+                                          user,
                                                     employees,
-                                                  });
-                                                  setUserDetailsDialogOpen(true);
-                                                }}
-                                                title="Ver detalhes"
-                                              >
-                                                <Eye className="h-4 w-4" />
-                                              </Button>
-                                              <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                  <Button variant="ghost" size="sm">
-                                                    <MoreVertical className="h-4 w-4" />
-                                                  </Button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end">
-                                                  <DropdownMenuItem
-                                                    onClick={() => {
-                                                      setSelectedUserId(user.id);
-                                                      setUserFormData({
-                                                        email: user.email || "",
-                                                        password: "",
-                                                        full_name: (user as any).full_name || "",
-                                                        cpf: (user as any).cpf || "",
-                                                        phone: (user as any).phone || "",
-                                                        address: (user as any).address || "",
-                                                        city: (user as any).city || "",
-                                                        state: (user as any).state || "",
-                                                        postal_code: (user as any).postal_code || "",
-                                                        country: (user as any).country || "Brasil",
-                                                        birth_date: (user as any).birth_date || "",
-                                                        max_companies: 1,
-                                                        max_establishments: 1,
-                                                      });
-                                                      setUserDialogOpen(true);
-                                                    }}
-                                                  >
-                                                    <Edit className="h-4 w-4 mr-2" />
-                                                    Editar
-                                                  </DropdownMenuItem>
-                                                  <DropdownMenuItem
-                                                    onClick={() => {
-                                                      setDeleteType("user");
-                                                      setDeleteId(user.id);
-                                                      setDeleteDialogOpen(true);
-                                                    }}
-                                                    className="text-destructive"
-                                                  >
-                                                    <Trash2 className="h-4 w-4 mr-2" />
-                                                    Excluir
-                                                  </DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                              </DropdownMenu>
-                                            </div>
-                                          </TableCell>
-                                        </TableRow>
-                                      );
-                                    })}
-                                  </TableBody>
-                                </Table>
+                                        });
+                                        setUserDetailsDialogOpen(true);
+                                      }}
+                                      title="Ver detalhes"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="sm">
+                                          <MoreVertical className="h-4 w-4" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem
+                                          onClick={() => {
+                                            setSelectedUserId(user.id);
+                                            setUserFormData({
+                                              email: user.email || "",
+                                              password: "",
+                                              full_name: (user as any).full_name || "",
+                                              cpf: (user as any).cpf || "",
+                                              phone: (user as any).phone || "",
+                                              address: (user as any).address || "",
+                                              city: (user as any).city || "",
+                                              state: (user as any).state || "",
+                                              postal_code: (user as any).postal_code || "",
+                                              country: (user as any).country || "Brasil",
+                                              birth_date: (user as any).birth_date || "",
+                                              max_companies: 1,
+                                              max_establishments: 1,
+                                            });
+                                            setUserDialogOpen(true);
+                                          }}
+                                        >
+                                          <Edit className="h-4 w-4 mr-2" />
+                                          Editar
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onClick={() => {
+                                            setDeleteType("user");
+                                            setDeleteId(user.id);
+                                            setDeleteDialogOpen(true);
+                                          }}
+                                          className="text-destructive"
+                                        >
+                                          <Trash2 className="h-4 w-4 mr-2" />
+                                          Excluir
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
                               </div>
                             )}
                           </Card>
                         );
                       })}
-                  </div>
-                )}
-              </Card>
+                    </div>
+                  )}
+                </Card>
               </TabsContent>
 
               {/* Tab: Super Admins */}
@@ -1850,20 +1850,20 @@ const SuperAdmin = () => {
                             })
                             .map((item: any) => {
                               const { user, employees } = item;
-                              return (
+                            return (
                                 <TableRow key={user.id} className="hover:bg-muted/50">
-                                  <TableCell>
-                                    <div className="flex items-center gap-3">
+                                <TableCell>
+                                  <div className="flex items-center gap-3">
                                       <div className="h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center">
                                         <Shield className="h-5 w-5 text-purple-600" />
-                                      </div>
-                                      <div>
+                                    </div>
+                                    <div>
                                         <p className="font-medium">{user.full_name || user.email}</p>
                                         <p className="text-xs text-muted-foreground">{user.email}</p>
-                                      </div>
                                     </div>
-                                  </TableCell>
-                                  <TableCell>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
                                     <span className="text-sm">{user.cpf || "-"}</span>
                                   </TableCell>
                                   <TableCell>
@@ -1871,19 +1871,19 @@ const SuperAdmin = () => {
                                   </TableCell>
                                   <TableCell>
                                     <Badge variant="default" className="bg-purple-600">
-                                      <Shield className="h-3 w-3 mr-1" />
+                                        <Shield className="h-3 w-3 mr-1" />
                                       Super Admin
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>
+                                      </Badge>
+                                </TableCell>
+                                <TableCell>
                                     <Badge variant="outline">
                                       {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_companies || "Ilimitado"}
                                     </Badge>
-                                  </TableCell>
-                                  <TableCell>
+                                </TableCell>
+                                <TableCell>
                                     <Badge variant="outline">
                                       {allUserLimits.find((ul: any) => ul.user_id === user.id)?.max_establishments || "Ilimitado"}
-                                    </Badge>
+                                      </Badge>
                                   </TableCell>
                                   <TableCell>
                                     <span className="text-sm">
@@ -1893,23 +1893,23 @@ const SuperAdmin = () => {
                                         year: "numeric",
                                       }) : "-"}
                                     </span>
-                                  </TableCell>
-                                  <TableCell className="text-right">
+                                </TableCell>
+                                <TableCell className="text-right">
                                     <div className="flex items-center justify-end gap-2">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          setSelectedUserDetails({
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setSelectedUserDetails({
                                             user,
                                             employees,
-                                          });
-                                          setUserDetailsDialogOpen(true);
-                                        }}
-                                        title="Ver detalhes"
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                      </Button>
+                                      });
+                                      setUserDetailsDialogOpen(true);
+                                    }}
+                                    title="Ver detalhes"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
                                       <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
                                           <Button variant="ghost" size="sm">
@@ -1955,10 +1955,10 @@ const SuperAdmin = () => {
                                         </DropdownMenuContent>
                                       </DropdownMenu>
                                     </div>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </div>

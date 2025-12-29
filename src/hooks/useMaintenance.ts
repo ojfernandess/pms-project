@@ -32,7 +32,8 @@ export const useMaintenance = () => {
         .select(`
           *,
           rooms (*),
-          maintenance_ticket_attachments (*)
+          maintenance_ticket_attachments (*),
+          maintenance_ticket_comments (*)
         `);
 
       // Filtrar por establishment_id se disponível
@@ -47,7 +48,52 @@ export const useMaintenance = () => {
         throw error;
       }
 
-      return data;
+      if (!data || data.length === 0) return [];
+
+      // Buscar dados dos usuários e hóspedes separadamente para os comentários
+      const allComments = data.flatMap((ticket: any) => ticket.maintenance_ticket_comments || []);
+      const userIds = [...new Set(allComments.map((c: any) => c.created_by_user_id).filter(Boolean))];
+      const guestIds = [...new Set(allComments.map((c: any) => c.created_by_guest_id).filter(Boolean))];
+
+      // Buscar usuários
+      let usersMap: Record<string, any> = {};
+      if (userIds.length > 0) {
+        const { data: usersData } = await supabase
+          .from("users")
+          .select("id, email, full_name")
+          .in("id", userIds);
+        
+        if (usersData) {
+          usersData.forEach((user: any) => {
+            usersMap[user.id] = user;
+          });
+        }
+      }
+
+      // Buscar hóspedes
+      let guestsMap: Record<string, any> = {};
+      if (guestIds.length > 0) {
+        const { data: guestsData } = await supabase
+          .from("guest_accounts")
+          .select("id, email, full_name")
+          .in("id", guestIds);
+        
+        if (guestsData) {
+          guestsData.forEach((guest: any) => {
+            guestsMap[guest.id] = guest;
+          });
+        }
+      }
+
+      // Combinar dados
+      return data.map((ticket: any) => ({
+        ...ticket,
+        maintenance_ticket_comments: (ticket.maintenance_ticket_comments || []).map((comment: any) => ({
+          ...comment,
+          created_by_user: comment.created_by_user_id ? usersMap[comment.created_by_user_id] : null,
+          created_by_guest: comment.created_by_guest_id ? guestsMap[comment.created_by_guest_id] : null,
+        })),
+      }));
     },
   });
 
@@ -296,6 +342,137 @@ export const useMaintenance = () => {
     },
   });
 
+  // Buscar comentários de um ticket específico
+  const getTicketComments = (ticketId: string) => {
+    return useQuery({
+      queryKey: ["maintenance_ticket_comments", ticketId],
+      queryFn: async () => {
+        const { data, error } = await supabase
+          .from("maintenance_ticket_comments")
+          .select("*")
+          .eq("ticket_id", ticketId)
+          .order("created_at", { ascending: true });
+
+        if (error) throw error;
+        if (!data || data.length === 0) return [];
+
+        // Buscar dados dos usuários e hóspedes separadamente
+        const userIds = [...new Set(data.map((c: any) => c.created_by_user_id).filter(Boolean))];
+        const guestIds = [...new Set(data.map((c: any) => c.created_by_guest_id).filter(Boolean))];
+
+        // Buscar usuários
+        let usersMap: Record<string, any> = {};
+        if (userIds.length > 0) {
+          const { data: usersData } = await supabase
+            .from("users")
+            .select("id, email, full_name")
+            .in("id", userIds);
+          
+          if (usersData) {
+            usersData.forEach((user: any) => {
+              usersMap[user.id] = user;
+            });
+          }
+        }
+
+        // Buscar hóspedes
+        let guestsMap: Record<string, any> = {};
+        if (guestIds.length > 0) {
+          const { data: guestsData } = await supabase
+            .from("guest_accounts")
+            .select("id, email, full_name")
+            .in("id", guestIds);
+          
+          if (guestsData) {
+            guestsData.forEach((guest: any) => {
+              guestsMap[guest.id] = guest;
+            });
+          }
+        }
+
+        // Combinar dados
+        return data.map((comment: any) => ({
+          ...comment,
+          created_by_user: comment.created_by_user_id ? usersMap[comment.created_by_user_id] : null,
+          created_by_guest: comment.created_by_guest_id ? guestsMap[comment.created_by_guest_id] : null,
+        }));
+      },
+    });
+  };
+
+  // Criar comentário (para usuários do sistema)
+  const createComment = useMutation({
+    mutationFn: async ({ ticketId, comment }: { ticketId: string; comment: string }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        throw new Error("Usuário não autenticado");
+      }
+
+      const { data, error } = await supabase
+        .from("maintenance_ticket_comments")
+        .insert([{
+          ticket_id: ticketId,
+          comment: comment.trim(),
+          created_by_user_id: user.id,
+          created_by_guest_id: null,
+        }])
+        .select("*")
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["maintenance_ticket_comments", variables.ticketId] });
+      queryClient.invalidateQueries({ queryKey: ["maintenance_tickets", selectedEstablishment?.id] });
+      toast.success("Comentário adicionado com sucesso!");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao adicionar comentário");
+    },
+  });
+
+  // Criar comentário (para hóspedes)
+  const createGuestComment = useMutation({
+    mutationFn: async ({ ticketId, comment, guestAccountId }: { ticketId: string; comment: string; guestAccountId: string }) => {
+      // Verificar se o ticket pertence ao hóspede
+      const { data: ticket, error: ticketError } = await supabase
+        .from("maintenance_tickets")
+        .select("guest_account_id")
+        .eq("id", ticketId)
+        .single();
+
+      if (ticketError) throw ticketError;
+
+      if (ticket?.guest_account_id !== guestAccountId) {
+        throw new Error("Você não tem permissão para comentar neste ticket");
+      }
+
+      const { data, error } = await supabase
+        .from("maintenance_ticket_comments")
+        .insert([{
+          ticket_id: ticketId,
+          comment: comment.trim(),
+          created_by_user_id: null,
+          created_by_guest_id: guestAccountId,
+        }])
+        .select("*")
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["maintenance_ticket_comments", variables.ticketId] });
+      queryClient.invalidateQueries({ queryKey: ["maintenance_tickets"] });
+      toast.success("Comentário adicionado com sucesso!");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao adicionar comentário");
+    },
+  });
+
   return {
     tickets: ticketsQuery.data || [],
     isLoading: ticketsQuery.isLoading,
@@ -307,6 +484,10 @@ export const useMaintenance = () => {
     completeTicket: completeTicket.mutateAsync,
     isCreating: createTicket.isPending,
     isUpdating: updateTicket.isPending,
+    getTicketComments,
+    createComment: createComment.mutateAsync,
+    createGuestComment: createGuestComment.mutateAsync,
+    isCreatingComment: createComment.isPending || createGuestComment.isPending,
   };
 };
 

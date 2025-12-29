@@ -74,7 +74,8 @@ export function MaintenanceTicketDialog({
     try {
       for (const file of files) {
         const fileExt = file.name.split(".").pop();
-        const fileName = `maintenance/${ticketId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+        // Não incluir "maintenance/" no caminho porque já especificamos o bucket no .from("maintenance")
+        const fileName = `${ticketId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
         const { error: uploadError } = await supabase.storage
           .from("maintenance")
