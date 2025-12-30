@@ -1220,12 +1220,14 @@ export const useWebCheckin = () => {
                       phone: mainGuest.phone || reservation.guest?.phone,
                       birth_date: mainGuest.birth_date,
                       document_type: mainGuest.document_type,
-                      document_number: mainGuest.document_number,
+                      document_number: mainGuest.document_number || mainGuest.cpf,
+                      cpf: mainGuest.cpf || mainGuest.document_number,
                     } : null,
                     additional_guests: additionalGuests.map((g: any) => ({
                       name: g.name,
                       document_type: g.document_type,
-                      document_number: g.document_number,
+                      document_number: g.document_number || g.cpf,
+                      cpf: g.cpf || g.document_number,
                     })),
                     checkin_completed_at: webCheckinData.completed_at ? new Date(webCheckinData.completed_at).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR'),
                   };

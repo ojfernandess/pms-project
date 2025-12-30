@@ -79,7 +79,11 @@ SET body_html = '<!DOCTYPE html>
                     <p style="margin:8px 0;"><strong>Data de Nascimento:</strong> {{main_guest.birth_date}}</p>
                     {{/if}}
                     {{#if main_guest.document_number}}
-                    <p style="margin:8px 0;"><strong>Documento:</strong> {{main_guest.document_type}} - {{main_guest.document_number}}</p>
+                    <p style="margin:8px 0;"><strong>CPF/Documento:</strong> {{main_guest.document_type}} - {{main_guest.document_number}}</p>
+                    {{else}}
+                    {{#if main_guest.cpf}}
+                    <p style="margin:8px 0;"><strong>CPF:</strong> {{main_guest.cpf}}</p>
+                    {{/if}}
                     {{/if}}
                   </td>
                 </tr>
@@ -145,7 +149,16 @@ SET body_html = '<!DOCTYPE html>
                   <td style="background:#f8fafc; border-left:4px solid #8b5cf6; padding:22px; border-radius:0;">
                     <h3 style="margin-top:0; margin-bottom:15px; font-size:16px;">👥 Hóspedes Adicionais</h3>
                     {{#each additional_guests}}
-                    <p style="margin:8px 0;"><strong>{{this.name}}:</strong> {{this.document_type}} - {{this.document_number}}</p>
+                    <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #e5e7eb;">
+                      <p style="margin:4px 0;"><strong>Nome:</strong> {{this.name}}</p>
+                      {{#if this.document_number}}
+                      <p style="margin:4px 0;"><strong>CPF/Documento:</strong> {{this.document_type}} - {{this.document_number}}</p>
+                      {{else}}
+                      {{#if this.cpf}}
+                      <p style="margin:4px 0;"><strong>CPF:</strong> {{this.cpf}}</p>
+                      {{/if}}
+                      {{/if}}
+                    </div>
                     {{/each}}
                   </td>
                 </tr>

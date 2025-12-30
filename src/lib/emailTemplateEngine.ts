@@ -199,7 +199,35 @@ export function processTemplate(template: string, variables: TemplateVariables):
   processed = processEachLoops(processed, variables);
 
   // Depois, processar condicionais {{#if variable}}...{{/if}}
-  processed = processConditionals(processed, variables);
+  // Fazer múltiplas passadas até que não haja mais mudanças
+  let conditionalChanged = true;
+  let conditionalIterations = 0;
+  while (conditionalChanged && conditionalIterations < 50) {
+    conditionalIterations++;
+    const beforeConditionals = processed;
+    processed = processConditionals(processed, variables);
+    conditionalChanged = beforeConditionals !== processed;
+  }
+  
+  // Limpeza final: remover qualquer {{/if}} solto que possa ter sobrado
+  // Isso pode acontecer se houver um erro no processamento de condicionais aninhadas
+  // Contar quantos {{#if}} e {{/if}} existem para garantir que não removemos demais
+  const ifCount = (processed.match(/\{\{#if\s+\w+(?:\.\w+)*\}\}/g) || []).length;
+  const endifCount = (processed.match(/\{\{\/if\}\}/g) || []).length;
+  
+  // Se há mais {{/if}} do que {{#if}}, remover os extras
+  if (endifCount > ifCount) {
+    // Remover apenas os {{/if}} extras (a diferença)
+    let removed = 0;
+    const toRemove = endifCount - ifCount;
+    processed = processed.replace(/\{\{\/if\}\}/g, (match) => {
+      if (removed < toRemove) {
+        removed++;
+        return '';
+      }
+      return match;
+    });
+  }
 
   // Por último, substituir variáveis no formato {{variable_name}} ou {{variable.path}}
   // Processar variáveis aninhadas primeiro (ex: {{main_guest.name}})
@@ -336,13 +364,17 @@ function processConditionals(template: string, variables: TemplateVariables): st
       while (depth > 0 && searchIndex < processed.length) {
         const nextIf = processed.indexOf('{{#if', searchIndex);
         const nextEndIf = processed.indexOf('{{/if}}', searchIndex);
+        const nextElse = processed.indexOf('{{else}}', searchIndex);
         
         if (nextEndIf === -1) {
           // Não encontrou fechamento, sair
           break;
         }
         
-        if (nextIf !== -1 && nextIf < nextEndIf) {
+        // Verificar se há um {{else}} antes do próximo {{#if}} ou {{/if}}
+        // Se houver um {{else}} no mesmo nível (depth === 1), ele pertence ao bloco atual
+        // Se houver um {{#if}} antes do {{else}}, incrementar depth
+        if (nextIf !== -1 && nextIf < nextEndIf && (nextElse === -1 || nextIf < nextElse)) {
           // Encontrou um {{#if}} antes do {{/if}}, incrementar profundidade
           depth++;
           searchIndex = nextIf + 5; // Avançar após {{#if
@@ -356,7 +388,51 @@ function processConditionals(template: string, variables: TemplateVariables): st
             const content = processed.substring(startIndex + startTag.length, nextEndIf);
             
             // Verificar se há um {{else}} dentro do conteúdo
-            const elseIndex = content.indexOf('{{else}}');
+            // Precisamos encontrar o {{else}} que pertence a este bloco (não aos aninhados)
+            let elseIndex = -1;
+            let elseDepth = 0;
+            let searchElseIndex = 0;
+            
+            while (searchElseIndex < content.length) {
+              const nextIfInContent = content.indexOf('{{#if', searchElseIndex);
+              const nextElseInContent = content.indexOf('{{else}}', searchElseIndex);
+              const nextEndIfInContent = content.indexOf('{{/if}}', searchElseIndex);
+              
+              // Encontrar qual tag vem primeiro
+              const positions = [];
+              if (nextIfInContent !== -1) positions.push({ type: 'if', pos: nextIfInContent });
+              if (nextElseInContent !== -1) positions.push({ type: 'else', pos: nextElseInContent });
+              if (nextEndIfInContent !== -1) positions.push({ type: 'endif', pos: nextEndIfInContent });
+              
+              if (positions.length === 0) {
+                break; // Não há mais tags
+              }
+              
+              // Ordenar por posição
+              positions.sort((a, b) => a.pos - b.pos);
+              const nextTag = positions[0];
+              
+              // Se encontramos um {{else}} no nível 0 (sem blocos aninhados abertos), ele pertence ao bloco atual
+              if (nextTag.type === 'else' && elseDepth === 0) {
+                elseIndex = nextTag.pos;
+                break;
+              }
+              
+              // Ajustar depth para rastrear blocos aninhados
+              if (nextTag.type === 'if') {
+                elseDepth++;
+                searchElseIndex = nextTag.pos + 5;
+              } else if (nextTag.type === 'endif') {
+                elseDepth--;
+                searchElseIndex = nextTag.pos + 7;
+              } else if (nextTag.type === 'else') {
+                // {{else}} dentro de um bloco aninhado, ignorar
+                searchElseIndex = nextTag.pos + 8;
+              } else {
+                break;
+              }
+            }
+            
             let ifContent = content;
             let elseContent = '';
             
@@ -366,13 +442,35 @@ function processConditionals(template: string, variables: TemplateVariables): st
               elseContent = content.substring(elseIndex + 8); // {{else}} tem 8 caracteres
               
               // Processar condicionais recursivamente no conteúdo do else
-              if (elseContent.includes('{{#if')) {
-                elseContent = processConditionals(elseContent, variables);
+              // Fazer múltiplas passadas para garantir que todas as condicionais sejam processadas
+              let elseProcessed = elseContent;
+              let elseChanged = true;
+              let elseIterations = 0;
+              while (elseChanged && elseIterations < 10) {
+                elseIterations++;
+                const beforeProcess = elseProcessed;
+                elseProcessed = processConditionals(elseProcessed, variables);
+                elseChanged = beforeProcess !== elseProcessed;
               }
+              elseContent = elseProcessed;
             }
             
             // Verificar se a variável existe e é truthy
-            const value = variables[variableName];
+            // Suportar variáveis aninhadas (ex: main_guest.document_number)
+            const value = variableName.includes('.') 
+              ? getNestedValue(variables, variableName)
+              : variables[variableName];
+            
+            // Debug: log para variáveis aninhadas problemáticas
+            if (variableName.includes('.') && (value === null || value === undefined)) {
+              console.log(`🔍 [Template Debug] Variável aninhada não encontrada: ${variableName}`, {
+                variableName,
+                path: variableName.split('.'),
+                variablesKeys: Object.keys(variables),
+                mainGuest: variables['main_guest'],
+              });
+            }
+            
             const isTruthy = value !== null && 
                              value !== undefined && 
                              value !== '' && 
@@ -383,18 +481,31 @@ function processConditionals(template: string, variables: TemplateVariables): st
             if (isTruthy) {
               // Variável é truthy: manter o conteúdo do if, remover apenas as tags
               // Processar condicionais recursivamente no conteúdo do if se necessário
+              // Fazer múltiplas passadas para garantir que todas as condicionais sejam processadas
               let finalIfContent = ifContent;
-              if (ifContent.includes('{{#if')) {
-                finalIfContent = processConditionals(ifContent, variables);
+              let ifChanged = true;
+              let ifIterations = 0;
+              while (ifChanged && ifIterations < 10) {
+                ifIterations++;
+                const beforeProcess = finalIfContent;
+                finalIfContent = processConditionals(finalIfContent, variables);
+                ifChanged = beforeProcess !== finalIfContent;
               }
-              processed = processed.replace(fullMatch, finalIfContent);
+              // Limpar qualquer {{/if}} solto que possa ter sobrado do processamento recursivo
+              // (isso não deveria acontecer, mas é uma segurança)
+              finalIfContent = finalIfContent.replace(/\{\{\/if\}\}/g, '');
+              // Substituir o bloco completo (incluindo {{#if}} e {{/if}}) usando substring
+              processed = processed.substring(0, startIndex) + finalIfContent + processed.substring(endIndex);
             } else {
               // Variável é falsy: manter o conteúdo do else (se existir), remover apenas as tags
               if (elseContent) {
-                processed = processed.replace(fullMatch, elseContent);
+                // Limpar qualquer {{/if}} solto que possa ter sobrado do processamento recursivo
+                let finalElseContent = elseContent.replace(/\{\{\/if\}\}/g, '');
+                // Substituir o bloco completo (incluindo {{#if}} e {{/if}}) usando substring
+                processed = processed.substring(0, startIndex) + finalElseContent + processed.substring(endIndex);
               } else {
-                // Sem else: remover todo o bloco
-                processed = processed.replace(fullMatch, '');
+                // Sem else: remover todo o bloco (incluindo {{#if}} e {{/if}})
+                processed = processed.substring(0, startIndex) + processed.substring(endIndex);
               }
             }
             
