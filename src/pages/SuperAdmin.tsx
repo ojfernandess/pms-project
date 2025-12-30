@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -81,7 +82,7 @@ import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { Textarea } from "@/components/ui/textarea";
 import { StripeGlobalConfigDialog } from "@/components/stripe/StripeGlobalConfigDialog";
 import { useStripe } from "@/hooks/useStripe";
-import { CreditCard, Settings, Zap, Key } from "lucide-react";
+import { CreditCard, Settings, Zap, Key, Star } from "lucide-react";
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
@@ -468,8 +469,9 @@ const SuperAdmin = () => {
   const { companies, isLoading: isLoadingCompanies, createCompany, updateCompany, deleteCompany } = useCompanies();
   const { users, isLoading: isLoadingUsers, createUser, updateUser, deleteUser } = useUsers();
   const { createUserCompany, updateUserCompany } = useUserCompanies();
-  const { establishments, isLoading: isLoadingEstablishments, createEstablishment } = useEstablishments();
+  const { establishments, isLoading: isLoadingEstablishments, createEstablishment, updateEstablishment, deleteEstablishment } = useEstablishments();
   const { allUserLimits } = useAllUserLimits();
+  const { settings: siteSettings } = useSiteSettings();
   
   const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
   const [userDialogOpen, setUserDialogOpen] = useState(false);
@@ -482,8 +484,9 @@ const SuperAdmin = () => {
   // Hook que depende de selectedUserId deve vir depois da declaração
   const { userLimit, createOrUpdateUserLimit } = useUserLimits(selectedUserId);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteType, setDeleteType] = useState<"company" | "user">("company");
+  const [deleteType, setDeleteType] = useState<"company" | "user" | "establishment">("company");
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [selectedEstablishmentForEdit, setSelectedEstablishmentForEdit] = useState<any>(null);
   
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
@@ -1062,12 +1065,21 @@ const SuperAdmin = () => {
   const handleSubmitEstablishment = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await createEstablishment(establishmentFormData);
+      if (selectedEstablishmentForEdit) {
+        await updateEstablishment({
+          id: selectedEstablishmentForEdit.id,
+          ...establishmentFormData,
+        });
+        toast.success("Estabelecimento atualizado com sucesso!");
+      } else {
+        await createEstablishment(establishmentFormData);
+        toast.success("Estabelecimento criado com sucesso!");
+      }
       setEstablishmentDialogOpen(false);
       setEstablishmentFormData({ company_id: "", name: "", type: "hotel" });
-      toast.success("Estabelecimento criado com sucesso!");
+      setSelectedEstablishmentForEdit(null);
     } catch (error: any) {
-      toast.error(error.message || "Erro ao criar estabelecimento");
+      toast.error(error.message || "Erro ao salvar estabelecimento");
     }
   };
 
@@ -2090,6 +2102,7 @@ const SuperAdmin = () => {
                 </p>
               </div>
               <Button onClick={() => {
+                setSelectedEstablishmentForEdit(null);
                 setEstablishmentFormData({ company_id: "", name: "", type: "hotel" });
                 setEstablishmentDialogOpen(true);
               }}>
@@ -2119,6 +2132,7 @@ const SuperAdmin = () => {
                       <TableHead>Tipo</TableHead>
                       <TableHead>Empresa</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -2151,6 +2165,62 @@ const SuperAdmin = () => {
                           <Badge variant={establishment.is_active ? "default" : "secondary"} className="font-normal">
                             {establishment.is_active ? "Ativo" : "Inativo"}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSelectedEstablishmentForEdit(establishment);
+                                  setEstablishmentFormData({
+                                    company_id: establishment.company_id,
+                                    name: establishment.name,
+                                    type: establishment.type,
+                                  });
+                                  setEstablishmentDialogOpen(true);
+                                }}
+                              >
+                                <Edit className="h-4 w-4 mr-2" />
+                                Editar
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={async () => {
+                                  try {
+                                    await updateEstablishment({
+                                      id: establishment.id,
+                                      is_active: !establishment.is_active,
+                                    });
+                                    toast.success(
+                                      establishment.is_active
+                                        ? "Estabelecimento ocultado com sucesso!"
+                                        : "Estabelecimento exibido com sucesso!"
+                                    );
+                                  } catch (error: any) {
+                                    toast.error(error.message || "Erro ao atualizar estabelecimento");
+                                  }
+                                }}
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                {establishment.is_active ? "Ocultar" : "Exibir"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setDeleteType("establishment");
+                                  setDeleteId(establishment.id);
+                                  setDeleteDialogOpen(true);
+                                }}
+                                className="text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Excluir
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -2626,10 +2696,19 @@ const SuperAdmin = () => {
       </Dialog>
 
       {/* Dialog: Estabelecimento */}
-      <Dialog open={establishmentDialogOpen} onOpenChange={setEstablishmentDialogOpen}>
+      <Dialog 
+        open={establishmentDialogOpen} 
+        onOpenChange={(open) => {
+          setEstablishmentDialogOpen(open);
+          if (!open) {
+            setSelectedEstablishmentForEdit(null);
+            setEstablishmentFormData({ company_id: "", name: "", type: "hotel" });
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Novo Estabelecimento</DialogTitle>
+            <DialogTitle>{selectedEstablishmentForEdit ? "Editar Estabelecimento" : "Novo Estabelecimento"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmitEstablishment} className="space-y-4">
             <div>
@@ -2823,13 +2902,14 @@ const SuperAdmin = () => {
         </DialogContent>
       </Dialog>
 
+
       {/* Alert Dialog: Exclusão */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
             <AlertDialogDescription>
-              Tem certeza que deseja excluir este {deleteType === "company" ? "empresa" : "usuário"}? Esta ação não pode ser desfeita.
+              Tem certeza que deseja excluir este {deleteType === "company" ? "empresa" : deleteType === "user" ? "usuário" : "estabelecimento"}? Esta ação não pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2840,8 +2920,10 @@ const SuperAdmin = () => {
                 try {
                   if (deleteType === "company") {
                     await deleteCompany(deleteId);
-                  } else {
+                  } else if (deleteType === "user") {
                     await deleteUser(deleteId);
+                  } else if (deleteType === "establishment") {
+                    await deleteEstablishment(deleteId);
                   }
                   setDeleteDialogOpen(false);
                   setDeleteId(null);
@@ -2864,12 +2946,15 @@ const SuperAdmin = () => {
 const FeatureFlagsManager = () => {
   const { settings, isLoading, updateSettings, isUpdating } = useSiteSettings();
   const { companies } = useCompanies();
+  const { establishments } = useEstablishments();
+  const navigate = useNavigate();
   const [features, setFeatures] = useState<any>({
     api_integrations: true,
     stripe: true,
     email: true,
     web_checkin: true,
     channel_manager: true,
+    stay_reviews: { enabled: false, establishment_ids: [] },
     dynamic_pricing_automation: { enabled: false, company_ids: [] },
   });
   const [expandedFeature, setExpandedFeature] = useState<string | null>(null);
@@ -2883,6 +2968,9 @@ const FeatureFlagsManager = () => {
         email: typeof fe.email === 'boolean' ? fe.email : (fe.email?.enabled ?? true),
         web_checkin: typeof fe.web_checkin === 'boolean' ? fe.web_checkin : (fe.web_checkin?.enabled ?? true),
         channel_manager: typeof fe.channel_manager === 'boolean' ? fe.channel_manager : (fe.channel_manager?.enabled ?? true),
+        stay_reviews: typeof fe.stay_reviews === 'boolean' 
+          ? { enabled: fe.stay_reviews, establishment_ids: [] }
+          : (fe.stay_reviews || { enabled: false, establishment_ids: [] }),
         dynamic_pricing_automation: typeof fe.dynamic_pricing_automation === 'boolean' 
           ? { enabled: fe.dynamic_pricing_automation, company_ids: [] }
           : (fe.dynamic_pricing_automation || { enabled: false, company_ids: [] }),
@@ -2894,11 +2982,11 @@ const FeatureFlagsManager = () => {
     const currentFeatures = settings?.features_enabled || {};
     const newFeatures = { ...currentFeatures };
     
-    // Se for dynamic_pricing_automation, manter estrutura de objeto
-    if (feature === 'dynamic_pricing_automation') {
+    // Se for dynamic_pricing_automation ou stay_reviews, manter estrutura de objeto
+    if (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews') {
       const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
         ? newFeatures[feature]
-        : { enabled: false, company_ids: [] };
+        : { enabled: false, [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: [] };
       newFeatures[feature] = { ...currentConfig, enabled: value };
     } else {
       // Para outras funcionalidades, manter como boolean
@@ -2907,8 +2995,11 @@ const FeatureFlagsManager = () => {
     
     setFeatures((prev: any) => ({
       ...prev,
-      [feature]: feature === 'dynamic_pricing_automation' 
-        ? { enabled: value, company_ids: prev[feature]?.company_ids || [] }
+      [feature]: (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews')
+        ? { 
+            enabled: value, 
+            [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: prev[feature]?.[feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids'] || [] 
+          }
         : value
     }));
     
@@ -2960,6 +3051,47 @@ const FeatureFlagsManager = () => {
     }
   };
 
+  const handleEstablishmentToggle = async (feature: string, establishmentId: string, isSelected: boolean) => {
+    const currentFeatures = settings?.features_enabled || {};
+    const newFeatures = { ...currentFeatures };
+    const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
+      ? newFeatures[feature]
+      : { enabled: false, establishment_ids: [] };
+    
+    let establishmentIds = Array.isArray(currentConfig.establishment_ids) ? [...currentConfig.establishment_ids] : [];
+    
+    if (isSelected) {
+      if (!establishmentIds.includes(establishmentId)) {
+        establishmentIds.push(establishmentId);
+      }
+    } else {
+      establishmentIds = establishmentIds.filter((id: string) => id !== establishmentId);
+    }
+    
+    newFeatures[feature] = {
+      ...currentConfig,
+      enabled: currentConfig.enabled ?? false,
+      establishment_ids: establishmentIds,
+    };
+    
+    setFeatures((prev: any) => ({
+      ...prev,
+      [feature]: { 
+        enabled: prev[feature]?.enabled ?? false,
+        establishment_ids: establishmentIds 
+      }
+    }));
+    
+    try {
+      await updateSettings({
+        features_enabled: newFeatures,
+      });
+    } catch (error) {
+      console.error("Erro ao atualizar estabelecimentos da funcionalidade:", error);
+      toast.error("Erro ao atualizar estabelecimentos");
+    }
+  };
+
   if (isLoading) {
     return (
       <Card className="p-6">
@@ -3007,6 +3139,14 @@ const FeatureFlagsManager = () => {
       supportsCompanies: false,
     },
     {
+      key: "stay_reviews" as const,
+      label: "Avaliações da Estadia",
+      description: "Permite que hóspedes avaliem sua estadia após o check-out (quarto, conforto, atendimento, limpeza)",
+      icon: Star,
+      supportsCompanies: false,
+      supportsEstablishments: true,
+    },
+    {
       key: "dynamic_pricing_automation" as const,
       label: "Automação de Regras de Precificação Dinâmica",
       description: "Permite que empresas utilizem a automação de regras de precificação dinâmica para ajustar tarifas automaticamente",
@@ -3033,12 +3173,15 @@ const FeatureFlagsManager = () => {
         <div className="space-y-4">
           {featureList.map((feature) => {
             const Icon = feature.icon;
-            const isEnabled = feature.supportsCompanies 
+            const isEnabled = (feature.supportsCompanies || feature.supportsEstablishments)
               ? features[feature.key]?.enabled ?? false
               : features[feature.key] ?? false;
             const isExpanded = expandedFeature === feature.key;
             const selectedCompanyIds = feature.supportsCompanies 
               ? (features[feature.key]?.company_ids || [])
+              : [];
+            const selectedEstablishmentIds = feature.supportsEstablishments
+              ? (features[feature.key]?.establishment_ids || [])
               : [];
 
             return (
@@ -3062,6 +3205,11 @@ const FeatureFlagsManager = () => {
                             {selectedCompanyIds.length} empresa{selectedCompanyIds.length !== 1 ? 's' : ''}
                           </Badge>
                         )}
+                        {feature.supportsEstablishments && isEnabled && selectedEstablishmentIds.length > 0 && (
+                          <Badge variant="outline">
+                            {selectedEstablishmentIds.length} estabelecimento{selectedEstablishmentIds.length !== 1 ? 's' : ''}
+                          </Badge>
+                        )}
                     </div>
                     <p className="text-sm text-muted-foreground">
                       {feature.description}
@@ -3077,6 +3225,16 @@ const FeatureFlagsManager = () => {
                         disabled={!isEnabled}
                       >
                         {isExpanded ? "Ocultar" : "Selecionar Empresas"}
+                      </Button>
+                    )}
+                    {feature.supportsEstablishments && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setExpandedFeature(isExpanded ? null : feature.key)}
+                        disabled={!isEnabled}
+                      >
+                        {isExpanded ? "Ocultar" : "Selecionar Estabelecimentos"}
                       </Button>
                     )}
                   <Switch
@@ -3114,6 +3272,38 @@ const FeatureFlagsManager = () => {
                       </div>
                       {companies.length === 0 && (
                         <p className="text-sm text-muted-foreground">Nenhuma empresa cadastrada</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {feature.supportsEstablishments && isExpanded && isEnabled && (
+                  <div className="px-4 pb-4 border-t bg-muted/30">
+                    <div className="mt-4 space-y-2">
+                      <Label className="text-sm font-medium">Selecionar Estabelecimentos:</Label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-60 overflow-y-auto">
+                        {establishments.map((establishment: any) => {
+                          const isSelected = selectedEstablishmentIds.includes(establishment.id);
+                          return (
+                            <div
+                              key={establishment.id}
+                              className="flex items-center space-x-2 p-2 rounded border hover:bg-muted/50 cursor-pointer"
+                              onClick={() => handleEstablishmentToggle(feature.key, establishment.id, !isSelected)}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleEstablishmentToggle(feature.key, establishment.id, !isSelected)}
+                                className="rounded"
+                              />
+                              <Label className="text-sm cursor-pointer flex-1">
+                                {establishment.name}
+                              </Label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {establishments.length === 0 && (
+                        <p className="text-sm text-muted-foreground">Nenhum estabelecimento cadastrado</p>
                       )}
                     </div>
                   </div>

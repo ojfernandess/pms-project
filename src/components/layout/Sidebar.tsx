@@ -14,7 +14,8 @@ import {
   UserCog,
   FileText,
   BookOpen,
-  BarChart3
+  BarChart3,
+  Star
 } from "lucide-react";
 import { NavLink, useParams } from "react-router-dom";
 import { useIsSuperAdmin } from "@/hooks/useUsers";
@@ -25,6 +26,8 @@ import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { useCompanyPmsCustomization } from "@/hooks/useCompanyPmsCustomization";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
+import { useMemo } from "react";
+import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -41,6 +44,7 @@ const getMenuItems = (t: (key: string) => string) => [
   { icon: DollarSign, label: t("sidebar.financial"), path: "/financeiro", feature: "financial" },
   { icon: ClipboardList, label: t("sidebar.pricing"), path: "/tarifario", feature: "pricing" },
   { icon: Wrench, label: t("sidebar.maintenance"), path: "/manutencao", feature: "maintenance" },
+  { icon: Star, label: "Avaliações", path: "/avaliacoes", feature: "stay_reviews" },
   { icon: Network, label: t("sidebar.channelManager"), path: "/channel-manager", feature: "channel_manager" },
   { icon: FileText, label: t("sidebar.logs"), path: "/logs", feature: "logs" },
   { icon: Settings, label: t("sidebar.settings"), path: "/configuracoes", feature: "settings" },
@@ -114,6 +118,19 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
         return true;
       }
       return false;
+    }
+
+    // Verificar feature flag para stay_reviews
+    if (item.feature === "stay_reviews") {
+      const isStayReviewsEnabled = isFeatureEnabledForEstablishment(
+        settings?.features_enabled?.stay_reviews,
+        selectedEstablishment?.id
+      );
+      if (!isStayReviewsEnabled) {
+        return false;
+      }
+      // Se o feature flag estiver habilitado, mostrar o item (não verificar permissão adicional)
+      return true;
     }
 
     // Verificar permissão para o recurso (usando customPermissions se disponível)

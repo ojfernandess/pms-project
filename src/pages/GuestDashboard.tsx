@@ -38,7 +38,8 @@ import {
   Check,
   Trash2,
   CheckCheck,
-  MessageSquare
+  MessageSquare,
+  Star
 } from "lucide-react";
 import { format, parseISO, isAfter, startOfDay, differenceInDays, isBefore, addDays } from "date-fns";
 import { useGuestAccount } from "@/hooks/useGuestAccount";
@@ -50,8 +51,13 @@ import { GuestProfileDialog } from "@/components/webcheckin/GuestProfileDialog";
 import { MaintenanceTicketDialog } from "@/components/webcheckin/MaintenanceTicketDialog";
 import { GuestMaintenanceTickets } from "@/components/guest/GuestMaintenanceTickets";
 import { PoliciesViewDialog } from "@/components/webcheckin/PoliciesViewDialog";
+import { StayReviewForm } from "@/components/reviews/StayReviewForm";
+import { useStayReviews } from "@/hooks/useStayReviews";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import { FiscalDocumentRequest } from "@/components/webcheckin/FiscalDocumentRequest";
 import { SpecialRequestsDialog } from "@/components/webcheckin/SpecialRequestsDialog";
+import { WebCheckoutDialog } from "@/components/webcheckin/WebCheckoutDialog";
 import {
   Dialog,
   DialogContent,
@@ -63,7 +69,6 @@ import { toast } from "sonner";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { useDateLocale } from "@/hooks/useDateLocale";
-import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -356,6 +361,11 @@ export default function GuestDashboard() {
   const [showSpecialRequestsDialog, setShowSpecialRequestsDialog] = useState(false);
   const [showSpecialRequestsReservationSelector, setShowSpecialRequestsReservationSelector] = useState(false);
   const [selectedReservationForSpecialRequests, setSelectedReservationForSpecialRequests] = useState<any>(null);
+  const [showReviewReservationSelector, setShowReviewReservationSelector] = useState(false);
+  const [selectedReservationForReview, setSelectedReservationForReview] = useState<any>(null);
+  const [showReviewDialog, setShowReviewDialog] = useState(false);
+  const [selectedReservationForCheckout, setSelectedReservationForCheckout] = useState<any>(null);
+  const [showCheckoutDialog, setShowCheckoutDialog] = useState(false);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [readNotifications, setReadNotifications] = useState<Set<string>>(new Set());
   const [deletedNotifications, setDeletedNotifications] = useState<Set<string>>(new Set());
@@ -719,6 +729,101 @@ export default function GuestDashboard() {
     enabled: !!accountId,
   });
 
+  // Buscar reservas com check-out realizado para avaliação
+  const { data: reviewableReservations, isLoading: isLoadingReviewableReservations } = useQuery({
+    queryKey: ["reviewable_reservations_for_dialog", accountId, siteSettings?.features_enabled?.stay_reviews],
+    queryFn: async () => {
+      if (!accountId) return [];
+
+      // Buscar histórico de estadias do hóspede (sem filtrar por status, para pegar todas)
+      const { data: history } = await supabase
+        .from("guest_stay_history")
+        .select("reservation_id, status, checkout_date")
+        .eq("guest_account_id", accountId)
+        .order("checkout_date", { ascending: false });
+
+      if (!history || history.length === 0) return [];
+
+      const reservationIds = history.map((h) => h.reservation_id);
+
+      // Buscar reservas com check-out realizado
+      const { data: reservations } = await supabase
+        .from("reservations")
+        .select(`
+          id,
+          reservation_code,
+          checkin_date,
+          checkout_date,
+          status,
+          establishment_id,
+          rooms(id, room_number, name),
+          establishment:establishments(id, name)
+        `)
+        .in("id", reservationIds)
+        .eq("status", "checkedout")
+        .order("checkout_date", { ascending: false });
+
+      if (!reservations) return [];
+
+      // Filtrar reservas com data de check-out já passada
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const pastCheckoutReservations = reservations.filter((r) => {
+        if (!r.checkout_date) return false;
+        const checkoutDate = new Date(r.checkout_date);
+        checkoutDate.setHours(0, 0, 0, 0);
+        return checkoutDate < today;
+      });
+
+      if (pastCheckoutReservations.length === 0) return [];
+
+      const pastCheckoutReservationIds = pastCheckoutReservations.map((r) => r.id);
+
+      // Buscar avaliações existentes
+      const { data: reviews } = await supabase
+        .from("stay_reviews")
+        .select("reservation_id")
+        .in("reservation_id", pastCheckoutReservationIds);
+
+      const reviewedReservationIds = new Set(
+        reviews?.map((r) => r.reservation_id) || []
+      );
+
+      // Filtrar reservas que ainda não foram avaliadas E que têm o feature flag habilitado
+      return pastCheckoutReservations.filter((r) => {
+        // Verificar se já foi avaliada
+        if (reviewedReservationIds.has(r.id)) {
+          return false;
+        }
+        
+        // Verificar se o feature flag está habilitado para o estabelecimento desta reserva
+        return isFeatureEnabledForEstablishment(
+          siteSettings?.features_enabled?.stay_reviews,
+          r.establishment_id
+        );
+      });
+    },
+    enabled: !!accountId,
+  });
+
+  // Buscar todas as avaliações do hóspede para verificar quais reservas já foram avaliadas
+  const { data: allGuestReviews } = useQuery({
+    queryKey: ["all_guest_reviews", accountId],
+    queryFn: async () => {
+      if (!accountId) return [];
+      
+      // Buscar todas as avaliações do hóspede
+      const { data: reviews } = await supabase
+        .from("stay_reviews")
+        .select("reservation_id")
+        .eq("guest_account_id", accountId);
+      
+      return reviews || [];
+    },
+    enabled: !!accountId,
+  });
+
   // Buscar web_checkin para obter token e locator
   const { data: webCheckin, isLoading: isLoadingWebCheckin } = useQuery({
     queryKey: ["current_web_checkin", currentReservation?.id],
@@ -880,7 +985,133 @@ export default function GuestDashboard() {
         }
       }
 
-      // 3. Buscar chamados de manutenção (completados ou atualizados recentemente)
+      // 3. Verificar reservas com check-out que ainda não foram avaliadas
+      if (accountId) {
+        try {
+          // Buscar histórico de estadias do hóspede
+          const { data: history } = await supabase
+            .from("guest_stay_history")
+            .select("reservation_id, status, checkout_date")
+            .eq("guest_account_id", accountId)
+            .order("checkout_date", { ascending: false });
+
+          if (history && history.length > 0) {
+            const reservationIds = history.map((h) => h.reservation_id);
+
+            // Buscar reservas com check-out realizado
+            const { data: checkedOutReservations } = await supabase
+              .from("reservations")
+              .select(`
+                id,
+                reservation_code,
+                identification_number,
+                checkout_date,
+                status,
+                establishment_id,
+                rooms(id, room_number, name),
+                establishment:establishments(id, name)
+              `)
+              .in("id", reservationIds)
+              .eq("status", "checkedout")
+              .order("checkout_date", { ascending: false })
+              .limit(5);
+
+            // Buscar locators do web_checkin para cada reserva
+            const reservationIdsForLocator = checkedOutReservations?.map((r) => r.id) || [];
+            let locatorsMap: Record<string, string> = {};
+            
+            if (reservationIdsForLocator.length > 0) {
+              const { data: webCheckins } = await supabase
+                .from("web_checkin")
+                .select("reservation_id, locator")
+                .in("reservation_id", reservationIdsForLocator)
+                .order("created_at", { ascending: false });
+              
+              if (webCheckins) {
+                webCheckins.forEach((wc: any) => {
+                  if (wc.locator && !locatorsMap[wc.reservation_id]) {
+                    locatorsMap[wc.reservation_id] = wc.locator;
+                  }
+                });
+              }
+            }
+
+            if (checkedOutReservations && checkedOutReservations.length > 0) {
+              // Filtrar reservas com data de check-out já passada
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              
+              const pastCheckoutReservations = checkedOutReservations.filter((r) => {
+                if (!r.checkout_date) return false;
+                const checkoutDate = new Date(r.checkout_date);
+                checkoutDate.setHours(0, 0, 0, 0);
+                return checkoutDate < today;
+              });
+
+              if (pastCheckoutReservations.length > 0) {
+                const pastCheckoutReservationIds = pastCheckoutReservations.map((r) => r.id);
+
+                // Buscar avaliações existentes
+                const { data: reviews } = await supabase
+                  .from("stay_reviews")
+                  .select("reservation_id")
+                  .in("reservation_id", pastCheckoutReservationIds);
+
+                const reviewedReservationIds = new Set(
+                  reviews?.map((r) => r.reservation_id) || []
+                );
+
+                // Verificar feature flag
+                const { data: siteSettings } = await supabase
+                  .from("site_settings")
+                  .select("features_enabled")
+                  .eq("id", "00000000-0000-0000-0000-000000000001")
+                  .maybeSingle();
+
+                const { isFeatureEnabledForEstablishment } = await import("@/lib/featureAccess");
+
+                // Criar notificação para cada reserva não avaliada
+                for (const reservation of pastCheckoutReservations) {
+                  // Verificar se já foi avaliada
+                  if (reviewedReservationIds.has(reservation.id)) {
+                    continue;
+                  }
+
+                  // Verificar se o feature flag está habilitado para o estabelecimento
+                  const isStayReviewsEnabled = isFeatureEnabledForEstablishment(
+                    siteSettings?.features_enabled?.stay_reviews,
+                    reservation.establishment_id
+                  );
+
+                  if (isStayReviewsEnabled) {
+                    // Usar o locator do web_checkin, se disponível, caso contrário usar reservation_code
+                    const locator = locatorsMap[reservation.id] || reservation.reservation_code || "N/A";
+                    const checkoutDate = reservation.checkout_date 
+                      ? new Date(reservation.checkout_date)
+                      : new Date();
+                    
+                    notificationsList.push({
+                      id: `review-reminder-${reservation.id}`,
+                      type: "review_reminder",
+                      title: "Avalie sua estadia",
+                      message: `Sua reserva ${locator} já teve check-out realizado. Avalie sua experiência e nos ajude a melhorar!`,
+                      date: checkoutDate,
+                      reservationId: reservation.id,
+                      reservationCode: reservation.reservation_code,
+                      locator: locator,
+                      priority: "medium",
+                    });
+                  }
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Erro ao buscar reservas para avaliação:", error);
+        }
+      }
+
+      // 4. Buscar chamados de manutenção (completados ou atualizados recentemente)
       if (accountId) {
         try {
           // Buscar tickets do hóspede que foram atualizados recentemente (últimos 7 dias)
@@ -1265,6 +1496,8 @@ export default function GuestDashboard() {
                                   return <Key className="h-4 w-4 text-blue-600" />;
                                 case "checkout_reminder":
                                   return <LogOut className="h-4 w-4 text-orange-600" />;
+                                case "review_reminder":
+                                  return <Star className="h-4 w-4 text-yellow-600" />;
                                 case "maintenance_resolved":
                                   return <CheckCircle className="h-4 w-4 text-green-600" />;
                                 case "maintenance_progress":
@@ -1297,6 +1530,7 @@ export default function GuestDashboard() {
                                     className="mt-0.5 cursor-pointer flex-shrink-0"
                                     onClick={() => {
                                       if (notification.reservationId) {
+                                        setSelectedCancelledReservation(null); // Limpar reserva cancelada ao abrir detalhes
                                         setShowCurrentReservation(true);
                                       }
                                       if (!isRead) {
@@ -1310,7 +1544,19 @@ export default function GuestDashboard() {
                                   <div 
                                     className="flex-1 min-w-0 cursor-pointer"
                                     onClick={() => {
+                                      // Se for notificação de review, abrir detalhes da reserva
+                                      if (notification.type === "review_reminder" && notification.reservationId) {
+                                        if (!isRead) {
+                                          markAsRead(notification.id);
+                                        }
+                                        setSelectedCancelledReservation(null); // Limpar reserva cancelada ao abrir detalhes
+                                        setShowCurrentReservation(true);
+                                        setShowNotificationsDropdown(false);
+                                        return;
+                                      }
+                                      
                                       if (notification.reservationId) {
+                                        setSelectedCancelledReservation(null); // Limpar reserva cancelada ao abrir detalhes
                                         setShowCurrentReservation(true);
                                       }
                                       // Se for notificação de ticket de manutenção, rolar até a seção de tickets
@@ -1345,9 +1591,33 @@ export default function GuestDashboard() {
                                     <p className="text-sm text-slate-600 mb-2">
                                       {notification.message}
                                     </p>
-                                    <p className="text-xs text-slate-500">
+                                    {notification.locator && (
+                                      <p className="text-xs text-slate-500 mb-2">
+                                        Localizador: <span className="font-semibold">{notification.locator}</span>
+                                      </p>
+                                    )}
+                                    <p className="text-xs text-slate-500 mb-2">
                                       {format(notification.date, "dd/MM/yyyy 'às' HH:mm", { locale })}
                                     </p>
+                                    {notification.type === "review_reminder" && notification.reservationId && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="mt-2 text-xs h-7"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (!isRead) {
+                                            markAsRead(notification.id);
+                                          }
+                                          setSelectedCancelledReservation(null); // Limpar reserva cancelada ao abrir detalhes
+                                          setShowCurrentReservation(true);
+                                          setShowNotificationsDropdown(false);
+                                        }}
+                                      >
+                                        <FileText className="h-3 w-3 mr-1" />
+                                        Ver Detalhes da Reserva
+                                      </Button>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-1 flex-shrink-0">
                                     {!isRead && (
@@ -1577,7 +1847,10 @@ export default function GuestDashboard() {
 
                       {/* CTA Principal */}
                       <button 
-                        onClick={() => setShowCurrentReservation(true)}
+                        onClick={() => {
+                          setSelectedCancelledReservation(null); // Limpar reserva cancelada ao abrir detalhes
+                          setShowCurrentReservation(true);
+                        }}
                         className="w-full bg-white text-blue-600 font-bold py-4 rounded-2xl hover:bg-blue-50 transition-all transform hover:scale-[1.02] shadow-xl text-base"
                       >
                         Gerenciar Estadia
@@ -1655,6 +1928,15 @@ export default function GuestDashboard() {
                         <Receipt className="w-4 h-4 text-blue-600" />
                         <span className="text-sm font-medium text-slate-700">Nota Fiscal</span>
                       </button>
+                      {reviewableReservations && reviewableReservations.length > 0 && (
+                        <button
+                          onClick={() => setShowReviewReservationSelector(true)}
+                          className="flex items-center gap-2 px-4 py-2.5 bg-white rounded-xl hover:bg-blue-50 border border-slate-200 hover:border-blue-300 transition-all shadow-sm hover:shadow-md"
+                        >
+                          <Star className="w-4 h-4 text-blue-600" />
+                          <span className="text-sm font-medium text-slate-700">Avaliar Estadia</span>
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -1935,6 +2217,26 @@ export default function GuestDashboard() {
               color="from-blue-500 to-cyan-600"
               onClick={() => setShowProfileDialog(true)}
             />
+            {(() => {
+              // Verificar se a feature está habilitada globalmente
+              const stayReviewsConfig = siteSettings?.features_enabled?.stay_reviews;
+              const isGloballyEnabled = 
+                stayReviewsConfig === true || 
+                (typeof stayReviewsConfig === 'object' && 
+                 stayReviewsConfig?.enabled === true);
+              
+              return isGloballyEnabled && (
+                <ActionCard
+                  icon={<Star className="w-6 h-6" />}
+                  title="Avaliar Minhas Estadias"
+                  description="Avalie suas estadias e compartilhe sua experiência"
+                  color="from-yellow-500 to-orange-600"
+                  onClick={() => {
+                    setShowReviewReservationSelector(true);
+                  }}
+                />
+              );
+            })()}
             </div>
           </div>
 
@@ -1950,6 +2252,7 @@ export default function GuestDashboard() {
               </div>
             </div>
           )}
+
 
           {/* Serviços Disponíveis - Design Premium */}
           <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-100">
@@ -1967,6 +2270,7 @@ export default function GuestDashboard() {
                   });
                   if (currentReservation) {
                     console.log("✅ Abrindo detalhes da reserva");
+                    setSelectedCancelledReservation(null); // Limpar reserva cancelada ao abrir detalhes
                     setShowCurrentReservation(true);
                   } else {
                     console.log("⚠️ Não há reserva ativa para mostrar informações");
@@ -2432,16 +2736,284 @@ export default function GuestDashboard() {
               queryClient.invalidateQueries({ queryKey: ["current_guest_reservation"] });
               queryClient.invalidateQueries({ queryKey: ["reservations"] });
               queryClient.invalidateQueries({ queryKey: ["all_guest_reservations"] });
-            }}
-          />
-        )}
-      </div>
-    );
-  }
+          }}
+        />
+      )}
+
+      {/* Dialog de Seleção de Reserva para Avaliação */}
+      <Dialog open={showReviewReservationSelector} onOpenChange={setShowReviewReservationSelector}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Avaliar Minhas Estadias</DialogTitle>
+            <DialogDescription>
+              Escolha qual estadia você deseja avaliar. Para avaliar, é necessário realizar o check-out da reserva.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-4 max-h-[400px] overflow-y-auto">
+            {isLoadingAllReservations ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+              </div>
+            ) : allReservations && allReservations.length > 0 ? (
+              (() => {
+                // Criar Set com IDs de reservas já avaliadas
+                const reviewedReservationIds = new Set(
+                  allGuestReviews?.map((r: any) => r.reservation_id) || []
+                );
+
+                return allReservations
+                  .filter((r: any) => r.status?.toLowerCase() !== "cancelled")
+                  .map((reservation: any) => {
+                    const isCheckedOut = reservation.status?.toLowerCase() === "checkedout" || reservation.status?.toLowerCase() === "checked_out";
+                    const canReview = reviewableReservations?.some((r: any) => r.id === reservation.id);
+                    const isReviewed = reviewedReservationIds.has(reservation.id);
+                    
+                    return (
+                      <div
+                        key={reservation.id}
+                        className={`w-full text-left p-4 rounded-xl border transition-all ${
+                          isCheckedOut && canReview
+                            ? "border-green-200 bg-green-50 hover:border-green-500 hover:bg-green-100"
+                            : isReviewed
+                            ? "border-blue-200 bg-blue-50"
+                            : "border-slate-200 bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <h4 className="font-semibold text-slate-900">
+                                {reservation.reservation_code || "Reserva sem código"}
+                              </h4>
+                              {isReviewed ? (
+                                <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 border-blue-300">
+                                  <Star className="w-3 h-3 mr-1 fill-blue-600" />
+                                  Já avaliada
+                                </Badge>
+                              ) : isCheckedOut ? (
+                                <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-300">
+                                  Check-out realizado
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-xs bg-yellow-100 text-yellow-700 border-yellow-300">
+                                  Aguardando check-out
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-sm text-slate-600 space-y-1">
+                              <div>
+                                Quarto: {reservation.rooms?.room_number || reservation.rooms?.name || "N/A"}
+                              </div>
+                              <div>
+                                Estabelecimento: {reservation.establishment?.name || "N/A"}
+                              </div>
+                              <div>
+                                Check-out:{" "}
+                                {reservation.checkout_date
+                                  ? format(new Date(reservation.checkout_date), "dd/MM/yyyy", { locale })
+                                  : "N/A"}
+                              </div>
+                            </div>
+                            {isReviewed && (
+                              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                <p className="text-sm text-blue-800 flex items-center gap-2">
+                                  <Star className="w-4 h-4 fill-blue-600" />
+                                  Esta estadia já foi avaliada. Obrigado pelo seu feedback!
+                                </p>
+                              </div>
+                            )}
+                            {!isCheckedOut && !isReviewed && (
+                              <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                <p className="text-sm text-yellow-800 mb-2">
+                                  Para avaliar esta estadia, é necessário realizar o check-out primeiro.
+                                </p>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full border-yellow-300 text-yellow-700 hover:bg-yellow-100"
+                                  onClick={async () => {
+                                    // Buscar web_checkin para esta reserva
+                                    const { data: webCheckinData } = await supabase
+                                      .from("web_checkin")
+                                      .select("*")
+                                      .eq("reservation_id", reservation.id)
+                                      .order("created_at", { ascending: false })
+                                      .limit(1)
+                                      .maybeSingle();
+
+                                    if (!webCheckinData) {
+                                      toast.error("Não foi possível encontrar os dados de check-out. Por favor, tente novamente.");
+                                      return;
+                                    }
+
+                                    setSelectedReservationForCheckout({
+                                      ...reservation,
+                                      webCheckin: webCheckinData,
+                                    });
+                                    setShowCheckoutDialog(true);
+                                  }}
+                                >
+                                  <LogOut className="h-4 w-4 mr-2" />
+                                  Realizar Check-out
+                                </Button>
+                              </div>
+                            )}
+                            {isCheckedOut && !isReviewed && canReview && (
+                              <div className="mt-3">
+                                <Button
+                                  size="sm"
+                                  className="w-full bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-white"
+                                  onClick={async () => {
+                                    // Buscar configurações de avaliação do estabelecimento
+                                    const { data: settings } = await supabase
+                                      .from("establishment_review_settings")
+                                      .select("is_enabled, review_type")
+                                      .eq("establishment_id", reservation.establishment_id)
+                                      .maybeSingle();
+
+                                    if (!settings || !settings.is_enabled) {
+                                      toast.error("O sistema de avaliações não está habilitado para este estabelecimento.");
+                                      return;
+                                    }
+
+                                    setSelectedReservationForReview({
+                                      ...reservation,
+                                      reviewType: settings.review_type,
+                                      maxRating: settings.review_type === "numeric" ? 10 : 5,
+                                    });
+                                    setShowReviewReservationSelector(false);
+                                    setShowReviewDialog(true);
+                                  }}
+                                >
+                                  <Star className="h-4 w-4 mr-2" />
+                                  Avaliar Estadia
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  });
+              })()
+            ) : (
+              <div className="text-center py-8">
+                <Star className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+                <p className="text-slate-600">
+                  Nenhuma reserva encontrada.
+                </p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Check-out */}
+      {showCheckoutDialog && selectedReservationForCheckout && (
+        <WebCheckoutDialog
+          open={showCheckoutDialog}
+          onOpenChange={(open) => {
+            setShowCheckoutDialog(open);
+            if (!open) {
+              setSelectedReservationForCheckout(null);
+              queryClient.invalidateQueries({ queryKey: ["all_guest_reservations"] });
+              queryClient.invalidateQueries({ queryKey: ["reviewable_reservations_for_dialog"] });
+            }
+          }}
+          reservation={selectedReservationForCheckout}
+          webCheckin={selectedReservationForCheckout.webCheckin}
+          token={selectedReservationForCheckout.webCheckin?.token || ""}
+          onSuccess={async () => {
+            setShowCheckoutDialog(false);
+            setSelectedReservationForCheckout(null);
+            queryClient.invalidateQueries({ queryKey: ["all_guest_reservations"] });
+            queryClient.invalidateQueries({ queryKey: ["reviewable_reservations_for_dialog"] });
+            
+            // Buscar dados atualizados da reserva após check-out
+            const { data: updatedReservation } = await supabase
+              .from("reservations")
+              .select(`
+                *,
+                rooms(id, room_number, name),
+                establishment:establishments(id, name)
+              `)
+              .eq("id", selectedReservationForCheckout.id)
+              .single();
+
+            if (updatedReservation) {
+              // Buscar configurações de avaliação do estabelecimento
+              const { data: settings } = await supabase
+                .from("establishment_review_settings")
+                .select("is_enabled, review_type")
+                .eq("establishment_id", updatedReservation.establishment_id)
+                .maybeSingle();
+
+              if (settings && settings.is_enabled) {
+                // Abrir diretamente o formulário de avaliação
+                setSelectedReservationForReview({
+                  ...updatedReservation,
+                  reviewType: settings.review_type,
+                  maxRating: settings.review_type === "numeric" ? 10 : 5,
+                });
+                setShowReviewDialog(true);
+                toast.success("Check-out realizado com sucesso! Agora você pode avaliar sua estadia.");
+              } else {
+                toast.success("Check-out realizado com sucesso!");
+                // Reabrir o modal de seleção se avaliações não estiverem habilitadas
+                setTimeout(() => {
+                  setShowReviewReservationSelector(true);
+                }, 500);
+              }
+            } else {
+              toast.success("Check-out realizado com sucesso!");
+              // Reabrir o modal de seleção se não conseguir buscar a reserva
+              setTimeout(() => {
+                setShowReviewReservationSelector(true);
+              }, 500);
+            }
+          }}
+        />
+      )}
+
+      {/* Dialog de Avaliação */}
+      {showReviewDialog && selectedReservationForReview && accountId && (
+        <Dialog open={showReviewDialog} onOpenChange={setShowReviewDialog}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Avaliar Estadia</DialogTitle>
+              <DialogDescription>
+                Avalie sua experiência na estadia {selectedReservationForReview.reservation_code}
+              </DialogDescription>
+            </DialogHeader>
+            <StayReviewForm
+              reservationId={selectedReservationForReview.id}
+              establishmentId={selectedReservationForReview.establishment_id}
+              guestAccountId={accountId}
+              reviewType={selectedReservationForReview.reviewType}
+              maxRating={selectedReservationForReview.maxRating}
+              onSubmit={() => {
+                setShowReviewDialog(false);
+                setSelectedReservationForReview(null);
+                queryClient.invalidateQueries({ queryKey: ["reviewable_reservations_for_dialog"] });
+                queryClient.invalidateQueries({ queryKey: ["reviewable_reservations"] });
+                queryClient.invalidateQueries({ queryKey: ["all_guest_reviews"] });
+                queryClient.invalidateQueries({ queryKey: ["all_guest_reservations"] });
+                toast.success("Avaliação enviada com sucesso! Obrigado pelo seu feedback.");
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}
 
   // Visualização de detalhes da reserva
-  // Se houver uma reserva cancelada selecionada, usar ela; caso contrário, usar currentReservation
-  const reservation = selectedCancelledReservation || currentReservation;
+  // Se houver uma reserva cancelada selecionada E ela for realmente cancelada, usar ela; caso contrário, usar currentReservation
+  const reservation = (selectedCancelledReservation && selectedCancelledReservation.status?.toLowerCase() === "cancelled") 
+    ? selectedCancelledReservation 
+    : currentReservation;
   const building = reservation?.building;
   
   // Se não houver reserva, não renderizar nada
@@ -2490,7 +3062,13 @@ export default function GuestDashboard() {
           {/* Botão Voltar */}
           <Button
             variant="ghost"
-            onClick={() => setShowCurrentReservation(false)}
+            onClick={() => {
+              setShowCurrentReservation(false);
+              // Limpar reserva cancelada selecionada ao voltar, para evitar conflitos
+              if (selectedCancelledReservation && selectedCancelledReservation.status?.toLowerCase() !== "cancelled") {
+                setSelectedCancelledReservation(null);
+              }
+            }}
             className="mb-4 sm:mb-6 flex items-center gap-2"
           >
             <ChevronRight className="w-4 h-4 rotate-180" />
@@ -2818,8 +3396,8 @@ export default function GuestDashboard() {
           )
         )}
 
-        {/* Mensagem se reserva estiver cancelada ou check-out realizado */}
-        {reservation && (reservation.status?.toLowerCase() === "cancelled" || reservation.status?.toLowerCase() === "checkedout" || reservation.status?.toLowerCase() === "checked_out") && (
+        {/* Mensagem se reserva estiver cancelada */}
+        {reservation && reservation.status?.toLowerCase() === "cancelled" && (
           <Card className="p-4 sm:p-6 mt-4 sm:mt-6 bg-red-50 border-red-200">
             <div className="text-center">
               <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-red-100 mb-3 sm:mb-4">
@@ -2853,6 +3431,69 @@ export default function GuestDashboard() {
             </div>
           </Card>
         )}
+
+        {/* Botão de Avaliar Estadia - Mostrar apenas se check-out realizado e feature habilitado */}
+        {(() => {
+          const isCheckedOut = reservation?.status?.toLowerCase() === "checkedout" || reservation?.status?.toLowerCase() === "checked_out";
+          if (!isCheckedOut || !accountId || !reservation?.establishment_id) return null;
+
+          // Verificar se o feature flag está habilitado e se a reserva pode ser avaliada
+          const isStayReviewsEnabled = isFeatureEnabledForEstablishment(
+            siteSettings?.features_enabled?.stay_reviews,
+            reservation.establishment_id
+          );
+
+          if (!isStayReviewsEnabled) return null;
+
+          // Verificar se a reserva já foi avaliada
+          const hasReview = reviewableReservations?.some((r: any) => r.id === reservation.id);
+          
+          // Se não está na lista de reviewable, pode ser que já foi avaliada ou não está disponível
+          // Vamos mostrar o botão se estiver na lista ou se não temos certeza
+          if (reviewableReservations && !hasReview) return null;
+
+          return (
+            <Card className="p-4 sm:p-6 mt-4 sm:mt-6 bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-200">
+              <div className="text-center">
+                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-yellow-100 mb-3 sm:mb-4">
+                  <Star className="h-6 w-6 sm:h-8 sm:w-8 text-yellow-600 fill-yellow-600" />
+                </div>
+                <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">
+                  Avalie sua Estadia
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 mb-3 sm:mb-4">
+                  Sua reserva já teve check-out realizado. Compartilhe sua experiência e nos ajude a melhorar!
+                </p>
+                <Button
+                  onClick={async () => {
+                    // Buscar configurações de avaliação do estabelecimento
+                    const { data: settings } = await supabase
+                      .from("establishment_review_settings")
+                      .select("is_enabled, review_type")
+                      .eq("establishment_id", reservation.establishment_id)
+                      .maybeSingle();
+
+                    if (!settings || !settings.is_enabled) {
+                      toast.error("O sistema de avaliações não está habilitado para este estabelecimento.");
+                      return;
+                    }
+
+                    setSelectedReservationForReview({
+                      ...reservation,
+                      reviewType: settings.review_type,
+                      maxRating: settings.review_type === "numeric" ? 10 : 5,
+                    });
+                    setShowReviewDialog(true);
+                  }}
+                  className="bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-white shadow-md hover:shadow-lg transition-all"
+                >
+                  <Star className="h-4 w-4 mr-2" />
+                  Avaliar Estadia
+                </Button>
+              </div>
+            </Card>
+          );
+        })()}
 
         {/* Ações Rápidas */}
         <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center pt-4 sm:pt-6">

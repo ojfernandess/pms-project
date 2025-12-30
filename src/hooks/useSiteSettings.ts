@@ -18,6 +18,7 @@ export interface SiteSettings {
     email?: boolean;
     web_checkin?: boolean;
     channel_manager?: boolean;
+    stay_reviews?: boolean;
   } | null;
   created_at: string;
   updated_at: string;
@@ -59,6 +60,7 @@ export const useSiteSettings = () => {
             email: true,
             web_checkin: true,
             channel_manager: true,
+            stay_reviews: false,
           },
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),

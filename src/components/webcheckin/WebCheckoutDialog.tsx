@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { format, parseISO } from "date-fns";
@@ -38,27 +37,11 @@ export function WebCheckoutDialog({
 }: WebCheckoutDialogProps) {
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
-  const [twoFactorCode, setTwoFactorCode] = useState("");
-  const [showTwoFactor, setShowTwoFactor] = useState(false);
   const [feedback, setFeedback] = useState("");
 
   const handleRequestCheckout = async () => {
-    // Para ações críticas, solicitar autenticação em duas etapas
-    if (!showTwoFactor) {
-      setShowTwoFactor(true);
-      return;
-    }
-
-    if (!twoFactorCode.trim()) {
-      toast.error("Por favor, informe o código de verificação");
-      return;
-    }
-
     setLoading(true);
     try {
-      // Verificar código de duas etapas (simplificado - em produção usar validação adequada)
-      // Por enquanto, apenas verificar se foi informado
-
       // Atualizar status da reserva para checkedout
       const { error: updateError } = await supabase
         .from("reservations")
@@ -106,6 +89,110 @@ export function WebCheckoutDialog({
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
       queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
       queryClient.invalidateQueries({ queryKey: ["guest_stay_history"] });
+      
+      // Criar notificação no sistema informando o check-out do hóspede
+      try {
+        // Buscar dados completos da reserva para obter nome do hóspede
+        const { data: fullReservation } = await supabase
+          .from("reservations")
+          .select(`
+            *,
+            financial_responsible:clients!client_id(full_name, email),
+            guest:clients!guest_id(full_name, email),
+            rooms(room_number, name),
+            establishment:establishments(name)
+          `)
+          .eq("id", reservation.id)
+          .single();
+
+        if (fullReservation && fullReservation.establishment_id) {
+          const guestName = fullReservation.guest?.full_name || 
+                           fullReservation.financial_responsible?.full_name || 
+                           "Hóspede";
+          const roomNumber = fullReservation.rooms?.room_number || 
+                            fullReservation.rooms?.name || 
+                            "N/A";
+          const establishmentName = fullReservation.establishment?.name || 
+                                   "Estabelecimento";
+
+          await supabase.rpc("create_notification_for_establishment", {
+            p_establishment_id: fullReservation.establishment_id,
+            p_type: "checkout_today",
+            p_title: "Check-out Realizado",
+            p_message: `${guestName} realizou check-out da reserva ${reservation.reservation_code || ''} (Quarto: ${roomNumber})`,
+            p_priority: "medium",
+            p_metadata: {
+              reservation_id: reservation.id,
+              reservation_code: reservation.reservation_code,
+              guest_name: guestName,
+              room_number: roomNumber,
+              checkout_via: "web_checkin",
+            },
+          });
+        }
+      } catch (error) {
+        console.error("Erro ao criar notificação de check-out:", error);
+        // Não bloquear o checkout se a notificação falhar
+      }
+      
+      // Verificar se deve enviar email de solicitação de avaliação
+      try {
+        // Verificar feature flag para o estabelecimento
+        const { data: siteSettings } = await supabase
+          .from("site_settings")
+          .select("features_enabled")
+          .eq("id", "00000000-0000-0000-0000-000000000001")
+          .maybeSingle();
+        
+        const { isFeatureEnabledForEstablishment } = await import("@/lib/featureAccess");
+        const isStayReviewsEnabled = isFeatureEnabledForEstablishment(
+          siteSettings?.features_enabled?.stay_reviews,
+          reservation.establishment_id
+        );
+        
+        if (isStayReviewsEnabled) {
+          const { sendStayReviewRequestEmail } = await import("@/lib/emailService");
+          
+          // Buscar dados completos da reserva
+          const { data: fullReservation } = await supabase
+            .from("reservations")
+            .select(`
+              *,
+              financial_responsible:clients!client_id(*),
+              guest:clients!guest_id(*),
+              rooms (*),
+              room_categories (*)
+            `)
+            .eq("id", reservation.id)
+            .single();
+          
+          if (fullReservation) {
+            // Buscar configurações de avaliação do estabelecimento
+            const { data: reviewSettings } = await supabase
+              .from("establishment_review_settings")
+              .select("is_enabled, send_email_after_checkout, email_delay_hours")
+              .eq("establishment_id", fullReservation.establishment_id)
+              .maybeSingle();
+            
+            if (reviewSettings?.is_enabled && reviewSettings?.send_email_after_checkout) {
+            // Gerar link de avaliação
+            const baseUrl = typeof window !== 'undefined' 
+              ? window.location.origin 
+              : (import.meta.env.VITE_APP_URL || 'http://localhost:8080');
+            
+            // Usar reservation_code ou identification_number para o link
+            const locator = fullReservation.identification_number || fullReservation.reservation_code;
+            const reviewLink = `${baseUrl}/review/${locator}`;
+            
+            await sendStayReviewRequestEmail(fullReservation, reviewLink);
+            }
+          }
+        }
+      } catch (error) {
+        console.warn("⚠️ Erro ao enviar email de solicitação de avaliação:", error);
+        // Não bloquear o checkout se houver erro no envio de email
+      }
+      
       onSuccess?.();
       onOpenChange(false);
 
@@ -176,34 +263,6 @@ export function WebCheckoutDialog({
             />
           </div>
 
-          {/* Autenticação em duas etapas */}
-          {showTwoFactor && (
-            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
-              <div className="flex items-start gap-2 mb-3">
-                <AlertCircle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-semibold text-yellow-900 mb-1">
-                    Verificação de Segurança
-                  </p>
-                  <p className="text-sm text-yellow-800">
-                    Para sua segurança, confirme o check-out informando o código enviado
-                    por email ou SMS.
-                  </p>
-                </div>
-              </div>
-              <div>
-                <Label>Código de Verificação</Label>
-                <Input
-                  value={twoFactorCode}
-                  onChange={(e) => setTwoFactorCode(e.target.value)}
-                  placeholder="Digite o código"
-                  className="mt-1"
-                  maxLength={6}
-                />
-              </div>
-            </div>
-          )}
-
           {/* Aviso sobre saldo pendente */}
           {pendingAmount > 0 && (
             <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-md">
@@ -226,10 +285,8 @@ export function WebCheckoutDialog({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Processando...
               </>
-            ) : showTwoFactor ? (
-              "Confirmar Check-out"
             ) : (
-              "Solicitar Check-out"
+              "Confirmar Check-out"
             )}
           </Button>
         </DialogFooter>

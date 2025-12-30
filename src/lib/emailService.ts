@@ -1878,8 +1878,153 @@ export async function sendCheckoutReminders(
   }
 }
 
+/**
+ * Envia e-mail de solicitação de avaliação após check-out
+ */
+export async function sendStayReviewRequestEmail(
+  reservation: any,
+  reviewLink: string
+): Promise<string | null> {
+  try {
+    console.log('📧 Enviando e-mail de solicitação de avaliação:', { 
+      reservationId: reservation?.id,
+      reviewLink
+    });
+    
+    // Verificar se o feature flag de avaliações está habilitado para este estabelecimento
+    const { data: siteSettings } = await supabase
+      .from('site_settings')
+      .select('features_enabled')
+      .eq('id', '00000000-0000-0000-0000-000000000001')
+      .maybeSingle();
+    
+    const { isFeatureEnabledForEstablishment } = await import('@/lib/featureAccess');
+    const isStayReviewsEnabled = isFeatureEnabledForEstablishment(
+      siteSettings?.features_enabled?.stay_reviews,
+      reservation?.establishment_id
+    );
+    
+    if (!isStayReviewsEnabled) {
+      console.warn('⚠️ Sistema de avaliações está desabilitado para este estabelecimento. E-mail não será enviado.');
+      return null;
+    }
+    
+    // Verificar se as configurações de e-mail estão ativas
+    const settings = await getEmailSettings();
+    if (!settings || !settings.is_active) {
+      console.warn('⚠️ Configurações de e-mail não encontradas ou inativas. E-mail não será enviado.');
+      return null;
+    }
+    
+    // Buscar template ativo para o evento
+    const { data: templates, error: templateError } = await supabase
+      .from('email_templates')
+      .select('*')
+      .eq('event_type', 'checkout.completed')
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+
+    if (templateError) {
+      console.error('❌ Erro ao buscar template para evento: checkout.completed', templateError);
+      return null;
+    }
+
+    if (!templates || templates.length === 0) {
+      console.warn('⚠️ Template não encontrado para evento: checkout.completed');
+      return null;
+    }
+
+    const template = templates[0];
+    
+    // Buscar dados completos da reserva
+    const { data: fullReservation, error: reservationError } = await supabase
+      .from('reservations')
+      .select(`
+        *,
+        financial_responsible:clients!client_id(*),
+        guest:clients!guest_id(*),
+        rooms (id, room_number, name),
+        room_categories (id, name, description, building_id)
+      `)
+      .eq('id', reservation.id || reservation)
+      .single();
+
+    if (reservationError || !fullReservation) {
+      console.error('❌ Erro ao buscar dados da reserva:', reservationError);
+      return null;
+    }
+
+    // Gerar variáveis do template
+    const variables = generateReservationVariables(fullReservation);
+    
+    // Adicionar link de avaliação
+    const allVariables: TemplateVariables = {
+      ...variables,
+      review_link: reviewLink,
+    };
+
+    // Processar template
+    const subject = processTemplate(template.subject, allVariables);
+    const bodyHtml = processTemplate(template.body_html, allVariables);
+
+    // Determinar destinatário
+    const recipientEmail = fullReservation.guest?.email || fullReservation.financial_responsible?.email;
+    const recipientName = fullReservation.guest?.full_name || fullReservation.financial_responsible?.full_name;
+
+    if (!recipientEmail) {
+      console.warn('⚠️ E-mail do destinatário não encontrado para reserva:', fullReservation.id);
+      return null;
+    }
+
+    console.log('✅ Destinatário encontrado:', { email: recipientEmail, name: recipientName });
+
+    // Adicionar à fila
+    const queueId = await queueEmail({
+      template_id: template.id,
+      event_type: 'checkout.completed',
+      recipient_email: recipientEmail,
+      recipient_name: recipientName,
+      subject,
+      body_html: bodyHtml,
+      variables: allVariables,
+      reservation_id: fullReservation.id,
+      cc_emails: template.cc_emails || undefined,
+      bcc_emails: template.bcc_emails || undefined,
+    });
+
+    if (!queueId) {
+      console.error('❌ Erro ao adicionar e-mail à fila');
+      return null;
+    }
+
+    console.log('✅ E-mail adicionado à fila:', { queueId });
+
+    // Processar imediatamente
+    try {
+      const { data: queueItem } = await supabase
+        .from('email_queue')
+        .select('*')
+        .eq('id', queueId)
+        .single();
+
+      if (queueItem) {
+        // Processar e-mail imediatamente (a função processEmailQueue será chamada automaticamente)
+        console.log('📬 E-mail será processado pela fila');
+      }
+    } catch (error) {
+      console.warn('⚠️ Erro ao processar e-mail imediatamente, será processado pela fila:', error);
+    }
+
+    return queueId;
+  } catch (error) {
+    console.error('❌ Erro ao enviar e-mail de solicitação de avaliação:', error);
+    return null;
+  }
+}
+
 export async function triggerEmail(
-  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification',
+  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification' | 'checkout.completed',
   reservation: any,
   additionalVariables?: TemplateVariables,
   customRecipientEmail?: string

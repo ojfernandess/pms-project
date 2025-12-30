@@ -881,7 +881,7 @@ export const useReservations = () => {
 
       return data;
     },
-        onSuccess: async () => {
+        onSuccess: async (updatedReservation) => {
           // Invalidar e refetch todas as queries relacionadas para atualizar o mapa em tempo real
           queryClient.invalidateQueries({ queryKey: ["reservations"] });
           queryClient.invalidateQueries({ queryKey: ["rooms"] });
@@ -889,6 +889,52 @@ export const useReservations = () => {
           // Forçar refetch imediato para atualizar o mapa
           await queryClient.refetchQueries({ queryKey: ["reservations"] });
           await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
+          
+          // Verificar se deve enviar email de solicitação de avaliação
+          try {
+            // Verificar feature flag para o estabelecimento
+            const { data: siteSettings } = await supabase
+              .from("site_settings")
+              .select("features_enabled")
+              .eq("id", "00000000-0000-0000-0000-000000000001")
+              .maybeSingle();
+            
+            const { isFeatureEnabledForEstablishment } = await import("@/lib/featureAccess");
+            const isStayReviewsEnabled = isFeatureEnabledForEstablishment(
+              siteSettings?.features_enabled?.stay_reviews,
+              updatedReservation.establishment_id
+            );
+            
+            if (isStayReviewsEnabled) {
+              const { sendStayReviewRequestEmail } = await import("@/lib/emailService");
+              
+              // Buscar configurações de avaliação do estabelecimento
+              const { data: reviewSettings } = await supabase
+                .from("establishment_review_settings")
+                .select("is_enabled, send_email_after_checkout, email_delay_hours")
+                .eq("establishment_id", updatedReservation.establishment_id)
+                .maybeSingle();
+              
+              if (reviewSettings?.is_enabled && reviewSettings?.send_email_after_checkout) {
+              // Gerar link de avaliação
+              const baseUrl = typeof window !== 'undefined' 
+                ? window.location.origin 
+                : (import.meta.env.VITE_APP_URL || 'http://localhost:8080');
+              
+              // Usar reservation_code ou identification_number para o link
+              const locator = updatedReservation.identification_number || updatedReservation.reservation_code;
+              const reviewLink = `${baseUrl}/review/${locator}`;
+              
+              // Se houver delay configurado, agendar o envio (por enquanto, enviar imediatamente)
+              // Em produção, poderia usar uma função edge ou cron job para enviar após o delay
+              await sendStayReviewRequestEmail(updatedReservation, reviewLink);
+              }
+            }
+          } catch (error) {
+            console.warn("⚠️ Erro ao enviar email de solicitação de avaliação:", error);
+            // Não bloquear o checkout se houver erro no envio de email
+          }
+          
           toast.success("Check-out realizado com sucesso!");
         },
     onError: (error: any) => {

@@ -27,6 +27,8 @@ import Pricing from "./pages/Pricing";
 import PMSRateSystem from "./pages/PMSRateSystem";
 import ChannelManager from "./pages/ChannelManager";
 import Settings from "./pages/Settings";
+import StayReviews from "./pages/StayReviews";
+import ReviewPage from "./pages/ReviewPage";
 import Profile from "./pages/Profile";
 import Employees from "./pages/Employees";
 import SuperAdmin from "./pages/SuperAdmin";
@@ -123,6 +125,7 @@ const AppContent = () => {
             <Route path="/web-checkin/reset-password" element={<GuestResetPassword />} />
             <Route path="/web-checkin" element={<WebCheckin />} />
             <Route path="/guest-dashboard" element={<GuestDashboard />} />
+            <Route path="/review/:locator" element={<ReviewPage />} />
             <Route path="/payment/:paymentIntentId" element={<PaymentPage />} />
             <Route path="/payment/success/:paymentIntentId" element={<PaymentSuccess />} />
             <Route path="/payment/return" element={<PaymentSuccess />} />
@@ -137,6 +140,7 @@ const AppContent = () => {
             <Route path="/:establishmentId/tarifario" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><PMSRateSystem /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/tarifario-legado" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Pricing /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/manutencao" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Maintenance /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/avaliacoes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><StayReviews /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/channel-manager" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ChannelManager /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/configuracoes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Settings /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/perfil" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Profile /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />

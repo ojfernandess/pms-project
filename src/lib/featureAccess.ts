@@ -58,4 +58,40 @@ export const checkEstablishmentFeatureAccess = async (
   }
 };
 
+/**
+ * Verifica se uma funcionalidade está habilitada para um estabelecimento específico
+ * @param featureConfig - Configuração da funcionalidade (pode ser boolean ou objeto com enabled e establishment_ids)
+ * @param establishmentId - ID do estabelecimento
+ * @returns true se a funcionalidade está habilitada para o estabelecimento, false caso contrário
+ */
+export const isFeatureEnabledForEstablishment = (
+  featureConfig: any,
+  establishmentId: string | null | undefined
+): boolean => {
+  if (!establishmentId) {
+    return false;
+  }
 
+  // Se for boolean (formato antigo), retornar o valor diretamente
+  if (typeof featureConfig === 'boolean') {
+    return featureConfig;
+  }
+
+  // Se for objeto, verificar enabled e establishment_ids
+  if (typeof featureConfig === 'object' && featureConfig !== null) {
+    // Verificar se está habilitado globalmente
+    if (featureConfig.enabled !== true) {
+      return false;
+    }
+
+    // Se não há establishment_ids, significa que está habilitado para todos
+    if (!featureConfig.establishment_ids || !Array.isArray(featureConfig.establishment_ids)) {
+      return true;
+    }
+
+    // Verificar se o estabelecimento está na lista
+    return featureConfig.establishment_ids.includes(establishmentId);
+  }
+
+  return false;
+};
