@@ -2218,14 +2218,34 @@ export default function GuestDashboard() {
               onClick={() => setShowProfileDialog(true)}
             />
             {(() => {
-              // Verificar se a feature está habilitada globalmente
+              // Verificar se a feature está habilitada para pelo menos um estabelecimento
+              // Primeiro, verificar se a reserva atual tem o feature flag habilitado
+              const currentReservationEnabled = currentReservation?.establishment_id 
+                ? isFeatureEnabledForEstablishment(
+                    siteSettings?.features_enabled?.stay_reviews,
+                    currentReservation.establishment_id
+                  )
+                : false;
+              
+              // Verificar se há alguma reserva nas allReservations com o feature flag habilitado
+              const hasEnabledEstablishment = allReservations?.some((reservation: any) => {
+                if (!reservation?.establishment_id) return false;
+                return isFeatureEnabledForEstablishment(
+                  siteSettings?.features_enabled?.stay_reviews,
+                  reservation.establishment_id
+                );
+              });
+              
+              // Se não houver reservas ainda, verificar se está habilitado globalmente
               const stayReviewsConfig = siteSettings?.features_enabled?.stay_reviews;
               const isGloballyEnabled = 
                 stayReviewsConfig === true || 
                 (typeof stayReviewsConfig === 'object' && 
                  stayReviewsConfig?.enabled === true);
               
-              return isGloballyEnabled && (
+              const shouldShow = currentReservationEnabled || hasEnabledEstablishment || (allReservations?.length === 0 && isGloballyEnabled);
+              
+              return shouldShow && (
                 <ActionCard
                   icon={<Star className="w-6 h-6" />}
                   title="Avaliar Minhas Estadias"

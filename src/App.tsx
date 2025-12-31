@@ -29,6 +29,7 @@ import ChannelManager from "./pages/ChannelManager";
 import Settings from "./pages/Settings";
 import StayReviews from "./pages/StayReviews";
 import ReviewPage from "./pages/ReviewPage";
+import ThankYouPage from "./pages/ThankYouPage";
 import Profile from "./pages/Profile";
 import Employees from "./pages/Employees";
 import SuperAdmin from "./pages/SuperAdmin";
@@ -126,6 +127,7 @@ const AppContent = () => {
             <Route path="/web-checkin" element={<WebCheckin />} />
             <Route path="/guest-dashboard" element={<GuestDashboard />} />
             <Route path="/review/:locator" element={<ReviewPage />} />
+            <Route path="/thank-you" element={<ThankYouPage />} />
             <Route path="/payment/:paymentIntentId" element={<PaymentPage />} />
             <Route path="/payment/success/:paymentIntentId" element={<PaymentSuccess />} />
             <Route path="/payment/return" element={<PaymentSuccess />} />

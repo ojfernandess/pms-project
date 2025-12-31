@@ -134,7 +134,7 @@ export default function ReviewPage() {
   }, [locator]);
 
   const handleSubmitSuccess = () => {
-    navigate("/guest-dashboard");
+    navigate("/thank-you?from=review");
   };
 
   // Verificar novamente após carregar a reserva
@@ -210,7 +210,12 @@ export default function ReviewPage() {
               <div className="flex items-center justify-between">
                 <span className="text-slate-600">Quarto:</span>
                 <span className="font-semibold">
-                  {reservation.rooms?.room_number || reservation.rooms?.name || "N/A"}
+                  {(() => {
+                    const roomsData = Array.isArray(reservation.rooms) 
+                      ? reservation.rooms[0] 
+                      : reservation.rooms;
+                    return roomsData?.room_number || roomsData?.name || "N/A";
+                  })()}
                 </span>
               </div>
               <div className="flex items-center justify-between">

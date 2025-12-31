@@ -194,6 +194,15 @@ function processEachLoops(template: string, variables: TemplateVariables): strin
  */
 export function processTemplate(template: string, variables: TemplateVariables): string {
   let processed = template;
+  
+  // Log inicial para debug
+  if (template?.includes('{{review_link}}') || template?.includes('{{{review_link}}}')) {
+    console.log('🔍 processTemplate: Template contém review_link placeholder', {
+      hasReviewLinkVar: 'review_link' in variables,
+      reviewLinkValue: variables.review_link,
+      allKeys: Object.keys(variables),
+    });
+  }
 
   // Primeiro, processar loops {{#each array}}...{{/each}}
   processed = processEachLoops(processed, variables);
@@ -286,11 +295,39 @@ export function processTemplate(template: string, variables: TemplateVariables):
       }
     });
     
-    // Depois substituir variáveis simples (formato {{variable}})
+    // Depois substituir variáveis simples primeiro (formato {{variable}})
+    // Processar variáveis simples (strings, números, etc) antes de objetos
+    Object.keys(variables).forEach((key) => {
+      const value = variables[key];
+      
+      // Processar apenas valores simples (não objetos ou arrays)
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        const stringValue = value !== null && value !== undefined ? String(value) : '';
+        // Escapar caracteres especiais na chave
+        const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g');
+        const beforeReplace = processed;
+        const matches = processed.match(regex);
+        if (matches && matches.length > 0) {
+          processed = processed.replace(regex, stringValue);
+          if (beforeReplace !== processed) {
+            varChanged = true;
+            if (key === 'review_link') {
+              console.log('✅ review_link substituído no loop simples:', {
+                matches: matches.length,
+                value: stringValue,
+              });
+            }
+          }
+        }
+      }
+    });
+    
+    // Depois processar objetos e arrays (variáveis aninhadas)
     Object.keys(variables).forEach((key) => {
       const value = variables[key];
     
-      // Pular objetos e arrays (já foram processados nos loops e variáveis aninhadas)
+      // Processar objetos e arrays (variáveis aninhadas)
     if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       // Processar propriedades do objeto como variáveis aninhadas
       Object.keys(value).forEach((prop) => {
@@ -304,14 +341,41 @@ export function processTemplate(template: string, variables: TemplateVariables):
           }
       });
     } else {
+      // Esta parte já foi processada acima, mas manter para compatibilidade
       // Converter para string, tratando null/undefined como string vazia
       const stringValue = value !== null && value !== undefined ? String(value) : '';
         // Usar replace global para substituir todas as ocorrências
-      const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+      // Escapar caracteres especiais na chave (como underscore, que é válido em regex)
+      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g');
         const beforeReplace = processed;
+      const matches = processed.match(regex);
+      if (matches && matches.length > 0) {
+        console.log(`🔍 Substituindo variável ${key}:`, {
+          matches: matches.length,
+          value: stringValue,
+          key,
+          escapedKey,
+        });
+      }
       processed = processed.replace(regex, stringValue);
         if (beforeReplace !== processed) {
           varChanged = true;
+          if (key === 'review_link') {
+            console.log('✅ review_link substituído:', {
+              before: beforeReplace.includes('{{review_link}}'),
+              after: processed.includes('{{review_link}}'),
+              value: stringValue,
+            });
+          }
+        } else if (key === 'review_link' && processed.includes('{{review_link}}')) {
+          console.warn('⚠️ review_link NÃO foi substituído:', {
+            key,
+            escapedKey,
+            regex: regex.toString(),
+            value: stringValue,
+            templateHasPlaceholder: processed.includes('{{review_link}}'),
+          });
         }
     }
   });
@@ -322,6 +386,12 @@ export function processTemplate(template: string, variables: TemplateVariables):
     const remainingVars = processed.match(/\{\{[\w.]+(?:\.[\w.]+)*\}\}/g);
     if (remainingVars && remainingVars.length > 0) {
       console.log('⚠️ Variáveis não substituídas no template:', remainingVars);
+      console.log('📋 Variáveis disponíveis:', Object.keys(variables));
+      console.log('🔍 Verificando review_link:', {
+        hasReviewLink: 'review_link' in variables,
+        reviewLinkValue: variables.review_link,
+        reviewLinkType: typeof variables.review_link,
+      });
     }
   }
 
@@ -452,6 +522,9 @@ function processConditionals(template: string, variables: TemplateVariables): st
                 elseProcessed = processConditionals(elseProcessed, variables);
                 elseChanged = beforeProcess !== elseProcessed;
               }
+              // Limpeza final: remover qualquer {{/if}} que possa ter sobrado
+              // Isso pode acontecer se houver blocos aninhados mal formados
+              elseProcessed = elseProcessed.replace(/\{\{\/if\}\}/g, '');
               elseContent = elseProcessed;
             }
             
@@ -499,8 +572,16 @@ function processConditionals(template: string, variables: TemplateVariables): st
             } else {
               // Variável é falsy: manter o conteúdo do else (se existir), remover apenas as tags
               if (elseContent) {
-                // Limpar qualquer {{/if}} solto que possa ter sobrado do processamento recursivo
-                let finalElseContent = elseContent.replace(/\{\{\/if\}\}/g, '');
+                // O elseContent já foi processado recursivamente, então não deve ter {{/if}} soltos
+                // Mas vamos garantir removendo apenas se houver (pode haver casos edge)
+                // IMPORTANTE: Não remover {{/if}} que fazem parte de blocos aninhados já processados
+                // O processamento recursivo já removeu as tags dos blocos aninhados
+                // Apenas remover se realmente houver {{/if}} solto (não deveria acontecer)
+                let finalElseContent = elseContent;
+                // Verificar se há {{/if}} que não fazem parte de um bloco válido
+                // Se o elseContent foi processado recursivamente, não deveria ter {{/if}}
+                // Mas vamos fazer uma limpeza final apenas para garantir
+                finalElseContent = finalElseContent.replace(/\{\{\/if\}\}/g, '');
                 // Substituir o bloco completo (incluindo {{#if}} e {{/if}}) usando substring
                 processed = processed.substring(0, startIndex) + finalElseContent + processed.substring(endIndex);
               } else {
@@ -1094,6 +1175,16 @@ export async function generateReservationVariables(
     isCompleteUrl: logoUrl ? (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) : false
   });
 
+  // Lidar com rooms que pode ser array ou objeto único
+  const roomsData = Array.isArray(reservation.rooms) 
+    ? reservation.rooms[0] 
+    : reservation.rooms;
+  
+  // Lidar com room_categories que pode ser array ou objeto único
+  const roomCategoriesData = Array.isArray(reservation.room_categories)
+    ? reservation.room_categories[0]
+    : reservation.room_categories;
+
   return {
     guest_name: guest?.full_name || client?.full_name || 'Hóspede',
     reservation_code: reservation.reservation_code || '',
@@ -1106,12 +1197,12 @@ export async function generateReservationVariables(
     total_amount: reservation.total_amount?.toFixed(2).replace('.', ',') || '0,00',
     paid_amount: reservation.paid_amount?.toFixed(2).replace('.', ',') || '0,00',
     payment_status: getPaymentStatusLabel(reservation.payment_status),
-    room_number: reservation.rooms?.room_number || '',
-    room_name: reservation.rooms?.name || reservation.rooms?.room_number || '',
-    room_password: reservation.rooms?.fixed_password || '',
-    category_name: reservation.room_categories?.name || '',
-    room_category: reservation.room_categories?.name || '', // Alias para category_name
-    room_category_name: reservation.room_categories?.name || '', // Nome da categoria do quarto
+    room_number: roomsData?.room_number || '',
+    room_name: roomsData?.name || roomsData?.room_number || '',
+    room_password: roomsData?.fixed_password || '',
+    category_name: roomCategoriesData?.name || '',
+    room_category: roomCategoriesData?.name || '', // Alias para category_name
+    room_category_name: roomCategoriesData?.name || '', // Nome da categoria do quarto
     adults: reservation.adults?.toString() || '1',
     children: reservation.children?.toString() || '0',
     hotel_name: hotelSettings?.name || 'Hotel',

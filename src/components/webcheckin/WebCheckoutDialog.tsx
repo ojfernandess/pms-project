@@ -135,6 +135,44 @@ export function WebCheckoutDialog({
         // Não bloquear o checkout se a notificação falhar
       }
       
+      // Disparar evento genérico de check-out concluído
+      try {
+        const { triggerEmail } = await import("@/lib/emailService");
+        
+        // Buscar dados completos da reserva atualizada
+        const { data: fullReservation } = await supabase
+          .from("reservations")
+          .select(`
+            *,
+            financial_responsible:clients!client_id(*),
+            guest:clients!guest_id(*),
+            rooms (*),
+            room_categories (*)
+          `)
+          .eq("id", reservation.id)
+          .single();
+        
+        if (fullReservation) {
+            // Verificar se a data de check-out já passou (incluindo hoje)
+            const checkoutDate = fullReservation.checkout_date ? new Date(fullReservation.checkout_date) : null;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            if (checkoutDate) {
+              checkoutDate.setHours(0, 0, 0, 0);
+              
+              // Enviar se a data de check-out já passou ou é hoje
+              if (checkoutDate <= today) {
+                // Disparar evento genérico de check-out concluído
+                await triggerEmail('checkout.completed', fullReservation);
+              }
+            }
+        }
+      } catch (error) {
+        console.warn("⚠️ Erro ao disparar evento de check-out concluído:", error);
+        // Não bloquear o checkout se houver erro no envio de email
+      }
+      
       // Verificar se deve enviar email de solicitação de avaliação
       try {
         // Verificar feature flag para o estabelecimento
@@ -175,16 +213,28 @@ export function WebCheckoutDialog({
               .maybeSingle();
             
             if (reviewSettings?.is_enabled && reviewSettings?.send_email_after_checkout) {
-            // Gerar link de avaliação
-            const baseUrl = typeof window !== 'undefined' 
-              ? window.location.origin 
-              : (import.meta.env.VITE_APP_URL || 'http://localhost:8080');
+            // Verificar se a data de check-out já passou (incluindo hoje)
+            const checkoutDate = fullReservation.checkout_date ? new Date(fullReservation.checkout_date) : null;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
             
-            // Usar reservation_code ou identification_number para o link
-            const locator = fullReservation.identification_number || fullReservation.reservation_code;
-            const reviewLink = `${baseUrl}/review/${locator}`;
-            
-            await sendStayReviewRequestEmail(fullReservation, reviewLink);
+            if (checkoutDate) {
+              checkoutDate.setHours(0, 0, 0, 0);
+              
+              // Enviar se a data de check-out já passou ou é hoje
+              if (checkoutDate <= today) {
+                // Gerar link de avaliação
+                const baseUrl = typeof window !== 'undefined' 
+                  ? window.location.origin 
+                  : (import.meta.env.VITE_APP_URL || 'http://localhost:8080');
+                
+                // Usar reservation_code ou identification_number para o link
+                const locator = fullReservation.identification_number || fullReservation.reservation_code;
+                const reviewLink = `${baseUrl}/review/${locator}`;
+                
+                await sendStayReviewRequestEmail(fullReservation, reviewLink);
+              }
+            }
             }
           }
         }

@@ -80,6 +80,10 @@ function parseEmailList(emailString?: string): string[] {
  */
 export async function queueEmail(email: EmailQueueItem): Promise<string | null> {
   try {
+    // Verificar se há review_link no body_html antes de salvar
+    const hasPlaceholder = email.body_html?.includes('{{review_link}}') || email.body_html?.includes('{{{review_link}}}');
+    const hasReviewLink = email.variables?.review_link ? email.body_html?.includes(email.variables.review_link) : false;
+    
     console.log('📬 Adicionando e-mail à fila:', { 
       eventType: email.event_type, 
       recipient: email.recipient_email,
@@ -87,8 +91,30 @@ export async function queueEmail(email: EmailQueueItem): Promise<string | null> 
       cc_emails: email.cc_emails || 'Nenhum',
       bcc_emails: email.bcc_emails || 'Nenhum',
       cc_parsed: email.cc_emails ? parseEmailList(email.cc_emails) : [],
-      bcc_parsed: email.bcc_emails ? parseEmailList(email.bcc_emails) : []
+      bcc_parsed: email.bcc_emails ? parseEmailList(email.bcc_emails) : [],
+      hasPlaceholderInBody: hasPlaceholder,
+      hasReviewLinkInBody: hasReviewLink,
+      reviewLinkInVariables: email.variables?.review_link,
+      bodyHtmlLength: email.body_html?.length,
+      bodyHtmlSample: email.body_html?.substring(
+        email.body_html.indexOf('Avaliar Estadia') > 0 ? email.body_html.indexOf('Avaliar Estadia') - 50 : 0,
+        email.body_html.indexOf('Avaliar Estadia') > 0 ? email.body_html.indexOf('Avaliar Estadia') + 200 : 200
+      ),
     });
+    
+    // GARANTIR que review_link está nas variáveis antes de salvar
+    // Isso é crítico porque o review_link pode ser perdido na serialização JSONB
+    if (email.variables && !email.variables.review_link) {
+      // Tentar extrair do body_html se não estiver nas variáveis
+      if (email.body_html) {
+        const urlPattern = /(https?:\/\/[^\s<>"']+\/review\/[^\s<>"']+)/g;
+        const matches = email.body_html.match(urlPattern);
+        if (matches && matches.length > 0) {
+          email.variables.review_link = matches[0];
+          console.log('🔧 review_link extraído do body_html e adicionado às variáveis antes de salvar:', email.variables.review_link);
+        }
+      }
+    }
     
     // Tentar inserir diretamente primeiro
     const { data, error } = await supabase
@@ -96,6 +122,8 @@ export async function queueEmail(email: EmailQueueItem): Promise<string | null> 
       .insert([{
         ...email,
         status: 'pending',
+        // Garantir que variables seja um objeto JSON válido
+        variables: email.variables ? JSON.parse(JSON.stringify(email.variables)) : {},
       }])
       .select('id')
       .single();
@@ -107,6 +135,17 @@ export async function queueEmail(email: EmailQueueItem): Promise<string | null> 
       // Usar a função insert_email_queue que bypassa RLS
       // IMPORTANTE: p_template_id e p_recipient_name são obrigatórios na função SQL
       // mas podem ser NULL no banco, então passamos string vazia se não tiver valor
+      // GARANTIR que review_link está nas variáveis antes de passar para a função
+      const variablesToSave = email.variables ? JSON.parse(JSON.stringify(email.variables)) : {};
+      if (!variablesToSave.review_link && email.body_html) {
+        const urlPattern = /(https?:\/\/[^\s<>"']+\/review\/[^\s<>"']+)/g;
+        const matches = email.body_html.match(urlPattern);
+        if (matches && matches.length > 0) {
+          variablesToSave.review_link = matches[0];
+          console.log('🔧 review_link extraído do body_html e adicionado às variáveis antes de salvar (via função):', variablesToSave.review_link);
+        }
+      }
+      
       const { data: functionData, error: functionError } = await supabase.rpc('insert_email_queue', {
         p_template_id: email.template_id || '00000000-0000-0000-0000-000000000000',
         p_event_type: email.event_type,
@@ -115,7 +154,7 @@ export async function queueEmail(email: EmailQueueItem): Promise<string | null> 
         p_subject: email.subject,
         p_body_html: email.body_html,
         p_reservation_id: email.reservation_id || null,
-        p_variables: email.variables || null,
+        p_variables: variablesToSave,
         p_priority: email.priority || 1,
         p_cc_emails: email.cc_emails || null,
         p_bcc_emails: email.bcc_emails || null
@@ -160,6 +199,54 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
     console.error('Erro ao buscar item da fila:', fetchError);
     return false;
   }
+  
+  // Log detalhado do que foi recuperado da fila
+  const hasPlaceholderInQueue = queueItem.body_html?.includes('{{review_link}}') || queueItem.body_html?.includes('{{{review_link}}}');
+  
+  // IMPORTANTE: Se review_link não estiver nas variáveis, tentar extrair do body_html
+  // Isso pode acontecer se o JSONB foi corrompido ou se o review_link foi perdido na serialização
+  let reviewLinkFromBody = null;
+  if (hasPlaceholderInQueue && queueItem.body_html) {
+    // Tentar extrair o review_link do body_html procurando por padrões de URL
+    const urlPattern = /(https?:\/\/[^\s<>"']+)/g;
+    const matches = queueItem.body_html.match(urlPattern);
+    if (matches) {
+      // Procurar por URLs que contenham '/review/'
+      const reviewUrl = matches.find(url => url.includes('/review/'));
+      if (reviewUrl) {
+        reviewLinkFromBody = reviewUrl;
+        console.log('🔍 review_link extraído do body_html:', reviewLinkFromBody);
+      }
+    }
+  }
+  
+  // Se review_link não estiver nas variáveis, mas estiver no body_html, adicionar às variáveis
+  if (!queueItem.variables?.review_link && reviewLinkFromBody) {
+    if (!queueItem.variables) {
+      queueItem.variables = {};
+    }
+    queueItem.variables.review_link = reviewLinkFromBody;
+    console.log('✅ review_link adicionado às variáveis a partir do body_html');
+  }
+  
+  const hasReviewLinkInQueue = queueItem.variables?.review_link ? queueItem.body_html?.includes(queueItem.variables.review_link) : false;
+  
+  console.log('📥 Item recuperado da fila:', {
+    itemId,
+    eventType: queueItem.event_type,
+    recipient: queueItem.recipient_email,
+    hasPlaceholderInBody: hasPlaceholderInQueue,
+    hasReviewLinkInBody: hasReviewLinkInQueue,
+    reviewLinkInVariables: queueItem.variables?.review_link,
+    reviewLinkFromBody,
+    variablesType: typeof queueItem.variables,
+    variablesKeys: queueItem.variables ? Object.keys(queueItem.variables) : [],
+    bodyHtmlLength: queueItem.body_html?.length,
+    bodyHtmlSample: queueItem.body_html?.substring(
+      queueItem.body_html.indexOf('Avaliar Estadia') > 0 ? queueItem.body_html.indexOf('Avaliar Estadia') - 50 : 0,
+      queueItem.body_html.indexOf('Avaliar Estadia') > 0 ? queueItem.body_html.indexOf('Avaliar Estadia') + 200 : 200
+    ),
+  });
 
   // Log para debug de CC e BCC
   if (queueItem.cc_emails || queueItem.bcc_emails) {
@@ -207,6 +294,107 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
       throw new Error('Configurações de e-mail não encontradas ou inativas');
     }
 
+    // SUBSTITUIR review_link ANTES DE ENVIAR (última chance)
+    // Verificar se há review_link nas variáveis e substituir no body_html
+    let finalBodyHtml = queueItem.body_html || '';
+    let finalSubject = queueItem.subject || '';
+    
+    console.log('🔍 processEmailQueue - Estado inicial:', {
+      bodyHtmlLength: finalBodyHtml.length,
+      hasPlaceholder: finalBodyHtml.includes('{{review_link}}') || finalBodyHtml.includes('{{{review_link}}}'),
+      hasReviewLink: queueItem.variables?.review_link ? finalBodyHtml.includes(queueItem.variables.review_link) : false,
+      reviewLinkInVariables: queueItem.variables?.review_link,
+      bodyHtmlSample: finalBodyHtml.substring(
+        finalBodyHtml.indexOf('Avaliar Estadia') > 0 ? finalBodyHtml.indexOf('Avaliar Estadia') - 50 : 0,
+        finalBodyHtml.indexOf('Avaliar Estadia') > 0 ? finalBodyHtml.indexOf('Avaliar Estadia') + 200 : 200
+      ),
+    });
+    
+    if (queueItem.variables?.review_link) {
+      const reviewLink = queueItem.variables.review_link;
+      console.log('🔧 Substituindo review_link no processEmailQueue:', {
+        reviewLink,
+        hasPlaceholderInBody: finalBodyHtml.includes('{{review_link}}') || finalBodyHtml.includes('{{{review_link}}}'),
+        bodyHtmlLength: finalBodyHtml.length,
+      });
+      
+      // Substituir todas as variações possíveis - MÚLTIPLAS VEZES
+      let iterations = 0;
+      while (iterations < 10 && (finalBodyHtml.includes('{{review_link}}') || finalBodyHtml.includes('{{{review_link}}}'))) {
+        const before = finalBodyHtml;
+        finalBodyHtml = finalBodyHtml.split('{{review_link}}').join(reviewLink);
+        finalBodyHtml = finalBodyHtml.split('{{{review_link}}}').join(reviewLink);
+        finalBodyHtml = finalBodyHtml.split('{{ review_link }}').join(reviewLink);
+        finalBodyHtml = finalBodyHtml.split('{{{ review_link }}}').join(reviewLink);
+        
+        if (before === finalBodyHtml) break; // Sem mudanças, parar
+        iterations++;
+      }
+      
+      // Também substituir no subject
+      finalSubject = finalSubject.split('{{review_link}}').join(reviewLink);
+      finalSubject = finalSubject.split('{{{review_link}}}').join(reviewLink);
+      finalSubject = finalSubject.split('{{ review_link }}').join(reviewLink);
+      finalSubject = finalSubject.split('{{{ review_link }}}').join(reviewLink);
+      
+      console.log('✅ review_link substituído no processEmailQueue:', {
+        iterations,
+        hasPlaceholderAfter: finalBodyHtml.includes('{{review_link}}') || finalBodyHtml.includes('{{{review_link}}}'),
+        hasReviewLinkInBody: finalBodyHtml.includes(reviewLink),
+        reviewLink,
+        bodyHtmlSample: finalBodyHtml.substring(
+          finalBodyHtml.indexOf('Avaliar Estadia') > 0 ? finalBodyHtml.indexOf('Avaliar Estadia') - 50 : 0,
+          finalBodyHtml.indexOf('Avaliar Estadia') > 0 ? finalBodyHtml.indexOf('Avaliar Estadia') + 200 : 200
+        ),
+      });
+      
+      // Atualizar queueItem com o body_html processado
+      queueItem.body_html = finalBodyHtml;
+      queueItem.subject = finalSubject;
+    } else {
+      console.warn('⚠️ review_link não encontrado nas variáveis do queueItem:', {
+        hasVariables: !!queueItem.variables,
+        variablesKeys: queueItem.variables ? Object.keys(queueItem.variables) : [],
+      });
+    }
+
+    // VERIFICAÇÃO FINAL ABSOLUTA ANTES DE ENVIAR
+    // Garantir que o body_html está processado e não tem placeholders
+    if (queueItem.variables?.review_link && queueItem.body_html) {
+      const reviewLink = queueItem.variables.review_link;
+      const hasPlaceholder = queueItem.body_html.includes('{{review_link}}') || 
+                             queueItem.body_html.includes('{{{review_link}}}') ||
+                             queueItem.body_html.includes('{{ review_link }}') ||
+                             queueItem.body_html.includes('{{{ review_link }}}');
+      
+      if (hasPlaceholder) {
+        console.error('🚨 ERRO CRÍTICO: Placeholder ainda presente no body_html antes de enviar!');
+        console.error('Executando substituição de emergência final...');
+        
+        // Substituição de emergência final - todas as formas possíveis
+        queueItem.body_html = queueItem.body_html.replace(/\{\{review_link\}\}/gi, reviewLink);
+        queueItem.body_html = queueItem.body_html.replace(/\{\{\{review_link\}\}\}/gi, reviewLink);
+        queueItem.body_html = queueItem.body_html.replace(/\{\{\s*review_link\s*\}\}/gi, reviewLink);
+        queueItem.body_html = queueItem.body_html.replace(/\{\{\{\s*review_link\s*\}\}\}/gi, reviewLink);
+        queueItem.body_html = queueItem.body_html.split('{{review_link}}').join(reviewLink);
+        queueItem.body_html = queueItem.body_html.split('{{{review_link}}}').join(reviewLink);
+        queueItem.body_html = queueItem.body_html.split('{{ review_link }}').join(reviewLink);
+        queueItem.body_html = queueItem.body_html.split('{{{ review_link }}}').join(reviewLink);
+        
+        // Também no subject
+        queueItem.subject = queueItem.subject.replace(/\{\{review_link\}\}/gi, reviewLink);
+        queueItem.subject = queueItem.subject.replace(/\{\{\{review_link\}\}\}/gi, reviewLink);
+        queueItem.subject = queueItem.subject.split('{{review_link}}').join(reviewLink);
+        queueItem.subject = queueItem.subject.split('{{{review_link}}}').join(reviewLink);
+        
+        console.log('✅ Substituição de emergência final executada:', {
+          stillHasPlaceholder: queueItem.body_html.includes('{{review_link}}') || queueItem.body_html.includes('{{{review_link}}}'),
+          hasReviewLink: queueItem.body_html.includes(reviewLink),
+          reviewLink,
+        });
+      }
+    }
+
     // Enviar e-mail baseado no provedor
     let success = false;
     let errorMessage = '';
@@ -214,7 +402,14 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
     console.log('📧 Processando email com provedor:', {
       provider: settings.provider,
       cc_emails: queueItem.cc_emails || 'Nenhum',
-      bcc_emails: queueItem.bcc_emails || 'Nenhum'
+      bcc_emails: queueItem.bcc_emails || 'Nenhum',
+      hasReviewLinkPlaceholder: queueItem.body_html?.includes('{{review_link}}') || queueItem.body_html?.includes('{{{review_link}}}'),
+      hasReviewLink: queueItem.variables?.review_link ? queueItem.body_html?.includes(queueItem.variables.review_link) : false,
+      reviewLink: queueItem.variables?.review_link,
+      bodyHtmlSample: queueItem.body_html?.substring(
+        queueItem.body_html.indexOf('Avaliar Estadia') > 0 ? queueItem.body_html.indexOf('Avaliar Estadia') - 50 : 0,
+        queueItem.body_html.indexOf('Avaliar Estadia') > 0 ? queueItem.body_html.indexOf('Avaliar Estadia') + 200 : 200
+      ),
     });
 
     // Extrair nome do hotel das variáveis salvas (se disponível)
@@ -369,6 +564,37 @@ async function sendViaSMTP(queueItem: any, settings: EmailSettings, hotelName?: 
     // Garantir que sender_name não esteja vazio - usar nome do hotel como fallback
     const senderName = settings.sender_name?.trim() || hotelName || 'PMS System';
     
+    // VERIFICAÇÃO FINAL: Garantir que review_link está substituído antes de enviar
+    let finalHtml = queueItem.body_html || '';
+    if (queueItem.variables?.review_link) {
+      const reviewLink = queueItem.variables.review_link;
+      const hasPlaceholder = finalHtml.includes('{{review_link}}') || 
+                             finalHtml.includes('{{{review_link}}}') ||
+                             finalHtml.includes('{{ review_link }}') ||
+                             finalHtml.includes('{{{ review_link }}}');
+      
+      if (hasPlaceholder) {
+        console.error('🚨 ERRO CRÍTICO: Placeholder ainda presente no body_html antes de enviar via SMTP!');
+        console.error('Executando substituição de emergência final no sendViaSMTP...');
+        
+        // Substituição de emergência final
+        finalHtml = finalHtml.replace(/\{\{review_link\}\}/gi, reviewLink);
+        finalHtml = finalHtml.replace(/\{\{\{review_link\}\}\}/gi, reviewLink);
+        finalHtml = finalHtml.replace(/\{\{\s*review_link\s*\}\}/gi, reviewLink);
+        finalHtml = finalHtml.replace(/\{\{\{\s*review_link\s*\}\}\}/gi, reviewLink);
+        finalHtml = finalHtml.split('{{review_link}}').join(reviewLink);
+        finalHtml = finalHtml.split('{{{review_link}}}').join(reviewLink);
+        finalHtml = finalHtml.split('{{ review_link }}').join(reviewLink);
+        finalHtml = finalHtml.split('{{{ review_link }}}').join(reviewLink);
+        
+        console.log('✅ Substituição de emergência final no sendViaSMTP executada:', {
+          stillHasPlaceholder: finalHtml.includes('{{review_link}}') || finalHtml.includes('{{{review_link}}}'),
+          hasReviewLink: finalHtml.includes(reviewLink),
+          reviewLink,
+        });
+      }
+    }
+    
     const smtpPayload = {
       to: queueItem.recipient_email,
       to_name: queueItem.recipient_name,
@@ -376,7 +602,7 @@ async function sendViaSMTP(queueItem: any, settings: EmailSettings, hotelName?: 
       from_name: senderName,
       reply_to: settings.reply_to_email || settings.sender_email,
       subject: queueItem.subject,
-      html: queueItem.body_html,
+      html: finalHtml,
       text: queueItem.body_text,
       ...(ccEmails.length > 0 ? { cc: ccEmails.join(',') } : {}),
       ...(bccEmails.length > 0 ? { bcc: bccEmails.join(',') } : {}),
@@ -395,7 +621,14 @@ async function sendViaSMTP(queueItem: any, settings: EmailSettings, hotelName?: 
       ...smtpPayload,
       from_name: senderName,
       original_sender_name: settings.sender_name,
-      smtp_config: { ...smtpPayload.smtp_config, auth: { user: smtpPayload.smtp_config.auth.user, pass: '***' } }
+      smtp_config: { ...smtpPayload.smtp_config, auth: { user: smtpPayload.smtp_config.auth.user, pass: '***' } },
+      hasReviewLinkPlaceholder: smtpPayload.html?.includes('{{review_link}}') || smtpPayload.html?.includes('{{{review_link}}}'),
+      hasReviewLink: queueItem.variables?.review_link ? smtpPayload.html?.includes(queueItem.variables.review_link) : false,
+      reviewLink: queueItem.variables?.review_link,
+      htmlSample: smtpPayload.html?.substring(
+        smtpPayload.html.indexOf('Avaliar Estadia') > 0 ? smtpPayload.html.indexOf('Avaliar Estadia') - 50 : 0,
+        smtpPayload.html.indexOf('Avaliar Estadia') > 0 ? smtpPayload.html.indexOf('Avaliar Estadia') + 200 : 200
+      ),
     });
     
     // Chamar Edge Function do Supabase para enviar via SMTP
@@ -1886,13 +2119,30 @@ export async function sendStayReviewRequestEmail(
   reviewLink: string
 ): Promise<string | null> {
   try {
+    // Validar e garantir que reviewLink está correto
+    if (!reviewLink || reviewLink.trim() === '') {
+      console.error('❌ reviewLink está vazio ou inválido!');
+      return null;
+    }
+    
+    // Garantir que o link começa com http:// ou https://
+    if (!reviewLink.startsWith('http://') && !reviewLink.startsWith('https://')) {
+      console.warn('⚠️ reviewLink não começa com http:// ou https://, ajustando...');
+      const baseUrl = typeof window !== 'undefined' 
+        ? window.location.origin 
+        : (import.meta.env.VITE_APP_URL || 'http://localhost:8080');
+      reviewLink = `${baseUrl}${reviewLink.startsWith('/') ? '' : '/'}${reviewLink}`;
+    }
+    
     console.log('📧 Enviando e-mail de solicitação de avaliação:', { 
       reservationId: reservation?.id,
-      reviewLink
+      reviewLink,
+      reviewLinkLength: reviewLink.length,
+      reviewLinkStartsWithHttp: reviewLink.startsWith('http'),
     });
     
     // Verificar se o feature flag de avaliações está habilitado para este estabelecimento
-    const { data: siteSettings } = await supabase
+    const { data: siteSettingsFeatureFlag } = await supabase
       .from('site_settings')
       .select('features_enabled')
       .eq('id', '00000000-0000-0000-0000-000000000001')
@@ -1900,7 +2150,7 @@ export async function sendStayReviewRequestEmail(
     
     const { isFeatureEnabledForEstablishment } = await import('@/lib/featureAccess');
     const isStayReviewsEnabled = isFeatureEnabledForEstablishment(
-      siteSettings?.features_enabled?.stay_reviews,
+      siteSettingsFeatureFlag?.features_enabled?.stay_reviews,
       reservation?.establishment_id
     );
     
@@ -1955,18 +2205,188 @@ export async function sendStayReviewRequestEmail(
       return null;
     }
 
+    // Buscar configurações do hotel (necessárias para generateReservationVariables)
+    const establishmentId = fullReservation.establishment_id;
+    let hotelSettings = null;
+    if (establishmentId) {
+      const { data: settings, error: settingsError } = await supabase
+        .from('hotel_settings')
+        .select('*')
+        .eq('establishment_id', establishmentId)
+        .maybeSingle();
+      
+      if (settingsError) {
+        console.warn('⚠️ Erro ao buscar configurações do hotel:', settingsError);
+      }
+      
+      hotelSettings = settings;
+    }
+
+    // Buscar site_settings como fallback para logo
+    let siteSettings = null;
+    try {
+      const { data: siteData } = await supabase
+        .from('site_settings')
+        .select('logo_url')
+        .maybeSingle();
+      siteSettings = siteData;
+    } catch (error) {
+      console.warn('⚠️ Erro ao buscar site_settings:', error);
+    }
+
     // Gerar variáveis do template
-    const variables = generateReservationVariables(fullReservation);
+    // IMPORTANTE: generateReservationVariables é async, precisa de await
+    const variables = await generateReservationVariables(
+      fullReservation,
+      fullReservation.financial_responsible,
+      fullReservation.guest,
+      hotelSettings,
+      siteSettings
+    );
     
     // Adicionar link de avaliação
     const allVariables: TemplateVariables = {
       ...variables,
       review_link: reviewLink,
     };
+    
+    console.log('📊 Variáveis geradas:', {
+      variablesCount: Object.keys(variables).length,
+      variablesKeys: Object.keys(variables),
+      allVariablesCount: Object.keys(allVariables).length,
+      allVariablesKeys: Object.keys(allVariables),
+    });
 
-    // Processar template
-    const subject = processTemplate(template.subject, allVariables);
-    const bodyHtml = processTemplate(template.body_html, allVariables);
+    console.log('📧 Processando template de avaliação:', {
+      reviewLink,
+      hasReviewLink: !!reviewLink,
+      allVariablesKeys: Object.keys(allVariables),
+      reviewLinkInVariables: allVariables.review_link,
+      templateBodyHasReviewLink: template.body_html?.includes('{{review_link}}'),
+      templateBodyHasReviewLinkTriple: template.body_html?.includes('{{{review_link}}}'),
+      templateBodySample: template.body_html?.substring(0, 500),
+    });
+
+    // SUBSTITUIR review_link DIRETAMENTE NO TEMPLATE ANTES DE PROCESSAR
+    // Isso garante que a variável seja substituída mesmo se o processTemplate falhar
+    let templateSubject = template.subject || '';
+    let templateBodyHtml = template.body_html || '';
+    
+    console.log('🔍 Template original (primeiros 2000 chars):', templateBodyHtml.substring(0, 2000));
+    console.log('🔍 reviewLink recebido:', reviewLink);
+    
+    if (reviewLink) {
+      // Substituir no template ANTES de processar - usar método mais direto
+      // Substituir todas as variações possíveis
+      const replacements = [
+        { from: '{{review_link}}', to: reviewLink },
+        { from: '{{{review_link}}}', to: reviewLink },
+        { from: '{{ review_link }}', to: reviewLink },
+        { from: '{{{ review_link }}}', to: reviewLink },
+      ];
+      
+      replacements.forEach(({ from, to }) => {
+        while (templateSubject.includes(from)) {
+          templateSubject = templateSubject.replace(from, to);
+        }
+        while (templateBodyHtml.includes(from)) {
+          templateBodyHtml = templateBodyHtml.replace(from, to);
+        }
+      });
+      
+      console.log('🔧 review_link substituído no template ANTES do processamento:', {
+        subjectHasPlaceholder: templateSubject.includes('{{review_link}}') || templateSubject.includes('{{{review_link}}}'),
+        bodyHasPlaceholder: templateBodyHtml.includes('{{review_link}}') || templateBodyHtml.includes('{{{review_link}}}'),
+        bodyHasReviewLink: templateBodyHtml.includes(reviewLink),
+        reviewLinkLength: reviewLink.length,
+      });
+    }
+
+    // Processar template (agora sem review_link placeholder)
+    // IMPORTANTE: Não processar review_link novamente, já foi substituído
+    // Processar normalmente, mas garantir que review_link não seja processado novamente
+    // Salvar o templateBodyHtml antes de processar para poder restaurar se necessário
+    const templateBodyHtmlWithLink = templateBodyHtml;
+    
+    let subject = processTemplate(templateSubject, allVariables);
+    let bodyHtml = processTemplate(templateBodyHtml, allVariables);
+    
+    // VERIFICAÇÃO CRÍTICA: Se o processTemplate removeu o review_link que já estava substituído
+    if (reviewLink) {
+      const templateHadReviewLink = templateBodyHtmlWithLink.includes(reviewLink);
+      const processedHasReviewLink = bodyHtml.includes(reviewLink);
+      const processedHasPlaceholder = bodyHtml.includes('{{review_link}}') || bodyHtml.includes('{{{review_link}}}');
+      
+      console.log('🔍 Verificação pós-processamento:', {
+        templateHadReviewLink,
+        processedHasReviewLink,
+        processedHasPlaceholder,
+        reviewLink,
+      });
+      
+      // Se o template tinha o link mas o processado não tem, restaurar
+      if (templateHadReviewLink && !processedHasReviewLink) {
+        console.error('❌ ERRO: processTemplate removeu review_link que já estava substituído!');
+        console.error('Restaurando do templateBodyHtml que já tinha o link...');
+        // Usar o templateBodyHtml que já tinha o link substituído
+        bodyHtml = templateBodyHtmlWithLink;
+      }
+      
+      // Se ainda há placeholder após processamento, substituir
+      if (processedHasPlaceholder) {
+        console.warn('⚠️ Placeholder ainda presente após processamento, substituindo...');
+        bodyHtml = bodyHtml.replace(/\{\{review_link\}\}/g, reviewLink);
+        bodyHtml = bodyHtml.replace(/\{\{\{review_link\}\}\}/g, reviewLink);
+        bodyHtml = bodyHtml.split('{{review_link}}').join(reviewLink);
+        bodyHtml = bodyHtml.split('{{{review_link}}}').join(reviewLink);
+      }
+    }
+    
+    // VERIFICAÇÃO CRÍTICA: Se o processTemplate não substituiu review_link corretamente
+    // e o templateBodyHtml já tinha o link substituído, usar o templateBodyHtml
+    if (reviewLink && templateBodyHtml.includes(reviewLink) && !bodyHtml.includes(reviewLink)) {
+      console.error('❌ ERRO CRÍTICO: processTemplate removeu review_link que já estava substituído!');
+      console.error('Restaurando do templateBodyHtml que já tinha o link...');
+      bodyHtml = templateBodyHtml; // Usar o template já com review_link substituído
+    }
+    
+    console.log('📧 Template processado (primeira passada):', {
+      subject,
+      bodyHtmlLength: bodyHtml?.length,
+      hasReviewLinkInBody: bodyHtml?.includes(reviewLink || ''),
+      hasPlaceholder: bodyHtml?.includes('{{review_link}}'),
+      hasPlaceholderTriple: bodyHtml?.includes('{{{review_link}}}'),
+      reviewLinkValue: reviewLink,
+      reviewLinkInVariables: allVariables.review_link,
+      templateBodyHadReviewLink: templateBodyHtml.includes(reviewLink),
+      bodyHtmlSample: bodyHtml?.substring(
+        bodyHtml.indexOf('Avaliar Estadia') > 0 ? bodyHtml.indexOf('Avaliar Estadia') - 50 : 0, 
+        bodyHtml.indexOf('Avaliar Estadia') > 0 ? bodyHtml.indexOf('Avaliar Estadia') + 200 : 200
+      ),
+    });
+    
+    // Se ainda houver placeholder, substituir manualmente (fallback)
+    if (bodyHtml?.includes('{{review_link}}') && reviewLink) {
+      console.warn('⚠️ Placeholder {{review_link}} ainda presente após processamento, substituindo manualmente');
+      bodyHtml = bodyHtml.replace(/\{\{review_link\}\}/g, reviewLink);
+      subject = subject.replace(/\{\{review_link\}\}/g, reviewLink);
+    }
+    if (bodyHtml?.includes('{{{review_link}}}') && reviewLink) {
+      console.warn('⚠️ Placeholder {{{review_link}}} ainda presente após processamento, substituindo manualmente');
+      bodyHtml = bodyHtml.replace(/\{\{\{review_link\}\}\}/g, reviewLink);
+      subject = subject.replace(/\{\{\{review_link\}\}\}/g, reviewLink);
+    }
+    
+    // Verificação final
+    if (bodyHtml?.includes('{{review_link}}') || bodyHtml?.includes('{{{review_link}}}')) {
+      console.error('❌ ERRO: Placeholder review_link ainda presente após todas as tentativas de substituição!');
+      console.error('Variáveis disponíveis:', Object.keys(allVariables));
+      console.error('review_link value:', allVariables.review_link);
+    } else {
+      console.log('✅ review_link substituído com sucesso!');
+    }
+    
+    const finalBodyHtml = bodyHtml;
 
     // Determinar destinatário
     const recipientEmail = fullReservation.guest?.email || fullReservation.financial_responsible?.email;
@@ -1979,18 +2399,216 @@ export async function sendStayReviewRequestEmail(
 
     console.log('✅ Destinatário encontrado:', { email: recipientEmail, name: recipientName });
 
+    // GARANTIR que review_link seja substituído ANTES de adicionar à fila
+    // Fazer substituição final manual FORÇADA para garantir
+    let finalSubject = subject;
+    let finalBodyHtmlFinal = finalBodyHtml;
+    
+    if (reviewLink) {
+      console.log('🔧 Executando substituição FORÇADA de review_link:', {
+        reviewLink,
+        bodyHtmlLength: finalBodyHtmlFinal?.length,
+        hasPlaceholderBefore: finalBodyHtmlFinal?.includes('{{review_link}}') || finalBodyHtmlFinal?.includes('{{{review_link}}}'),
+      });
+      
+      // Substituir TODAS as variações possíveis do placeholder - FORÇADO
+      const replacements = [
+        { pattern: /\{\{review_link\}\}/g, value: reviewLink },
+        { pattern: /\{\{\{review_link\}\}\}/g, value: reviewLink },
+        { pattern: /\{\{ review_link \}\}/g, value: reviewLink },
+        { pattern: /\{\{\{ review_link \}\}\}/g, value: reviewLink },
+        { pattern: /\{\{review_link\s*\}\}/g, value: reviewLink },
+        { pattern: /\{\{\{review_link\s*\}\}\}/g, value: reviewLink },
+      ];
+      
+      let replacedCount = 0;
+      replacements.forEach(({ pattern, value }) => {
+        const beforeSubject = finalSubject;
+        const beforeBody = finalBodyHtmlFinal;
+        
+        finalSubject = finalSubject?.replace(pattern, value) || finalSubject;
+        finalBodyHtmlFinal = finalBodyHtmlFinal?.replace(pattern, value) || finalBodyHtmlFinal;
+        
+        if (beforeSubject !== finalSubject) {
+          replacedCount++;
+          console.log('✅ review_link substituído no subject (fallback)', { pattern: pattern.toString() });
+        }
+        if (beforeBody !== finalBodyHtmlFinal) {
+          replacedCount++;
+          console.log('✅ review_link substituído no body (fallback)', { pattern: pattern.toString() });
+        }
+      });
+      
+      console.log('📊 Substituições realizadas:', { replacedCount });
+    }
+    
+    // Verificação final CRÍTICA
+    const stillHasPlaceholder = finalBodyHtmlFinal?.includes('{{review_link}}') || 
+                                finalBodyHtmlFinal?.includes('{{{review_link}}}') ||
+                                finalBodyHtmlFinal?.includes('{{ review_link }}') ||
+                                finalBodyHtmlFinal?.includes('{{{ review_link }}}');
+    
+    if (stillHasPlaceholder) {
+      console.error('❌ ERRO CRÍTICO: review_link ainda não foi substituído após todas as tentativas!');
+      console.error('Template original (primeiros 1000 chars):', template.body_html?.substring(0, 1000));
+      console.error('Body processado (primeiros 1000 chars):', finalBodyHtmlFinal?.substring(0, 1000));
+      console.error('reviewLink value:', reviewLink);
+      console.error('allVariables.review_link:', allVariables.review_link);
+      
+      // ÚLTIMA TENTATIVA: substituição direta e literal
+      if (reviewLink) {
+        finalBodyHtmlFinal = finalBodyHtmlFinal?.replace(/{{review_link}}/g, reviewLink) || finalBodyHtmlFinal;
+        finalBodyHtmlFinal = finalBodyHtmlFinal?.replace(/{{{review_link}}}/g, reviewLink) || finalBodyHtmlFinal;
+        finalBodyHtmlFinal = finalBodyHtmlFinal?.replace(/{{ review_link }}/g, reviewLink) || finalBodyHtmlFinal;
+        finalBodyHtmlFinal = finalBodyHtmlFinal?.replace(/{{{ review_link }}}/g, reviewLink) || finalBodyHtmlFinal;
+        console.log('🔄 Última tentativa de substituição direta executada');
+      }
+    } else {
+      console.log('✅ Verificação final: review_link foi substituído com sucesso!');
+    }
+    
+    // VERIFICAÇÃO FINAL ANTES DE ADICIONAR À FILA
+    // Garantir que NÃO há placeholders restantes - SUBSTITUIÇÃO FORÇADA
+    if (finalBodyHtmlFinal && reviewLink) {
+      console.log('🔧 Executando substituição FORÇADA final antes de adicionar à fila:', {
+        reviewLink,
+        bodyLength: finalBodyHtmlFinal.length,
+        hasPlaceholderBefore: finalBodyHtmlFinal.includes('{{review_link}}') || finalBodyHtmlFinal.includes('{{{review_link}}}'),
+      });
+      
+      // Substituição literal final (sem regex, direto) - MÚLTIPLAS VEZES
+      let iterations = 0;
+      let previousBody = '';
+      while (iterations < 10 && (finalBodyHtmlFinal.includes('{{review_link}}') || finalBodyHtmlFinal.includes('{{{review_link}}}'))) {
+        previousBody = finalBodyHtmlFinal;
+        finalBodyHtmlFinal = finalBodyHtmlFinal.split('{{review_link}}').join(reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.split('{{{review_link}}}').join(reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.split('{{ review_link }}').join(reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.split('{{{ review_link }}}').join(reviewLink);
+        
+        if (previousBody === finalBodyHtmlFinal) break; // Sem mudanças, parar
+        iterations++;
+      }
+      
+      // Também substituir no subject
+      let subjectIterations = 0;
+      while (subjectIterations < 10 && (finalSubject.includes('{{review_link}}') || finalSubject.includes('{{{review_link}}}'))) {
+        const prevSubject = finalSubject;
+        finalSubject = finalSubject.split('{{review_link}}').join(reviewLink);
+        finalSubject = finalSubject.split('{{{review_link}}}').join(reviewLink);
+        finalSubject = finalSubject.split('{{ review_link }}').join(reviewLink);
+        finalSubject = finalSubject.split('{{{ review_link }}}').join(reviewLink);
+        
+        if (prevSubject === finalSubject) break; // Sem mudanças, parar
+        subjectIterations++;
+      }
+      
+      console.log('✅ Verificação final após substituição forçada:', {
+        iterations,
+        subjectIterations,
+        stillHasPlaceholder: finalBodyHtmlFinal.includes('{{review_link}}') || finalBodyHtmlFinal.includes('{{{review_link}}}'),
+        reviewLinkInBody: finalBodyHtmlFinal.includes(reviewLink),
+        reviewLinkValue: reviewLink,
+      });
+      
+      // Se AINDA houver placeholder após todas as tentativas, ERRO CRÍTICO
+      if (finalBodyHtmlFinal.includes('{{review_link}}') || finalBodyHtmlFinal.includes('{{{review_link}}}')) {
+        console.error('❌ ERRO CRÍTICO: review_link AINDA presente após substituição forçada!');
+        console.error('Body HTML (primeiros 2000 chars):', finalBodyHtmlFinal.substring(0, 2000));
+        console.error('reviewLink:', reviewLink);
+        
+        // ÚLTIMA TENTATIVA DESESPERADA: substituir caractere por caractere
+        finalBodyHtmlFinal = finalBodyHtmlFinal.replace(/\{\{review_link\}\}/g, reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.replace(/\{\{\{review_link\}\}\}/g, reviewLink);
+      }
+    }
+    
+    // VERIFICAÇÃO ABSOLUTAMENTE FINAL - GARANTIR QUE review_link ESTÁ SUBSTITUÍDO
+    // Se ainda houver placeholder, substituir UMA ÚLTIMA VEZ
+    if (reviewLink && finalBodyHtmlFinal) {
+      const hasPlaceholder = finalBodyHtmlFinal.includes('{{review_link}}') || 
+                             finalBodyHtmlFinal.includes('{{{review_link}}}') ||
+                             finalBodyHtmlFinal.includes('{{ review_link }}') ||
+                             finalBodyHtmlFinal.includes('{{{ review_link }}}');
+      
+      if (hasPlaceholder) {
+        console.error('🚨 ERRO: Placeholder ainda presente! Executando substituição de emergência...');
+        // Substituição de emergência - todas as formas possíveis
+        finalBodyHtmlFinal = finalBodyHtmlFinal.replace(/\{\{review_link\}\}/gi, reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.replace(/\{\{\{review_link\}\}\}/gi, reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.replace(/\{\{\s*review_link\s*\}\}/gi, reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.replace(/\{\{\{\s*review_link\s*\}\}\}/gi, reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.split('{{review_link}}').join(reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.split('{{{review_link}}}').join(reviewLink);
+        
+        console.log('🔧 Substituição de emergência executada:', {
+          stillHasPlaceholder: finalBodyHtmlFinal.includes('{{review_link}}') || finalBodyHtmlFinal.includes('{{{review_link}}}'),
+          hasReviewLink: finalBodyHtmlFinal.includes(reviewLink),
+        });
+      }
+    }
+    
+    // VERIFICAÇÃO FINAL ABSOLUTA ANTES DE ADICIONAR À FILA
+    // Garantir que o body_html NÃO tem placeholders
+    if (reviewLink && finalBodyHtmlFinal) {
+      const hasPlaceholder = finalBodyHtmlFinal.includes('{{review_link}}') || 
+                             finalBodyHtmlFinal.includes('{{{review_link}}}') ||
+                             finalBodyHtmlFinal.includes('{{ review_link }}') ||
+                             finalBodyHtmlFinal.includes('{{{ review_link }}}');
+      
+      if (hasPlaceholder) {
+        console.error('🚨 ERRO CRÍTICO: Placeholder ainda presente ANTES de adicionar à fila!');
+        console.error('Executando substituição de emergência FINAL antes de salvar na fila...');
+        
+        // Substituição de emergência final - TODAS as formas possíveis
+        finalBodyHtmlFinal = finalBodyHtmlFinal.replace(/\{\{review_link\}\}/gi, reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.replace(/\{\{\{review_link\}\}\}/gi, reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.replace(/\{\{\s*review_link\s*\}\}/gi, reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.replace(/\{\{\{\s*review_link\s*\}\}\}/gi, reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.split('{{review_link}}').join(reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.split('{{{review_link}}}').join(reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.split('{{ review_link }}').join(reviewLink);
+        finalBodyHtmlFinal = finalBodyHtmlFinal.split('{{{ review_link }}}').join(reviewLink);
+        
+        // Também no subject
+        finalSubject = finalSubject.replace(/\{\{review_link\}\}/gi, reviewLink);
+        finalSubject = finalSubject.replace(/\{\{\{review_link\}\}\}/gi, reviewLink);
+        finalSubject = finalSubject.split('{{review_link}}').join(reviewLink);
+        finalSubject = finalSubject.split('{{{review_link}}}').join(reviewLink);
+        
+        console.log('✅ Substituição de emergência FINAL executada antes de salvar na fila:', {
+          stillHasPlaceholder: finalBodyHtmlFinal.includes('{{review_link}}') || finalBodyHtmlFinal.includes('{{{review_link}}}'),
+          hasReviewLink: finalBodyHtmlFinal.includes(reviewLink),
+          reviewLink,
+        });
+      }
+    }
+    
     // Adicionar à fila
     const queueId = await queueEmail({
       template_id: template.id,
       event_type: 'checkout.completed',
       recipient_email: recipientEmail,
       recipient_name: recipientName,
-      subject,
-      body_html: bodyHtml,
+      subject: finalSubject,
+      body_html: finalBodyHtmlFinal,
       variables: allVariables,
       reservation_id: fullReservation.id,
       cc_emails: template.cc_emails || undefined,
       bcc_emails: template.bcc_emails || undefined,
+    });
+    
+    console.log('📬 Email adicionado à fila:', {
+      queueId,
+      hasReviewLinkInFinalBody: finalBodyHtmlFinal?.includes(reviewLink || ''),
+      hasPlaceholderInFinalBody: finalBodyHtmlFinal?.includes('{{review_link}}') || finalBodyHtmlFinal?.includes('{{{review_link}}}'),
+      reviewLinkValue: reviewLink,
+      reviewLinkInVariables: allVariables.review_link,
+      bodyHtmlSample: finalBodyHtmlFinal?.substring(
+        finalBodyHtmlFinal.indexOf('Avaliar Estadia') > 0 ? finalBodyHtmlFinal.indexOf('Avaliar Estadia') - 50 : 0,
+        finalBodyHtmlFinal.indexOf('Avaliar Estadia') > 0 ? finalBodyHtmlFinal.indexOf('Avaliar Estadia') + 200 : 200
+      ),
+      bodyHtmlLength: finalBodyHtmlFinal?.length,
     });
 
     if (!queueId) {
@@ -2180,6 +2798,55 @@ export async function triggerEmail(
       const dateStr = processedAdditionalVariables.new_checkout_date as string;
       if (dateStr) {
         processedAdditionalVariables.new_checkout_date = formatDate(dateStr);
+      }
+    }
+    
+    // IMPORTANTE: Se o evento for checkout.completed, gerar review_link e adicionar às variáveis
+    // Isso garante que o review_link esteja disponível quando o template for processado
+    if (eventType === 'checkout.completed' && !processedAdditionalVariables.review_link) {
+      // Verificar se o feature flag de avaliações está habilitado para este estabelecimento
+      const { data: siteSettingsFeatureFlag } = await supabase
+        .from('site_settings')
+        .select('features_enabled')
+        .eq('id', '00000000-0000-0000-0000-000000000001')
+        .maybeSingle();
+      
+      const { isFeatureEnabledForEstablishment } = await import('@/lib/featureAccess');
+      const isStayReviewsEnabled = isFeatureEnabledForEstablishment(
+        siteSettingsFeatureFlag?.features_enabled?.stay_reviews,
+        fullReservation.establishment_id
+      );
+      
+      if (isStayReviewsEnabled) {
+        // Gerar link de avaliação
+        const baseUrl = typeof window !== 'undefined' 
+          ? window.location.origin 
+          : (import.meta.env.VITE_APP_URL || 'http://localhost:8080');
+        
+        // Buscar locator da reserva (identification_number ou reservation_code)
+        // Pode estar em fullReservation ou precisar buscar de web_checkin
+        let locator = fullReservation.identification_number || fullReservation.reservation_code;
+        
+        // Se não tiver identification_number, tentar buscar de web_checkin
+        if (!fullReservation.identification_number) {
+          const { data: webCheckin } = await supabase
+            .from('web_checkin')
+            .select('locator')
+            .eq('reservation_id', fullReservation.id)
+            .maybeSingle();
+          
+          if (webCheckin?.locator) {
+            locator = webCheckin.locator;
+          }
+        }
+        
+        if (locator) {
+          const reviewLink = `${baseUrl}/review/${locator}`;
+          processedAdditionalVariables.review_link = reviewLink;
+          console.log('✅ review_link gerado e adicionado às variáveis no triggerEmail:', reviewLink);
+        } else {
+          console.warn('⚠️ Não foi possível gerar review_link: locator não encontrado');
+        }
       }
     }
     

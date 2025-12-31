@@ -65,6 +65,10 @@ SELECT
                 <p style="color: #555555; font-size: 14px; margin: 5px 0;"><strong>Check-out:</strong> {{checkout_date}}</p>
                 {{#if room_number}}
                 <p style="color: #555555; font-size: 14px; margin: 5px 0;"><strong>Quarto:</strong> {{room_number}}</p>
+                {{else}}
+                {{#if room_name}}
+                <p style="color: #555555; font-size: 14px; margin: 5px 0;"><strong>Quarto:</strong> {{room_name}}</p>
+                {{/if}}
                 {{/if}}
               </div>
               

@@ -115,7 +115,11 @@ export default function StayReviews() {
     const searchLower = searchTerm.toLowerCase();
     const reservation = review.reservation as any;
     const guestName = reservation?.guest?.full_name || "";
-    const roomNumber = reservation?.rooms?.room_number || "";
+    // Lidar com rooms que pode ser array ou objeto único
+    const roomsData = Array.isArray(reservation?.rooms) 
+      ? reservation.rooms[0] 
+      : reservation?.rooms;
+    const roomNumber = roomsData?.room_number || roomsData?.name || "";
     const comment = review.comment || "";
     
     return (
@@ -235,9 +239,12 @@ export default function StayReviews() {
               {filteredReviews.map((review: any) => {
                 const reservation = review.reservation as any;
                 const guestName = reservation?.guest?.full_name || "Hóspede";
-                const room = reservation?.rooms;
-                const roomNumber = room?.room_number || "N/A";
-                const roomCategory = room?.room_categories;
+                // Lidar com rooms que pode ser array ou objeto único
+                const roomsData = Array.isArray(reservation?.rooms) 
+                  ? reservation.rooms[0] 
+                  : reservation?.rooms;
+                const roomNumber = roomsData?.room_number || roomsData?.name || "N/A";
+                const roomCategory = roomsData?.room_categories;
                 const building = roomCategory?.buildings;
                 const buildingName = building?.name;
                 
@@ -436,8 +443,12 @@ export default function StayReviews() {
           </DialogHeader>
           {selectedReview && (() => {
             const reservation = selectedReview.reservation as any;
-            const room = reservation?.rooms;
-            const roomCategory = room?.room_categories;
+            // Lidar com rooms que pode ser array ou objeto único
+            const roomsData = Array.isArray(reservation?.rooms) 
+              ? reservation.rooms[0] 
+              : reservation?.rooms;
+            const roomNumber = roomsData?.room_number || roomsData?.name || "N/A";
+            const roomCategory = roomsData?.room_categories;
             const building = roomCategory?.buildings;
             const buildingName = building?.name;
             
@@ -463,7 +474,7 @@ export default function StayReviews() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <div className="text-sm text-muted-foreground">Quarto</div>
-                    <div className="font-semibold">{room?.room_number || "N/A"}</div>
+                    <div className="font-semibold">{roomNumber}</div>
                   </div>
                   {buildingName && (
                     <div>
