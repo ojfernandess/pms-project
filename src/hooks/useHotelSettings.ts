@@ -72,6 +72,7 @@ export const useHotelSettings = () => {
       invoice_email?: string;
       establishment_cnpj?: string;
       show_establishment_cnpj?: boolean;
+      enable_cleaning_notifications?: boolean;
     }) => {
       // Buscar establishment_id do localStorage
       const establishmentId = localStorage.getItem("selectedEstablishmentId");

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { parseISO, format } from "date-fns";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 
 /**
  * Hook para detectar check-outs que passaram do horário e criar notificações de limpeza
@@ -11,8 +11,53 @@ export const useCheckoutCleaning = () => {
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
 
+  // Buscar configurações do hotel para verificar se notificações de limpeza estão ativas
+  const { data: hotelSettings } = useQuery({
+    queryKey: ["hotel_settings_cleaning", selectedEstablishment?.id],
+    queryFn: async () => {
+      if (!selectedEstablishment?.id) return null;
+      
+      try {
+        const { data, error } = await supabase
+          .from("hotel_settings")
+          .select("enable_cleaning_notifications")
+          .eq("establishment_id", selectedEstablishment.id)
+          .single();
+
+        if (error) {
+          // Se a coluna não existe (erro 42703), retornar null (usar padrão: true)
+          if (error.code === "42703" || error.message?.includes("does not exist")) {
+            console.warn("Coluna enable_cleaning_notifications não existe ainda. Execute a migration 20251210000004_add_enable_cleaning_notifications_to_hotel_settings.sql");
+            return null;
+          }
+          // Se não encontrar configurações, retornar null (usar padrão: true)
+          if (error.code === "PGRST116") return null;
+          console.error("Erro ao buscar configurações de limpeza:", error);
+          return null;
+        }
+        return data;
+      } catch (err: any) {
+        // Se a coluna não existe, retornar null (usar padrão: true)
+        if (err?.code === "42703" || err?.message?.includes("does not exist")) {
+          console.warn("Coluna enable_cleaning_notifications não existe ainda. Execute a migration 20251210000004_add_enable_cleaning_notifications_to_hotel_settings.sql");
+          return null;
+        }
+        console.error("Erro ao buscar configurações de limpeza:", err);
+        return null;
+      }
+    },
+    enabled: !!selectedEstablishment?.id,
+    retry: false, // Não tentar novamente se a coluna não existir
+  });
+
+  // Verificar se notificações de limpeza estão habilitadas (padrão: true se coluna não existir)
+  const isCleaningNotificationsEnabled = hotelSettings?.enable_cleaning_notifications !== false;
+
   useEffect(() => {
     if (!selectedEstablishment?.id) return;
+    
+    // Se notificações de limpeza estão desativadas, não executar
+    if (!isCleaningNotificationsEnabled) return;
 
     const checkCheckoutsAndNotify = async () => {
       try {
@@ -176,6 +221,6 @@ export const useCheckoutCleaning = () => {
     const interval = setInterval(checkCheckoutsAndNotify, 5 * 60 * 1000);
 
     return () => clearInterval(interval);
-  }, [selectedEstablishment?.id, queryClient]);
+  }, [selectedEstablishment?.id, queryClient, isCleaningNotificationsEnabled]);
 };
 

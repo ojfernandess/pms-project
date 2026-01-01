@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -53,10 +53,14 @@ export function ConfirmCleaningDialog({
   const { selectedEstablishment } = useEstablishment();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notes, setNotes] = useState("");
+  const toastShownRef = useRef(false); // Ref para controlar se o toast já foi exibido
 
   // Verificar se o quarto já foi limpo quando o diálogo abre
   useEffect(() => {
     if (open && roomId && selectedEstablishment?.id) {
+      // Resetar ref quando o diálogo abre
+      toastShownRef.current = false;
+      
       const checkRoomStatus = async () => {
         const { data: room } = await supabase
           .from("rooms")
@@ -95,11 +99,29 @@ export function ConfirmCleaningDialog({
           }
           // Fechar diálogo se quarto já foi limpo
           onOpenChange(false);
-          toast.info(`O quarto ${roomNumber} já foi limpo anteriormente.`);
+          
+          // Mostrar toast apenas uma vez
+          if (!toastShownRef.current) {
+            toastShownRef.current = true;
+            toast.info(`O quarto ${roomNumber} já foi limpo anteriormente.`, {
+              duration: 5000,
+              className: "bg-blue-50 border-2 border-blue-300 text-blue-900 shadow-lg",
+              style: {
+                backgroundColor: "#eff6ff",
+                borderColor: "#93c5fd",
+                color: "#1e3a8a",
+              },
+              closeButton: true,
+              description: "Esta notificação será removida automaticamente.",
+            });
+          }
         }
       };
 
       checkRoomStatus();
+    } else {
+      // Resetar ref quando o diálogo fecha
+      toastShownRef.current = false;
     }
   }, [open, roomId, selectedEstablishment?.id, roomNumber, onOpenChange, queryClient]);
 

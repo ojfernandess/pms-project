@@ -43,6 +43,20 @@ const Toaster = ({ ...props }: ToasterProps) => {
             height: 20px;
           }
         }
+        
+        /* Estilo customizado para toast de info com cor azul diferenciada */
+        [data-sonner-toast][data-type="info"].bg-blue-50 [data-close-button] {
+          color: rgb(30 58 138) !important;
+          opacity: 1 !important;
+          background-color: rgba(255, 255, 255, 0.5);
+          border-radius: 4px;
+          padding: 2px;
+        }
+        
+        [data-sonner-toast][data-type="info"].bg-blue-50 [data-close-button]:hover {
+          color: rgb(15 23 42) !important;
+          background-color: rgba(255, 255, 255, 0.8);
+        }
       `}</style>
     <Sonner
       theme={theme as ToasterProps["theme"]}

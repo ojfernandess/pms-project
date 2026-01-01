@@ -67,6 +67,7 @@ const Settings = () => {
     checkout_time: "12:00",
     auto_payment_ota: false,
     auto_payment_carrier_id: "",
+    enable_cleaning_notifications: true,
     fiscal_document_type: "both",
     invoice_email: "",
     establishment_cnpj: "",
@@ -122,6 +123,7 @@ const Settings = () => {
         checkout_time: settings.checkout_time ? settings.checkout_time.substring(0, 5) : "12:00",
         auto_payment_ota: settings.auto_payment_ota ?? false,
         auto_payment_carrier_id: settings.auto_payment_carrier_id || "",
+        enable_cleaning_notifications: settings.enable_cleaning_notifications !== undefined ? settings.enable_cleaning_notifications : true,
         fiscal_document_type: settings.fiscal_document_type || "both",
         invoice_email: settings.invoice_email || "",
         establishment_cnpj: settings.establishment_cnpj || "",
@@ -715,6 +717,27 @@ const Settings = () => {
                       </p>
                     </div>
                   )}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-semibold mb-4">Notificações</h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label htmlFor="enable_cleaning_notifications">Notificações de Limpeza</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Quando ativado, o sistema criará notificações automaticamente quando um check-out passar do horário, alertando que o quarto precisa de limpeza
+                      </p>
+                    </div>
+                    <Switch
+                      id="enable_cleaning_notifications"
+                      checked={formData.enable_cleaning_notifications}
+                      onCheckedChange={(checked) =>
+                        setFormData({ ...formData, enable_cleaning_notifications: checked })
+                      }
+                    />
+                  </div>
                 </div>
               </div>
 

@@ -6,9 +6,15 @@ import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { BarChart3, TrendingUp, DollarSign, Users, Download, Calendar as CalendarIcon } from "lucide-react";
+import { BarChart3, TrendingUp, DollarSign, Users, Download, Calendar as CalendarIcon, FileSpreadsheet, FileText, ChevronDown } from "lucide-react";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -57,6 +63,7 @@ export const RateAnalyticsView = ({
   const [selectedPlan, setSelectedPlan] = useState<string>("all");
   const [applyingRecommendation, setApplyingRecommendation] = useState<string | null>(null);
   const [showPastRecommendations, setShowPastRecommendations] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const { getMetricsForPeriod } = useRateMetrics();
   
@@ -180,6 +187,270 @@ export const RateAnalyticsView = ({
     },
   });
 
+  // Preparar dados para exportação
+  const prepareExportData = useMemo(() => {
+    if (!reservationsData) return null;
+
+    const filtered = reservationsData.filter((r: any) => {
+      if (selectedCategory !== "all" && r.category_id !== selectedCategory) return false;
+      if (selectedPlan !== "all" && r.pricing_plan_id !== selectedPlan) return false;
+      return true;
+    });
+
+    // Dados principais para exportação
+    const exportData = filtered.map((r: any) => ({
+      "Código": r.reservation_code || "-",
+      "Categoria": r.room_categories?.name || "-",
+      "Plano Tarifário": r.pricing_plans?.name || "-",
+      "Check-in": r.checkin_date ? format(new Date(r.checkin_date), "dd/MM/yyyy", { locale: ptBR }) : "-",
+      "Check-out": r.checkout_date ? format(new Date(r.checkout_date), "dd/MM/yyyy", { locale: ptBR }) : "-",
+      "Hóspede": r.guest_name || "-",
+      "Status": r.status || "-",
+      "Valor Total": formatCurrency(Number(r.total_amount || 0)),
+      "Valor Pago": formatCurrency(Number(r.paid_amount || 0)),
+      "Valor Pendente": formatCurrency(Number(r.total_amount || 0) - Number(r.paid_amount || 0)),
+      "Noites": Math.ceil(
+        (new Date(r.checkout_date).getTime() - new Date(r.checkin_date).getTime()) / (1000 * 60 * 60 * 24)
+      ),
+      "ADR": formatCurrency(
+        Math.ceil(
+          (new Date(r.checkout_date).getTime() - new Date(r.checkin_date).getTime()) / (1000 * 60 * 60 * 24)
+        ) > 0
+          ? Number(r.total_amount || 0) /
+              Math.ceil(
+                (new Date(r.checkout_date).getTime() - new Date(r.checkin_date).getTime()) / (1000 * 60 * 60 * 24)
+              )
+          : 0
+      ),
+    }));
+
+    return exportData;
+  }, [reservationsData, selectedCategory, selectedPlan, categories, ratePlans]);
+
+  // Função para exportar para XLSX
+  const handleExportXLSX = async () => {
+    if (!prepareExportData || !metrics) {
+      toast.error("Nenhum dado disponível para exportação");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.utils.book_new();
+
+      // Aba 1: Resumo
+      const summaryData = [
+        { "Métrica": "Receita Total", "Valor": formatCurrency(metrics.totalRevenue) },
+        { "Métrica": "Total de Reservas", "Valor": metrics.totalReservations.toString() },
+        { "Métrica": "ADR Médio", "Valor": formatCurrency(metrics.avgADR) },
+        { "Métrica": "RevPAR", "Valor": formatCurrency(metrics.avgADR * 0.75) },
+      ];
+      const summarySheet = XLSX.utils.json_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(workbook, summarySheet, "Resumo");
+
+      // Aba 2: Receita por Categoria
+      const categoryData = metrics.revenueByCategory.map((cat: any) => ({
+        "Categoria": cat.name,
+        "Receita": formatCurrency(cat.revenue),
+        "Reservas": cat.reservations.toString(),
+        "ADR": formatCurrency(cat.adr),
+      }));
+      const categorySheet = XLSX.utils.json_to_sheet(categoryData);
+      XLSX.utils.book_append_sheet(workbook, categorySheet, "Por Categoria");
+
+      // Aba 3: Receita por Plano
+      const planData = metrics.revenueByPlan.map((plan: any) => ({
+        "Plano Tarifário": plan.name,
+        "Receita": formatCurrency(plan.revenue),
+        "Reservas": plan.reservations.toString(),
+        "ADR": formatCurrency(plan.adr),
+      }));
+      const planSheet = XLSX.utils.json_to_sheet(planData);
+      XLSX.utils.book_append_sheet(workbook, planSheet, "Por Plano");
+
+      // Aba 4: Detalhes das Reservas
+      const reservationsSheet = XLSX.utils.json_to_sheet(prepareExportData);
+      XLSX.utils.book_append_sheet(workbook, reservationsSheet, "Reservas");
+
+      const filename = `Relatorio_Analytics_${format(dateRange.start, "yyyy-MM-dd")}_${format(dateRange.end, "yyyy-MM-dd")}`;
+      XLSX.writeFile(workbook, `${filename}.xlsx`);
+      toast.success("Relatório exportado com sucesso!");
+    } catch (error) {
+      console.error("Erro ao exportar:", error);
+      toast.error("Erro ao exportar relatório");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Função para exportar para PDF
+  const handleExportPDF = async () => {
+    if (!prepareExportData || !metrics) {
+      toast.error("Nenhum dado disponível para exportação");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const jsPDF = (await import("jspdf")).default;
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 15;
+      let currentY = margin;
+
+      // Título
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.text("Relatório de Analytics e Relatórios", margin, currentY);
+      currentY += 10;
+
+      // Informações do período
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text(
+        `Período: ${format(dateRange.start, "dd/MM/yyyy", { locale: ptBR })} até ${format(dateRange.end, "dd/MM/yyyy", { locale: ptBR })}`,
+        margin,
+        currentY
+      );
+      currentY += 6;
+      if (selectedCategory !== "all") {
+        const categoryName = categories.find((c) => c.id === selectedCategory)?.name || selectedCategory;
+        doc.text(`Categoria: ${categoryName}`, margin, currentY);
+        currentY += 6;
+      }
+      if (selectedPlan !== "all") {
+        const planName = ratePlans.find((p) => p.id === selectedPlan)?.name || selectedPlan;
+        doc.text(`Plano Tarifário: ${planName}`, margin, currentY);
+        currentY += 6;
+      }
+      currentY += 5;
+
+      // Resumo
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text("Resumo", margin, currentY);
+      currentY += 8;
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      const summaryData = [
+        { "Métrica": "Receita Total", "Valor": formatCurrency(metrics.totalRevenue) },
+        { "Métrica": "Total de Reservas", "Valor": metrics.totalReservations.toString() },
+        { "Métrica": "ADR Médio", "Valor": formatCurrency(metrics.avgADR) },
+        { "Métrica": "RevPAR", "Valor": formatCurrency(metrics.avgADR * 0.75) },
+      ];
+      summaryData.forEach((item: any) => {
+        doc.setFont("helvetica", "bold");
+        doc.text(`${item.Métrica}:`, margin, currentY);
+        doc.setFont("helvetica", "normal");
+        doc.text(item.Valor, margin + 60, currentY);
+        currentY += 7;
+      });
+      currentY += 5;
+
+      // Receita por Categoria
+      if (metrics.revenueByCategory.length > 0) {
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.text("Receita por Categoria", margin, currentY);
+        currentY += 8;
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.text("Categoria", margin, currentY);
+        doc.text("Receita", margin + 60, currentY);
+        doc.text("Reservas", margin + 100, currentY);
+        doc.text("ADR", margin + 130, currentY);
+        currentY += 6;
+        doc.line(margin, currentY - 2, pageWidth - margin, currentY - 2);
+        currentY += 3;
+
+        doc.setFont("helvetica", "normal");
+        metrics.revenueByCategory.forEach((item: any) => {
+          if (currentY > 270) {
+            doc.addPage();
+            currentY = margin + 10;
+          }
+          doc.text(item.name, margin, currentY);
+          doc.text(formatCurrency(item.revenue), margin + 60, currentY);
+          doc.text(item.reservations.toString(), margin + 100, currentY);
+          doc.text(formatCurrency(item.adr), margin + 130, currentY);
+          currentY += 7;
+        });
+        currentY += 5;
+      }
+
+      // Receita por Plano
+      if (metrics.revenueByPlan.length > 0) {
+        if (currentY > 250) {
+          doc.addPage();
+          currentY = margin + 10;
+        }
+
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.text("Receita por Plano Tarifário", margin, currentY);
+        currentY += 8;
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.text("Plano", margin, currentY);
+        doc.text("Receita", margin + 60, currentY);
+        doc.text("Reservas", margin + 100, currentY);
+        doc.text("ADR", margin + 130, currentY);
+        currentY += 6;
+        doc.line(margin, currentY - 2, pageWidth - margin, currentY - 2);
+        currentY += 3;
+
+        doc.setFont("helvetica", "normal");
+        metrics.revenueByPlan.forEach((item: any) => {
+          if (currentY > 270) {
+            doc.addPage();
+            currentY = margin + 10;
+          }
+          doc.text(item.name, margin, currentY);
+          doc.text(formatCurrency(item.revenue), margin + 60, currentY);
+          doc.text(item.reservations.toString(), margin + 100, currentY);
+          doc.text(formatCurrency(item.adr), margin + 130, currentY);
+          currentY += 7;
+        });
+      }
+
+      // Rodapé
+      const totalPages = doc.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "italic");
+        doc.text(
+          `Página ${i} de ${totalPages}`,
+          pageWidth - margin - 30,
+          doc.internal.pageSize.getHeight() - 10
+        );
+        doc.text(
+          `Gerado em ${new Date().toLocaleString("pt-BR")}`,
+          margin,
+          doc.internal.pageSize.getHeight() - 10
+        );
+      }
+
+      const filename = `Relatorio_Analytics_${format(dateRange.start, "yyyy-MM-dd")}_${format(dateRange.end, "yyyy-MM-dd")}`;
+      doc.save(`${filename}.pdf`);
+      toast.success("Relatório PDF exportado com sucesso!");
+    } catch (error) {
+      console.error("Erro ao exportar PDF:", error);
+      toast.error("Erro ao exportar relatório PDF");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   // Calcular métricas agregadas
   const metrics = useMemo(() => {
     if (!reservationsData) return null;
@@ -271,10 +542,34 @@ export const RateAnalyticsView = ({
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" className="gap-2">
-            <Download className="w-4 h-4" />
-            Exportar Relatório
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2" disabled={isExporting || !metrics}>
+                {isExporting ? (
+                  <>
+                    <Download className="w-4 h-4 animate-spin" />
+                    Exportando...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    Exportar Relatório
+                    <ChevronDown className="w-4 h-4" />
+                  </>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleExportXLSX} disabled={isExporting || !metrics}>
+                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                Exportar para Excel (XLSX)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportPDF} disabled={isExporting || !metrics}>
+                <FileText className="w-4 h-4 mr-2" />
+                Exportar para PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
