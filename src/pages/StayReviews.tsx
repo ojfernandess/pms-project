@@ -412,20 +412,37 @@ export default function StayReviews() {
                   <ResponsiveContainer width="100%" height={300}>
                     <PieChart>
                       <Pie
-                        data={distributionData}
+                        data={distributionData.filter(d => d.value > 0)}
                         cx="50%"
-                        cy="50%"
+                        cy="45%"
                         labelLine={false}
-                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        label={false}
                         outerRadius={80}
                         fill="#8884d8"
                         dataKey="value"
                       >
-                        {distributionData.map((entry, index) => (
+                        {distributionData.filter(d => d.value > 0).map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip />
+                      <Tooltip 
+                        formatter={(value: number, name: string) => [
+                          `${value} ${value === 1 ? 'avaliação' : 'avaliações'}`,
+                          name
+                        ]}
+                      />
+                      <Legend 
+                        verticalAlign="bottom" 
+                        height={60}
+                        wrapperStyle={{ paddingTop: '20px' }}
+                        formatter={(value: string) => {
+                          const entry = distributionData.find(d => d.name === value);
+                          if (!entry || entry.value === 0) return '';
+                          const total = distributionData.reduce((sum, d) => sum + d.value, 0);
+                          const percent = total > 0 ? ((entry.value / total) * 100).toFixed(0) : '0';
+                          return `${value}: ${percent}%`;
+                        }}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
                 </Card>
