@@ -35,7 +35,8 @@ export const getAvailableRooms = async (
   categoryId: string,
   checkinDate: string,
   checkoutDate: string,
-  includeRoomId?: string // Quarto específico para incluir mesmo se ocupado (para edição)
+  includeRoomId?: string, // Quarto específico para incluir mesmo se ocupado (para edição)
+  excludeReservationId?: string // ID da reserva atual para excluir da verificação de conflitos (para edição)
 ): Promise<Room[]> => {
   const establishmentId = localStorage.getItem("selectedEstablishmentId");
   
@@ -62,7 +63,7 @@ export const getAvailableRooms = async (
   // Uma reserva que termina no dia X não conflita com uma que começa no dia X
   let reservationsQuery = supabase
     .from("reservations")
-    .select("room_id")
+    .select("room_id, id")
     .eq("category_id", categoryId)
     .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"])
     .or(
@@ -71,6 +72,11 @@ export const getAvailableRooms = async (
   
   if (establishmentId) {
     reservationsQuery = reservationsQuery.eq("establishment_id", establishmentId);
+  }
+  
+  // Se estiver editando uma reserva, excluir ela da verificação de conflitos
+  if (excludeReservationId) {
+    reservationsQuery = reservationsQuery.neq("id", excludeReservationId);
   }
   
   const { data: conflictingReservations, error: reservationsError } = await reservationsQuery;

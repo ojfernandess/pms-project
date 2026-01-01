@@ -787,9 +787,9 @@ export const MaintenanceTicketDialog = ({
                       </SelectLabel>
                       {group.rooms.map((room) => (
                         <SelectItem key={room.id} value={room.id} className="pl-6">
-                          {room.room_number} {room.floor && `- Andar ${room.floor}`}
-                          {room.status === "maintenance" && " (Em manutenção)"}
-                        </SelectItem>
+                      {room.room_number} {room.floor && `- Andar ${room.floor}`}
+                      {room.status === "maintenance" && " (Em manutenção)"}
+                    </SelectItem>
                       ))}
                     </SelectGroup>
                   ))}

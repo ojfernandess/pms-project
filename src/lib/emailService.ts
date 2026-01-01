@@ -414,7 +414,7 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
 
     // Extrair nome do hotel das variáveis salvas (se disponível)
     const hotelName = queueItem.variables?.hotel_name || undefined;
-    
+
     try {
       switch (settings.provider) {
         case 'smtp':

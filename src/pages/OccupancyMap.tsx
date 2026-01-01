@@ -18,6 +18,7 @@ import {
   Filter,
   Calendar,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Eye,
   AlertCircle,
@@ -31,7 +32,7 @@ import { useReservations } from "@/hooks/useReservations";
 import { useMaintenance } from "@/hooks/useMaintenance";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
-import { format, addDays, subDays, isToday, parseISO } from "date-fns";
+import { format, addDays, subDays, isToday, parseISO, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ReservationDialog } from "@/components/reservations/ReservationDialog";
 import { BlockRoomDialog } from "@/components/reservations/BlockRoomDialog";
@@ -603,17 +604,41 @@ const OccupancyMap = () => {
               Data
             </Label>
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setSelectedDate(subDays(selectedDate, 1))}
+                title="Dia anterior"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
               <Input
                 id="date"
                 type="date"
                 value={format(selectedDate, "yyyy-MM-dd")}
-                onChange={(e) => setSelectedDate(new Date(e.target.value))}
+                onChange={(e) => {
+                  // Usar parseISO para garantir que a data seja interpretada corretamente
+                  // e startOfDay para normalizar para o início do dia (evitar problemas de timezone)
+                  const dateValue = e.target.value;
+                  if (dateValue) {
+                    const parsedDate = parseISO(dateValue);
+                    setSelectedDate(startOfDay(parsedDate));
+                  }
+                }}
                 className="flex-1"
               />
               <Button
                 variant="outline"
                 size="icon"
-                onClick={() => setSelectedDate(new Date())}
+                onClick={() => setSelectedDate(addDays(selectedDate, 1))}
+                title="Próximo dia"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setSelectedDate(startOfDay(new Date()))}
                 title="Hoje"
               >
                 <Calendar className="h-4 w-4" />
@@ -657,45 +682,6 @@ const OccupancyMap = () => {
               </SelectContent>
             </Select>
           </div>
-
-          {/* Status */}
-          <div>
-            <Label className="text-sm font-medium mb-2 block">Status</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {Object.entries(statusConfig).map(([status, config]) => {
-                const isSelected = selectedStatuses.has(status as RoomOccupancyStatus);
-                return (
-                  <button
-                    key={status}
-                    type="button"
-                    onClick={() => toggleStatusFilter(status as RoomOccupancyStatus)}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200",
-                      "border-2 cursor-pointer select-none",
-                      "hover:scale-105 active:scale-95",
-                      isSelected
-                        ? cn(
-                            "bg-slate-900 text-white border-slate-900 shadow-sm",
-                            "hover:bg-slate-800 hover:border-slate-800"
-                          )
-                        : cn(
-                            "bg-white text-slate-700 border-slate-200",
-                            "hover:bg-slate-50 hover:border-slate-300"
-                          )
-                    )}
-                  >
-                    <span className="text-sm leading-none">{config.emoji}</span>
-                    <span className="hidden sm:inline whitespace-nowrap">
-                      {config.label.split("/")[0]}
-                    </span>
-                    {isSelected && (
-                      <CheckCircle2 className="h-3 w-3 text-white" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </div>
       </Card>
 
@@ -706,13 +692,34 @@ const OccupancyMap = () => {
           <Card className="p-3 sm:p-4">
             <div className="flex flex-wrap items-center gap-3 sm:gap-6">
               <span className="text-xs sm:text-sm font-semibold text-slate-700 w-full sm:w-auto">Legenda:</span>
-        {Object.entries(statusConfig).map(([status, config]) => (
-          <div key={status} className="flex items-center gap-1.5 sm:gap-2">
-                  <div className={cn("w-3 h-3 sm:w-4 sm:h-4 rounded flex-shrink-0", config.color)} />
-                  <span className="text-[10px] sm:text-xs font-medium text-slate-600 whitespace-nowrap">{config.label}</span>
-          </div>
-        ))}
-      </div>
+              {Object.entries(statusConfig).map(([status, config]) => {
+                const isSelected = selectedStatuses.has(status as RoomOccupancyStatus);
+                return (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => toggleStatusFilter(status as RoomOccupancyStatus)}
+                    className={cn(
+                      "flex items-center gap-1.5 sm:gap-2 px-2 py-1 rounded-md transition-all duration-200 cursor-pointer",
+                      "hover:bg-slate-100 active:scale-95",
+                      isSelected && "bg-slate-200 ring-2 ring-slate-400"
+                    )}
+                    title={`Clique para ${isSelected ? 'remover' : 'aplicar'} filtro`}
+                  >
+                    <div className={cn("w-3 h-3 sm:w-4 sm:h-4 rounded flex-shrink-0", config.color)} />
+                    <span className={cn(
+                      "text-[10px] sm:text-xs font-medium whitespace-nowrap",
+                      isSelected ? "text-slate-900 font-semibold" : "text-slate-600"
+                    )}>
+                      {config.label}
+                    </span>
+                    {isSelected && (
+                      <CheckCircle2 className="h-3 w-3 text-slate-700" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </Card>
 
           {/* Quartos agrupados por categoria */}
@@ -777,7 +784,11 @@ const OccupancyMap = () => {
                             {/* Linhas dos Quartos */}
                             <div className="divide-y divide-slate-200">
                               {categoryRooms.map((room) => {
-                                const config = statusConfig[room.status];
+                                // Determinar se o quarto está sujo mesmo sendo disponível
+                                const isDirtyAvailable = room.status === "available" && room.is_dirty;
+                                
+                                // Usar configuração de "dirty" se estiver sujo, senão usar a configuração normal
+                                const config = isDirtyAvailable ? statusConfig["dirty"] : statusConfig[room.status];
             const Icon = config.icon;
                                 
                                 // Verificar se checkout ocorreu na data selecionada
@@ -799,7 +810,7 @@ const OccupancyMap = () => {
                                    room.reservation_status === "checkedin");
                                 
                                 // Determinar texto do status do quarto
-                                let roomStatusText = config.label;
+                                let roomStatusText = isDirtyAvailable ? "Disponível (Sujo)" : config.label;
                                 let statusDisplayText = "";
                                 
                                 // Texto superior (dias ou status)
@@ -808,7 +819,7 @@ const OccupancyMap = () => {
                                 } else if (room.nights_remaining === 0) {
                                   statusDisplayText = "Último dia";
                                 } else if (room.status === "available") {
-                                  statusDisplayText = "Disponível";
+                                  statusDisplayText = isDirtyAvailable ? "Aguardando Limpeza" : "Disponível";
                                 } else if (room.status === "dirty" || room.status === "dirty_priority") {
                                   statusDisplayText = "Aguardando Limpeza";
                                 } else if (room.status === "maintenance") {
@@ -886,14 +897,52 @@ const OccupancyMap = () => {
                                                 #{room.reservation_code}
                                               </span>
                                             )}
-                                            <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-slate-700 text-white rounded flex-shrink-0 font-medium">
-                                              CHECKOUT
-                                            </span>
-                                            {room.checkout_date && (
-                                              <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
-                                                - às {room.checkout_time?.substring(0, 5) || "12:00"}
-                                              </span>
-                                            )}
+                                            {(() => {
+                                              // Verificar se é reserva futura (ainda não entrou)
+                                              const reservationStatus = room.reservation_status;
+                                              const hasCheckedInStatus = reservationStatus === "checkedin";
+                                              
+                                              let hasCheckedInByDate = false;
+                                              if (room.checkin_date) {
+                                                const checkinDate = parseISO(room.checkin_date);
+                                                checkinDate.setHours(0, 0, 0, 0);
+                                                const selectedDateNormalized = startOfDay(selectedDate);
+                                                hasCheckedInByDate = checkinDate <= selectedDateNormalized;
+                                              }
+                                              
+                                              const isFutureReservation = room.checkin_date && 
+                                                                        parseISO(room.checkin_date) > startOfDay(selectedDate);
+                                              
+                                              // Mostrar CHECKIN se é reserva futura ou ainda não fez check-in
+                                              // Mostrar CHECKOUT apenas se já fez check-in
+                                              const shouldShowCheckin = isFutureReservation || (!hasCheckedInStatus && !hasCheckedInByDate);
+                                              const shouldShowCheckout = hasCheckedInStatus || (hasCheckedInByDate && !isFutureReservation);
+                                              
+                                              if (shouldShowCheckin && room.checkin_date) {
+                                                return (
+                                                  <>
+                                                    <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-pink-500 text-white rounded flex-shrink-0 font-medium">
+                                                      CHECKIN
+                                                    </span>
+                                                    <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
+                                                      - às {room.checkin_time?.substring(0, 5) || "15:00"}
+                                                    </span>
+                                                  </>
+                                                );
+                                              } else if (shouldShowCheckout && room.checkout_date) {
+                                                return (
+                                                  <>
+                                                    <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-slate-700 text-white rounded flex-shrink-0 font-medium">
+                                                      CHECKOUT
+                                                    </span>
+                                                    <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
+                                                      - às {room.checkout_time?.substring(0, 5) || "12:00"}
+                                                    </span>
+                                                  </>
+                                                );
+                                              }
+                                              return null;
+                                            })()}
                                           </>
                                         ) : (
                                           <span className="text-[10px] sm:text-xs text-slate-400 italic">Sem hóspede atual</span>
@@ -1104,8 +1153,19 @@ const OccupancyMap = () => {
                     <div className="text-xs font-semibold text-orange-700 mb-0.5">Anterior</div>
                     <div className="text-sm font-medium text-slate-900 truncate">{selectedRoom.previous_guest_name}</div>
                     <div className="flex items-center gap-3 mt-1 text-xs text-slate-600">
+                      {selectedRoom.previous_checkin_date && (
+                        <span>Check-in: {format(parseISO(selectedRoom.previous_checkin_date), "dd/MM/yyyy")}
+                          {selectedRoom.previous_checkin_time && (
+                            <span> às {selectedRoom.previous_checkin_time.substring(0, 5)}</span>
+                          )}
+                        </span>
+                      )}
                       {selectedRoom.previous_checkout_date && (
-                        <span>Check-out: {format(parseISO(selectedRoom.previous_checkout_date), "dd/MM/yyyy")}</span>
+                        <span>Check-out: {format(parseISO(selectedRoom.previous_checkout_date), "dd/MM/yyyy")}
+                          {selectedRoom.previous_checkout_time && (
+                            <span> às {selectedRoom.previous_checkout_time.substring(0, 5)}</span>
+                          )}
+                        </span>
                       )}
                       {selectedRoom.previous_reservation_code && (
                         <span className="text-slate-500">#{selectedRoom.previous_reservation_code}</span>
@@ -1116,26 +1176,68 @@ const OccupancyMap = () => {
               )}
 
               {/* Hóspede Atual */}
-              {selectedRoom?.guest_name && (
-                <div className="flex items-start gap-2 p-2 bg-slate-100 border-l-4 border-slate-400 rounded">
-                  <span className="text-slate-600 font-bold text-sm mt-0.5">●</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-semibold text-slate-700 mb-0.5">Atual</div>
-                    <div className="text-sm font-medium text-slate-900 truncate">{selectedRoom.guest_name}</div>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-slate-600">
-                      {selectedRoom.checkout_date && (
-                        <span>Check-out: {format(parseISO(selectedRoom.checkout_date), "dd/MM/yyyy")}</span>
-                      )}
-                      {selectedRoom.nights_remaining !== undefined && (
-                        <span>{selectedRoom.nights_remaining} noite(s) restante(s)</span>
-                      )}
-                      {selectedRoom.reservation_code && (
-                        <span className="text-slate-500">#{selectedRoom.reservation_code}</span>
-                      )}
+              {selectedRoom?.guest_name && (() => {
+                // Verificar se a reserva já fez check-in baseado no status
+                const reservationStatus = selectedRoom.reservation_status;
+                const hasCheckedInStatus = reservationStatus === "checkedin";
+                
+                // Verificar se a data de check-in já passou em relação à data selecionada
+                let hasCheckedInByDate = false;
+                if (selectedRoom.checkin_date) {
+                  const checkinDate = parseISO(selectedRoom.checkin_date);
+                  checkinDate.setHours(0, 0, 0, 0);
+                  const selectedDateNormalized = startOfDay(selectedDate);
+                  // Se a data de check-in é anterior ou igual à data selecionada, já fez check-in
+                  hasCheckedInByDate = checkinDate <= selectedDateNormalized;
+                }
+                
+                // Verificar se é o dia do check-in
+                const isCheckinToday = selectedRoom.checkin_date && 
+                                      format(parseISO(selectedRoom.checkin_date), "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd");
+                
+                // Verificar se é uma reserva futura (check-in ainda não aconteceu na data selecionada)
+                const isFutureReservation = selectedRoom.checkin_date && 
+                                          parseISO(selectedRoom.checkin_date) > startOfDay(selectedDate);
+                
+                // Lógica melhorada: 
+                // - Se é reserva futura OU é o dia do check-in: mostrar APENAS check-in
+                // - Se já fez check-in (status ou data): mostrar APENAS check-out
+                // - Nunca mostrar ambos ao mesmo tempo para evitar confusão
+                const shouldShowCheckin = isFutureReservation || isCheckinToday || (!hasCheckedInStatus && !hasCheckedInByDate);
+                const shouldShowCheckout = hasCheckedInStatus || (hasCheckedInByDate && !isCheckinToday && !isFutureReservation);
+                
+                return (
+                  <div className="flex items-start gap-2 p-2 bg-slate-100 border-l-4 border-slate-400 rounded">
+                    <span className="text-slate-600 font-bold text-sm mt-0.5">●</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold text-slate-700 mb-0.5">Atual</div>
+                      <div className="text-sm font-medium text-slate-900 truncate">{selectedRoom.guest_name}</div>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-slate-600">
+                        {shouldShowCheckin && selectedRoom.checkin_date && (
+                          <span>Check-in: {format(parseISO(selectedRoom.checkin_date), "dd/MM/yyyy")}
+                            {selectedRoom.checkin_time && (
+                              <span> às {selectedRoom.checkin_time.substring(0, 5)}</span>
+                            )}
+                          </span>
+                        )}
+                        {shouldShowCheckout && selectedRoom.checkout_date && (
+                          <span>Check-out: {format(parseISO(selectedRoom.checkout_date), "dd/MM/yyyy")}
+                            {selectedRoom.checkout_time && (
+                              <span> às {selectedRoom.checkout_time.substring(0, 5)}</span>
+                            )}
+                          </span>
+                        )}
+                        {selectedRoom.nights_remaining !== undefined && selectedRoom.nights_remaining > 0 && (
+                          <span>{selectedRoom.nights_remaining} noite(s) restante(s)</span>
+                        )}
+                        {selectedRoom.reservation_code && (
+                          <span className="text-slate-500">#{selectedRoom.reservation_code}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Próximo Hóspede */}
               {selectedRoom?.next_guest_name && (

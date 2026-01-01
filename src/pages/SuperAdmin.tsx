@@ -1072,7 +1072,7 @@ const SuperAdmin = () => {
         });
         toast.success("Estabelecimento atualizado com sucesso!");
       } else {
-        await createEstablishment(establishmentFormData);
+      await createEstablishment(establishmentFormData);
         toast.success("Estabelecimento criado com sucesso!");
       }
       setEstablishmentDialogOpen(false);

@@ -812,21 +812,72 @@ export const useRateSystem = () => {
     }
 
     // Usar função PostgreSQL (padrão)
-    const { data, error } = await supabase.rpc("calculate_rate_price", {
-      p_establishment_id: establishmentId,
-      p_category_id: categoryId,
-      p_pricing_plan_id: planId,
-      p_date: format(date, "yyyy-MM-dd"),
-      p_adults: adults,
-      p_children: children,
-    });
+    try {
+      const { data, error } = await supabase.rpc("calculate_rate_price", {
+        p_establishment_id: establishmentId,
+        p_category_id: categoryId,
+        p_pricing_plan_id: planId,
+        p_date: format(date, "yyyy-MM-dd"),
+        p_adults: adults,
+        p_children: children,
+      });
 
-    if (error) {
-      console.error("Erro ao calcular preço:", error);
+      if (error) {
+        console.error("Erro ao calcular preço:", error);
+        // Se for erro de CORS ou 502, tentar usar fallback
+        if (error.message?.includes("CORS") || error.message?.includes("Failed to fetch") || error.code === "PGRST301") {
+          console.warn("Erro de CORS/502 detectado, tentando fallback...");
+          // Tentar usar Edge Function como fallback
+          try {
+            const result = await applyDynamicPricingRules(categoryId, planId, date, adults, children);
+            return result.final_price;
+          } catch (fallbackError) {
+            console.error("Erro no fallback também:", fallbackError);
+            return 0;
+          }
+        }
+        return 0;
+      }
+
+      return Number(data || 0);
+    } catch (fetchError: any) {
+      console.error("Erro de rede ao calcular preço:", fetchError);
+      // Se for erro de rede (CORS, 502, etc), tentar fallback
+      if (fetchError.message?.includes("Failed to fetch") || 
+          fetchError.message?.includes("CORS") || 
+          fetchError.message?.includes("502") ||
+          fetchError.code === "PGRST301") {
+        console.warn("Erro de rede detectado, tentando fallback...");
+        try {
+          // Tentar Edge Function primeiro
+          const result = await applyDynamicPricingRules(categoryId, planId, date, adults, children);
+          if (result.final_price > 0) {
+            return result.final_price;
+          }
+        } catch (fallbackError) {
+          console.error("Erro no fallback Edge Function:", fallbackError);
+        }
+        
+        // Se Edge Function também falhar, buscar preço base da categoria
+        try {
+          const { data: categoryData } = await supabase
+            .from("room_categories")
+            .select("base_price")
+            .eq("id", categoryId)
+            .single();
+          
+          if (categoryData?.base_price) {
+            console.warn("Usando preço base da categoria como fallback:", categoryData.base_price);
+            return Number(categoryData.base_price);
+          }
+        } catch (categoryError) {
+          console.error("Erro ao buscar preço base da categoria:", categoryError);
+        }
+        
+        return 0;
+      }
       return 0;
     }
-
-    return Number(data || 0);
   };
 
   // Função para aplicar regras dinâmicas via Edge Function (com informações detalhadas)

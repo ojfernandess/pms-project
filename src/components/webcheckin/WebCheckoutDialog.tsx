@@ -89,6 +89,8 @@ export function WebCheckoutDialog({
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
       queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
       queryClient.invalidateQueries({ queryKey: ["guest_stay_history"] });
+      // Invalidar query do mapa de ocupação para atualizar informações dos hóspedes (próximas entradas)
+      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       
       // Criar notificação no sistema informando o check-out do hóspede
       try {

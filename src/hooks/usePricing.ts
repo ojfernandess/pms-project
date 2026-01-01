@@ -417,27 +417,42 @@ export const usePricing = () => {
       const dateStr = format(currentDate, "yyyy-MM-dd");
       
       try {
-        const { data, error } = await supabase.rpc("calculate_rate_price", {
-          p_establishment_id: establishmentId,
-          p_category_id: categoryId,
-          p_pricing_plan_id: planId,
-          p_date: dateStr,
-          p_adults: adults,
-          p_children: children,
-        });
+        try {
+          const { data, error } = await supabase.rpc("calculate_rate_price", {
+            p_establishment_id: establishmentId,
+            p_category_id: categoryId,
+            p_pricing_plan_id: planId,
+            p_date: dateStr,
+            p_adults: adults,
+            p_children: children,
+          });
 
-        if (error) {
-          console.error(`Erro ao calcular preço para ${dateStr}:`, error);
-          hasError = true;
-          // Usar preço base como fallback
-          totalPrice += basePrice;
-        } else {
-          const price = Number(data || 0);
-          if (price > 0) {
-            totalPrice += price;
-          } else {
-            // Se retornou 0, usar preço base
+          if (error) {
+            console.error(`Erro ao calcular preço para ${dateStr}:`, error);
+            hasError = true;
+            // Usar preço base como fallback
             totalPrice += basePrice;
+          } else {
+            const price = Number(data || 0);
+            if (price > 0) {
+              totalPrice += price;
+            } else {
+              // Se retornou 0, usar preço base
+              totalPrice += basePrice;
+            }
+          }
+        } catch (rpcError: any) {
+          console.error(`Erro ao chamar RPC calculate_rate_price para ${dateStr}:`, rpcError);
+          // Se for erro de CORS ou 502, usar preço base como fallback
+          if (rpcError.message?.includes("CORS") || 
+              rpcError.message?.includes("Failed to fetch") || 
+              rpcError.message?.includes("502") ||
+              rpcError.code === "PGRST301") {
+            console.warn(`Usando preço base como fallback para ${dateStr} devido a erro de rede`);
+            totalPrice += basePrice;
+            hasError = true;
+          } else {
+            throw rpcError;
           }
         }
       } catch (err) {

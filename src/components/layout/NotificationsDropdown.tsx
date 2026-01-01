@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bell, Check, CheckCheck, Trash2, AlertCircle, CreditCard, Wrench, Calendar, X, Loader2 } from "lucide-react";
+import { Bell, Check, CheckCheck, Trash2, AlertCircle, CreditCard, Wrench, Calendar, X, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
@@ -13,6 +13,7 @@ import { useNotifications, Notification } from "@/hooks/useNotifications";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { ConfirmCleaningDialog } from "@/components/cleaning/ConfirmCleaningDialog";
 
 const getNotificationIcon = (type: Notification["type"]) => {
   switch (type) {
@@ -23,6 +24,8 @@ const getNotificationIcon = (type: Notification["type"]) => {
       return <CreditCard className="h-4 w-4 text-orange-600" />;
     case "maintenance_ticket":
       return <Wrench className="h-4 w-4 text-red-600" />;
+    case "cleaning_required":
+      return <Sparkles className="h-4 w-4 text-yellow-600" />;
     default:
       return <AlertCircle className="h-4 w-4 text-gray-600" />;
   }
@@ -46,6 +49,17 @@ export function NotificationsDropdown() {
   const [open, setOpen] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [cleaningDialogOpen, setCleaningDialogOpen] = useState(false);
+  const [selectedCleaningNotification, setSelectedCleaningNotification] = useState<{
+    roomId: string;
+    roomNumber: string;
+    reservationId?: string;
+    reservationCode?: string;
+    guestName?: string;
+    checkinDate?: string;
+    checkoutDate?: string;
+    notificationId?: string;
+  } | null>(null);
 
   const handleMarkAsRead = async (notificationId: string) => {
     await markAsRead(notificationId);
@@ -159,11 +173,36 @@ export function NotificationsDropdown() {
                   className={cn(
                     "p-4 hover:bg-muted/50 transition-all duration-300 ease-in-out",
                     !notification.is_read && "bg-blue-50/50 dark:bg-blue-950/20",
-                    isAnimating && "opacity-0 -translate-x-4 scale-95"
+                    isAnimating && "opacity-0 -translate-x-4 scale-95",
+                    notification.type === "cleaning_required" && "cursor-pointer"
                   )}
                   style={{
                     transitionDelay: isAnimating ? `${notifications.indexOf(notification) * 30}ms` : '0ms',
                     transitionDuration: isAnimating ? '300ms' : '150ms'
+                  }}
+                  onClick={(e) => {
+                    // Prevenir que o clique propague para o botão de deletar
+                    e.stopPropagation();
+                    
+                    if (notification.type === "cleaning_required") {
+                      const metadata = notification.metadata as any;
+                      if (metadata?.room_id) {
+                        setSelectedCleaningNotification({
+                          roomId: metadata.room_id,
+                          roomNumber: metadata.room_number || "N/A",
+                          reservationId: metadata.reservation_id,
+                          reservationCode: metadata.reservation_code,
+                          guestName: metadata.guest_name,
+                          checkinDate: metadata.checkin_date,
+                          checkoutDate: metadata.checkout_date,
+                          notificationId: notification.id,
+                        });
+                        setCleaningDialogOpen(true);
+                        if (!notification.is_read) {
+                          handleMarkAsRead(notification.id);
+                        }
+                      }
+                    }
                   }}
                 >
                   <div className="flex items-start gap-3">
@@ -206,7 +245,11 @@ export function NotificationsDropdown() {
                               variant="ghost"
                               size="sm"
                               className="h-6 w-6 p-0"
-                              onClick={() => handleMarkAsRead(notification.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                handleMarkAsRead(notification.id);
+                              }}
                               title="Marcar como lida"
                             >
                               <Check className="h-3 w-3" />
@@ -216,7 +259,11 @@ export function NotificationsDropdown() {
                             variant="ghost"
                             size="sm"
                             className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-                            onClick={() => handleDelete(notification.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handleDelete(notification.id);
+                            }}
                             title="Excluir"
                           >
                             <Trash2 className="h-3 w-3" />
@@ -231,6 +278,31 @@ export function NotificationsDropdown() {
           )}
         </ScrollArea>
       </DropdownMenuContent>
+      
+      {selectedCleaningNotification && (
+        <ConfirmCleaningDialog
+          open={cleaningDialogOpen}
+          onOpenChange={(open) => {
+            setCleaningDialogOpen(open);
+            if (!open) {
+              setSelectedCleaningNotification(null);
+            }
+          }}
+          roomId={selectedCleaningNotification.roomId}
+          roomNumber={selectedCleaningNotification.roomNumber}
+          reservationId={selectedCleaningNotification.reservationId}
+          reservationCode={selectedCleaningNotification.reservationCode}
+          guestName={selectedCleaningNotification.guestName}
+          checkinDate={selectedCleaningNotification.checkinDate}
+          checkoutDate={selectedCleaningNotification.checkoutDate}
+          notificationId={selectedCleaningNotification.notificationId}
+          onSuccess={() => {
+            // Fechar dropdown após confirmação
+            setOpen(false);
+            setSelectedCleaningNotification(null);
+          }}
+        />
+      )}
     </DropdownMenu>
   );
 }

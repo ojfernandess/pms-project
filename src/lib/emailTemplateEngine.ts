@@ -194,7 +194,7 @@ function processEachLoops(template: string, variables: TemplateVariables): strin
  */
 export function processTemplate(template: string, variables: TemplateVariables): string {
   let processed = template;
-  
+
   // Log inicial para debug
   if (template?.includes('{{review_link}}') || template?.includes('{{{review_link}}}')) {
     console.log('🔍 processTemplate: Template contém review_link placeholder', {
@@ -214,7 +214,7 @@ export function processTemplate(template: string, variables: TemplateVariables):
   while (conditionalChanged && conditionalIterations < 50) {
     conditionalIterations++;
     const beforeConditionals = processed;
-    processed = processConditionals(processed, variables);
+  processed = processConditionals(processed, variables);
     conditionalChanged = beforeConditionals !== processed;
   }
   

@@ -369,6 +369,7 @@ export default function GuestDashboard() {
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [readNotifications, setReadNotifications] = useState<Set<string>>(new Set());
   const [deletedNotifications, setDeletedNotifications] = useState<Set<string>>(new Set());
+  const [selectedReservationIdFromNotification, setSelectedReservationIdFromNotification] = useState<string | null>(null);
   
   // Carregar notificações lidas/excluídas do localStorage
   useEffect(() => {
@@ -641,6 +642,100 @@ export default function GuestDashboard() {
   });
 
 
+  // Buscar reserva selecionada a partir de notificação (para reservas com check-out)
+  const { data: selectedReservationFromNotification } = useQuery({
+    queryKey: ["selected_reservation_from_notification", selectedReservationIdFromNotification],
+    queryFn: async () => {
+      if (!selectedReservationIdFromNotification) return null;
+
+      // Buscar dados completos da reserva
+      const { data: reservation, error } = await supabase
+        .from("reservations")
+        .select(`
+          *,
+          rooms(room_number, name, fixed_password, authentication_type),
+          room_categories(name),
+          establishment:establishments(name)
+        `)
+        .eq("id", selectedReservationIdFromNotification)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Erro ao buscar reserva da notificação:", error);
+        return null;
+      }
+
+      if (!reservation) return null;
+
+      // Buscar dados do hóspede
+      let guest = null;
+      if (reservation.guest_id) {
+        const { data: guestData } = await supabase
+          .from("clients")
+          .select("full_name, email, phone")
+          .eq("id", reservation.guest_id)
+          .maybeSingle();
+        guest = guestData;
+      }
+
+      // Buscar dados do responsável financeiro
+      let financialResponsible = null;
+      if (reservation.client_id) {
+        const { data: financialData } = await supabase
+          .from("clients")
+          .select("full_name, email, phone")
+          .eq("id", reservation.client_id)
+          .maybeSingle();
+        financialResponsible = financialData;
+      }
+
+      // Buscar dados do building
+      let building = null;
+      if (reservation.category_id) {
+        const { data: categoryData } = await supabase
+          .from("room_categories")
+          .select("building_id")
+          .eq("id", reservation.category_id)
+          .maybeSingle();
+        
+        if (categoryData?.building_id) {
+          const { data: buildingData } = await supabase
+            .from("buildings")
+            .select("street, city, state, number, neighborhood, zip_code, name")
+            .eq("id", categoryData.building_id)
+            .maybeSingle();
+          building = buildingData;
+        }
+      }
+
+      // Buscar endereço do estabelecimento
+      let establishmentAddress = null;
+      if (reservation.establishment_id) {
+        const { data: hotelSettings } = await supabase
+          .from("hotel_settings")
+          .select("street, number, neighborhood, city, state, zip_code")
+          .eq("establishment_id", reservation.establishment_id)
+          .maybeSingle();
+        
+        if (hotelSettings) {
+          establishmentAddress = {
+            ...(reservation.establishment as any),
+            ...hotelSettings,
+          };
+        }
+      }
+
+      return {
+        ...reservation,
+        guest,
+        financial_responsible: financialResponsible,
+        building,
+        establishment: establishmentAddress || reservation.establishment,
+      } as any;
+    },
+    enabled: !!selectedReservationIdFromNotification,
+  });
+
   // Buscar reservas canceladas separadamente
   const { data: cancelledReservations, isLoading: isLoadingCancelled } = useQuery({
     queryKey: ["cancelled_guest_reservations", accountId],
@@ -826,9 +921,10 @@ export default function GuestDashboard() {
 
   // Buscar web_checkin para obter token e locator
   const { data: webCheckin, isLoading: isLoadingWebCheckin } = useQuery({
-    queryKey: ["current_web_checkin", currentReservation?.id],
+    queryKey: ["current_web_checkin", currentReservation?.id, selectedReservationFromNotification?.id],
     queryFn: async () => {
-      if (!currentReservation?.id) return null;
+      const reservationId = currentReservation?.id || selectedReservationFromNotification?.id;
+      if (!reservationId) return null;
 
       const { data, error } = await (supabase as any)
         .from("web_checkin")
@@ -837,7 +933,7 @@ export default function GuestDashboard() {
           reservation:reservations(*),
           establishment:establishments(*)
         `)
-        .eq("reservation_id", currentReservation.id)
+        .eq("reservation_id", reservationId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -851,23 +947,24 @@ export default function GuestDashboard() {
       }
       return data;
     },
-    enabled: !!currentReservation?.id,
+    enabled: !!(currentReservation?.id || selectedReservationFromNotification?.id),
     retry: false, // Não tentar novamente se não encontrar
   });
 
   // Buscar estabelecimento
-  const establishment = currentReservation?.establishment;
+  const establishment = (selectedReservationFromNotification || currentReservation)?.establishment;
 
   // Buscar WhatsApp do estabelecimento
   const { data: hotelSettings } = useQuery({
-    queryKey: ["hotel_settings", currentReservation?.establishment_id],
+    queryKey: ["hotel_settings", currentReservation?.establishment_id, selectedReservationFromNotification?.establishment_id],
     queryFn: async () => {
-      if (!currentReservation?.establishment_id) return null;
+      const establishmentId = currentReservation?.establishment_id || selectedReservationFromNotification?.establishment_id;
+      if (!establishmentId) return null;
       
       const { data, error } = await supabase
         .from("hotel_settings")
         .select("whatsapp, whatsapp_ddi, whatsapp_number, phone, phone_ddi, phone_number")
-        .eq("establishment_id", currentReservation.establishment_id)
+        .eq("establishment_id", establishmentId)
         .maybeSingle();
 
       if (error) {
@@ -893,7 +990,7 @@ export default function GuestDashboard() {
       
       return null;
     },
-    enabled: !!currentReservation?.establishment_id,
+    enabled: !!(currentReservation?.establishment_id || selectedReservationFromNotification?.establishment_id),
   });
 
   const handleLogout = () => {
@@ -1531,6 +1628,7 @@ export default function GuestDashboard() {
                                     onClick={() => {
                                       if (notification.reservationId) {
                                         setSelectedCancelledReservation(null); // Limpar reserva cancelada ao abrir detalhes
+                                        setSelectedReservationIdFromNotification(notification.reservationId);
                                         setShowCurrentReservation(true);
                                       }
                                       if (!isRead) {
@@ -1550,6 +1648,7 @@ export default function GuestDashboard() {
                                           markAsRead(notification.id);
                                         }
                                         setSelectedCancelledReservation(null); // Limpar reserva cancelada ao abrir detalhes
+                                        setSelectedReservationIdFromNotification(notification.reservationId);
                                         setShowCurrentReservation(true);
                                         setShowNotificationsDropdown(false);
                                         return;
@@ -1557,6 +1656,7 @@ export default function GuestDashboard() {
                                       
                                       if (notification.reservationId) {
                                         setSelectedCancelledReservation(null); // Limpar reserva cancelada ao abrir detalhes
+                                        setSelectedReservationIdFromNotification(notification.reservationId);
                                         setShowCurrentReservation(true);
                                       }
                                       // Se for notificação de ticket de manutenção, rolar até a seção de tickets
@@ -1610,6 +1710,7 @@ export default function GuestDashboard() {
                                             markAsRead(notification.id);
                                           }
                                           setSelectedCancelledReservation(null); // Limpar reserva cancelada ao abrir detalhes
+                                          setSelectedReservationIdFromNotification(notification.reservationId);
                                           setShowCurrentReservation(true);
                                           setShowNotificationsDropdown(false);
                                         }}
@@ -3020,20 +3121,20 @@ export default function GuestDashboard() {
                 queryClient.invalidateQueries({ queryKey: ["all_guest_reviews"] });
                 queryClient.invalidateQueries({ queryKey: ["all_guest_reservations"] });
                 toast.success("Avaliação enviada com sucesso! Obrigado pelo seu feedback.");
-              }}
-            />
-          </DialogContent>
-        </Dialog>
-      )}
-    </div>
-  );
-}
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+    );
+  }
 
   // Visualização de detalhes da reserva
-  // Se houver uma reserva cancelada selecionada E ela for realmente cancelada, usar ela; caso contrário, usar currentReservation
+  // Prioridade: 1) reserva cancelada selecionada, 2) reserva da notificação, 3) currentReservation
   const reservation = (selectedCancelledReservation && selectedCancelledReservation.status?.toLowerCase() === "cancelled") 
     ? selectedCancelledReservation 
-    : currentReservation;
+    : (selectedReservationFromNotification || currentReservation);
   const building = reservation?.building;
   
   // Se não houver reserva, não renderizar nada
@@ -3084,6 +3185,7 @@ export default function GuestDashboard() {
             variant="ghost"
             onClick={() => {
               setShowCurrentReservation(false);
+              setSelectedReservationIdFromNotification(null);
               // Limpar reserva cancelada selecionada ao voltar, para evitar conflitos
               if (selectedCancelledReservation && selectedCancelledReservation.status?.toLowerCase() !== "cancelled") {
                 setSelectedCancelledReservation(null);
@@ -3440,6 +3542,7 @@ export default function GuestDashboard() {
                 <Button 
                   onClick={() => {
                     setShowCurrentReservation(false);
+                    setSelectedReservationIdFromNotification(null);
                     setSelectedCancelledReservation(null); // Limpar reserva cancelada selecionada ao voltar
                   }} 
                   variant="outline"
@@ -3465,12 +3568,22 @@ export default function GuestDashboard() {
 
           if (!isStayReviewsEnabled) return null;
 
-          // Verificar se a reserva já foi avaliada
-          const hasReview = reviewableReservations?.some((r: any) => r.id === reservation.id);
+          // Verificar se a reserva já foi avaliada usando allGuestReviews
+          const hasReview = allGuestReviews?.some((r: any) => r.reservation_id === reservation.id) || false;
           
-          // Se não está na lista de reviewable, pode ser que já foi avaliada ou não está disponível
-          // Vamos mostrar o botão se estiver na lista ou se não temos certeza
-          if (reviewableReservations && !hasReview) return null;
+          // Se já foi avaliada, não mostrar o botão
+          if (hasReview) return null;
+
+          // Verificar se a data de check-out já passou
+          if (reservation.checkout_date) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const checkoutDate = new Date(reservation.checkout_date);
+            checkoutDate.setHours(0, 0, 0, 0);
+            
+            // Se o check-out ainda não passou, não mostrar o botão
+            if (checkoutDate >= today) return null;
+          }
 
           return (
             <Card className="p-4 sm:p-6 mt-4 sm:mt-6 bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-200">
@@ -3486,24 +3599,46 @@ export default function GuestDashboard() {
                 </p>
                 <Button
                   onClick={async () => {
-                    // Buscar configurações de avaliação do estabelecimento
-                    const { data: settings } = await supabase
-                      .from("establishment_review_settings")
-                      .select("is_enabled, review_type")
-                      .eq("establishment_id", reservation.establishment_id)
-                      .maybeSingle();
+                    try {
+                      console.log("🔍 Iniciando processo de avaliação:", {
+                        reservationId: reservation.id,
+                        establishmentId: reservation.establishment_id,
+                        accountId: accountId
+                      });
 
-                    if (!settings || !settings.is_enabled) {
-                      toast.error("O sistema de avaliações não está habilitado para este estabelecimento.");
-                      return;
+                      // Buscar configurações de avaliação do estabelecimento
+                      const { data: settings, error: settingsError } = await supabase
+                        .from("establishment_review_settings")
+                        .select("is_enabled, review_type")
+                        .eq("establishment_id", reservation.establishment_id)
+                        .maybeSingle();
+
+                      if (settingsError) {
+                        console.error("❌ Erro ao buscar configurações:", settingsError);
+                        toast.error("Erro ao buscar configurações de avaliação.");
+                        return;
+                      }
+
+                      if (!settings || !settings.is_enabled) {
+                        console.warn("⚠️ Sistema de avaliações não habilitado:", settings);
+                        toast.error("O sistema de avaliações não está habilitado para este estabelecimento.");
+                        return;
+                      }
+
+                      const reviewData = {
+                        ...reservation,
+                        reviewType: settings.review_type,
+                        maxRating: settings.review_type === "numeric" ? 10 : 5,
+                      };
+
+                      console.log("✅ Configurações encontradas, abrindo diálogo:", reviewData);
+
+                      setSelectedReservationForReview(reviewData);
+                      setShowReviewDialog(true);
+                    } catch (error) {
+                      console.error("❌ Erro ao abrir diálogo de avaliação:", error);
+                      toast.error("Erro ao abrir formulário de avaliação.");
                     }
-
-                    setSelectedReservationForReview({
-                      ...reservation,
-                      reviewType: settings.review_type,
-                      maxRating: settings.review_type === "numeric" ? 10 : 5,
-                    });
-                    setShowReviewDialog(true);
                   }}
                   className="bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-white shadow-md hover:shadow-lg transition-all"
                 >
@@ -3857,9 +3992,39 @@ export default function GuestDashboard() {
       <PoliciesViewDialog
         open={showPoliciesDialog}
         onOpenChange={setShowPoliciesDialog}
-        establishmentId={currentReservation?.establishment_id || (currentReservation?.establishment as any)?.id}
-        categoryId={currentReservation?.category_id}
+        establishmentId={reservation?.establishment_id || (reservation?.establishment as any)?.id}
+        categoryId={reservation?.category_id}
       />
+
+      {/* Dialog de Avaliação - Disponível na visualização de detalhes */}
+      {showReviewDialog && selectedReservationForReview && accountId && (
+        <Dialog open={showReviewDialog} onOpenChange={setShowReviewDialog}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Avaliar Estadia</DialogTitle>
+              <DialogDescription>
+                Avalie sua experiência na estadia {selectedReservationForReview.reservation_code}
+              </DialogDescription>
+            </DialogHeader>
+            <StayReviewForm
+              reservationId={selectedReservationForReview.id}
+              establishmentId={selectedReservationForReview.establishment_id}
+              guestAccountId={accountId}
+              reviewType={selectedReservationForReview.reviewType}
+              maxRating={selectedReservationForReview.maxRating}
+              onSubmit={() => {
+                setShowReviewDialog(false);
+                setSelectedReservationForReview(null);
+                queryClient.invalidateQueries({ queryKey: ["reviewable_reservations_for_dialog"] });
+                queryClient.invalidateQueries({ queryKey: ["reviewable_reservations"] });
+                queryClient.invalidateQueries({ queryKey: ["all_guest_reviews"] });
+                queryClient.invalidateQueries({ queryKey: ["all_guest_reservations"] });
+                toast.success("Avaliação enviada com sucesso! Obrigado pelo seu feedback.");
+              }}
+      />
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Dialog de Todas as Reservas Canceladas */}
       <CancelledReservationsDialog

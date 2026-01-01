@@ -51,6 +51,7 @@ interface ReservationDialogProps {
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
   reservationId?: string; // Para edição
+  initialEditMode?: boolean; // Para abrir diretamente em modo de edição
   initialData?: {
     checkin_date?: string;
     checkout_date?: string;
@@ -70,6 +71,7 @@ export const ReservationDialog = ({
   onOpenChange, 
   onSuccess,
   reservationId,
+  initialEditMode = false,
   initialData
 }: ReservationDialogProps) => {
   const { createReservation, updateReservation, isCreating, isUpdating, cancelReservation } = useReservations();
@@ -520,7 +522,8 @@ export const ReservationDialog = ({
   useEffect(() => {
     if (reservationId && open) {
       // Ao abrir uma reserva existente, iniciar em modo de VISUALIZAÇÃO
-      setIsEditMode(false);
+      // A menos que initialEditMode seja true (quando vem de "Editar Responsável e Hóspede")
+      setIsEditMode(initialEditMode || false);
       
       const fetchReservation = async () => {
         const { data, error } = await supabase
@@ -715,12 +718,15 @@ export const ReservationDialog = ({
           formData.checkout_date &&
           new Date(formData.checkout_date) > new Date(formData.checkin_date)
         ) {
-          // Incluir o quarto já selecionado (se houver) na busca
+          // Sempre incluir o quarto já selecionado (se houver) na busca, especialmente ao editar
+          // Passar reservationId para excluir a reserva atual da verificação de conflitos
+          // Isso garante que o quarto atual da reserva apareça na lista mesmo que esteja ocupado
           const rooms = await getAvailableRooms(
             formData.category_id,
             formData.checkin_date,
             formData.checkout_date,
-            formData.room_id || undefined
+            formData.room_id || undefined, // Passar room_id atual para incluir na lista
+            reservationId || undefined // Excluir reserva atual da verificação de conflitos
           );
           setAvailableRooms(rooms);
         } else {
@@ -733,7 +739,23 @@ export const ReservationDialog = ({
             .order("room_number");
 
           if (error) throw error;
-          setAvailableRooms(rooms || []);
+          
+          // Se estiver editando uma reserva e tiver um room_id, garantir que ele esteja na lista
+          let finalRooms = rooms || [];
+          if (reservationId && formData.room_id && !finalRooms.find(r => r.id === formData.room_id)) {
+            // Buscar o quarto atual da reserva e adicioná-lo à lista
+            const { data: currentRoom } = await supabase
+              .from("rooms")
+              .select("*")
+              .eq("id", formData.room_id)
+              .single();
+            
+            if (currentRoom) {
+              finalRooms = [currentRoom, ...finalRooms];
+            }
+          }
+          
+          setAvailableRooms(finalRooms);
         }
       } catch (error: any) {
         console.error("Erro ao buscar quartos:", error);
@@ -745,7 +767,7 @@ export const ReservationDialog = ({
     };
 
     fetchAvailableRooms();
-  }, [formData.category_id, formData.checkin_date, formData.checkout_date, formData.room_id]);
+  }, [formData.category_id, formData.checkin_date, formData.checkout_date, formData.room_id, reservationId]);
 
   // Calcular total quando necessário (com tarifário dinâmico)
   useEffect(() => {

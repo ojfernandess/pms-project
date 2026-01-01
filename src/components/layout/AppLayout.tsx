@@ -1,6 +1,7 @@
 import { ReactNode, useState } from "react";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
+import { useCheckoutCleaning } from "@/hooks/useCheckoutCleaning";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -8,6 +9,9 @@ interface AppLayoutProps {
 
 export const AppLayout = ({ children }: AppLayoutProps) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  
+  // Hook para detectar check-outs que passaram do horário e criar notificações de limpeza
+  useCheckoutCleaning();
 
   return (
     <div className="min-h-screen bg-background">

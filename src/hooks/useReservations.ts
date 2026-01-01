@@ -886,6 +886,8 @@ export const useReservations = () => {
           queryClient.invalidateQueries({ queryKey: ["reservations"] });
           queryClient.invalidateQueries({ queryKey: ["rooms"] });
           queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+          // Invalidar também para atualizar informações dos hóspedes (próximas entradas)
+          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
           // Forçar refetch imediato para atualizar o mapa
           await queryClient.refetchQueries({ queryKey: ["reservations"] });
           await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });

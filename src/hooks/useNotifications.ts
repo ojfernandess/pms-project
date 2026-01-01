@@ -10,6 +10,7 @@ export type NotificationType =
   | 'reservation_cancelled'
   | 'checkin_today'
   | 'checkout_today'
+  | 'cleaning_required'
   | 'other';
 
 export type NotificationPriority = 'low' | 'medium' | 'high' | 'urgent';
