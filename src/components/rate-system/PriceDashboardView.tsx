@@ -12,7 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { toast } from "sonner";
-import { DollarSign, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, AlertCircle, CalendarIcon, X, Save, Download, Upload } from "lucide-react";
+import { DollarSign, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, AlertCircle, CalendarIcon, X, Save, Download, Upload, RotateCcw } from "lucide-react";
 import { format, addDays, differenceInDays, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Category {
   id: string;
@@ -51,6 +61,8 @@ export const PriceDashboardView = () => {
   const [activePlanTab, setActivePlanTab] = useState<string>("all");
   const [isSaving, setIsSaving] = useState(false);
   const [hasSavedAdjustments, setHasSavedAdjustments] = useState(false);
+  const [showDynamicRulesWarning, setShowDynamicRulesWarning] = useState(false);
+  const [pendingApply, setPendingApply] = useState(false);
 
   // Buscar categorias do estabelecimento
   const { data: categories = [], isLoading: isLoadingCategories } = useQuery({
@@ -89,6 +101,46 @@ export const PriceDashboardView = () => {
     },
     enabled: !!establishmentId,
   });
+
+  // Buscar configurações do sistema tarifário para verificar se regras dinâmicas estão ativas
+  const { data: hotelSettings } = useQuery({
+    queryKey: ["hotel_settings_rate_system", establishmentId],
+    queryFn: async () => {
+      if (!establishmentId) return null;
+      
+      const { data, error } = await supabase
+        .from("hotel_settings")
+        .select("rate_system_settings")
+        .eq("establishment_id", establishmentId)
+        .single();
+
+      if (error) {
+        // Se não encontrar configurações, retornar null (regras dinâmicas não ativas)
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+      return data;
+    },
+    enabled: !!establishmentId,
+  });
+
+  // Verificar se auto_apply_dynamic_rules está ativo
+  const isDynamicRulesEnabled = useMemo(() => {
+    if (!hotelSettings?.rate_system_settings) return false;
+    
+    const settings = hotelSettings.rate_system_settings;
+    const autoApply = settings.auto_apply_dynamic_rules;
+    
+    if (typeof autoApply === "boolean") {
+      return autoApply;
+    }
+    
+    if (typeof autoApply === "string") {
+      return autoApply === "true" || autoApply === "1" || autoApply === "True" || autoApply === "TRUE";
+    }
+    
+    return false;
+  }, [hotelSettings]);
 
   // Função para gerar chave única baseada no estabelecimento
   const getStorageKey = useCallback(() => {
@@ -293,6 +345,53 @@ export const PriceDashboardView = () => {
     toast.success("Ajustes carregados com sucesso!");
   };
 
+  // Resetar configurações padrão
+  const resetToDefaults = () => {
+    if (!establishmentId) {
+      toast.error("Estabelecimento não selecionado");
+      return;
+    }
+
+    try {
+      // Remover ajustes salvos do localStorage
+      localStorage.removeItem(getStorageKey());
+      setHasSavedAdjustments(false);
+
+      // Resetar preço base para o menor preço das categorias (ou 250 se não houver)
+      const prices = categories.map(cat => cat.base_price).filter(p => p > 0);
+      if (prices.length > 0) {
+        const minPrice = Math.min(...prices);
+        setBasePrice(minPrice);
+      } else {
+        setBasePrice(250);
+      }
+
+      // Resetar ajustes de categorias para valores calculados baseados no preço base comum
+      const currentBasePrice = prices.length > 0 ? Math.min(...prices) : 250;
+      const adjustments: Record<string, number> = {};
+      categories.forEach((cat) => {
+        if (currentBasePrice > 0 && cat.base_price > 0) {
+          adjustments[cat.id] = Math.round(((cat.base_price / currentBasePrice) - 1) * 100);
+        } else {
+          adjustments[cat.id] = 0;
+        }
+      });
+      setCategoryAdjustments(adjustments);
+
+      // Resetar ajustes de planos tarifários para valores padrão
+      const planAdjustments: Record<string, { adjustment: number; active: boolean }> = {};
+      ratePlans.forEach((plan) => {
+        planAdjustments[plan.id] = { adjustment: 0, active: true };
+      });
+      setRatePlanAdjustments(planAdjustments);
+
+      toast.success("Configurações resetadas para os valores padrão!");
+    } catch (error) {
+      console.error("Erro ao resetar configurações:", error);
+      toast.error("Erro ao resetar configurações");
+    }
+  };
+
   // Verificar se há ajustes salvos ao carregar
   useEffect(() => {
     if (establishmentId) {
@@ -474,7 +573,29 @@ export const PriceDashboardView = () => {
       toast.error("Nenhum plano tarifário ativo encontrado. Crie um plano tarifário primeiro.");
       return;
     }
-    applyPricesMutation.mutate();
+
+    // Verificar se regras dinâmicas estão ativas
+    if (isDynamicRulesEnabled) {
+      // Mostrar aviso antes de aplicar
+      setPendingApply(true);
+      setShowDynamicRulesWarning(true);
+    } else {
+      // Aplicar diretamente se regras dinâmicas não estão ativas
+      applyPricesMutation.mutate();
+    }
+  };
+
+  const confirmApplyPrices = () => {
+    setShowDynamicRulesWarning(false);
+    if (pendingApply) {
+      applyPricesMutation.mutate();
+      setPendingApply(false);
+    }
+  };
+
+  const cancelApplyPrices = () => {
+    setShowDynamicRulesWarning(false);
+    setPendingApply(false);
   };
 
   if (isLoadingCategories || isLoadingRatePlans) {
@@ -687,6 +808,15 @@ export const PriceDashboardView = () => {
                   Carregar Ajustes
                 </Button>
               )}
+              <Button
+                onClick={resetToDefaults}
+                variant="outline"
+                size="lg"
+                className="gap-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Resetar Padrão
+              </Button>
               <Button
                 onClick={handleApplyPrices}
                 disabled={isSaving || ratePlans.length === 0}
@@ -915,6 +1045,42 @@ export const PriceDashboardView = () => {
           </div>
         </div>
       </Card>
+
+      {/* Diálogo de aviso sobre Regras de Precificação Dinâmica */}
+      <AlertDialog open={showDynamicRulesWarning} onOpenChange={setShowDynamicRulesWarning}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-orange-600" />
+              Regras de Precificação Dinâmica Ativadas
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3 pt-2">
+              <p>
+                As <strong>Regras de Precificação Dinâmica</strong> estão ativas no seu estabelecimento.
+              </p>
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 space-y-2">
+                <p className="text-sm font-medium text-orange-900">
+                  ⚠️ Importante:
+                </p>
+                <ul className="text-sm text-orange-800 space-y-1 list-disc list-inside">
+                  <li>Os preços definidos no <strong>Dashboard de Preços</strong> serão aplicados normalmente.</li>
+                  <li>As <strong>Regras de Precificação Dinâmica</strong> serão calculadas com base nesses valores aplicados.</li>
+                  <li>Os preços finais exibidos podem variar conforme as regras dinâmicas configuradas (ocupação, demanda, etc.).</li>
+                </ul>
+              </div>
+              <p className="text-sm text-muted-foreground pt-2">
+                Deseja continuar e aplicar os preços?
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelApplyPrices}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmApplyPrices} className="bg-primary hover:bg-primary/90">
+              Sim, Aplicar Preços
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
