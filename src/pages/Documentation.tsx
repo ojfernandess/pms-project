@@ -19,7 +19,8 @@ import {
   Globe,
   Lock,
   Key,
-  DollarSign
+  DollarSign,
+  Star
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -2756,8 +2757,25 @@ await logError({
                             <li><strong>Filtros Avançados:</strong> Busca por data, status, hóspede, código, identificação, quarto, categoria</li>
                             <li><strong>Histórico de Atividades:</strong> Log completo de todas as ações realizadas na reserva</li>
                             <li><strong>Número de Identificação:</strong> Identificador único sequencial (#123456) para cada reserva</li>
-                            <li><strong>Pré-registros:</strong> Gestão de reservas pendentes de confirmação</li>
+                            <li><strong>Pré-registros:</strong> Gestão de reservas pendentes de confirmação com expiração automática</li>
+                            <li><strong>Expiração de Pré-reservas:</strong> Cancelamento automático após data/hora de expiração configurada</li>
+                            <li><strong>Confirmação Automática:</strong> Pré-reservas são automaticamente confirmadas ao receber pagamento</li>
+                            <li><strong>Timezone Configurável:</strong> Configuração de timezone por estabelecimento para cálculos precisos</li>
                             <li><strong>Overbooking:</strong> Detecção e alertas de sobre-reservas</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-amber-50 rounded border border-amber-200">
+                          <h4 className="font-semibold mb-2 text-amber-900">Pré-reservas com Expiração - Detalhes Técnicos:</h4>
+                          <ul className="space-y-1 text-xs text-amber-800">
+                            <li><strong>Campo:</strong> <code>reservations.expiration_date</code> (TIMESTAMPTZ)</li>
+                            <li><strong>Configuração:</strong> Data e hora de expiração definidas na criação da pré-reserva</li>
+                            <li><strong>Timezone:</strong> Conversão automática do horário local (configurado em hotel_settings.timezone) para UTC</li>
+                            <li><strong>Cancelamento Automático:</strong> Função PostgreSQL <code>cancel_expired_preregistrations()</code> executa a cada 30 segundos</li>
+                            <li><strong>Comparação:</strong> Pré-reservas com <code>expiration_date &lt;= NOW()</code> são canceladas automaticamente</li>
+                            <li><strong>E-mail Automático:</strong> Envio de e-mail com evento <code>preregistration.expired</code> ao cancelar</li>
+                            <li><strong>Variáveis do E-mail:</strong> Inclui detalhes da reserva, data de expiração e informações do hotel</li>
+                            <li><strong>Confirmação ao Pagar:</strong> Ao registrar pagamento, status muda de <code>preregistration</code> para <code>confirmed</code> ou <code>pending</code></li>
+                            <li><strong>Validação:</strong> Verifica disponibilidade do quarto antes de criar pré-reserva</li>
                           </ul>
                         </div>
                         <div className="p-3 bg-blue-50 rounded border border-blue-200">
@@ -2810,12 +2828,37 @@ await logError({
                             <li><strong>Pessoa Física:</strong> CPF, nome completo, data de nascimento, RG</li>
                             <li><strong>Pessoa Jurídica:</strong> CNPJ, razão social, nome fantasia, inscrição estadual</li>
                             <li><strong>Histórico de Hospedagens:</strong> Visualização de todas as reservas do cliente</li>
-                            <li><strong>Centralização de Dados:</strong> Detecção e merge de registros duplicados</li>
+                            <li><strong>Centralização de Dados:</strong> Detecção e merge de registros duplicados (feature flag)</li>
+                            <li><strong>Histórico de Reservas:</strong> Visualização completa de todas as reservas do cliente (como hóspede ou responsável financeiro)</li>
                             <li><strong>Informações de Contato:</strong> Email, telefone, WhatsApp, endereço completo</li>
                             <li><strong>Documentos:</strong> Upload e armazenamento de documentos (RG, CPF, CNH, etc.)</li>
                             <li><strong>Preferências:</strong> Registro de preferências do cliente (quarto, andar, etc.)</li>
                             <li><strong>Observações:</strong> Campo livre para anotações sobre o cliente</li>
                             <li><strong>Busca Avançada:</strong> Filtro por nome, email, CPF/CNPJ, telefone</li>
+                            <li><strong>Visualização de Detalhes:</strong> Modal de visualização com todas as informações do cliente</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-teal-50 rounded border border-teal-200">
+                          <h4 className="font-semibold mb-2 text-teal-900">Centralização de Clientes - Feature Flag:</h4>
+                          <ul className="space-y-1 text-xs text-teal-800">
+                            <li><strong>Feature Flag:</strong> <code>client_deduplication</code> em <code>site_settings.features_enabled</code></li>
+                            <li><strong>Controle:</strong> Habilitado/desabilitado por estabelecimento no Super Admin</li>
+                            <li><strong>Funcionalidade:</strong> Identifica clientes duplicados por nome, email, CPF/CNPJ, telefone</li>
+                            <li><strong>Agrupamento:</strong> Agrupa clientes similares com razão do match</li>
+                            <li><strong>Exibição:</strong> Mostra nome do estabelecimento e ID numérico ao invés de UUID</li>
+                            <li><strong>Busca:</strong> Filtro por nome, email, documento, telefone ou razão do match</li>
+                            <li><strong>Acesso:</strong> Disponível apenas para estabelecimentos com feature habilitada</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-cyan-50 rounded border border-cyan-200">
+                          <h4 className="font-semibold mb-2 text-cyan-900">Histórico de Reservas no Detalhes do Cliente:</h4>
+                          <ul className="space-y-1 text-xs text-cyan-800">
+                            <li><strong>Aba:</strong> "Histórico de Reservas" no modal de detalhes do cliente</li>
+                            <li><strong>Busca:</strong> Reservas onde o cliente é <code>guest_id</code> ou <code>client_id</code></li>
+                            <li><strong>Colunas:</strong> Código, Check-in, Check-out, Quarto, Valor, Status, Ações</li>
+                            <li><strong>Navegação:</strong> Botão "Ver Detalhes" leva para página de detalhes da reserva</li>
+                            <li><strong>Contador:</strong> Exibe número total de reservas na aba</li>
+                            <li><strong>Status Badges:</strong> Visual consistente com o resto do sistema</li>
                           </ul>
                         </div>
                         <div className="p-3 bg-slate-50 rounded">
@@ -2906,9 +2949,11 @@ await logError({
                             <li><strong>Templates Personalizáveis:</strong> Criação e edição de templates HTML para cada evento</li>
                             <li><strong>Variáveis Dinâmicas:</strong> Substituição automática de variáveis ({`{{guest_name}}`}, {`{{reservation_code}}`}, etc.)</li>
                             <li><strong>Múltiplos Provedores:</strong> SMTP, Resend, SendGrid, Mailgun, AWS SES</li>
-                            <li><strong>Fila de E-mails:</strong> Sistema de fila para processamento assíncrono</li>
+                            <li><strong>Fila de E-mails:</strong> Sistema de fila para processamento assíncrono com limpeza e atualização</li>
                             <li><strong>Logs de Envio:</strong> Histórico completo de todos os e-mails enviados</li>
                             <li><strong>E-mails Automáticos:</strong> Disparo automático em eventos (reserva criada, check-in, pagamento, etc.)</li>
+                            <li><strong>Seleção de Estabelecimentos:</strong> Controle granular de quais estabelecimentos podem usar cada template</li>
+                            <li><strong>Feature Flag por Estabelecimento:</strong> Sistema de e-mail pode ser habilitado/desabilitado por estabelecimento</li>
                             <li><strong>Condicionais Handlebars:</strong> Suporte a {`{{#if}}`} para conteúdo condicional</li>
                             <li><strong>Prioridade:</strong> Sistema de prioridade para e-mails urgentes</li>
                             <li><strong>Retry Automático:</strong> Tentativas automáticas em caso de falha</li>
@@ -2929,6 +2974,7 @@ await logError({
                             <div><code>fiscal_document.request</code> - Solicitação de documento fiscal</div>
                             <div><code>reservation.overbooking</code> - Overbooking detectado</div>
                             <div><code>guest.password_reset</code> - Redefinição de senha</div>
+                            <div><code>preregistration.expired</code> - Pré-reserva cancelada por expiração</div>
                           </div>
                         </div>
                         <div className="p-3 bg-slate-50 rounded">
@@ -2939,13 +2985,47 @@ await logError({
                             <div><code>{`{{identification_number}}`}</code> - Número de identificação (#123456)</div>
                             <div><code>{`{{checkin_date}}`}</code> - Data de check-in</div>
                             <div><code>{`{{checkout_date}}`}</code> - Data de check-out</div>
+                            <div><code>{`{{checkin_time}}`}</code> - Horário de check-in (HH:MM)</div>
+                            <div><code>{`{{checkout_time}}`}</code> - Horário de check-out (HH:MM)</div>
+                            <div><code>{`{{expiration_date}}`}</code> - Data e horário de expiração (pré-reservas)</div>
                             <div><code>{`{{hotel_name}}`}</code> - Nome do estabelecimento</div>
                             <div><code>{`{{hotel_logo}}`}</code> - URL do logo</div>
+                            <div><code>{`{{hotel_email}}`}</code> - E-mail do estabelecimento</div>
+                            <div><code>{`{{hotel_phone}}`}</code> - Telefone do estabelecimento</div>
+                            <div><code>{`{{hotel_address}}`}</code> - Endereço completo do estabelecimento</div>
                             <div><code>{`{{room_number}}`}</code> - Número do quarto</div>
+                            <div><code>{`{{category_name}}`}</code> - Nome da categoria</div>
                             <div><code>{`{{room_password}}`}</code> - Senha do quarto</div>
+                            <div><code>{`{{total_amount}}`}</code> - Valor total da reserva</div>
                             <div><code>{`{{web_checkin_link}}`}</code> - Link para web check-in</div>
                             <div><code>{`{{payment_link}}`}</code> - Link para pagamento</div>
                           </div>
+                        </div>
+                        <div className="p-3 bg-indigo-50 rounded border border-indigo-200">
+                          <h4 className="font-semibold mb-2 text-indigo-900">Seleção de Estabelecimentos por Template:</h4>
+                          <ul className="space-y-1 text-xs text-indigo-800">
+                            <li><strong>Campo:</strong> <code>email_templates.establishment_ids</code> (JSONB array)</li>
+                            <li><strong>Comportamento:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><code>null</code> ou <code>undefined</code>: Template disponível para todos os estabelecimentos com sistema de e-mail habilitado</li>
+                                <li><code>[]</code>: Template desabilitado para todos os estabelecimentos</li>
+                                <li><code>["uuid1", "uuid2"]</code>: Template disponível apenas para os estabelecimentos especificados</li>
+                              </ul>
+                            </li>
+                            <li><strong>UI:</strong> Interface permite selecionar estabelecimentos agrupados por empresa</li>
+                            <li><strong>Filtro:</strong> Apenas estabelecimentos com sistema de e-mail habilitado aparecem na seleção</li>
+                            <li><strong>Padrão:</strong> Ao criar novo template, todos os estabelecimentos habilitados são pré-selecionados</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-purple-50 rounded border border-purple-200">
+                          <h4 className="font-semibold mb-2 text-purple-900">Fila de E-mails - Melhorias:</h4>
+                          <ul className="space-y-1 text-xs text-purple-800">
+                            <li><strong>Limpar Fila:</strong> Deleta todos os e-mails pendentes, falhados, cancelados e em fila em lotes de 1000</li>
+                            <li><strong>Atualizar:</strong> Botão para forçar atualização da lista com invalidação de cache</li>
+                            <li><strong>Processamento Automático:</strong> E-mails de pré-reserva expirada são processados automaticamente após cancelamento</li>
+                            <li><strong>Status:</strong> pending, queued, sending, sent, failed, cancelled</li>
+                            <li><strong>Logs:</strong> Histórico completo de tentativas de envio e erros</li>
+                          </ul>
                         </div>
                       </div>
                     </CollapsibleContent>
@@ -2977,9 +3057,19 @@ await logError({
                             <li><strong>Políticas:</strong> Aceite de termos e condições do estabelecimento</li>
                             <li><strong>Solicitação de Documentos Fiscais:</strong> Pedido de recibo ou nota fiscal</li>
                             <li><strong>Dashboard do Hóspede:</strong> Visualização de reservas ativas e histórico</li>
-                            <li><strong>Reutilização de Dados:</strong> Preenchimento automático com dados de check-ins anteriores</li>
+                            <li><strong>Reutilização de Dados:</strong> Preenchimento automático com dados do check-in anterior mais recente (busca única)</li>
                             <li><strong>Status Tracking:</strong> Acompanhamento do status do check-in (pending, in_progress, completed)</li>
                             <li><strong>Email Automático:</strong> Envio automático de confirmação ao concluir check-in</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-indigo-50 rounded border border-indigo-200">
+                          <h4 className="font-semibold mb-2 text-indigo-900">Reutilização de Dados de Check-in Anterior:</h4>
+                          <ul className="space-y-1 text-xs text-indigo-800">
+                            <li><strong>Busca:</strong> Busca o check-in mais recente concluído do hóspede (via <code>guestAccountId</code>, <code>guestEmail</code>, <code>guestCpf</code> ou <code>guestDocumentNumber</code>)</li>
+                            <li><strong>Resultado:</strong> Retorna apenas um único check-in (o mais recente)</li>
+                            <li><strong>Dados Reutilizados:</strong> Informações dos hóspedes, documentos e preferências</li>
+                            <li><strong>Consistência:</strong> Mesma lógica para check-in web e manual</li>
+                            <li><strong>Query:</strong> Ordena por <code>completed_at DESC</code> e limita a 1 resultado</li>
                           </ul>
                         </div>
                         <div className="p-3 bg-purple-50 rounded border border-purple-200">
@@ -3292,6 +3382,171 @@ await logError({
                     </CollapsibleContent>
                   </Collapsible>
 
+                  {/* Sistema de Avaliações */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.stayReviews}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, stayReviews: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Star className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Sistema de Avaliações</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.stayReviews ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-4 text-sm text-slate-700">
+                        <div>
+                          <h4 className="font-semibold mb-2 text-slate-800">Funcionalidades Principais:</h4>
+                          <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Avaliações por Categoria:</strong> Quarto, Conforto, Serviço, Limpeza</li>
+                            <li><strong>Tipos de Avaliação:</strong> Estrelas (1-5), Numérico (1-10), Emoji</li>
+                            <li><strong>Comentários Livres:</strong> Campo de texto para feedback detalhado</li>
+                            <li><strong>Moderação:</strong> Publicar/ocultar avaliações antes de exibir publicamente</li>
+                            <li><strong>Anonimato:</strong> Opção de avaliação anônima</li>
+                            <li><strong>E-mail Automático:</strong> Envio automático de solicitação após check-out (configurável)</li>
+                            <li><strong>Estatísticas:</strong> Médias por categoria, distribuição de avaliações, gráficos</li>
+                            <li><strong>Notificações:</strong> Notificação automática quando nova avaliação é recebida</li>
+                            <li><strong>Feature Flag:</strong> Ativação/desativação por estabelecimento</li>
+                            <li><strong>Dashboard do Hóspede:</strong> Interface para hóspedes avaliarem suas estadias</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-yellow-50 rounded border border-yellow-200">
+                          <h4 className="font-semibold mb-2 text-yellow-900">Configurações de Avaliação:</h4>
+                          <ul className="space-y-1 text-xs text-yellow-800">
+                            <li><strong>Tabela:</strong> <code>establishment_review_settings</code> - Uma linha por estabelecimento</li>
+                            <li><strong>Campos:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><code>is_enabled</code> - Ativar/desativar sistema de avaliações</li>
+                                <li><code>review_type</code> - Tipo de avaliação (stars, numeric, emoji)</li>
+                                <li><code>send_email_after_checkout</code> - Enviar e-mail automaticamente após check-out</li>
+                                <li><code>email_delay_hours</code> - Horas após check-out para enviar e-mail (padrão: 24)</li>
+                              </ul>
+                            </li>
+                            <li><strong>Estrutura de Dados:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><code>stay_reviews</code> - Tabela principal de avaliações</li>
+                                <li><code>room_rating</code>, <code>comfort_rating</code>, <code>service_rating</code>, <code>cleanliness_rating</code> - Avaliações por categoria</li>
+                                <li><code>comment</code> - Comentário livre do hóspede</li>
+                                <li><code>is_published</code> - Controle de publicação</li>
+                                <li><code>is_anonymous</code> - Flag de anonimato</li>
+                                <li><code>review_type</code> - Tipo usado na avaliação</li>
+                              </ul>
+                            </li>
+                            <li><strong>Feature Flag:</strong> <code>stay_reviews</code> em <code>site_settings.features_enabled</code></li>
+                            <li><strong>Acesso:</strong> Super Admin &gt; Controle de Funcionalidades &gt; Avaliações da Estadia</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-orange-50 rounded border border-orange-200">
+                          <h4 className="font-semibold mb-2 text-orange-900">Fluxo de Avaliação:</h4>
+                          <ol className="list-decimal list-inside space-y-1 text-xs text-orange-800">
+                            <li><strong>Check-out:</strong> Hóspede realiza check-out da reserva</li>
+                            <li><strong>E-mail Automático:</strong> Após delay configurado, e-mail é enviado solicitando avaliação</li>
+                            <li><strong>Link de Avaliação:</strong> Hóspede acessa link único para avaliar a estadia</li>
+                            <li><strong>Formulário:</strong> Hóspede preenche avaliações por categoria e comentário</li>
+                            <li><strong>Submissão:</strong> Avaliação é salva e notificação é criada para o estabelecimento</li>
+                            <li><strong>Moderação:</strong> Estabelecimento pode publicar ou ocultar avaliação</li>
+                            <li><strong>Publicação:</strong> Avaliações publicadas aparecem nas estatísticas e relatórios</li>
+                          </ol>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded">
+                          <h4 className="font-semibold mb-2 text-slate-800">Estatísticas e Relatórios:</h4>
+                          <div className="text-xs space-y-1">
+                            <div><strong>Média Geral:</strong> Média de todas as categorias de avaliação</div>
+                            <div><strong>Médias por Categoria:</strong> Quarto, Conforto, Serviço, Limpeza</div>
+                            <div><strong>Distribuição:</strong> Gráfico de pizza mostrando distribuição de avaliações (1-5 estrelas)</div>
+                            <div><strong>Total de Avaliações:</strong> Contagem de avaliações recebidas</div>
+                            <div><strong>Filtros:</strong> Por status de publicação, data, reserva</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  {/* Gestão de Manutenção */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.maintenance}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, maintenance: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Settings className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Gestão de Manutenção</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.maintenance ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-4 text-sm text-slate-700">
+                        <div>
+                          <h4 className="font-semibold mb-2 text-slate-800">Funcionalidades Principais:</h4>
+                          <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Criação de Tickets:</strong> Abertura de chamados de manutenção por funcionários ou hóspedes</li>
+                            <li><strong>Tipos de Ticket:</strong> Manutenção, Limpeza, Outros</li>
+                            <li><strong>Prioridades:</strong> Baixa, Média, Alta, Urgente</li>
+                            <li><strong>Status:</strong> Aberto, Em Progresso, Concluído, Cancelado</li>
+                            <li><strong>Vinculação a Quartos:</strong> Tickets podem ser associados a quartos específicos</li>
+                            <li><strong>Vinculação a Reservas:</strong> Tickets podem ser criados a partir de reservas</li>
+                            <li><strong>Upload de Imagens:</strong> Anexar fotos do problema ou solicitação</li>
+                            <li><strong>Comentários:</strong> Sistema de comentários para acompanhamento do ticket</li>
+                            <li><strong>Atualização Automática de Status:</strong> Quarto é marcado como "maintenance" ao criar ticket</li>
+                            <li><strong>Dashboard de KPIs:</strong> Estatísticas de tickets abertos, em progresso, urgentes, concluídos</li>
+                            <li><strong>Filtros Avançados:</strong> Por status, prioridade, quarto, busca por texto</li>
+                            <li><strong>Visualização de Imagens:</strong> Modal para visualizar imagens anexadas</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                          <h4 className="font-semibold mb-2 text-blue-900">Estrutura Técnica:</h4>
+                          <ul className="space-y-1 text-xs text-blue-800">
+                            <li><strong>Tabela Principal:</strong> <code>maintenance_tickets</code></li>
+                            <li><strong>Campos Principais:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><code>title</code> - Título do ticket</li>
+                                <li><code>description</code> - Descrição detalhada</li>
+                                <li><code>ticket_type</code> - Tipo (maintenance, cleaning, other)</li>
+                                <li><code>priority</code> - Prioridade (low, medium, high, urgent)</li>
+                                <li><code>status</code> - Status (open, in_progress, completed, cancelled)</li>
+                                <li><code>room_id</code> - Quarto relacionado (opcional)</li>
+                                <li><code>reservation_id</code> - Reserva relacionada (opcional)</li>
+                                <li><code>guest_account_id</code> - Hóspede que criou (se criado por hóspede)</li>
+                                <li><code>opened_by</code> - Usuário que criou o ticket</li>
+                                <li><code>assigned_to</code> - Usuário responsável (opcional)</li>
+                              </ul>
+                            </li>
+                            <li><strong>Tabelas Relacionadas:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><code>maintenance_ticket_attachments</code> - Anexos/imagens</li>
+                                <li><code>maintenance_ticket_comments</code> - Comentários e atualizações</li>
+                              </ul>
+                            </li>
+                            <li><strong>Integração com Quartos:</strong> Ao criar ticket com <code>room_id</code>, o status do quarto é atualizado para "maintenance"</li>
+                            <li><strong>Rota:</strong> <code>/manutencao</code></li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-green-50 rounded border border-green-200">
+                          <h4 className="font-semibold mb-2 text-green-900">Dashboard de KPIs:</h4>
+                          <ul className="space-y-1 text-xs text-green-800">
+                            <li><strong>Tickets Abertos:</strong> Contagem de tickets com status "open"</li>
+                            <li><strong>Em Progresso:</strong> Contagem de tickets com status "in_progress"</li>
+                            <li><strong>Urgentes:</strong> Contagem de tickets com prioridade "urgent" e status não concluído</li>
+                            <li><strong>Concluídos:</strong> Contagem de tickets com status "completed"</li>
+                            <li><strong>Interatividade:</strong> Clicar em um KPI filtra a lista de tickets automaticamente</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-purple-50 rounded border border-purple-200">
+                          <h4 className="font-semibold mb-2 text-purple-900">Criação por Hóspedes:</h4>
+                          <ul className="space-y-1 text-xs text-purple-900">
+                            <li><strong>Dashboard do Hóspede:</strong> Hóspedes podem criar tickets de manutenção</li>
+                            <li><strong>Vinculação Automática:</strong> Ticket é automaticamente vinculado à reserva ativa do hóspede</li>
+                            <li><strong>Upload de Imagens:</strong> Hóspedes podem anexar fotos do problema</li>
+                            <li><strong>Notificação:</strong> Estabelecimento recebe notificação quando hóspede cria ticket</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
                   {/* Outras Funcionalidades */}
                   <Collapsible 
                     className="border rounded-lg"
@@ -3312,7 +3567,6 @@ await logError({
                           <ul className="space-y-1 list-disc list-inside">
                             <li><strong>Gestão de Unidades/Quartos:</strong> Cadastro, status, bloqueios, manutenção</li>
                             <li><strong>Sistema de Tarifas:</strong> Tarifas dinâmicas por data, categoria, período, eventos</li>
-                            <li><strong>Gestão de Manutenção:</strong> Chamados, agendamentos, histórico de manutenções</li>
                             <li><strong>Channel Manager:</strong> Integração com OTAs (Booking.com, Expedia, etc.)</li>
                             <li><strong>Gestão de Funcionários:</strong> Cadastro, permissões, roles (Manager, Employee)</li>
                             <li><strong>Logs de Atividade:</strong> Auditoria completa de todas as ações do sistema</li>
@@ -3339,6 +3593,20 @@ await logError({
                             <div><strong>Variáveis:</strong> Suporte a variáveis dinâmicas no template de solicitação</div>
                             <div><strong>Armazenamento:</strong> Documentos salvos em Supabase Storage</div>
                           </div>
+                        </div>
+                        <div className="p-3 bg-violet-50 rounded border border-violet-200">
+                          <h4 className="font-semibold mb-2 text-violet-900">Configurações do Hotel:</h4>
+                          <ul className="space-y-1 text-xs text-violet-800">
+                            <li><strong>Tabela:</strong> <code>hotel_settings</code> - Uma linha por estabelecimento</li>
+                            <li><strong>Timezone:</strong> Campo <code>timezone</code> (TEXT) para configuração do fuso horário do estabelecimento</li>
+                            <li><strong>Valor Padrão:</strong> <code>'America/Sao_Paulo'</code> (UTC-3)</li>
+                            <li><strong>Uso:</strong> Conversão de horários locais para UTC em pré-reservas e cálculos de expiração</li>
+                            <li><strong>Formato:</strong> IANA timezone database (ex: 'America/Sao_Paulo', 'America/New_York', 'Europe/London')</li>
+                            <li><strong>Notificações de Limpeza:</strong> Campo <code>enable_cleaning_notifications</code> (BOOLEAN) para ativar/desativar</li>
+                            <li><strong>Horários de Check-in/Check-out:</strong> <code>checkin_time</code> e <code>checkout_time</code> (TIME)</li>
+                            <li><strong>Configuração:</strong> Acesse Configurações &gt; Informações do Hotel</li>
+                            <li><strong>Impacto:</strong> Timezone afeta cálculos de expiração de pré-reservas e exibição de horários em e-mails</li>
+                          </ul>
                         </div>
                       </div>
                     </CollapsibleContent>
@@ -3376,24 +3644,64 @@ await logError({
                             <li><strong>Logs de Atividades:</strong> Registro automático de todas as alterações de preço com usuário "Sistema"</li>
                           </ul>
                         </div>
+                        <div className="p-3 bg-emerald-50 rounded border border-emerald-200">
+                          <h4 className="font-semibold mb-2 text-emerald-900">Dashboard de Preços:</h4>
+                          <ul className="space-y-1 text-xs text-emerald-800">
+                            <li><strong>Funcionalidade:</strong> Interface visual para ajustar preços de forma rápida e intuitiva</li>
+                            <li><strong>Preço Base Comum:</strong> Define um preço base que serve de referência para todas as categorias</li>
+                            <li><strong>Ajustes por Categoria:</strong> Aplicar ajustes percentuais (-50% a +100%) sobre o preço base</li>
+                            <li><strong>Ajustes por Plano Tarifário:</strong> Aplicar ajustes percentuais (-20% a +30%) sobre o preço da categoria</li>
+                            <li><strong>Período de Aplicação:</strong> Selecionar data inicial e final para aplicar os preços</li>
+                            <li><strong>Visualização em Tempo Real:</strong> Ver preços calculados antes de aplicar</li>
+                            <li><strong>Resetar Padrão:</strong> Botão para reverter todos os ajustes e voltar aos preços padrão</li>
+                            <li><strong>Persistência:</strong> Ajustes são salvos no localStorage por estabelecimento</li>
+                            <li><strong>Integração com Regras Dinâmicas:</strong> Aviso quando regras dinâmicas estão ativas</li>
+                            <li><strong>Aplicação:</strong> Preços são aplicados ao calendário tarifário (<code>rate_calendar</code>)</li>
+                            <li><strong>Logs:</strong> Todas as alterações são registradas como atividades do sistema</li>
+                          </ul>
+                        </div>
                         <div className="p-3 bg-blue-50 rounded border border-blue-200">
                           <h4 className="font-semibold mb-2 text-blue-900">Regras de Precificação Dinâmica - Detalhes:</h4>
                           <ul className="space-y-1 text-xs text-blue-800">
+                            <li><strong>Tabela:</strong> <code>dynamic_pricing_rules</code> - Armazena todas as regras configuradas</li>
                             <li><strong>Tipos de Gatilho:</strong>
                               <ul className="list-disc list-inside mt-1 ml-4">
                                 <li><strong>Ocupação:</strong> Ajustes baseados em faixas de ocupação (Baixa, Média, Alta)</li>
                                 <li><strong>Velocidade de Reservas:</strong> Ajustes baseados na velocidade de novas reservas</li>
                                 <li><strong>Dia da Semana:</strong> Ajustes específicos para diferentes dias da semana</li>
                                 <li><strong>Antecedência:</strong> Ajustes baseados na antecedência da reserva</li>
+                                <li><strong>Evento Local:</strong> Ajustes baseados em eventos locais cadastrados</li>
                                 <li><strong>Personalizado:</strong> Regras customizadas com condições específicas</li>
                               </ul>
                             </li>
+                            <li><strong>Tipos de Ajuste:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><strong>Percentual:</strong> Ajuste percentual (+15%, -10%) sobre o preço base</li>
+                                <li><strong>Fixo:</strong> Ajuste em valor fixo (R$ 50, -R$ 30)</li>
+                                <li><strong>Multiplicador:</strong> Multiplicador sobre o preço (1.2x, 0.9x)</li>
+                              </ul>
+                            </li>
+                            <li><strong>Prioridade:</strong> Regras são aplicadas em ordem de prioridade (menor número = maior prioridade)</li>
+                            <li><strong>Aplicação Seletiva:</strong> Regras podem ser aplicadas a categorias e planos específicos</li>
+                            <li><strong>Período de Validade:</strong> Regras podem ter data de início e fim</li>
+                            <li><strong>Ativação/Desativação:</strong> Campo <code>is_active</code> para controlar regras sem deletá-las</li>
                             <li><strong>Faixas de Ocupação Personalizáveis:</strong>
                               <ul className="list-disc list-inside mt-1 ml-4">
                                 <li>Baixa Ocupação: Min/Max % configurável com ajuste e valor base opcional</li>
                                 <li>Média Ocupação: Min/Max % configurável com ajuste e valor base opcional</li>
                                 <li>Alta Ocupação: Min/Max % configurável com ajuste e valor base opcional</li>
+                                <li>Formato: <code>trigger_condition.occupancy_ranges</code> (array de objetos com min, max, adjustment, base_value)</li>
                               </ul>
+                            </li>
+                            <li><strong>Função de Cálculo:</strong> <code>calculate_rate_price()</code> - RPC PostgreSQL que aplica todas as regras ativas</li>
+                            <li><strong>Ordem de Aplicação:</strong>
+                              <ol className="list-decimal list-inside mt-1 ml-4">
+                                <li>Buscar preço base do calendário ou categoria</li>
+                                <li>Aplicar regras dinâmicas em ordem de prioridade</li>
+                                <li>Calcular ajustes proporcionais por número de quartos</li>
+                                <li>Considerar histórico de demanda (se habilitado)</li>
+                                <li>Retornar preço final calculado</li>
+                              </ol>
                             </li>
                             <li><strong>Ajustes Proporcionais Automáticos:</strong>
                               <ul className="list-disc list-inside mt-1 ml-4">
@@ -3933,7 +4241,51 @@ if (data) {
                           </div>
                         </div>
                         <div className="p-3 bg-amber-50 rounded border border-amber-200">
-                          <h4 className="font-semibold mb-2 text-amber-900">Controle de Funcionalidades:</h4>
+                          <h4 className="font-semibold mb-2 text-amber-900">Controle de Funcionalidades (Feature Flags):</h4>
+                          <ul className="space-y-1 text-xs text-amber-800">
+                            <li><strong>Localização:</strong> Super Admin &gt; Controle de Funcionalidades</li>
+                            <li><strong>Tabela:</strong> <code>site_settings.features_enabled</code> (JSONB)</li>
+                            <li><strong>Funcionalidades Disponíveis:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><code>dynamic_pricing_automation</code> - Automação de Precificação Dinâmica</li>
+                                <li><code>stay_reviews</code> - Sistema de Avaliações da Estadia</li>
+                                <li><code>client_deduplication</code> - Centralização de Clientes</li>
+                                <li><code>email</code> - Sistema de E-mail</li>
+                                <li><code>api_integrations</code> - Integrações de API</li>
+                              </ul>
+                            </li>
+                            <li><strong>Tipos de Controle:</strong>
+                              <ul className="list-disc list-inside mt-1 ml-4">
+                                <li><strong>Global (Boolean):</strong> <code>true</code> ou <code>false</code> - Ativa/desativa para todos</li>
+                                <li><strong>Por Empresa:</strong> <code>{`{enabled: true, company_ids: ["uuid1", "uuid2"]}`}</code> - Controle por empresa</li>
+                                <li><strong>Por Estabelecimento:</strong> <code>{`{enabled: true, establishment_ids: ["uuid1", "uuid2"]}`}</code> - Controle granular</li>
+                              </ul>
+                            </li>
+                            <li><strong>Estrutura JSONB:</strong>
+                              <pre className="bg-amber-100 p-2 rounded mt-1 text-xs overflow-x-auto">{`{
+  "dynamic_pricing_automation": {
+    "enabled": true,
+    "company_ids": ["uuid1", "uuid2"]
+  },
+  "stay_reviews": {
+    "enabled": true,
+    "establishment_ids": ["uuid1", "uuid2"]
+  },
+  "client_deduplication": {
+    "enabled": true,
+    "establishment_ids": ["uuid1"]
+  },
+  "email": {
+    "enabled": true,
+    "establishment_ids": ["uuid1", "uuid2"]
+  }
+}`}</pre>
+                            </li>
+                            <li><strong>Agrupamento por Empresa:</strong> Interface permite expandir/colapsar empresas e selecionar estabelecimentos individualmente</li>
+                            <li><strong>Verificação de Acesso:</strong> Função <code>isFeatureEnabledForEstablishment()</code> verifica se feature está habilitada para estabelecimento específico</li>
+                            <li><strong>Impacto:</strong> Features desabilitadas não aparecem no menu e não podem ser acessadas</li>
+                            <li><strong>Padrão:</strong> Todas as features começam desabilitadas até serem ativadas pelo Super Admin</li>
+                          </ul>
                           <ul className="space-y-1 text-xs text-amber-800">
                             <li><strong>Super Admin:</strong> Pode ativar/desativar "Automação de Regras de Precificação Dinâmica"</li>
                             <li><strong>Seleção por Empresa:</strong> Permite escolher quais empresas podem usar a funcionalidade</li>
