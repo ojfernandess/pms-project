@@ -46,11 +46,16 @@ export function EmailLogsManager() {
     "reservation.cancelled": "Reserva Cancelada",
     "reservation.extended": "Extensão de Reserva",
     "reservation.overbooking": "Overbooking Detectado",
+    "preregistration.expired": "Pré-reserva Cancelada por Expiração",
     "payment.confirmed": "Pagamento Confirmado",
     "payment.pending": "Pagamento Pendente",
     "checkin.confirmed": "Check-in Confirmado",
+    "checkin.reception.notification": "Notificação de Check-in para Portaria",
     "checkout.completed": "Check-out Concluído",
+    "checkout.reminder": "Lembrete de Check-out Próximo",
     "fiscal_document.request": "Solicitação de Documento Fiscal",
+    "employee.added_to_establishment": "Funcionário Adicionado ao Estabelecimento",
+    "guest.password_reset": "Recuperação de Senha do Hóspede",
   };
 
   const handleResend = async (logId: string) => {

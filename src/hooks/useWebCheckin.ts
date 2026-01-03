@@ -1342,27 +1342,61 @@ export const useWebCheckin = () => {
         let allReservationIds: string[] = [];
         const reservationIdSet = new Set<string>();
 
-        // 1. Buscar por guestAccountId (web check-in) - método mais confiável
-        if (guestAccountId) {
-          const { data: stayHistory, error: historyError } = await supabase
-            .from("guest_stay_history")
-            .select("reservation_id, created_at")
-            .eq("guest_account_id", guestAccountId)
-            .order("created_at", { ascending: false })
-            .limit(20);
+        // Buscar check-ins anteriores diretamente da tabela web_checkin_guests
+        // Isso garante consistência entre web check-in e manual check-in
+        // Ambos buscam da mesma fonte: check-ins completos (status = "completed")
+        
+        // 1. Buscar por guestAccountId (web check-in) através dos hóspedes
+        if (guestAccountId && !guestEmail && !guestCpf && !guestDocumentNumber) {
+          // Buscar primeiro os hóspedes associados ao guestAccountId
+          const { data: guestAccounts, error: accountError } = await supabase
+            .from("guest_accounts")
+            .select("id, email")
+            .eq("id", guestAccountId)
+            .limit(1);
 
-          if (historyError) {
-            console.error("Erro ao buscar histórico:", historyError);
-          } else if (stayHistory) {
-            stayHistory.forEach((h) => {
-              if (h.reservation_id && h.reservation_id !== currentReservationId) {
-                reservationIdSet.add(h.reservation_id);
+          if (accountError) {
+            console.error("Erro ao buscar conta do hóspede:", accountError);
+          } else if (guestAccounts && guestAccounts.length > 0) {
+            const accountEmail = guestAccounts[0].email;
+            
+            // Buscar check-ins completos através do email da conta
+            if (accountEmail) {
+              const { data: previousGuests, error: guestsError } = await supabase
+                .from("web_checkin_guests")
+                .select(`
+                  web_checkin_id,
+                  web_checkin:web_checkin!inner(
+                    reservation_id,
+                    status,
+                    completed_at
+                  )
+                `)
+                .eq("email", accountEmail.trim())
+                .eq("web_checkin.status", "completed");
+
+              if (guestsError) {
+                console.error("Erro ao buscar check-ins por conta:", guestsError);
+              } else if (previousGuests && previousGuests.length > 0) {
+                // Ordenar por completed_at (mais recente primeiro) e pegar apenas o primeiro
+                const sortedGuests = previousGuests.sort((a: any, b: any) => {
+                  const dateA = a.web_checkin?.completed_at ? new Date(a.web_checkin.completed_at).getTime() : 0;
+                  const dateB = b.web_checkin?.completed_at ? new Date(b.web_checkin.completed_at).getTime() : 0;
+                  return dateB - dateA;
+                });
+                
+                // Pegar apenas o check-in mais recente
+                const mostRecentGuest = sortedGuests[0];
+                const reservationId = mostRecentGuest?.web_checkin?.reservation_id;
+                if (reservationId && reservationId !== currentReservationId) {
+                  reservationIdSet.add(reservationId);
+                }
               }
-            });
+            }
           }
         }
 
-        // 2. Buscar por email, CPF ou document_number nos hóspedes (incluindo todos, não só principal)
+        // 2. Buscar por email, CPF ou document_number nos hóspedes (check-in manual)
         // IMPORTANTE: Buscar apenas pelo campo específico informado, não usar OR
         // Isso garante que cada busca retorne apenas hóspedes com o documento específico
         // E apenas de check-ins completos (status = "completed")
@@ -1392,30 +1426,24 @@ export const useWebCheckin = () => {
           // Filtrar apenas check-ins completos na query
           query = query.eq("web_checkin.status", "completed");
 
-          const { data: previousGuests, error: guestsError } = await query.limit(20);
+          const { data: previousGuests, error: guestsError } = await query;
 
-            if (guestsError) {
-              console.error("Erro ao buscar hóspedes anteriores:", guestsError);
+          if (guestsError) {
+            console.error("Erro ao buscar hóspedes anteriores:", guestsError);
           } else if (previousGuests && previousGuests.length > 0) {
-            // Filtrar apenas check-ins completos e ordenar por completed_at
-            const validGuests = previousGuests.filter((g: any) => 
-              g.web_checkin?.status === "completed" && 
-              g.web_checkin?.completed_at
-            );
-            
-            // Ordenar por completed_at (mais recente primeiro)
-            const sortedGuests = validGuests.sort((a: any, b: any) => {
-                const dateA = a.web_checkin?.completed_at ? new Date(a.web_checkin.completed_at).getTime() : 0;
-                const dateB = b.web_checkin?.completed_at ? new Date(b.web_checkin.completed_at).getTime() : 0;
+            // Ordenar por completed_at (mais recente primeiro) e pegar apenas o primeiro
+            const sortedGuests = previousGuests.sort((a: any, b: any) => {
+              const dateA = a.web_checkin?.completed_at ? new Date(a.web_checkin.completed_at).getTime() : 0;
+              const dateB = b.web_checkin?.completed_at ? new Date(b.web_checkin.completed_at).getTime() : 0;
               return dateB - dateA;
-              });
-              
-              sortedGuests.forEach((g: any) => {
-                const reservationId = g.web_checkin?.reservation_id;
-                if (reservationId && reservationId !== currentReservationId) {
-                  reservationIdSet.add(reservationId);
-                }
-              });
+            });
+            
+            // Pegar apenas o check-in mais recente
+            const mostRecentGuest = sortedGuests[0];
+            const reservationId = mostRecentGuest?.web_checkin?.reservation_id;
+            if (reservationId && reservationId !== currentReservationId) {
+              reservationIdSet.add(reservationId);
+            }
           }
         }
 
@@ -1429,7 +1457,7 @@ export const useWebCheckin = () => {
 
         console.log(`🔍 Encontrados ${allReservationIds.length} check-ins anteriores para reutilização`);
 
-        // 3. Buscar os check-ins completos mais recentes
+        // 3. Buscar apenas o check-in completo mais recente (único)
         const { data: previousCheckins, error: checkinError } = await supabase
           .from("web_checkin")
           .select(`
@@ -1449,7 +1477,7 @@ export const useWebCheckin = () => {
           .in("reservation_id", allReservationIds)
           .eq("status", "completed")
           .order("completed_at", { ascending: false })
-          .limit(5); // Buscar os 5 mais recentes para garantir que pegamos o mais atualizado
+          .limit(1); // Buscar apenas o check-in mais recente
 
         if (checkinError) {
           console.error("Erro ao buscar check-ins anteriores:", checkinError);
@@ -1461,32 +1489,26 @@ export const useWebCheckin = () => {
           return null;
         }
 
-        // 4. Selecionar o check-in mais recente com dados completos de hóspedes
-        let selectedCheckin = null;
-        for (const checkin of previousCheckins) {
-          if (checkin.guests && Array.isArray(checkin.guests) && checkin.guests.length > 0) {
-            // Verificar se tem pelo menos um hóspede com dados válidos
-            const hasValidGuest = checkin.guests.some((g: any) => 
-              g.name && g.name.trim() !== ""
-            );
-            
-            if (hasValidGuest) {
-              selectedCheckin = checkin;
-              break; // Pegar o primeiro (mais recente) com dados válidos
-            }
-          }
+        // 4. Usar o único check-in retornado (mais recente)
+        const selectedCheckin = previousCheckins[0];
+
+        // Verificar se tem dados válidos de hóspedes
+        if (!selectedCheckin.guests || !Array.isArray(selectedCheckin.guests) || selectedCheckin.guests.length === 0) {
+          console.log("ℹ️ Check-in encontrado mas sem dados de hóspedes");
+          return null;
         }
 
-        if (!selectedCheckin) {
+        // Verificar se tem pelo menos um hóspede com dados válidos
+        const hasValidGuest = selectedCheckin.guests.some((g: any) => 
+          g.name && g.name.trim() !== ""
+        );
+        
+        if (!hasValidGuest) {
           console.log("ℹ️ Nenhum check-in com dados válidos de hóspedes encontrado");
           return null;
         }
 
         console.log(`✅ Check-in selecionado para reutilização: ${selectedCheckin.reservation?.reservation_code || selectedCheckin.id} (completado em ${selectedCheckin.completed_at})`);
-
-        if (!selectedCheckin.guests || selectedCheckin.guests.length === 0) {
-          return null;
-        }
 
         // Formatar dados para reutilização (incluindo endereço)
         const previousGuests = (selectedCheckin.guests as any[]).map((g) => ({

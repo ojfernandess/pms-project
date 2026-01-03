@@ -182,7 +182,7 @@ serve(async (req) => {
     if (paymentIntent.status === "succeeded" && payment.reservation_id) {
       const { data: reservation, error: reservationFetchError } = await supabaseClient
         .from("reservations")
-        .select("paid_amount, total_amount")
+        .select("paid_amount, total_amount, status")
         .eq("id", payment.reservation_id)
         .single();
 
@@ -191,19 +191,36 @@ serve(async (req) => {
         const paymentAmount = Number(payment.amount || 0);
         const totalAmount = Number(reservation.total_amount || 0);
         const newPaidAmount = Math.min(currentPaidAmount + paymentAmount, totalAmount);
+        const isPreregistration = reservation.status === "preregistration";
+        
+        // Determinar novo status: se for pré-reserva, efetivar automaticamente
+        // Se pagamento completo, status = "confirmed", senão "pending"
+        const newStatus = newPaidAmount >= totalAmount && totalAmount > 0 
+          ? "confirmed" 
+          : (newPaidAmount > 0 ? "pending" : reservation.status);
+
+        const updateData: any = {
+          paid_amount: newPaidAmount,
+        };
+        
+        // Atualizar status se for pré-reserva ou se o pagamento foi completo
+        if (isPreregistration || newStatus === "confirmed") {
+          updateData.status = newStatus;
+        }
 
         const { error: reservationUpdateError } = await supabaseClient
           .from("reservations")
-          .update({
-            status: "confirmed",
-            paid_amount: newPaidAmount,
-          })
+          .update(updateData)
           .eq("id", payment.reservation_id);
 
         if (reservationUpdateError) {
           console.error("Error updating reservation:", reservationUpdateError);
         } else {
-          console.log(`✅ Reserva ${payment.reservation_id} atualizada para status "confirmed" com paid_amount: ${newPaidAmount}`);
+          if (isPreregistration) {
+            console.log(`✅ Pré-reserva ${payment.reservation_id} efetivada automaticamente para status "${newStatus}" com paid_amount: ${newPaidAmount}`);
+          } else {
+            console.log(`✅ Reserva ${payment.reservation_id} atualizada para status "${newStatus}" com paid_amount: ${newPaidAmount}`);
+          }
         }
       }
     }

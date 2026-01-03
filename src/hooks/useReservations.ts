@@ -26,8 +26,44 @@ export const useReservations = () => {
   // Buscar todas as reservas com joins
   const reservationsQuery = useQuery({
     queryKey: ["reservations", selectedEstablishment?.id],
+    refetchInterval: 60000, // Refetch a cada minuto para verificar pré-reservas expiradas
     queryFn: async () => {
       const establishmentId = getEstablishmentId();
+      
+      // Verificar e cancelar pré-reservas expiradas antes de buscar as reservas
+      // Isso garante que as pré-reservas expiradas sejam canceladas automaticamente
+      try {
+        // Primeiro, verificar quantas pré-reservas existem com expiration_date
+        const { data: preregistrations, error: checkError } = await supabase
+          .from("reservations")
+          .select("id, reservation_code, expiration_date, status")
+          .eq("status", "preregistration")
+          .not("expiration_date", "is", null)
+          .limit(10);
+        
+        if (!checkError && preregistrations && preregistrations.length > 0) {
+          console.log("📋 Pré-reservas encontradas:", preregistrations.map((r: any) => ({
+            code: r.reservation_code,
+            expiration: r.expiration_date,
+            status: r.status,
+            expired: new Date(r.expiration_date) <= new Date()
+          })));
+        }
+        
+        const { data: cancelledCount, error: cancelError } = await supabase.rpc("cancel_expired_preregistrations");
+        if (cancelError) {
+          console.error("❌ Erro ao cancelar pré-reservas expiradas:", cancelError);
+          // Não bloquear o carregamento se houver erro ao cancelar
+        } else if (cancelledCount && cancelledCount > 0) {
+          console.log(`✅ ${cancelledCount} pré-reserva(s) expirada(s) cancelada(s) automaticamente`);
+        } else {
+          console.log("ℹ️ Nenhuma pré-reserva expirada encontrada para cancelar");
+        }
+      } catch (err) {
+        console.error("❌ Erro ao executar cancelamento de pré-reservas expiradas:", err);
+        // Não bloquear o carregamento se houver erro
+      }
+      
       let query = supabase
         .from("reservations")
         .select(`
@@ -243,6 +279,7 @@ export const useReservations = () => {
           checkout_time: reservation.checkout_time || null,
           pricing_plan_id: reservation.pricing_plan_id || null,
           created_by: user?.id || null,
+          expiration_date: reservation.expiration_date || null,
         };
 
         // Chamar função com lock (ordem: obrigatórios primeiro, opcionais depois)
@@ -270,11 +307,41 @@ export const useReservations = () => {
 
         if (!lockResult?.success) {
           const errorMessage = lockResult?.error || "Erro ao criar reserva";
+          
+          // Debug: Log detalhado do erro
+          console.error("❌ Erro ao criar reserva:", {
+            error: errorMessage,
+            lockResult: lockResult,
+            reservationData: {
+              room_id: reservation.room_id,
+              category_id: reservation.category_id,
+              checkin_date: reservation.checkin_date,
+              checkout_date: reservation.checkout_date,
+              status: reservation.status
+            }
+          });
+          
+          // Se o erro menciona quarto bloqueado ou manutenção, verificar o status real do quarto
+          if (reservation.room_id && (errorMessage.includes("bloqueado") || errorMessage.includes("manutenção") || errorMessage.includes("interditado"))) {
+            const { data: roomStatus } = await supabase
+              .from("rooms")
+              .select("id, room_number, name, status, is_blocked")
+              .eq("id", reservation.room_id)
+              .single();
+            
+            console.error("🔍 Status do quarto:", roomStatus);
+          }
+          
           await logError({
             error: new Error(errorMessage),
             context: "reservations.createReservation.validation",
             severity: "medium",
-            metadata: { lock_result: lockResult },
+            metadata: { 
+              lock_result: lockResult,
+              reservation_data: reservationData,
+              room_id: reservation.room_id,
+              category_id: reservation.category_id
+            },
           });
           throw new Error(errorMessage);
         }
@@ -1176,6 +1243,170 @@ export const useReservations = () => {
       supabase.removeChannel(paymentsChannel);
     };
   }, [selectedEstablishment?.id, queryClient]);
+
+  // Verificar e cancelar pré-reservas expiradas periodicamente
+  useEffect(() => {
+    const checkAndCancelExpired = async () => {
+      try {
+        const now = new Date();
+        const nowISO = now.toISOString();
+        
+        // Buscar TODAS as pré-reservas com expiration_date para debug
+        const { data: allPreregistrations, error: allError } = await supabase
+          .from("reservations")
+          .select("id, reservation_code, expiration_date, status, establishment_id")
+          .eq("status", "preregistration")
+          .not("expiration_date", "is", null);
+        
+        if (allPreregistrations && allPreregistrations.length > 0) {
+          console.log(`📋 Total de pré-reservas com expiration_date: ${allPreregistrations.length}`);
+          allPreregistrations.forEach((r: any) => {
+            const expirationDate = new Date(r.expiration_date);
+            const expiredSeconds = Math.floor((now.getTime() - expirationDate.getTime()) / 1000);
+            const expiredMinutes = Math.floor(expiredSeconds / 60);
+            console.log(`  - ${r.reservation_code}: expira em ${r.expiration_date} (${expiredSeconds > 0 ? `EXPIRADA há ${expiredMinutes} minutos` : `expira em ${-expiredMinutes} minutos`})`);
+          });
+        }
+        
+        // Buscar pré-reservas expiradas diretamente
+        const { data: expiredReservations, error: fetchError } = await supabase
+          .from("reservations")
+          .select("id, reservation_code, expiration_date, status, establishment_id")
+          .eq("status", "preregistration")
+          .not("expiration_date", "is", null)
+          .lte("expiration_date", nowISO);
+        
+        if (fetchError) {
+          console.error("❌ Erro ao buscar pré-reservas expiradas:", fetchError);
+          return;
+        }
+        
+        if (expiredReservations && expiredReservations.length > 0) {
+          console.log(`⏰ Encontradas ${expiredReservations.length} pré-reserva(s) expirada(s):`, 
+            expiredReservations.map((r: any) => {
+              const expirationDate = new Date(r.expiration_date);
+              const expiredSeconds = Math.floor((now.getTime() - expirationDate.getTime()) / 1000);
+              return {
+                code: r.reservation_code,
+                expiration: r.expiration_date,
+                expirationLocal: expirationDate.toLocaleString('pt-BR'),
+                expiredSeconds: expiredSeconds,
+                expiredMinutes: Math.floor(expiredSeconds / 60),
+                now: nowISO,
+                nowLocal: now.toLocaleString('pt-BR')
+              };
+            })
+          );
+          
+          // Tentar cancelar usando a função RPC primeiro
+          const { data: cancelledCount, error: rpcError } = await supabase.rpc("cancel_expired_preregistrations");
+          
+          if (rpcError) {
+            console.error("❌ Erro na função RPC, tentando cancelar diretamente:", rpcError);
+            
+            // Fallback: cancelar diretamente se a função RPC falhar
+            let cancelledDirectly = 0;
+            for (const reservation of expiredReservations) {
+              const { error: updateError } = await supabase
+                .from("reservations")
+                .update({ 
+                  status: "cancelled",
+                  notes: (reservation.notes || "") + `\nCancelada automaticamente: pré-reserva expirada em ${reservation.expiration_date}`
+                })
+                .eq("id", reservation.id)
+                .eq("status", "preregistration");
+              
+              if (updateError) {
+                console.error(`❌ Erro ao cancelar pré-reserva ${reservation.reservation_code}:`, updateError);
+              } else {
+                cancelledDirectly++;
+                console.log(`✅ Pré-reserva ${reservation.reservation_code} cancelada diretamente`);
+              }
+            }
+            
+            if (cancelledDirectly > 0) {
+              // Invalidar queries após cancelamento direto
+              queryClient.invalidateQueries({ queryKey: ["reservations"] });
+              queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+            }
+          } else {
+            console.log(`📊 Função RPC retornou: ${cancelledCount} pré-reserva(s) cancelada(s)`);
+            
+            if (cancelledCount && cancelledCount > 0) {
+              console.log(`✅ ${cancelledCount} pré-reserva(s) expirada(s) cancelada(s) pela função RPC`);
+              // Invalidar queries para atualizar a lista
+              queryClient.invalidateQueries({ queryKey: ["reservations"] });
+              queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+              
+              // Processar emails pendentes na fila após cancelamento
+              try {
+                const { processEmailQueue } = await import("@/lib/emailService");
+                // Buscar emails pendentes relacionados a pré-reservas expiradas
+                // Usar 'as any' para contornar limitação de tipos do Supabase
+                const { data: pendingEmails } = await (supabase as any)
+                  .from("email_queue")
+                  .select("id")
+                  .eq("status", "pending")
+                  .eq("event_type", "preregistration.expired")
+                  .order("scheduled_at", { ascending: true })
+                  .limit(10);
+                
+                if (pendingEmails && pendingEmails.length > 0) {
+                  console.log(`📧 Processando ${pendingEmails.length} email(s) pendente(s) de pré-reservas expiradas...`);
+                  for (const email of pendingEmails) {
+                    try {
+                      await processEmailQueue(email.id);
+                    } catch (emailError) {
+                      console.error(`❌ Erro ao processar email ${email.id}:`, emailError);
+                    }
+                  }
+                }
+              } catch (emailProcessError) {
+                console.error("❌ Erro ao processar emails pendentes:", emailProcessError);
+              }
+            } else if (expiredReservations.length > 0) {
+              console.warn(`⚠️ Função RPC retornou 0, mas encontramos ${expiredReservations.length} pré-reserva(s) expirada(s). Cancelando diretamente...`);
+              
+              // Cancelar diretamente se a função RPC não cancelou
+              let cancelledDirectly = 0;
+              for (const reservation of expiredReservations) {
+                const { error: updateError } = await supabase
+                  .from("reservations")
+                  .update({ 
+                    status: "cancelled",
+                    notes: (reservation.notes || "") + `\nCancelada automaticamente: pré-reserva expirada em ${reservation.expiration_date}`
+                  })
+                  .eq("id", reservation.id)
+                  .eq("status", "preregistration");
+                
+                if (!updateError) {
+                  cancelledDirectly++;
+                }
+              }
+              
+              if (cancelledDirectly > 0) {
+                console.log(`✅ ${cancelledDirectly} pré-reserva(s) cancelada(s) diretamente`);
+                queryClient.invalidateQueries({ queryKey: ["reservations"] });
+                queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+              }
+            }
+          }
+        } else {
+          console.log(`ℹ️ Nenhuma pré-reserva expirada encontrada para cancelar (agora: ${nowISO})`);
+        }
+      } catch (err) {
+        console.error("❌ Erro ao verificar pré-reservas expiradas:", err);
+      }
+    };
+    
+    // Executar imediatamente ao montar
+    checkAndCancelExpired();
+    
+    // Executar periodicamente a cada 30 segundos
+    const checkExpiredInterval = setInterval(checkAndCancelExpired, 30000);
+
+    return () => clearInterval(checkExpiredInterval);
+  }, [queryClient]);
 
   return {
     reservations: reservationsQuery.data || [],

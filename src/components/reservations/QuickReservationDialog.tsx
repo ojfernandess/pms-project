@@ -209,11 +209,13 @@ export const QuickReservationDialog = ({
 
         if (cancelled) return;
 
-        setCalculatedPrice(total); // Armazenar o preço calculado
+        // Arredondar para 2 casas decimais
+        const roundedTotal = Math.round(total * 100) / 100;
+        setCalculatedPrice(roundedTotal); // Armazenar o preço calculado
         setFormData((prev) => {
           // Só atualizar se o valor mudou para evitar loops
-          if (prev.total_amount !== total) {
-            return { ...prev, total_amount: total };
+          if (prev.total_amount !== roundedTotal) {
+            return { ...prev, total_amount: roundedTotal };
           }
           return prev;
         });
@@ -231,8 +233,10 @@ export const QuickReservationDialog = ({
           const days = Math.ceil((checkoutDate.getTime() - checkinDate.getTime()) / (1000 * 60 * 60 * 24));
           setFormData((prev) => {
             const fallbackTotal = Number(category.base_price) * days;
-            if (prev.total_amount !== fallbackTotal) {
-              return { ...prev, total_amount: fallbackTotal };
+            // Arredondar para 2 casas decimais
+            const roundedFallbackTotal = Math.round(fallbackTotal * 100) / 100;
+            if (prev.total_amount !== roundedFallbackTotal) {
+              return { ...prev, total_amount: roundedFallbackTotal };
             }
             return prev;
           });
@@ -833,7 +837,7 @@ export const QuickReservationDialog = ({
                       type="number"
                       step="0.01"
                       min="0"
-                      value={formData.total_amount}
+                      value={formData.total_amount > 0 ? Number(formData.total_amount.toFixed(2)) : formData.total_amount}
                       onChange={(e) => {
                         const newValue = parseFloat(e.target.value) || 0;
                         setIsManualEdit(true); // Marcar como edição manual
@@ -844,7 +848,9 @@ export const QuickReservationDialog = ({
                         // Garantir que o valor manual seja preservado ao sair do campo
                         const newValue = parseFloat(e.target.value) || 0;
                         if (isManualEdit && newValue > 0) {
-                          setFormData(prev => ({ ...prev, total_amount: newValue }));
+                          // Arredondar para 2 casas decimais ao sair do campo
+                          const roundedValue = Math.round(newValue * 100) / 100;
+                          setFormData(prev => ({ ...prev, total_amount: roundedValue }));
                         }
                       }}
                       className="pr-9 h-9"

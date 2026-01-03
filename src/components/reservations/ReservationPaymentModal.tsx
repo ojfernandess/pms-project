@@ -564,16 +564,21 @@ export function ReservationPaymentModal({
         newReservationStatus = "pending";
       }
       
-      // Não atualizar status se for blocked, cancelled, checkedin, checkedout, preregistration ou noshow
+      // Não atualizar status se for blocked, cancelled, checkedin, checkedout ou noshow
+      // MAS permitir atualizar se for preregistration (para efetivar pré-reserva automaticamente)
       const currentStatus = reservation.status;
-      const shouldUpdateStatus = !["blocked", "cancelled", "checkedin", "checkedout", "preregistration", "noshow"].includes(currentStatus);
+      const isPreregistration = currentStatus === "preregistration";
+      const shouldUpdateStatus = !["blocked", "cancelled", "checkedin", "checkedout", "noshow"].includes(currentStatus);
+      
+      // Se for pré-reserva e houver pagamento, efetivar automaticamente
+      const finalStatus = isPreregistration && newPaidAmount > 0 ? newReservationStatus : (shouldUpdateStatus ? newReservationStatus : currentStatus);
       
       const { error: reservationError, data: updatedReservation } = await supabase
         .from("reservations")
         .update({ 
           paid_amount: newPaidAmount,
           payment_status: newPaymentStatus,
-          ...(shouldUpdateStatus ? { status: newReservationStatus } : {})
+          ...(shouldUpdateStatus || isPreregistration ? { status: finalStatus } : {})
         })
         .eq("id", reservation.id)
         .select(`

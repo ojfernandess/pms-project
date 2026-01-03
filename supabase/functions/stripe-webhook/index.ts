@@ -494,9 +494,11 @@ async function sendReservationExtensionEmail(
     const checkoutDate = formatDate(reservationAny.checkout_date);
     const newCheckoutDateFormatted = formatDate(newCheckoutDate);
     
-    // Horários de check-in e check-out
-    const checkinTime = reservationAny.checkin_time || hotelSettings?.checkin_time?.substring(0, 5) || hotelSettings?.default_checkin_time || '14:00';
-    const checkoutTime = reservationAny.checkout_time || hotelSettings?.checkout_time?.substring(0, 5) || hotelSettings?.default_checkout_time || '12:00';
+    // Horários de check-in e check-out (garantir formato HH:MM sem segundos)
+    const checkinTimeRaw = reservationAny.checkin_time || hotelSettings?.checkin_time || hotelSettings?.default_checkin_time || '14:00';
+    const checkoutTimeRaw = reservationAny.checkout_time || hotelSettings?.checkout_time || hotelSettings?.default_checkout_time || '12:00';
+    const checkinTime = typeof checkinTimeRaw === 'string' && checkinTimeRaw.includes(':') ? checkinTimeRaw.substring(0, 5) : checkinTimeRaw;
+    const checkoutTime = typeof checkoutTimeRaw === 'string' && checkoutTimeRaw.includes(':') ? checkoutTimeRaw.substring(0, 5) : checkoutTimeRaw;
 
     // Construir endereço completo
     const addressParts: string[] = [];
@@ -853,9 +855,11 @@ async function sendPaymentConfirmedEmail(
     const checkinDate = formatDate(reservationAny.checkin_date);
     const checkoutDate = formatDate(reservationAny.checkout_date);
     
-    // Horários de check-in e check-out
-    const checkinTime = reservationAny.checkin_time || hotelSettings?.checkin_time?.substring(0, 5) || hotelSettings?.default_checkin_time || '14:00';
-    const checkoutTime = reservationAny.checkout_time || hotelSettings?.checkout_time?.substring(0, 5) || hotelSettings?.default_checkout_time || '12:00';
+    // Horários de check-in e check-out (garantir formato HH:MM sem segundos)
+    const checkinTimeRaw = reservationAny.checkin_time || hotelSettings?.checkin_time || hotelSettings?.default_checkin_time || '14:00';
+    const checkoutTimeRaw = reservationAny.checkout_time || hotelSettings?.checkout_time || hotelSettings?.default_checkout_time || '12:00';
+    const checkinTime = typeof checkinTimeRaw === 'string' && checkinTimeRaw.includes(':') ? checkinTimeRaw.substring(0, 5) : checkinTimeRaw;
+    const checkoutTime = typeof checkoutTimeRaw === 'string' && checkoutTimeRaw.includes(':') ? checkoutTimeRaw.substring(0, 5) : checkoutTimeRaw;
 
     // Construir endereço completo
     const addressParts: string[] = [];
@@ -1443,13 +1447,24 @@ serve(async (req) => {
               // Atualizar status baseado no pagamento
               // Se o valor pago é maior ou igual ao total, status = "confirmed" (Pago)
               // Caso contrário, manter status atual ou definir como "pending" se necessário
+              // IMPORTANTE: Se for pré-reserva (preregistration), efetivar automaticamente quando houver pagamento
+              const isPreregistration = reservation.status === "preregistration";
+              
               if (newPaidAmount >= totalAmount && totalAmount > 0) {
                 (reservationUpdate as any).status = "confirmed";
-                console.log(`[Webhook] ✅ Status atualizado para "confirmed" (paid_amount: ${newPaidAmount} >= total_amount: ${totalAmount})`);
+                if (isPreregistration) {
+                  console.log(`[Webhook] ✅ Pré-reserva efetivada automaticamente para "confirmed" (paid_amount: ${newPaidAmount} >= total_amount: ${totalAmount})`);
+                } else {
+                  console.log(`[Webhook] ✅ Status atualizado para "confirmed" (paid_amount: ${newPaidAmount} >= total_amount: ${totalAmount})`);
+                }
               } else if (newPaidAmount > 0) {
                 // Se pagou parcialmente, status pode ser "pending" ou manter o atual
                 // Mas se já estava "confirmed", manter "confirmed"
-                if (reservation.status !== "confirmed") {
+                // Se for pré-reserva, efetivar como "pending" quando houver pagamento parcial
+                if (isPreregistration) {
+                  (reservationUpdate as any).status = "pending";
+                  console.log(`[Webhook] ✅ Pré-reserva efetivada automaticamente para "pending" (pagamento parcial: ${newPaidAmount} < ${totalAmount})`);
+                } else if (reservation.status !== "confirmed") {
                   (reservationUpdate as any).status = "pending";
                   console.log(`[Webhook] ℹ️ Status definido como "pending" (pagamento parcial: ${newPaidAmount} < ${totalAmount})`);
                 } else {

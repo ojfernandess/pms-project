@@ -1192,8 +1192,22 @@ export async function generateReservationVariables(
     checkin_date: checkinDate,
     checkout_date: checkoutDate,
     new_checkout_date: newCheckoutDate, // Nova data de check-out após extensão
-    checkin_time: reservation.checkin_time || hotelSettings?.checkin_time?.substring(0, 5) || hotelSettings?.default_checkin_time || '14:00',
-    checkout_time: reservation.checkout_time || hotelSettings?.checkout_time?.substring(0, 5) || hotelSettings?.default_checkout_time || '12:00',
+    checkin_time: (() => {
+      const time = reservation.checkin_time || hotelSettings?.checkin_time || hotelSettings?.default_checkin_time || '14:00';
+      // Garantir formato HH:MM (sem segundos)
+      if (typeof time === 'string' && time.includes(':')) {
+        return time.substring(0, 5); // Pega apenas HH:MM
+      }
+      return time;
+    })(),
+    checkout_time: (() => {
+      const time = reservation.checkout_time || hotelSettings?.checkout_time || hotelSettings?.default_checkout_time || '12:00';
+      // Garantir formato HH:MM (sem segundos)
+      if (typeof time === 'string' && time.includes(':')) {
+        return time.substring(0, 5); // Pega apenas HH:MM
+      }
+      return time;
+    })(),
     total_amount: reservation.total_amount?.toFixed(2).replace('.', ',') || '0,00',
     paid_amount: reservation.paid_amount?.toFixed(2).replace('.', ',') || '0,00',
     payment_status: getPaymentStatusLabel(reservation.payment_status),

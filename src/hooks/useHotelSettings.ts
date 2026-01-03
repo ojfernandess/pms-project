@@ -73,6 +73,7 @@ export const useHotelSettings = () => {
       establishment_cnpj?: string;
       show_establishment_cnpj?: boolean;
       enable_cleaning_notifications?: boolean;
+      timezone?: string;
     }) => {
       // Buscar establishment_id do localStorage
       const establishmentId = localStorage.getItem("selectedEstablishmentId");

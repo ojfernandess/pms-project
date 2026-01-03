@@ -2951,13 +2951,15 @@ const FeatureFlagsManager = () => {
   const [features, setFeatures] = useState<any>({
     api_integrations: true,
     stripe: true,
-    email: true,
+    email: { enabled: false, establishment_ids: [] },
     web_checkin: true,
     channel_manager: true,
     stay_reviews: { enabled: false, establishment_ids: [] },
     dynamic_pricing_automation: { enabled: false, company_ids: [] },
+    client_deduplication: { enabled: false, establishment_ids: [] },
   });
   const [expandedFeature, setExpandedFeature] = useState<string | null>(null);
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (settings?.features_enabled) {
@@ -2965,7 +2967,9 @@ const FeatureFlagsManager = () => {
       setFeatures({
         api_integrations: typeof fe.api_integrations === 'boolean' ? fe.api_integrations : (fe.api_integrations?.enabled ?? true),
         stripe: typeof fe.stripe === 'boolean' ? fe.stripe : (fe.stripe?.enabled ?? true),
-        email: typeof fe.email === 'boolean' ? fe.email : (fe.email?.enabled ?? true),
+        email: typeof fe.email === 'boolean' 
+          ? { enabled: fe.email, establishment_ids: [] }
+          : (fe.email || { enabled: false, establishment_ids: [] }),
         web_checkin: typeof fe.web_checkin === 'boolean' ? fe.web_checkin : (fe.web_checkin?.enabled ?? true),
         channel_manager: typeof fe.channel_manager === 'boolean' ? fe.channel_manager : (fe.channel_manager?.enabled ?? true),
         stay_reviews: typeof fe.stay_reviews === 'boolean' 
@@ -2974,6 +2978,9 @@ const FeatureFlagsManager = () => {
         dynamic_pricing_automation: typeof fe.dynamic_pricing_automation === 'boolean' 
           ? { enabled: fe.dynamic_pricing_automation, company_ids: [] }
           : (fe.dynamic_pricing_automation || { enabled: false, company_ids: [] }),
+        client_deduplication: typeof fe.client_deduplication === 'boolean' 
+          ? { enabled: fe.client_deduplication, establishment_ids: [] }
+          : (fe.client_deduplication || { enabled: false, establishment_ids: [] }),
       });
     }
   }, [settings]);
@@ -2982,8 +2989,8 @@ const FeatureFlagsManager = () => {
     const currentFeatures = settings?.features_enabled || {};
     const newFeatures = { ...currentFeatures };
     
-    // Se for dynamic_pricing_automation ou stay_reviews, manter estrutura de objeto
-    if (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews') {
+    // Se for dynamic_pricing_automation, stay_reviews, client_deduplication ou email, manter estrutura de objeto
+    if (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email') {
       const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
         ? newFeatures[feature]
         : { enabled: false, [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: [] };
@@ -2995,7 +3002,7 @@ const FeatureFlagsManager = () => {
     
     setFeatures((prev: any) => ({
       ...prev,
-      [feature]: (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews')
+      [feature]: (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email')
         ? { 
             enabled: value, 
             [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: prev[feature]?.[feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids'] || [] 
@@ -3092,6 +3099,68 @@ const FeatureFlagsManager = () => {
     }
   };
 
+  // Agrupar estabelecimentos por empresa
+  const establishmentsByCompanyMap = useMemo(() => {
+    if (!establishments || !companies) return new Map();
+    
+    const grouped = new Map<string, {
+      company: any;
+      establishments: any[];
+    }>();
+    
+    companies.forEach((company: any) => {
+      const companyEstablishments = establishments.filter(
+        (est: any) => est.company_id === company.id
+      );
+      
+      if (companyEstablishments.length > 0) {
+        grouped.set(company.id, {
+          company,
+          establishments: companyEstablishments,
+        });
+      }
+    });
+    
+    // Adicionar estabelecimentos sem empresa
+    const establishmentsWithoutCompany = establishments.filter(
+      (est: any) => !est.company_id || !companies.find((c: any) => c.id === est.company_id)
+    );
+    
+    if (establishmentsWithoutCompany.length > 0) {
+      grouped.set('no-company', {
+        company: { id: 'no-company', name: 'Sem Empresa' },
+        establishments: establishmentsWithoutCompany,
+      });
+    }
+    
+    return grouped;
+  }, [establishments, companies]);
+  
+  const toggleCompanyExpansion = (companyId: string) => {
+    setExpandedCompanies((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(companyId)) {
+        newSet.delete(companyId);
+      } else {
+        newSet.add(companyId);
+      }
+      return newSet;
+    });
+  };
+  
+  const handleCompanyEstablishmentsToggle = (featureKey: string, companyId: string, companyEstablishments: any[], selectedEstablishmentIds: string[]) => {
+    const companyEstIds = companyEstablishments.map((e: any) => e.id);
+    const allSelected = companyEstIds.every((id: string) => 
+      selectedEstablishmentIds.includes(id)
+    );
+    
+    // Se todos estão selecionados, desmarcar todos
+    // Se não, marcar todos
+    companyEstIds.forEach((estId: string) => {
+      handleEstablishmentToggle(featureKey, estId, !allSelected);
+    });
+  };
+
   if (isLoading) {
     return (
       <Card className="p-6">
@@ -3123,6 +3192,7 @@ const FeatureFlagsManager = () => {
       description: "Habilita o sistema de envio de e-mails (templates, fila, logs)",
       icon: Mail,
       supportsCompanies: false,
+      supportsEstablishments: true,
     },
     {
       key: "web_checkin" as const,
@@ -3152,6 +3222,14 @@ const FeatureFlagsManager = () => {
       description: "Permite que empresas utilizem a automação de regras de precificação dinâmica para ajustar tarifas automaticamente",
       icon: TrendingUp,
       supportsCompanies: true,
+    },
+    {
+      key: "client_deduplication" as const,
+      label: "Centralização de Clientes",
+      description: "Permite identificar e mesclar clientes duplicados baseado em CPF, email ou telefone",
+      icon: Users,
+      supportsCompanies: false,
+      supportsEstablishments: true,
     },
   ];
 
@@ -3183,6 +3261,23 @@ const FeatureFlagsManager = () => {
             const selectedEstablishmentIds = feature.supportsEstablishments
               ? (features[feature.key]?.establishment_ids || [])
               : [];
+            
+            // Calcular estado de seleção por empresa (apenas para features que suportam estabelecimentos)
+            const establishmentsByCompany = feature.supportsEstablishments ? Array.from(establishmentsByCompanyMap.values()).map((group) => {
+              const companyEstIds = group.establishments.map((e: any) => e.id);
+              const allSelected = companyEstIds.every((id: string) => 
+                selectedEstablishmentIds.includes(id)
+              );
+              const someSelected = companyEstIds.some((id: string) => 
+                selectedEstablishmentIds.includes(id)
+              );
+              
+              return {
+                ...group,
+                allSelected,
+                someSelected,
+              };
+            }) : [];
 
             return (
               <div
@@ -3280,29 +3375,78 @@ const FeatureFlagsManager = () => {
                   <div className="px-4 pb-4 border-t bg-muted/30">
                     <div className="mt-4 space-y-2">
                       <Label className="text-sm font-medium">Selecionar Estabelecimentos:</Label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-60 overflow-y-auto">
-                        {establishments.map((establishment: any) => {
-                          const isSelected = selectedEstablishmentIds.includes(establishment.id);
+                      <div className="space-y-2 max-h-96 overflow-y-auto">
+                        {establishmentsByCompany.map((group) => {
+                          const isCompanyExpanded = expandedCompanies.has(group.company.id);
                           return (
-                            <div
-                              key={establishment.id}
-                              className="flex items-center space-x-2 p-2 rounded border hover:bg-muted/50 cursor-pointer"
-                              onClick={() => handleEstablishmentToggle(feature.key, establishment.id, !isSelected)}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => handleEstablishmentToggle(feature.key, establishment.id, !isSelected)}
-                                className="rounded"
-                              />
-                              <Label className="text-sm cursor-pointer flex-1">
-                                {establishment.name}
-                              </Label>
+                            <div key={group.company.id} className="border rounded-lg">
+                              {/* Cabeçalho da Empresa */}
+                              <div className="flex items-center justify-between p-2 bg-muted/50 rounded-t-lg">
+                                <div className="flex items-center space-x-2 flex-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleCompanyExpansion(group.company.id)}
+                                    className="p-1 hover:bg-muted rounded"
+                                  >
+                                    {isCompanyExpanded ? (
+                                      <ChevronDown className="h-4 w-4" />
+                                    ) : (
+                                      <ChevronRight className="h-4 w-4" />
+                                    )}
+                                  </button>
+                                  <input
+                                    type="checkbox"
+                                    checked={group.allSelected}
+                                    ref={(el) => {
+                                      if (el) el.indeterminate = group.someSelected && !group.allSelected;
+                                    }}
+                                    onChange={() => handleCompanyEstablishmentsToggle(feature.key, group.company.id, group.establishments, selectedEstablishmentIds)}
+                                    className="rounded"
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                  <Label 
+                                    className="text-sm font-medium cursor-pointer flex-1"
+                                      onClick={() => handleCompanyEstablishmentsToggle(feature.key, group.company.id, group.establishments, selectedEstablishmentIds)}
+                                  >
+                                    {group.company.name}
+                                    <span className="text-muted-foreground ml-2">
+                                      ({group.establishments.length} estabelecimento{group.establishments.length !== 1 ? 's' : ''})
+                                    </span>
+                                  </Label>
+                                </div>
+                              </div>
+                              
+                              {/* Estabelecimentos da Empresa */}
+                              {isCompanyExpanded && (
+                                <div className="p-2 space-y-1 bg-background rounded-b-lg">
+                                  {group.establishments.map((establishment: any) => {
+                                    const isSelected = selectedEstablishmentIds.includes(establishment.id);
+                                    return (
+                                      <div
+                                        key={establishment.id}
+                                        className="flex items-center space-x-2 p-2 rounded border hover:bg-muted/50 cursor-pointer ml-6"
+                                        onClick={() => handleEstablishmentToggle(feature.key, establishment.id, !isSelected)}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={() => handleEstablishmentToggle(feature.key, establishment.id, !isSelected)}
+                                          className="rounded"
+                                          onClick={(e) => e.stopPropagation()}
+                                        />
+                                        <Label className="text-sm cursor-pointer flex-1">
+                                          {establishment.name}
+                                        </Label>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
                       </div>
-                      {establishments.length === 0 && (
+                      {establishmentsByCompany.length === 0 && (
                         <p className="text-sm text-muted-foreground">Nenhum estabelecimento cadastrado</p>
                       )}
                     </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,8 +23,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { useEmailTemplates } from "@/hooks/useEmailTemplates";
 import { extractVariables } from "@/lib/emailTemplateEngine";
-import { Plus, Edit, Trash2, Mail, Eye } from "lucide-react";
+import { Plus, Edit, Trash2, Mail, Eye, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
+import { useEstablishments } from "@/hooks/useEstablishments";
+import { useCompanies } from "@/hooks/useCompanies";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,6 +49,10 @@ export function EmailTemplatesManager() {
     deleteTemplate,
     sendTestEmail,
   } = useEmailTemplates();
+  
+  const { establishments } = useEstablishments();
+  const { companies } = useCompanies();
+  const { settings: siteSettings } = useSiteSettings();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -52,6 +60,8 @@ export function EmailTemplatesManager() {
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
   const [testEmailDialogOpen, setTestEmailDialogOpen] = useState(false);
   const [testEmail, setTestEmail] = useState("");
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
+  const [selectedEstablishmentIds, setSelectedEstablishmentIds] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -65,6 +75,7 @@ export function EmailTemplatesManager() {
     logo_url: "",
     cc_emails: "",
     bcc_emails: "",
+    establishment_ids: [] as string[],
   });
 
   const eventTypes = [
@@ -73,6 +84,7 @@ export function EmailTemplatesManager() {
     { value: "reservation.cancelled", label: "Reserva Cancelada" },
     { value: "reservation.overbooking", label: "Overbooking Detectado" },
     { value: "reservation.extended", label: "Extensão de Reserva" },
+    { value: "preregistration.expired", label: "Pré-reserva Cancelada por Expiração" },
     { value: "payment.confirmed", label: "Pagamento Confirmado" },
     { value: "payment.pending", label: "Pagamento Pendente" },
     { value: "checkin.confirmed", label: "Check-in Confirmado" },
@@ -84,8 +96,65 @@ export function EmailTemplatesManager() {
   ];
 
   const handleOpenDialog = (template?: any) => {
+    // Obter IDs dos estabelecimentos que têm sistema de e-mail habilitado
+    const enabledIds = enabledEstablishments.map((est: any) => est.id);
+    
+    console.log('📂 Abrindo dialog de template:', {
+      hasTemplate: !!template,
+      templateId: template?.id,
+      templateName: template?.name,
+      rawEstablishmentIds: template?.establishment_ids,
+      enabledIdsCount: enabledIds.length,
+      enabledIds: enabledIds
+    });
+    
     if (template) {
       setSelectedTemplate(template);
+      
+      // Verificar se o template tem establishment_ids definido
+      // null ou undefined = nunca foi definido, então pré-selecionar todos os habilitados
+      // [] (array vazio) = foi salvo como vazio (todos desmarcados), então manter vazio
+      // Array com valores = usar os valores salvos, mas filtrar apenas os que ainda têm sistema de e-mail habilitado
+      let finalIds: string[] = [];
+      
+      if (template.establishment_ids === null || template.establishment_ids === undefined) {
+        // Nunca foi definido, pré-selecionar todos os habilitados (comportamento padrão)
+        finalIds = enabledIds;
+        console.log('✅ Template nunca foi definido - pré-selecionando todos:', finalIds);
+      } else {
+        // Foi definido (pode ser array vazio ou array com valores)
+        let establishmentIds: string[] = [];
+        
+        if (Array.isArray(template.establishment_ids)) {
+          establishmentIds = template.establishment_ids;
+        } else if (typeof template.establishment_ids === 'string' && template.establishment_ids.trim() !== '') {
+          try {
+            const parsed = JSON.parse(template.establishment_ids);
+            establishmentIds = Array.isArray(parsed) ? parsed : [];
+          } catch (e) {
+            establishmentIds = [];
+          }
+        }
+        
+        console.log('📋 Template já foi definido:', {
+          rawValue: template.establishment_ids,
+          parsedArray: establishmentIds,
+          arrayLength: establishmentIds.length
+        });
+        
+        // Se o array estava vazio, manter vazio (foi explicitamente desmarcado)
+        // Se tinha valores, filtrar apenas os que ainda têm sistema de e-mail habilitado
+        if (establishmentIds.length === 0) {
+          finalIds = [];
+          console.log('⚠️ Array vazio - mantendo vazio (todos desmarcados)');
+        } else {
+          finalIds = establishmentIds.filter((id: string) => enabledIds.includes(id));
+          console.log('✅ Array com valores - filtrando:', finalIds);
+        }
+      }
+      
+      console.log('🎯 IDs finais para seleção:', finalIds);
+      setSelectedEstablishmentIds(finalIds);
       setFormData({
         name: template.name || "",
         event_type: template.event_type || "reservation.created",
@@ -98,9 +167,12 @@ export function EmailTemplatesManager() {
         logo_url: template.logo_url || "",
         cc_emails: template.cc_emails || "",
         bcc_emails: template.bcc_emails || "",
+        establishment_ids: finalIds,
       });
     } else {
       setSelectedTemplate(null);
+      // Pré-selecionar todos os estabelecimentos que têm sistema de e-mail habilitado (comportamento padrão)
+      setSelectedEstablishmentIds(enabledIds);
       setFormData({
         name: "",
         event_type: "reservation.created",
@@ -113,6 +185,7 @@ export function EmailTemplatesManager() {
         logo_url: "",
         cc_emails: "",
         bcc_emails: "",
+        establishment_ids: enabledIds,
       });
     }
     setDialogOpen(true);
@@ -123,8 +196,47 @@ export function EmailTemplatesManager() {
 
     const variables = extractVariables(formData.body_html + " " + formData.subject);
     
+    // Obter IDs dos estabelecimentos que têm sistema de e-mail habilitado
+    const enabledIds = enabledEstablishments.map((est: any) => est.id);
+    
+    // Garantir que establishment_ids seja um array válido
+    const selectedIds = Array.isArray(selectedEstablishmentIds) 
+      ? selectedEstablishmentIds 
+      : [];
+    
+    // Determinar o valor a salvar:
+    // - Se todos os habilitados estão selecionados = null (comportamento padrão, permite todos)
+    // - Se nenhum está selecionado = [] (array vazio, não permite nenhum)
+    // - Se alguns estão selecionados = array com os IDs selecionados
+    let establishmentIdsToSave: string[] | null = null;
+    
+    if (selectedIds.length === 0) {
+      // Nenhum selecionado = array vazio (não permite nenhum)
+      establishmentIdsToSave = [];
+      console.log('💾 Salvando: NENHUM selecionado - array vazio [] (BLOQUEADO)');
+    } else if (selectedIds.length === enabledIds.length && 
+               enabledIds.every(id => selectedIds.includes(id))) {
+      // Todos os habilitados estão selecionados = null (comportamento padrão)
+      establishmentIdsToSave = null;
+      console.log('💾 Salvando: TODOS selecionados - null (PERMITIDO para todos)');
+    } else {
+      // Alguns selecionados = array com os IDs
+      establishmentIdsToSave = selectedIds;
+      console.log('💾 Salvando: ALGUNS selecionados - array com IDs:', establishmentIdsToSave);
+    }
+    
+    console.log('💾 Dados finais para salvar:', {
+      selectedIdsCount: selectedIds.length,
+      enabledIdsCount: enabledIds.length,
+      establishmentIdsToSave,
+      isNull: establishmentIdsToSave === null,
+      isArray: Array.isArray(establishmentIdsToSave),
+      arrayLength: Array.isArray(establishmentIdsToSave) ? establishmentIdsToSave.length : 'N/A'
+    });
+    
     const templateData = {
       ...formData,
+      establishment_ids: establishmentIdsToSave,
       variables: variables,
     };
 
@@ -135,10 +247,112 @@ export function EmailTemplatesManager() {
         await createTemplate(templateData);
       }
       setDialogOpen(false);
+      // Não limpar selectedEstablishmentIds aqui, pois pode ser usado novamente se o dialog for reaberto
     } catch (error) {
       console.error(error);
     }
   };
+  
+  // Filtrar estabelecimentos que têm sistema de e-mail habilitado
+  const enabledEstablishments = useMemo(() => {
+    if (!establishments || !siteSettings?.features_enabled?.email) return [];
+    
+    return establishments.filter((establishment: any) => {
+      return isFeatureEnabledForEstablishment(
+        siteSettings.features_enabled.email,
+        establishment.id
+      );
+    });
+  }, [establishments, siteSettings]);
+  
+  // Agrupar estabelecimentos por empresa (apenas os que têm e-mail habilitado)
+  const establishmentsByCompanyMap = useMemo(() => {
+    if (!enabledEstablishments || !companies) return new Map();
+    
+    const grouped = new Map<string, {
+      company: any;
+      establishments: any[];
+    }>();
+    
+    companies.forEach((company: any) => {
+      const companyEstablishments = enabledEstablishments.filter(
+        (est: any) => est.company_id === company.id
+      );
+      
+      if (companyEstablishments.length > 0) {
+        grouped.set(company.id, {
+          company,
+          establishments: companyEstablishments,
+        });
+      }
+    });
+    
+    // Adicionar estabelecimentos sem empresa
+    const establishmentsWithoutCompany = enabledEstablishments.filter(
+      (est: any) => !est.company_id || !companies.find((c: any) => c.id === est.company_id)
+    );
+    
+    if (establishmentsWithoutCompany.length > 0) {
+      grouped.set('no-company', {
+        company: { id: 'no-company', name: 'Sem Empresa' },
+        establishments: establishmentsWithoutCompany,
+      });
+    }
+    
+    return grouped;
+  }, [enabledEstablishments, companies]);
+  
+  const toggleCompanyExpansion = (companyId: string) => {
+    setExpandedCompanies((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(companyId)) {
+        newSet.delete(companyId);
+      } else {
+        newSet.add(companyId);
+      }
+      return newSet;
+    });
+  };
+  
+  const handleEstablishmentToggle = (establishmentId: string, isSelected: boolean) => {
+    setSelectedEstablishmentIds((prev) => {
+      if (isSelected) {
+        return prev.includes(establishmentId) ? prev : [...prev, establishmentId];
+      } else {
+        return prev.filter((id) => id !== establishmentId);
+      }
+    });
+  };
+  
+  const handleCompanyEstablishmentsToggle = (companyId: string, companyEstablishments: any[]) => {
+    const companyEstIds = companyEstablishments.map((e: any) => e.id);
+    const allSelected = companyEstIds.every((id: string) => 
+      selectedEstablishmentIds.includes(id)
+    );
+    
+    // Se todos estão selecionados, desmarcar todos
+    // Se não, marcar todos
+    companyEstIds.forEach((estId: string) => {
+      handleEstablishmentToggle(estId, !allSelected);
+    });
+  };
+  
+  // Calcular estado de seleção por empresa
+  const establishmentsByCompany = Array.from(establishmentsByCompanyMap.values()).map((group) => {
+    const companyEstIds = group.establishments.map((e: any) => e.id);
+    const allSelected = companyEstIds.every((id: string) => 
+      selectedEstablishmentIds.includes(id)
+    );
+    const someSelected = companyEstIds.some((id: string) => 
+      selectedEstablishmentIds.includes(id)
+    );
+    
+    return {
+      ...group,
+      allSelected,
+      someSelected,
+    };
+  });
 
   const handleDelete = async () => {
     if (selectedTemplate) {
@@ -400,6 +614,95 @@ export function EmailTemplatesManager() {
                 onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
               />
               <Label htmlFor="is_active">Template Ativo</Label>
+            </div>
+
+            {/* Seleção de Estabelecimentos */}
+            <div className="space-y-2 border-t pt-4">
+              <Label className="text-sm font-medium">Estabelecimentos Permitidos:</Label>
+              <p className="text-xs text-muted-foreground mb-3">
+                Por padrão, todos os estabelecimentos com sistema de e-mail habilitado estão selecionados. Desmarque os estabelecimentos que não devem usar este template. Se todos forem desmarcados e salvar, o template não será usado por nenhum estabelecimento.
+              </p>
+              <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-3">
+                {establishmentsByCompany.map((group) => {
+                  const isCompanyExpanded = expandedCompanies.has(group.company.id);
+                  return (
+                    <div key={group.company.id} className="border rounded-lg">
+                      {/* Cabeçalho da Empresa */}
+                      <div className="flex items-center justify-between p-2 bg-muted/50 rounded-t-lg">
+                        <div className="flex items-center space-x-2 flex-1">
+                          <button
+                            type="button"
+                            onClick={() => toggleCompanyExpansion(group.company.id)}
+                            className="p-1 hover:bg-muted rounded"
+                          >
+                            {isCompanyExpanded ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </button>
+                          <input
+                            type="checkbox"
+                            checked={group.allSelected}
+                            ref={(el) => {
+                              if (el) el.indeterminate = group.someSelected && !group.allSelected;
+                            }}
+                            onChange={() => handleCompanyEstablishmentsToggle(group.company.id, group.establishments)}
+                            className="rounded"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <Label 
+                            className="text-sm font-medium cursor-pointer flex-1"
+                            onClick={() => handleCompanyEstablishmentsToggle(group.company.id, group.establishments)}
+                          >
+                            {group.company.name}
+                            <span className="text-muted-foreground ml-2">
+                              ({group.establishments.length} estabelecimento{group.establishments.length !== 1 ? 's' : ''})
+                            </span>
+                          </Label>
+                        </div>
+                      </div>
+                      
+                      {/* Estabelecimentos da Empresa */}
+                      {isCompanyExpanded && (
+                        <div className="p-2 space-y-1 bg-background rounded-b-lg">
+                          {group.establishments.map((establishment: any) => {
+                            const isSelected = selectedEstablishmentIds.includes(establishment.id);
+                            return (
+                              <div
+                                key={establishment.id}
+                                className="flex items-center space-x-2 p-2 rounded border hover:bg-muted/50 cursor-pointer ml-6"
+                                onClick={() => handleEstablishmentToggle(establishment.id, !isSelected)}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => handleEstablishmentToggle(establishment.id, !isSelected)}
+                                  className="rounded"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <Label className="text-sm cursor-pointer flex-1">
+                                  {establishment.name}
+                                </Label>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {establishmentsByCompany.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Nenhum estabelecimento cadastrado
+                  </p>
+                )}
+              </div>
+              {selectedEstablishmentIds.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {selectedEstablishmentIds.length} estabelecimento{selectedEstablishmentIds.length !== 1 ? 's' : ''} selecionado{selectedEstablishmentIds.length !== 1 ? 's' : ''}
+                </p>
+              )}
             </div>
 
             <div className="flex justify-end gap-2">

@@ -1057,10 +1057,22 @@ export const ReservationDialog = ({
         return;
       }
 
-      // Validar data de expiração para pré-reserva
-      if (isPreReservation && !expirationDate) {
-        toast.error("Informe a data de expiração da pré-reserva");
-        return;
+      // Validar data e hora de expiração para pré-reserva
+      if (isPreReservation) {
+        if (!expirationDate) {
+          toast.error("Informe a data de expiração da pré-reserva");
+          return;
+        }
+        if (!expirationTime || expirationTime.trim() === "") {
+          toast.error("Informe a hora de expiração da pré-reserva");
+          return;
+        }
+        // Validar formato da hora (HH:MM)
+        const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+        if (!timeRegex.test(expirationTime)) {
+          toast.error("Hora de expiração inválida. Use o formato HH:MM (ex: 14:30)");
+          return;
+        }
       }
 
       // Validar capacidade (apenas para reservas normais)
@@ -1203,18 +1215,116 @@ export const ReservationDialog = ({
       }
 
       // Adicionar data de expiração para pré-reserva
-      if (isPreReservation && expirationDate) {
+      if (isPreReservation && expirationDate && expirationTime) {
+        // Validar formato da hora antes de processar
+        const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+        if (!timeRegex.test(expirationTime)) {
+          toast.error("Hora de expiração inválida. Use o formato HH:MM (ex: 14:30)");
+          setLoading(false);
+          return;
+        }
+        
         // Criar data com timezone local
         // O PostgreSQL TIMESTAMPTZ armazena em UTC, então precisamos garantir que a data seja interpretada no timezone local
         const [year, month, day] = expirationDate.split('-').map(Number);
         const [hours, minutes] = expirationTime.split(':').map(Number);
-        // Criar Date no timezone local (o construtor Date usa o timezone local)
-        const expirationDateTimeObj = new Date(year, month - 1, day, hours, minutes, 0);
-        // Converter para ISO string (que inclui timezone UTC)
-        // Isso garante que a hora seja salva corretamente considerando o timezone local
-        // Exemplo: se o usuário informa 23:59 no timezone local (UTC-3), será salvo como 02:59 UTC do dia seguinte
-        // Mas quando comparado com NOW() no PostgreSQL, será comparado corretamente
-        reservationData.expiration_date = expirationDateTimeObj.toISOString();
+        
+        // Validar valores numéricos
+        if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hours) || isNaN(minutes)) {
+          toast.error("Data ou hora de expiração inválida");
+          setLoading(false);
+          return;
+        }
+        
+        // Obter timezone do hotel (padrão: America/Sao_Paulo)
+        const hotelTimezone = hotelSettings?.timezone || 'America/Sao_Paulo';
+        
+        // Criar data/hora local no timezone do hotel
+        const monthStr = String(month).padStart(2, '0');
+        const dayStr = String(day).padStart(2, '0');
+        const hoursStr = String(hours).padStart(2, '0');
+        const minutesStr = String(minutes).padStart(2, '0');
+        
+        // Método CORRETO: usar uma técnica simples e confiável
+        // 1. Criar uma data UTC conhecida (meio-dia UTC)
+        // 2. Ver como ela aparece no timezone do hotel
+        // 3. Calcular o offset
+        // 4. Aplicar o offset para converter do hotel para UTC
+        
+        // Criar uma data UTC de referência (meio-dia UTC do mesmo dia)
+        const refUTC = new Date(`${year}-${monthStr}-${dayStr}T12:00:00Z`);
+        
+        // Obter como essa data UTC aparece no timezone do hotel
+        const hotelTimeAtUTC12 = refUTC.toLocaleString('en-US', {
+          timeZone: hotelTimezone,
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+        
+        const hotelHourAtUTC12 = parseInt(hotelTimeAtUTC12.split(':')[0]);
+        
+        // Calcular offset: se UTC 12:00 aparece como 09:00 no hotel
+        // Isso significa: quando é 09:00 no hotel, é 12:00 em UTC
+        // Então o hotel está 3 horas ATRÁS de UTC
+        // Offset = hotelHour - 12 = 9 - 12 = -3
+        const offsetHours = hotelHourAtUTC12 - 12;
+        
+        // Criar a data local assumindo que o horário informado é UTC
+        // Mas na verdade é no timezone do hotel, então precisamos ajustar
+        const localAsUTC = new Date(`${year}-${monthStr}-${dayStr}T${hoursStr}:${minutesStr}:00Z`);
+        
+        // Aplicar o offset: converter do timezone do hotel para UTC
+        // Se offsetHours = -3 (hotel está 3 horas atrás de UTC):
+        //   Para converter 21:00 do hotel para UTC: 21:00 + 3 horas = 00:00 do dia seguinte
+        //   Fórmula: localAsUTC - offsetMs = localAsUTC - (-3 horas) = localAsUTC + 3 horas
+        const offsetMs = offsetHours * 60 * 60 * 1000;
+        const expirationDateTimeUTC = new Date(localAsUTC.getTime() - offsetMs);
+        
+        // Validar se a data é válida
+        if (isNaN(expirationDateTimeUTC.getTime())) {
+          toast.error("Data ou hora de expiração inválida");
+          setLoading(false);
+          return;
+        }
+        
+        // Converter para ISO string (UTC)
+        const expirationISOString = expirationDateTimeUTC.toISOString();
+        
+        // Debug: Log para verificar o que está sendo salvo
+        const now = new Date();
+        const nowLocal = now.toLocaleString('pt-BR', { 
+          timeZone: hotelTimezone,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        const nowUTC = now.toISOString();
+        
+        // Verificar se a conversão está correta: converter de volta para o timezone do hotel
+        const expirationLocal = expirationDateTimeUTC.toLocaleString('pt-BR', {
+          timeZone: hotelTimezone,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        
+        console.log("💾 Salvando expiration_date:", {
+          input: `${expirationDate} ${expirationTime}`,
+          hotelTimezone: hotelTimezone,
+          localDateTime: `${year}-${monthStr}-${dayStr} ${hoursStr}:${minutesStr}`,
+          utcISO: expirationISOString,
+          expirationLocal: expirationLocal,
+          nowLocal: nowLocal,
+          nowUTC: nowUTC,
+          hotelHourAtUTC12: hotelHourAtUTC12,
+          offsetHours: offsetHours,
+          offsetMs: offsetMs,
+          conversionCheck: expirationLocal.startsWith(`${hoursStr}:${minutesStr}`) ? '✅ CORRETO' : '❌ ERRO'
+        });
+        
+        // Salvar como string ISO UTC
+        reservationData.expiration_date = expirationISOString;
       }
 
       // Verificar se a data de check-in é no passado (apenas para novas reservas)
@@ -1236,11 +1346,31 @@ export const ReservationDialog = ({
             financialResponsibleData,
             isBlocked,
             isPreReservation,
-            expirationDate: isPreReservation && expirationDate ? (() => {
-              // Criar data com timezone local e converter para ISO string completo
+            expirationDate: isPreReservation && expirationDate && expirationTime ? (() => {
+              // Validar formato da hora antes de processar
+              const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+              if (!timeRegex.test(expirationTime)) {
+                return null;
+              }
+              
+              // Criar Date no timezone local do usuário
               const [year, month, day] = expirationDate.split('-').map(Number);
               const [hours, minutes] = expirationTime.split(':').map(Number);
+              
+              // Validar valores numéricos
+              if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hours) || isNaN(minutes)) {
+                return null;
+              }
+              
+              // Criar Date no timezone local
               const expirationDateTimeObj = new Date(year, month - 1, day, hours, minutes, 0);
+              
+              // Validar se a data criada é válida
+              if (isNaN(expirationDateTimeObj.getTime())) {
+                return null;
+              }
+              
+              // Converter para ISO string (UTC) para salvar no PostgreSQL
               return expirationDateTimeObj.toISOString();
             })() : null,
             blockReason: isBlocked ? blockReason : null,
@@ -3318,7 +3448,14 @@ export const ReservationDialog = ({
                     type="date"
                     value={expirationDate}
                     onChange={(e) => setExpirationDate(e.target.value)}
-                    min={new Date().toISOString().split('T')[0]}
+                    min={(() => {
+                      // Usar data de hoje no timezone local para permitir seleção de hoje
+                      const today = new Date();
+                      const year = today.getFullYear();
+                      const month = String(today.getMonth() + 1).padStart(2, '0');
+                      const day = String(today.getDate()).padStart(2, '0');
+                      return `${year}-${month}-${day}`;
+                    })()}
                     required
                     className="mt-1"
                   />
@@ -3328,10 +3465,19 @@ export const ReservationDialog = ({
                   <Input
                     id="expiration_time"
                     type="time"
-                    value={expirationTime}
-                    onChange={(e) => setExpirationTime(e.target.value)}
+                    value={expirationTime || "23:59"}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setExpirationTime(value || "23:59");
+                    }}
                     required
                     className="mt-1"
+                    onBlur={(e) => {
+                      // Garantir que sempre tenha um valor válido
+                      if (!e.target.value || e.target.value.trim() === "") {
+                        setExpirationTime("23:59");
+                      }
+                    }}
                   />
                 </div>
               </div>
@@ -3652,8 +3798,13 @@ export const ReservationDialog = ({
                 try {
                   setLoading(true);
                   
-                  // Remover campos auxiliares antes de criar
+                  // Remover campos auxiliares antes de criar, mas preservar expirationDate se for pré-reserva
                   const { hasFinancialResponsible, financialClientId, guestId, guestData, financialResponsibleData, isBlocked, isPreReservation, expirationDate, blockReason, ...cleanReservationData } = pendingReservationData;
+
+                  // Se for pré-reserva, incluir expirationDate no cleanReservationData
+                  if (isPreReservation && expirationDate) {
+                    cleanReservationData.expiration_date = expirationDate;
+                  }
 
                   // Limpar campos opcionais que podem estar como string vazia
                   if (cleanReservationData.pricing_plan_id === "" || !cleanReservationData.pricing_plan_id) {

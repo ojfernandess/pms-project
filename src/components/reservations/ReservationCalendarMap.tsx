@@ -687,15 +687,46 @@ export const ReservationCalendarMap = ({
       // Se o checkout está depois do período visível, usar o último dia visível + 1 (porque checkout é exclusivo)
       const lastVisibleDate = startOfDay(visibleDates[visibleDates.length - 1]);
       const checkoutStartOfDay = startOfDay(checkout);
-      const visibleEndDate = checkoutStartOfDay <= lastVisibleDate 
-        ? checkoutStartOfDay 
-        : addDays(lastVisibleDate, 1); // Adicionar 1 dia porque checkout é exclusivo
-      
       const actualStartDateStartOfDay = startOfDay(actualStartDate);
-      const duration = differenceInDays(visibleEndDate, actualStartDateStartOfDay);
+      
+      // Calcular a duração total da reserva (do check-in até o checkout)
+      const totalDuration = differenceInDays(checkoutStartOfDay, startOfDay(checkin));
+      
+      // Se a duração total é inválida, não mostrar
+      if (totalDuration <= 0) {
+        console.warn("⚠️ Duração total inválida em getReservationPosition:", totalDuration, { checkinStr, checkoutStr });
+        return { startIndex: -1, duration: 0, isVisible: false };
+      }
+      
+      // Calcular a duração visível (do início visível até o fim visível)
+      // O checkout é exclusivo, então uma reserva de check-in 01-01 até checkout 01-02 ocupa apenas o dia 01-01
+      let visibleEndDate: Date;
+      if (checkoutStartOfDay <= lastVisibleDate) {
+        // Checkout está dentro do período visível, usar checkout como fim
+        visibleEndDate = checkoutStartOfDay;
+      } else {
+        // Checkout está depois do período visível, usar o último dia visível + 1
+        // Mas precisamos garantir que não seja menor que o início atual
+        visibleEndDate = addDays(lastVisibleDate, 1);
+      }
+      
+      let duration = differenceInDays(visibleEndDate, actualStartDateStartOfDay);
+      
+      // Se a duração calculada for 0 ou negativa, mas temos uma reserva válida,
+      // significa que o checkout está no mesmo dia ou muito próximo do início visível
+      // Nesse caso, garantir pelo menos 1 dia de duração
+      if (duration <= 0 && totalDuration > 0) {
+        duration = 1;
+      }
+      
+      // Não pode ultrapassar a duração total da reserva
+      duration = Math.min(duration, totalDuration);
+      
+      // Não pode ultrapassar o período visível
+      duration = Math.min(duration, visibleDates.length - startIndex);
       
       if (duration <= 0) {
-        console.warn("⚠️ Duração inválida em getReservationPosition:", duration, { checkinStr, checkoutStr });
+        console.warn("⚠️ Duração inválida em getReservationPosition:", duration, { checkinStr, checkoutStr, totalDuration, startIndex });
         return { startIndex: -1, duration: 0, isVisible: false };
       }
 
@@ -2169,18 +2200,20 @@ export const ReservationCalendarMap = ({
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 md:gap-6">
           <span className="text-xs sm:text-sm font-semibold text-slate-700 whitespace-nowrap">Legenda:</span>
           <div className="flex flex-wrap items-center gap-2 sm:gap-3 md:gap-4">
-            {Object.entries(statusConfig).map(([key, config]) => (
-              <div key={key} className="flex items-center gap-1.5 sm:gap-2">
-                <div 
-                  className="w-4 h-4 sm:w-5 sm:h-5 rounded border-2 flex-shrink-0"
-                  style={{ 
-                    backgroundColor: config.legendColor,
-                    borderColor: config.legendColor
-                  }}
-                />
-                <span className="text-[10px] sm:text-xs font-medium text-slate-600 whitespace-nowrap">{config.label}</span>
-              </div>
-            ))}
+            {Object.entries(statusConfig)
+              .filter(([key]) => key !== "checkedout" && key !== "noshow")
+              .map(([key, config]) => (
+                <div key={key} className="flex items-center gap-1.5 sm:gap-2">
+                  <div 
+                    className="w-4 h-4 sm:w-5 sm:h-5 rounded border-2 flex-shrink-0"
+                    style={{ 
+                      backgroundColor: config.legendColor,
+                      borderColor: config.legendColor
+                    }}
+                  />
+                  <span className="text-[10px] sm:text-xs font-medium text-slate-600 whitespace-nowrap">{config.label}</span>
+                </div>
+              ))}
           </div>
         </div>
       </Card>
@@ -2691,8 +2724,8 @@ export const ReservationCalendarMap = ({
                             
                             const totalWithFees = baseTotalAmount + serviceFeesTotal;
                             
-                            if (reservation.status === 'blocked' || reservation.status === 'cancelled') {
-                              // Bloqueada ou cancelada: usar cor do status
+                            if (reservation.status === 'blocked' || reservation.status === 'cancelled' || reservation.status === 'preregistration') {
+                              // Bloqueada, cancelada ou pré-reserva: usar cor do status
                               statusColor = statusConfig[reservation.status] || statusConfig.confirmed;
                             } else if (paidAmount === 0 || reservation.status === "unpaid") {
                               // Sem pagamento = Não Pago (vermelho)
@@ -2955,8 +2988,8 @@ export const ReservationCalendarMap = ({
             
             const totalWithFees = baseTotalAmount + serviceFeesTotal;
             
-            if (reservation.status === 'blocked' || reservation.status === 'cancelled') {
-              // Bloqueada ou cancelada: usar cor do status
+            if (reservation.status === 'blocked' || reservation.status === 'cancelled' || reservation.status === 'preregistration') {
+              // Bloqueada, cancelada ou pré-reserva: usar cor do status
               previewColor = statusConfig[reservation.status] || statusConfig.confirmed;
             } else if (paidAmount === 0 || reservation.status === "unpaid") {
               // Sem pagamento = Não Pago (vermelho)

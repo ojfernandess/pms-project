@@ -100,38 +100,89 @@ export const useEmailQueue = (filters?: {
   // Limpar toda a fila (deletar todos os e-mails)
   const clearQueue = useMutation({
     mutationFn: async () => {
-      // Buscar todos os IDs primeiro para garantir que temos permissão
+      console.log('🧹 Iniciando limpeza da fila de e-mails...');
+      
+      // Primeiro, buscar todos os IDs para verificar quantos serão deletados
       const { data: allItems, error: fetchError } = await supabase
         .from('email_queue')
-        .select('id');
+        .select('id, status')
+        .in('status', ['pending', 'failed', 'cancelled', 'queued', 'sending']);
 
-      if (fetchError) throw fetchError;
-
-      if (!allItems || allItems.length === 0) {
-        return; // Nada para deletar
+      if (fetchError) {
+        console.error('Erro ao buscar itens da fila:', fetchError);
+        throw fetchError;
       }
 
-      // Deletar todos os itens
-      const { error } = await supabase
-        .from('email_queue')
-        .delete()
-        .in('id', allItems.map(item => item.id));
+      if (!allItems || allItems.length === 0) {
+        console.log('ℹ️ Nenhum item para deletar');
+        return;
+      }
 
-      if (error) throw error;
+      console.log(`📊 Encontrados ${allItems.length} item(ns) para deletar`);
+
+      // Deletar em lotes se houver muitos itens (limite do Supabase é ~1000 por vez)
+      const batchSize = 1000;
+      const batches = [];
+      for (let i = 0; i < allItems.length; i += batchSize) {
+        batches.push(allItems.slice(i, i + batchSize));
+      }
+
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
+        const batchIds = batch.map(item => item.id);
+        
+        console.log(`🗑️ Deletando lote ${i + 1}/${batches.length} (${batchIds.length} itens)...`);
+        
+        const { error: deleteError } = await supabase
+          .from('email_queue')
+          .delete()
+          .in('id', batchIds);
+
+        if (deleteError) {
+          console.error(`Erro ao deletar lote ${i + 1}:`, deleteError);
+          throw deleteError;
+        }
+      }
+
+      console.log('✅ Limpeza da fila concluída');
+      
+      // Verificar se ainda há itens restantes
+      const { data: remainingItems, error: checkError } = await supabase
+        .from('email_queue')
+        .select('id')
+        .in('status', ['pending', 'failed', 'cancelled', 'queued', 'sending'])
+        .limit(1);
+
+      if (checkError) {
+        console.warn('Erro ao verificar itens restantes:', checkError);
+      }
+
+      if (remainingItems && remainingItems.length > 0) {
+        console.warn(`⚠️ Ainda há ${remainingItems.length} item(ns) restante(s) na fila`);
+      }
     },
     onSuccess: () => {
+      // Invalidar todas as queries relacionadas à fila
       queryClient.invalidateQueries({ queryKey: ['email_queue'] });
+      queryClient.removeQueries({ queryKey: ['email_queue'] });
       toast.success('Fila de e-mails limpa com sucesso!');
     },
     onError: (error: any) => {
+      console.error('Erro ao limpar fila:', error);
       toast.error(error.message || 'Erro ao limpar fila');
     },
   });
 
+  // Função de refetch melhorada que também invalida o cache
+  const handleRefetch = async () => {
+    queryClient.invalidateQueries({ queryKey: ['email_queue'] });
+    return await queueQuery.refetch();
+  };
+
   return {
     queue: queueQuery.data || [],
     isLoading: queueQuery.isLoading,
-    refetch: queueQuery.refetch,
+    refetch: handleRefetch,
     processQueueItem: processQueueItem.mutateAsync,
     cancelQueueItem: cancelQueueItem.mutateAsync,
     retryQueueItem: retryQueueItem.mutateAsync,

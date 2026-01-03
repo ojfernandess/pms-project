@@ -19,6 +19,8 @@ DECLARE
   v_available BOOLEAN;
   v_conflict_count INTEGER;
   v_result JSONB;
+  v_room_is_blocked BOOLEAN;
+  v_room_status TEXT;
 BEGIN
   -- Extrair dados da reserva
   v_room_id := COALESCE(p_room_id, (p_reservation_data->>'room_id')::UUID);
@@ -38,18 +40,34 @@ BEGIN
     -- IMPORTANTE: Não bloquear por status "occupied" ou "blocked" se não houver bloqueio real
     -- O status "occupied" ou "blocked" pode ser apenas um status visual do mapa de ocupação
     -- que considera reservas, mas não impede a criação de novas reservas se não houver conflito
-    IF EXISTS (
-      SELECT 1 FROM public.rooms
-      WHERE id = v_room_id
-        AND (is_blocked = TRUE OR status = 'maintenance')
-    ) THEN
+    -- Verificar apenas is_blocked e status 'maintenance', ignorando outros status como 'occupied' ou 'blocked'
+    SELECT is_blocked, status INTO v_room_is_blocked, v_room_status
+    FROM public.rooms
+    WHERE id = v_room_id;
+    
+    -- Verificar se o quarto existe
+    IF NOT FOUND THEN
       RETURN jsonb_build_object(
         'success', false,
-        'error', CASE 
-          WHEN EXISTS (SELECT 1 FROM public.rooms WHERE id = v_room_id AND is_blocked = TRUE) 
-          THEN 'Quarto está interditado - não é possível criar reservas'
-          ELSE 'Quarto está em manutenção - não é possível criar reservas'
-        END
+        'error', 'Quarto não encontrado'
+      );
+    END IF;
+    
+    -- Verificar apenas se está realmente bloqueado (is_blocked = TRUE) ou em manutenção
+    -- Ignorar outros status como 'occupied' ou 'blocked' que são apenas visuais
+    -- IMPORTANTE: Verificar apenas is_blocked (campo booleano) e não o status 'blocked' (enum)
+    IF COALESCE(v_room_is_blocked, FALSE) = TRUE THEN
+      RETURN jsonb_build_object(
+        'success', false,
+        'error', 'Quarto está interditado - não é possível criar reservas'
+      );
+    END IF;
+    
+    -- Verificar apenas status 'maintenance', ignorando 'blocked' e 'occupied' que são apenas visuais
+    IF v_room_status = 'maintenance' THEN
+      RETURN jsonb_build_object(
+        'success', false,
+        'error', 'Quarto está em manutenção - não é possível criar reservas'
       );
     END IF;
 
@@ -143,7 +161,8 @@ BEGIN
     checkin_time,
     checkout_time,
     pricing_plan_id,
-    created_by
+    created_by,
+    expiration_date
   )
   VALUES (
     p_establishment_id,
@@ -172,7 +191,12 @@ BEGIN
       ELSE NULL
     END,
     (p_reservation_data->>'pricing_plan_id')::UUID,
-    (p_reservation_data->>'created_by')::UUID
+    (p_reservation_data->>'created_by')::UUID,
+    CASE 
+      WHEN p_reservation_data->>'expiration_date' IS NOT NULL AND p_reservation_data->>'expiration_date' != '' 
+      THEN (p_reservation_data->>'expiration_date')::TIMESTAMPTZ
+      ELSE NULL
+    END
   )
   RETURNING id INTO v_reservation_id;
 

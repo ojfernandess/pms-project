@@ -100,8 +100,20 @@ export function EmailQueueManager() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={() => refetch()} variant="outline" size="sm">
-            <RefreshCw className="h-4 w-4 mr-2" />
+          <Button 
+            onClick={async () => {
+              try {
+                await refetch();
+                toast.success('Fila atualizada!');
+              } catch (error: any) {
+                toast.error(error.message || 'Erro ao atualizar fila');
+              }
+            }} 
+            variant="outline" 
+            size="sm"
+            disabled={isLoading}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
           {queue.length > 0 && (
@@ -260,13 +272,19 @@ export function EmailQueueManager() {
                 try {
                   await clearQueue();
                   setClearDialogOpen(false);
-                } catch (error) {
-                  console.error(error);
+                  // Aguardar um pouco antes de atualizar para garantir que a deleção foi processada
+                  setTimeout(() => {
+                    refetch();
+                  }, 500);
+                } catch (error: any) {
+                  console.error('Erro ao limpar fila:', error);
+                  toast.error(error.message || 'Erro ao limpar fila');
                 }
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isClearing}
             >
-              Limpar Fila
+              {isClearing ? 'Limpando...' : 'Limpar Fila'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

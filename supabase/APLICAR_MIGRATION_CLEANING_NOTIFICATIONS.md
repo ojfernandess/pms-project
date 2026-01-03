@@ -60,3 +60,4 @@ DROP COLUMN IF EXISTS enable_cleaning_notifications;
 - As notificações de limpeza serão criadas automaticamente apenas se a configuração estiver ativa
 - O sistema funcionará normalmente mesmo se a migration não for aplicada (usando padrão: ativado)
 
+

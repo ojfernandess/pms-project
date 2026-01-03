@@ -73,6 +73,7 @@ const Settings = () => {
     establishment_cnpj: "",
     show_establishment_cnpj: true,
     reception_email: "",
+    timezone: "America/Sao_Paulo",
   });
 
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -129,6 +130,7 @@ const Settings = () => {
         establishment_cnpj: settings.establishment_cnpj || "",
         show_establishment_cnpj: settings.show_establishment_cnpj !== undefined ? settings.show_establishment_cnpj : true,
         reception_email: selectedEstablishment?.reception_email || "",
+        timezone: settings.timezone || "America/Sao_Paulo",
       });
       if (settings.logo_url) setLogoPreview(settings.logo_url);
       if (settings.photo_url) setPhotoPreview(settings.photo_url);
@@ -243,6 +245,7 @@ const Settings = () => {
         checkin_time: `${formData.checkin_time}:00`,
         checkout_time: `${formData.checkout_time}:00`,
         auto_payment_carrier_id: formData.auto_payment_carrier_id || undefined,
+        timezone: formData.timezone,
       });
 
       // Salvar reception_email na tabela establishments (não em hotel_settings)
@@ -737,6 +740,36 @@ const Settings = () => {
                         setFormData({ ...formData, enable_cleaning_notifications: checked })
                       }
                     />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="timezone">Fuso Horário</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Fuso horário do estabelecimento usado para cálculos de datas/horas (ex: America/Sao_Paulo, America/New_York)
+                      </p>
+                    </div>
+                    <Select
+                      value={formData.timezone}
+                      onValueChange={(value) =>
+                        setFormData({ ...formData, timezone: value })
+                      }
+                    >
+                      <SelectTrigger className="w-[250px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="America/Sao_Paulo">America/Sao_Paulo (UTC-3)</SelectItem>
+                        <SelectItem value="America/New_York">America/New_York (UTC-5)</SelectItem>
+                        <SelectItem value="America/Los_Angeles">America/Los_Angeles (UTC-8)</SelectItem>
+                        <SelectItem value="America/Chicago">America/Chicago (UTC-6)</SelectItem>
+                        <SelectItem value="America/Denver">America/Denver (UTC-7)</SelectItem>
+                        <SelectItem value="Europe/London">Europe/London (UTC+0)</SelectItem>
+                        <SelectItem value="Europe/Paris">Europe/Paris (UTC+1)</SelectItem>
+                        <SelectItem value="Asia/Tokyo">Asia/Tokyo (UTC+9)</SelectItem>
+                        <SelectItem value="UTC">UTC (UTC+0)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </div>

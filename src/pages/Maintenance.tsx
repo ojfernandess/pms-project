@@ -1029,6 +1029,11 @@ const Maintenance = () => {
       {/* Modal de Imagem */}
       <Dialog open={!!selectedImage} onOpenChange={(open) => !open && setSelectedImage(null)}>
         <DialogContent className="max-w-4xl max-h-[90vh] p-0 rounded-xl overflow-hidden">
+          <DialogHeader className="sr-only">
+            <DialogTitle>
+              {selectedImage ? `Visualizar imagem: ${selectedImage.fileName || 'Imagem do ticket'}` : 'Visualizar imagem'}
+            </DialogTitle>
+          </DialogHeader>
           {selectedImage && (
             <div className="relative">
               <div className="p-4 border-b border-slate-200 bg-white rounded-t-xl">

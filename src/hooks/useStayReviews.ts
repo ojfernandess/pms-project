@@ -183,6 +183,9 @@ export const useStayReviews = () => {
         submitted_at: new Date().toISOString(),
       };
 
+      let isNewReview = false;
+      let reviewResult;
+
       if (existingReview) {
         // Atualizar avaliação existente
         const { data, error } = await supabase
@@ -193,9 +196,10 @@ export const useStayReviews = () => {
           .single();
 
         if (error) throw error;
-        return data;
+        reviewResult = data;
       } else {
         // Criar nova avaliação
+        isNewReview = true;
         const { data, error } = await supabase
           .from("stay_reviews")
           .insert(reviewData)
@@ -203,13 +207,50 @@ export const useStayReviews = () => {
           .single();
 
         if (error) throw error;
-        return data;
+        reviewResult = data;
       }
+
+      return { review: reviewResult, isNewReview, reservationId, establishmentId };
     },
-    onSuccess: () => {
+    onSuccess: async (result) => {
       queryClient.invalidateQueries({ queryKey: ["stay_reviews"] });
       queryClient.invalidateQueries({ queryKey: ["stay_review"] });
       toast.success("Avaliação enviada com sucesso!");
+
+      // Criar notificação apenas para novas avaliações
+      if (result.isNewReview) {
+        try {
+          // Buscar informações da reserva para a notificação
+          const { data: reservation } = await supabase
+            .from("reservations")
+            .select("reservation_code, guest_name")
+            .eq("id", result.reservationId)
+            .single();
+
+          const reservationCode = reservation?.reservation_code || result.reservationId.substring(0, 8).toUpperCase();
+          const guestName = reservation?.guest_name || "Hóspede";
+
+          // Criar notificação para todos os usuários do estabelecimento
+          const { error: notificationError } = await supabase.rpc("create_notification_for_establishment", {
+            p_establishment_id: result.establishmentId,
+            p_type: "other",
+            p_title: "Nova Avaliação Recebida",
+            p_message: `${guestName} enviou uma nova avaliação para a reserva ${reservationCode}`,
+            p_priority: "medium",
+            p_metadata: {
+              reservation_id: result.reservationId,
+              review_id: result.review.id,
+              type: "stay_review"
+            }
+          });
+
+          if (notificationError) {
+            console.error("Erro ao criar notificação de avaliação:", notificationError);
+          }
+        } catch (error) {
+          console.error("Erro ao processar notificação de avaliação:", error);
+        }
+      }
     },
     onError: (error: any) => {
       console.error("Erro ao salvar avaliação:", error);

@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,11 +24,20 @@ import { toast } from "sonner";
 
 const Clients = () => {
   const { selectedEstablishment } = useEstablishment();
+  const { settings: siteSettings } = useSiteSettings();
   const navigate = useNavigate();
   const { establishmentId } = useParams<{ establishmentId?: string }>();
   const [searchTerm, setSearchTerm] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [dialogMode, setDialogMode] = useState<"create" | "view" | "edit">("create");
   const { canCreate } = usePermissions();
+
+  // Verificar se a funcionalidade de centralização está habilitada
+  const isDeduplicationEnabled = isFeatureEnabledForEstablishment(
+    siteSettings?.features_enabled?.client_deduplication,
+    selectedEstablishment?.id
+  );
 
   // Garantir que o establishmentId está disponível no localStorage
   useEffect(() => {
@@ -71,18 +82,20 @@ const Clients = () => {
           <p className="text-muted-foreground">Gerencie o cadastro de hóspedes</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => {
-              const currentId = establishmentId || selectedEstablishment?.numeric_id;
-              if (currentId) {
-                navigate(`/${currentId}/clientes/centralizacao`);
-              }
-            }}
-          >
-            <Users className="h-4 w-4 mr-2" />
-            Centralizar Clientes
-          </Button>
+          {isDeduplicationEnabled && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                const currentId = establishmentId || selectedEstablishment?.numeric_id;
+                if (currentId) {
+                  navigate(`/${currentId}/clientes/centralizacao`);
+                }
+              }}
+            >
+              <Users className="h-4 w-4 mr-2" />
+              Centralizar Clientes
+            </Button>
+          )}
           {canCreate("clients") && (
             <Button onClick={() => setDialogOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
@@ -130,7 +143,17 @@ const Clients = () => {
                   <TableCell>{client.document_number || "-"}</TableCell>
                   <TableCell>{client.city || "-"}</TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="sm">Ver</Button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => {
+                        setSelectedClientId(client.id);
+                        setDialogMode("view");
+                        setDialogOpen(true);
+                      }}
+                    >
+                      Ver
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -145,10 +168,20 @@ const Clients = () => {
 
       <ClientDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) {
+            setSelectedClientId(null);
+            setDialogMode("create");
+          }
+        }}
+        clientId={selectedClientId}
+        mode={dialogMode}
         onSuccess={() => {
           refetch();
           setDialogOpen(false);
+          setSelectedClientId(null);
+          setDialogMode("create");
         }}
       />
     </div>

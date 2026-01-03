@@ -19,7 +19,28 @@ export const useEmailTemplates = () => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data;
+      
+      // Normalizar establishment_ids para garantir que seja sempre um array ou null
+      const normalizedData = data?.map((template: any) => {
+        if (template.establishment_ids !== null && template.establishment_ids !== undefined) {
+          // Se não é null/undefined, garantir que seja um array
+          if (!Array.isArray(template.establishment_ids)) {
+            try {
+              // Tentar parsear se for string JSON
+              if (typeof template.establishment_ids === 'string' && template.establishment_ids.trim() !== '') {
+                template.establishment_ids = JSON.parse(template.establishment_ids);
+              } else {
+                template.establishment_ids = [];
+              }
+            } catch (e) {
+              template.establishment_ids = [];
+            }
+          }
+        }
+        return template;
+      });
+      
+      return normalizedData || data;
     },
   });
 
@@ -28,16 +49,49 @@ export const useEmailTemplates = () => {
     mutationFn: async (template: EmailTemplateInsert) => {
       const { data: { user } } = await supabase.auth.getUser();
       
+      // Garantir que establishment_ids seja salvo corretamente
+      // null = permite todos (padrão)
+      // [] = não permite nenhum
+      // [id1, id2, ...] = permite apenas esses IDs
+      const templateData: any = {
+        ...template,
+        created_by: user?.id || null,
+      };
+      
+      if ('establishment_ids' in template) {
+        if (template.establishment_ids === null || template.establishment_ids === undefined) {
+          // Manter null (permite todos)
+          templateData.establishment_ids = null;
+        } else if (Array.isArray(template.establishment_ids)) {
+          // Manter como array (pode ser vazio ou com valores)
+          templateData.establishment_ids = template.establishment_ids;
+        } else {
+          // Se não é null nem array, converter para array vazio
+          templateData.establishment_ids = [];
+        }
+      }
+      
+      console.log('📝 Criando template com establishment_ids:', {
+        establishment_ids: templateData.establishment_ids,
+        isNull: templateData.establishment_ids === null,
+        isArray: Array.isArray(templateData.establishment_ids),
+        length: Array.isArray(templateData.establishment_ids) ? templateData.establishment_ids.length : 'N/A'
+      });
+      
       const { data, error } = await supabase
         .from('email_templates')
-        .insert([{
-          ...template,
-          created_by: user?.id || null,
-        }])
+        .insert([templateData])
         .select()
         .single();
 
       if (error) throw error;
+      
+      console.log('✅ Template criado:', {
+        id: data.id,
+        establishment_ids: data.establishment_ids,
+        isArray: Array.isArray(data.establishment_ids)
+      });
+      
       return data;
     },
     onSuccess: () => {
@@ -73,12 +127,40 @@ export const useEmailTemplates = () => {
       }
       
       // Garantir que updated_at seja atualizado explicitamente (o trigger deve fazer isso, mas vamos garantir)
+      // Garantir que establishment_ids seja salvo corretamente como JSONB
+      const updateData: any = {
+        ...updates,
+        updated_at: new Date().toISOString(), // Forçar atualização do updated_at
+      };
+      
+      // Se establishment_ids está presente, garantir que seja salvo corretamente
+      // null = permite todos (padrão)
+      // [] = não permite nenhum
+      // [id1, id2, ...] = permite apenas esses IDs
+      if ('establishment_ids' in updates) {
+        if (updates.establishment_ids === null || updates.establishment_ids === undefined) {
+          // Manter null (permite todos)
+          updateData.establishment_ids = null;
+        } else if (Array.isArray(updates.establishment_ids)) {
+          // Manter como array (pode ser vazio ou com valores)
+          updateData.establishment_ids = updates.establishment_ids;
+        } else {
+          // Se não é null nem array, converter para array vazio
+          updateData.establishment_ids = [];
+        }
+      }
+      
+      console.log('📝 Dados para atualização:', {
+        id,
+        establishment_ids: updateData.establishment_ids,
+        isNull: updateData.establishment_ids === null,
+        isArray: Array.isArray(updateData.establishment_ids),
+        length: Array.isArray(updateData.establishment_ids) ? updateData.establishment_ids.length : 'N/A'
+      });
+      
       const { data, error } = await supabase
         .from('email_templates')
-        .update({
-          ...updates,
-          updated_at: new Date().toISOString(), // Forçar atualização do updated_at
-        })
+        .update(updateData)
         .eq('id', id)
         .select()
         .maybeSingle();
@@ -101,7 +183,11 @@ export const useEmailTemplates = () => {
         body_html_length: data.body_html?.length || 0,
         subject_length: data.subject?.length || 0,
         cc_emails: data.cc_emails || 'Nenhum',
-        bcc_emails: data.bcc_emails || 'Nenhum'
+        bcc_emails: data.bcc_emails || 'Nenhum',
+        establishment_ids: data.establishment_ids,
+        establishment_ids_type: typeof data.establishment_ids,
+        establishment_ids_isArray: Array.isArray(data.establishment_ids),
+        establishment_ids_length: Array.isArray(data.establishment_ids) ? data.establishment_ids.length : 'N/A'
       });
       
       return data;

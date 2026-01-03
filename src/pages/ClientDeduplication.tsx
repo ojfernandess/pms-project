@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +54,7 @@ interface DuplicateGroup {
 
 const ClientDeduplication = () => {
   const { selectedEstablishment } = useEstablishment();
+  const { settings: siteSettings } = useSiteSettings();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
@@ -59,6 +62,36 @@ const ClientDeduplication = () => {
   const [selectedGroup, setSelectedGroup] = useState<DuplicateGroup | null>(null);
   const [primaryClientId, setPrimaryClientId] = useState<string | null>(null);
   const [isMerging, setIsMerging] = useState(false);
+
+  // Verificar se a funcionalidade está habilitada para este estabelecimento
+  const isFeatureEnabled = isFeatureEnabledForEstablishment(
+    siteSettings?.features_enabled?.client_deduplication,
+    selectedEstablishment?.id
+  );
+
+  // Buscar todos os estabelecimentos para mapear IDs
+  const { data: allEstablishments } = useQuery({
+    queryKey: ["all-establishments-deduplication"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("establishments")
+        .select("id, name, numeric_id")
+        .order("name", { ascending: true });
+
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Criar mapeamento de establishment_id para nome e numeric_id
+  const establishmentMap = useMemo(() => {
+    if (!allEstablishments) return new Map();
+    const map = new Map();
+    allEstablishments.forEach(est => {
+      map.set(est.id, { name: est.name, numeric_id: est.numeric_id });
+    });
+    return map;
+  }, [allEstablishments]);
 
   // Buscar todos os clientes (de todos os estabelecimentos)
   const { data: allClients, isLoading: clientsLoading } = useQuery({
@@ -235,15 +268,17 @@ const ClientDeduplication = () => {
   }, [allClients, allReservations]);
 
   const filteredGroups = useMemo(() => {
-    if (!searchTerm) return duplicateGroups;
+    if (!searchTerm || searchTerm.trim() === "") return duplicateGroups;
     
-    const term = searchTerm.toLowerCase();
+    const term = searchTerm.toLowerCase().trim();
     return duplicateGroups.filter(group =>
       group.clients.some(client =>
-        client.full_name.toLowerCase().includes(term) ||
-        client.email?.toLowerCase().includes(term) ||
-        client.document_number?.toLowerCase().includes(term)
-      )
+        (client.full_name && client.full_name.toLowerCase().includes(term)) ||
+        (client.email && client.email.toLowerCase().includes(term)) ||
+        (client.document_number && client.document_number.toLowerCase().includes(term)) ||
+        (client.phone && client.phone.toLowerCase().includes(term))
+      ) ||
+      group.matchReason.toLowerCase().includes(term)
     );
   }, [duplicateGroups, searchTerm]);
 
@@ -366,6 +401,31 @@ const ClientDeduplication = () => {
 
   const totalDuplicates = duplicateGroups.reduce((sum, group) => sum + group.clients.length - 1, 0);
   const totalRevenue = duplicateGroups.reduce((sum, group) => sum + group.totalRevenue, 0);
+
+  // Se a funcionalidade não está habilitada, mostrar mensagem
+  if (!isFeatureEnabled) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Centralização de Clientes</h1>
+            <p className="text-muted-foreground">
+              Identifique, mescle e elimine perfis duplicados de hóspedes
+            </p>
+          </div>
+        </div>
+        <Card className="p-6">
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              Esta funcionalidade não está habilitada para este estabelecimento. 
+              Entre em contato com o administrador do sistema para habilitar a Centralização de Clientes.
+            </AlertDescription>
+          </Alert>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -539,7 +599,15 @@ const ClientDeduplication = () => {
                       <TableCell>
                         {format(new Date(client.created_at), "dd/MM/yyyy", { locale: ptBR })}
                       </TableCell>
-                      <TableCell>{client.establishment_id || "-"}</TableCell>
+                      <TableCell>
+                        {client.establishment_id ? (() => {
+                          const establishment = establishmentMap.get(client.establishment_id);
+                          if (establishment) {
+                            return `${establishment.name} (ID: ${establishment.numeric_id})`;
+                          }
+                          return client.establishment_id;
+                        })() : "-"}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

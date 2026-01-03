@@ -294,22 +294,46 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
       throw new Error('Configurações de e-mail não encontradas ou inativas');
     }
 
-    // SUBSTITUIR review_link ANTES DE ENVIAR (última chance)
-    // Verificar se há review_link nas variáveis e substituir no body_html
+    // PROCESSAR TODAS AS VARIÁVEIS DO TEMPLATE ANTES DE ENVIAR
+    // Se o body_html ainda contém placeholders ({{variable}}), processar usando processTemplate
     let finalBodyHtml = queueItem.body_html || '';
     let finalSubject = queueItem.subject || '';
     
-    console.log('🔍 processEmailQueue - Estado inicial:', {
-      bodyHtmlLength: finalBodyHtml.length,
-      hasPlaceholder: finalBodyHtml.includes('{{review_link}}') || finalBodyHtml.includes('{{{review_link}}}'),
-      hasReviewLink: queueItem.variables?.review_link ? finalBodyHtml.includes(queueItem.variables.review_link) : false,
-      reviewLinkInVariables: queueItem.variables?.review_link,
-      bodyHtmlSample: finalBodyHtml.substring(
-        finalBodyHtml.indexOf('Avaliar Estadia') > 0 ? finalBodyHtml.indexOf('Avaliar Estadia') - 50 : 0,
-        finalBodyHtml.indexOf('Avaliar Estadia') > 0 ? finalBodyHtml.indexOf('Avaliar Estadia') + 200 : 200
-      ),
-    });
+    // Verificar se há placeholders não processados no template
+    const hasUnprocessedPlaceholders = finalBodyHtml.includes('{{') || finalSubject.includes('{{');
     
+    if (hasUnprocessedPlaceholders && queueItem.variables) {
+      console.log('🔄 Processando variáveis do template na fila:', {
+        hasPlaceholders: hasUnprocessedPlaceholders,
+        variablesCount: Object.keys(queueItem.variables).length,
+        variableKeys: Object.keys(queueItem.variables),
+      });
+      
+      try {
+        // Importar e usar processTemplate para processar todas as variáveis
+        const { processTemplate } = await import('./emailTemplateEngine');
+        
+        // Processar subject e body_html com todas as variáveis
+        finalSubject = processTemplate(finalSubject, queueItem.variables);
+        finalBodyHtml = processTemplate(finalBodyHtml, queueItem.variables);
+        
+        console.log('✅ Template processado com todas as variáveis:', {
+          subjectProcessed: !finalSubject.includes('{{'),
+          bodyProcessed: !finalBodyHtml.includes('{{'),
+          remainingPlaceholders: (finalBodyHtml.match(/\{\{[^}]+\}\}/g) || []).length,
+        });
+        
+        // Atualizar queueItem com o conteúdo processado
+        queueItem.body_html = finalBodyHtml;
+        queueItem.subject = finalSubject;
+      } catch (processError) {
+        console.error('❌ Erro ao processar template com variáveis:', processError);
+        // Continuar mesmo se houver erro no processamento
+      }
+    }
+    
+    // SUBSTITUIR review_link ANTES DE ENVIAR (última chance)
+    // Verificar se há review_link nas variáveis e substituir no body_html
     if (queueItem.variables?.review_link) {
       const reviewLink = queueItem.variables.review_link;
       console.log('🔧 Substituindo review_link no processEmailQueue:', {
@@ -342,20 +366,11 @@ export async function processEmailQueue(itemId: string): Promise<boolean> {
         hasPlaceholderAfter: finalBodyHtml.includes('{{review_link}}') || finalBodyHtml.includes('{{{review_link}}}'),
         hasReviewLinkInBody: finalBodyHtml.includes(reviewLink),
         reviewLink,
-        bodyHtmlSample: finalBodyHtml.substring(
-          finalBodyHtml.indexOf('Avaliar Estadia') > 0 ? finalBodyHtml.indexOf('Avaliar Estadia') - 50 : 0,
-          finalBodyHtml.indexOf('Avaliar Estadia') > 0 ? finalBodyHtml.indexOf('Avaliar Estadia') + 200 : 200
-        ),
       });
       
       // Atualizar queueItem com o body_html processado
       queueItem.body_html = finalBodyHtml;
       queueItem.subject = finalSubject;
-    } else {
-      console.warn('⚠️ review_link não encontrado nas variáveis do queueItem:', {
-        hasVariables: !!queueItem.variables,
-        variablesKeys: queueItem.variables ? Object.keys(queueItem.variables) : [],
-      });
     }
 
     // VERIFICAÇÃO FINAL ABSOLUTA ANTES DE ENVIAR
@@ -1088,6 +1103,26 @@ export async function sendGuestPasswordResetEmail(
   try {
     console.log('📧 Enviando e-mail de reset de senha para hóspede:', { guestEmail });
     
+    // Verificar se o sistema de e-mail está habilitado para o estabelecimento
+    if (establishmentId) {
+      const { data: siteSettingsFeatureFlag } = await supabase
+        .from('site_settings')
+        .select('features_enabled')
+        .eq('id', '00000000-0000-0000-0000-000000000001')
+        .maybeSingle();
+      
+      const { isFeatureEnabledForEstablishment } = await import('@/lib/featureAccess');
+      const isEmailEnabled = isFeatureEnabledForEstablishment(
+        siteSettingsFeatureFlag?.features_enabled?.email,
+        establishmentId
+      );
+      
+      if (!isEmailEnabled) {
+        console.warn('⚠️ Sistema de e-mail está desabilitado para este estabelecimento. E-mail não será enviado.');
+        return null;
+      }
+    }
+    
     // Verificar se as configurações de e-mail estão ativas
     const settings = await getEmailSettings();
     if (!settings || !settings.is_active) {
@@ -1095,26 +1130,12 @@ export async function sendGuestPasswordResetEmail(
       return null;
     }
     
-    // Buscar template ativo para o evento
-    const { data: templates, error: templateError } = await supabase
-      .from('email_templates')
-      .select('*')
-      .eq('event_type', 'guest.password_reset')
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-
-    if (templateError) {
-      console.warn('⚠️ Erro ao buscar template para evento: guest.password_reset', templateError);
+    // Buscar template ativo para o evento com filtro de estabelecimento
+    const template = await findEmailTemplate('guest.password_reset', establishmentId);
+    
+    if (!template) {
       return null;
     }
-
-    if (!templates || templates.length === 0) {
-      console.warn('⚠️ Template não encontrado para evento: guest.password_reset');
-      return null;
-    }
-
-    const template = templates[0];
     
     // Buscar configurações do hotel se establishmentId fornecido
     let hotelSettings = null;
@@ -1217,9 +1238,30 @@ export async function sendFiscalDocumentRequestEmail(
     financialEmail?: string;
     reservationId: string;
     recipientEmail: string;
+    establishmentId?: string;
   }
 ): Promise<string | null> {
   try {
+    // Verificar se o sistema de e-mail está habilitado para o estabelecimento
+    if (requestData.establishmentId) {
+      const { data: siteSettingsFeatureFlag } = await supabase
+        .from('site_settings')
+        .select('features_enabled')
+        .eq('id', '00000000-0000-0000-0000-000000000001')
+        .maybeSingle();
+      
+      const { isFeatureEnabledForEstablishment } = await import('@/lib/featureAccess');
+      const isEmailEnabled = isFeatureEnabledForEstablishment(
+        siteSettingsFeatureFlag?.features_enabled?.email,
+        requestData.establishmentId
+      );
+      
+      if (!isEmailEnabled) {
+        console.warn('⚠️ Sistema de e-mail está desabilitado para este estabelecimento. E-mail não será enviado.');
+        return null;
+      }
+    }
+    
     // Verificar se as configurações de e-mail estão ativas
     const settings = await getEmailSettings();
     if (!settings || !settings.is_active) {
@@ -1227,26 +1269,12 @@ export async function sendFiscalDocumentRequestEmail(
       return null;
     }
 
-    // Buscar template ativo para o evento
-    const { data: templates, error: templateError } = await supabase
-      .from('email_templates')
-      .select('*')
-      .eq('event_type', 'fiscal_document.request')
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-
-    if (templateError) {
-      console.error('Erro ao buscar template:', templateError);
+    // Buscar template ativo para o evento com filtro de estabelecimento
+    const template = await findEmailTemplate('fiscal_document.request', requestData.establishmentId);
+    
+    if (!template) {
       return null;
     }
-
-    if (!templates || templates.length === 0) {
-      console.warn('⚠️ Template não encontrado para fiscal_document.request');
-      return null;
-    }
-
-    const template = templates[0];
 
     // Preparar variáveis para o template
     const formattedAmount = new Intl.NumberFormat("pt-BR", {
@@ -1696,6 +1724,24 @@ export async function sendEmployeeAddedToEstablishmentEmail(
       establishmentId: employeeData.establishmentId 
     });
     
+    // Verificar se o sistema de e-mail está habilitado para o estabelecimento
+    const { data: siteSettingsFeatureFlag } = await supabase
+      .from('site_settings')
+      .select('features_enabled')
+      .eq('id', '00000000-0000-0000-0000-000000000001')
+      .maybeSingle();
+    
+    const { isFeatureEnabledForEstablishment } = await import('@/lib/featureAccess');
+    const isEmailEnabled = isFeatureEnabledForEstablishment(
+      siteSettingsFeatureFlag?.features_enabled?.email,
+      employeeData.establishmentId
+    );
+    
+    if (!isEmailEnabled) {
+      console.warn('⚠️ Sistema de e-mail está desabilitado para este estabelecimento. E-mail não será enviado.');
+      return null;
+    }
+    
     // Verificar se as configurações de e-mail estão ativas
     const settings = await getEmailSettings();
     if (!settings || !settings.is_active) {
@@ -1703,30 +1749,14 @@ export async function sendEmployeeAddedToEstablishmentEmail(
       return null;
     }
     
-    // Buscar template ativo para o evento
+    // Buscar template ativo para o evento com filtro de estabelecimento
     console.log('🔍 Buscando template para evento: employee.added_to_establishment');
-    const { data: templates, error: templateError } = await supabase
-      .from('email_templates')
-      .select('*')
-      .eq('event_type', 'employee.added_to_establishment')
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-
-    if (templateError) {
-      console.error('❌ Erro ao buscar template para evento: employee.added_to_establishment', templateError);
-      return null;
-    }
-
-    console.log('📋 Templates encontrados:', templates?.length || 0);
-
-    if (!templates || templates.length === 0) {
-      console.error('❌ Template não encontrado para evento: employee.added_to_establishment');
+    const template = await findEmailTemplate('employee.added_to_establishment', employeeData.establishmentId);
+    
+    if (!template) {
       console.log('💡 Dica: Verifique se a migration 20251204000001_add_employee_added_to_establishment_email_template.sql foi executada no Supabase.');
       return null;
     }
-
-    const template = templates[0];
     
     // Buscar dados do estabelecimento se não foram fornecidos
     let establishmentName = employeeData.establishmentName;
@@ -1856,6 +1886,26 @@ export async function sendCheckoutReminderEmail(
       checkoutDate: reservation?.checkout_date
     });
     
+    // Verificar se o sistema de e-mail está habilitado para o estabelecimento
+    if (reservation?.establishment_id) {
+      const { data: siteSettingsFeatureFlag } = await supabase
+        .from('site_settings')
+        .select('features_enabled')
+        .eq('id', '00000000-0000-0000-0000-000000000001')
+        .maybeSingle();
+      
+      const { isFeatureEnabledForEstablishment } = await import('@/lib/featureAccess');
+      const isEmailEnabled = isFeatureEnabledForEstablishment(
+        siteSettingsFeatureFlag?.features_enabled?.email,
+        reservation.establishment_id
+      );
+      
+      if (!isEmailEnabled) {
+        console.warn('⚠️ Sistema de e-mail está desabilitado para este estabelecimento. E-mail não será enviado.');
+        return null;
+      }
+    }
+    
     // Verificar se as configurações de e-mail estão ativas
     const settings = await getEmailSettings();
     if (!settings || !settings.is_active) {
@@ -1863,30 +1913,14 @@ export async function sendCheckoutReminderEmail(
       return null;
     }
     
-    // Buscar template ativo para o evento
+    // Buscar template ativo para o evento com filtro de estabelecimento
     console.log('🔍 Buscando template para evento: checkout.reminder');
-    const { data: templates, error: templateError } = await supabase
-      .from('email_templates')
-      .select('*')
-      .eq('event_type', 'checkout.reminder')
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-
-    if (templateError) {
-      console.error('❌ Erro ao buscar template para evento: checkout.reminder', templateError);
-      return null;
-    }
-
-    console.log('📋 Templates encontrados:', templates?.length || 0);
-
-    if (!templates || templates.length === 0) {
-      console.error('❌ Template não encontrado para evento: checkout.reminder');
+    const template = await findEmailTemplate('checkout.reminder', reservation?.establishment_id);
+    
+    if (!template) {
       console.log('💡 Dica: Verifique se a migration 20251204000003_create_checkout_reminder_email_template.sql foi executada no Supabase.');
       return null;
     }
-
-    const template = templates[0];
     
     // Buscar dados completos da reserva com relacionamentos
     const { data: fullReservation, error: reservationError } = await supabase
@@ -2166,26 +2200,12 @@ export async function sendStayReviewRequestEmail(
       return null;
     }
     
-    // Buscar template ativo para o evento
-    const { data: templates, error: templateError } = await supabase
-      .from('email_templates')
-      .select('*')
-      .eq('event_type', 'checkout.completed')
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-
-    if (templateError) {
-      console.error('❌ Erro ao buscar template para evento: checkout.completed', templateError);
+    // Buscar template ativo para o evento com filtro de estabelecimento
+    const template = await findEmailTemplate('checkout.completed', reservation?.establishment_id);
+    
+    if (!template) {
       return null;
     }
-
-    if (!templates || templates.length === 0) {
-      console.warn('⚠️ Template não encontrado para evento: checkout.completed');
-      return null;
-    }
-
-    const template = templates[0];
     
     // Buscar dados completos da reserva
     const { data: fullReservation, error: reservationError } = await supabase
@@ -2641,14 +2661,150 @@ export async function sendStayReviewRequestEmail(
   }
 }
 
+/**
+ * Helper function para buscar templates de email com filtro de estabelecimento
+ */
+async function findEmailTemplate(eventType: string, establishmentId?: string) {
+  let templatesQuery = supabase
+    .from('email_templates')
+    .select('*')
+    .eq('event_type', eventType)
+    .eq('is_active', true)
+    .order('updated_at', { ascending: false });
+  
+  // Se houver establishment_id, filtrar templates que permitem este estabelecimento
+  // ou templates sem restrição (establishment_ids vazio, null ou array vazio)
+  if (establishmentId) {
+    // Verificar se o campo establishment_ids contém o establishment_id ou está vazio/null
+    // Usar RPC ou filtro mais específico para JSONB array
+    // Primeiro buscar todos os templates e filtrar no código se necessário
+    const { data: allTemplates, error: fetchError } = await templatesQuery;
+    
+    if (fetchError) {
+      console.warn(`⚠️ Erro ao buscar template para evento: ${eventType}`, fetchError);
+      return null;
+    }
+    
+    if (!allTemplates || allTemplates.length === 0) {
+      console.warn(`⚠️ Template não encontrado para evento: ${eventType}`);
+      return null;
+    }
+    
+    // Filtrar templates que permitem este estabelecimento ou não têm restrição
+    const filteredTemplates = allTemplates.filter((template: any) => {
+      const establishmentIds = template.establishment_ids;
+      
+      console.log(`🔍 Verificando template ${template.id} para estabelecimento ${establishmentId}:`, {
+        templateName: template.name,
+        establishmentIds,
+        isNull: establishmentIds === null,
+        isUndefined: establishmentIds === undefined,
+        isArray: Array.isArray(establishmentIds),
+        arrayLength: Array.isArray(establishmentIds) ? establishmentIds.length : 'N/A',
+        type: typeof establishmentIds
+      });
+      
+      // Se nunca foi definido (null ou undefined), permitir todos (comportamento padrão)
+      if (establishmentIds === null || establishmentIds === undefined) {
+        console.log(`✅ Template ${template.id}: null/undefined - PERMITIDO (padrão)`);
+        return true;
+      }
+      
+      // Se foi explicitamente definido como array vazio, não permitir nenhum
+      if (Array.isArray(establishmentIds) && establishmentIds.length === 0) {
+        console.log(`❌ Template ${template.id}: array vazio [] - NEGADO`);
+        return false;
+      }
+      
+      // Se for string JSON vazia, não permitir
+      if (typeof establishmentIds === 'string' && (establishmentIds.trim() === '' || establishmentIds === '[]')) {
+        console.log(`❌ Template ${template.id}: string vazia - NEGADO`);
+        return false;
+      }
+      
+      // Se há restrição com valores, verificar se o establishment_id está na lista
+      if (Array.isArray(establishmentIds)) {
+        const isIncluded = establishmentIds.includes(establishmentId);
+        console.log(`🔍 Template ${template.id}: array com valores - ${isIncluded ? 'PERMITIDO' : 'NEGADO'}`);
+        return isIncluded;
+      }
+      
+      // Se for string JSON, tentar parsear
+      try {
+        const parsed = typeof establishmentIds === 'string' ? JSON.parse(establishmentIds) : establishmentIds;
+        if (Array.isArray(parsed)) {
+          // Se parseou como array vazio, não permitir
+          if (parsed.length === 0) {
+            console.log(`❌ Template ${template.id}: parseado como array vazio - NEGADO`);
+            return false;
+          }
+          const isIncluded = parsed.includes(establishmentId);
+          console.log(`🔍 Template ${template.id}: parseado com valores - ${isIncluded ? 'PERMITIDO' : 'NEGADO'}`);
+          return isIncluded;
+        }
+      } catch (e) {
+        // Se não conseguir parsear, assumir que não há restrição (comportamento padrão)
+        console.log(`⚠️ Template ${template.id}: erro ao parsear - PERMITIDO (padrão)`);
+        return true;
+      }
+      
+      console.log(`❌ Template ${template.id}: caso não tratado - NEGADO`);
+      return false;
+    });
+    
+    if (filteredTemplates.length === 0) {
+      console.warn(`⚠️ Template não encontrado para evento: ${eventType} e estabelecimento: ${establishmentId}`);
+      return null;
+    }
+    
+    // Retornar o template mais recente (já ordenado por updated_at)
+    return filteredTemplates[0];
+  }
+  
+  // Se não há establishment_id, retornar o primeiro template encontrado
+  const { data: templates, error } = await templatesQuery.limit(1);
+  
+  if (error) {
+    console.warn(`⚠️ Erro ao buscar template para evento: ${eventType}`, error);
+    return null;
+  }
+  
+  if (!templates || templates.length === 0) {
+    console.warn(`⚠️ Template não encontrado para evento: ${eventType}`);
+    return null;
+  }
+  
+  return templates[0];
+}
+
 export async function triggerEmail(
-  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification' | 'checkout.completed',
+  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification' | 'checkout.completed' | 'preregistration.expired',
   reservation: any,
   additionalVariables?: TemplateVariables,
   customRecipientEmail?: string
 ): Promise<string | null> {
   try {
     console.log(`📧 Disparando e-mail para evento: ${eventType}`, { reservationId: reservation?.id });
+    
+    // Verificar se o sistema de e-mail está habilitado para o estabelecimento
+    if (reservation?.establishment_id) {
+      const { data: siteSettingsFeatureFlag } = await supabase
+        .from('site_settings')
+        .select('features_enabled')
+        .eq('id', '00000000-0000-0000-0000-000000000001')
+        .maybeSingle();
+      
+      const { isFeatureEnabledForEstablishment } = await import('@/lib/featureAccess');
+      const isEmailEnabled = isFeatureEnabledForEstablishment(
+        siteSettingsFeatureFlag?.features_enabled?.email,
+        reservation.establishment_id
+      );
+      
+      if (!isEmailEnabled) {
+        console.warn('⚠️ Sistema de e-mail está desabilitado para este estabelecimento. E-mail não será enviado.');
+        return null;
+      }
+    }
     
     // Verificar se as configurações de e-mail estão ativas
     const settings = await getEmailSettings();
@@ -2658,30 +2814,12 @@ export async function triggerEmail(
     }
     console.log('✅ Configurações de e-mail ativas:', { provider: settings.provider });
     
-    // Buscar template ativo para o evento
-    // IMPORTANTE: Usar .order('updated_at', { ascending: false }) para pegar o template mais recente
-    // e .maybeSingle() para evitar erro se houver múltiplos templates
-    const { data: templates, error: templateError } = await supabase
-      .from('email_templates')
-      .select('*')
-      .eq('event_type', eventType)
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-
-    if (templateError) {
-      console.warn(`⚠️ Erro ao buscar template para evento: ${eventType}`, templateError);
-      console.warn(`⚠️ Código do erro:`, templateError?.code);
-      console.warn(`⚠️ Mensagem do erro:`, templateError?.message);
+    // Buscar template ativo para o evento com filtro de estabelecimento
+    const template = await findEmailTemplate(eventType, reservation?.establishment_id);
+    
+    if (!template) {
       return null;
     }
-
-    if (!templates || templates.length === 0) {
-      console.warn(`⚠️ Template não encontrado para evento: ${eventType}`);
-      return null;
-    }
-
-    const template = templates[0]; // Pegar o template mais recente
     
     console.log('✅ Template encontrado:', { 
       templateId: template.id, 

@@ -10,52 +10,63 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <>
       <style>{`
         [data-sonner-toast] [data-close-button] {
-          color: rgb(37 99 235) !important;
-          opacity: 0.8;
-          transition: all 0.2s ease;
-          width: 20px;
-          height: 20px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          background-color: #1f2937 !important;
+          border-radius: 50% !important;
+          width: 24px !important;
+          height: 24px !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          transition: all 0.2s ease !important;
+          opacity: 1 !important;
+          border: none !important;
+          cursor: pointer !important;
         }
         
         @media (min-width: 768px) {
           [data-sonner-toast] [data-close-button] {
-            width: 24px;
-            height: 24px;
+            width: 28px !important;
+            height: 28px !important;
           }
         }
         
         [data-sonner-toast] [data-close-button]:hover {
-          color: rgb(29 78 216) !important;
-          opacity: 1;
+          background-color: #374151 !important;
+          transform: scale(1.05);
+        }
+        
+        [data-sonner-toast] [data-close-button]:active {
+          transform: scale(0.95);
         }
         
         [data-sonner-toast] [data-close-button] svg {
-          width: 16px;
-          height: 16px;
+          width: 14px !important;
+          height: 14px !important;
+          color: #f97316 !important;
+          stroke-width: 2.5 !important;
         }
         
         @media (min-width: 768px) {
           [data-sonner-toast] [data-close-button] svg {
-            width: 20px;
-            height: 20px;
+            width: 16px !important;
+            height: 16px !important;
           }
         }
         
         /* Estilo customizado para toast de info com cor azul diferenciada */
         [data-sonner-toast][data-type="info"].bg-blue-50 [data-close-button] {
-          color: rgb(30 58 138) !important;
-          opacity: 1 !important;
-          background-color: rgba(255, 255, 255, 0.5);
-          border-radius: 4px;
-          padding: 2px;
+          background-color: #1f2937 !important;
+          border-radius: 50% !important;
         }
         
         [data-sonner-toast][data-type="info"].bg-blue-50 [data-close-button]:hover {
-          color: rgb(15 23 42) !important;
-          background-color: rgba(255, 255, 255, 0.8);
+          background-color: #374151 !important;
+        }
+        
+        [data-sonner-toast][data-type="info"].bg-blue-50 [data-close-button] svg {
+          color: #f97316 !important;
         }
       `}</style>
     <Sonner
