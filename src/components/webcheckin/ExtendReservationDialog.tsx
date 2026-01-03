@@ -404,18 +404,20 @@ export function ExtendReservationDialog({
     };
   }, [newCheckoutDate, originalCheckout, reservation, calculatedPrice]);
 
-  // Verificar disponibilidade antes de permitir extensão usando a mesma lógica do mapa de reservas
+  // Verificar disponibilidade antes de permitir extensão usando validateRoomAvailability
   const checkAvailability = async (): Promise<boolean> => {
     if (!newCheckoutDate || !originalCheckout || !reservation) {
+      console.log("[checkAvailability] Dados insuficientes:", { newCheckoutDate, originalCheckout, reservation: !!reservation });
       return false;
     }
 
     try {
-      const categoryId = reservation.room_category_id || reservation.category_id;
       const roomId = reservation.room_id;
+      const categoryId = reservation.room_category_id || reservation.category_id;
       let establishmentId = reservation.establishment_id;
 
       if (!categoryId) {
+        console.error("[checkAvailability] Categoria do quarto não encontrada");
         toast.error("Categoria do quarto não encontrada");
         return false;
       }
@@ -426,7 +428,6 @@ export function ExtendReservationDialog({
         establishmentId = getSelectedEstablishmentId();
         
         // Se ainda não encontrou, buscar diretamente da categoria
-        // Primeiro tentar através do building (se existir), depois diretamente da categoria
         if (!establishmentId) {
           try {
             const { data: category } = await supabase
@@ -436,95 +437,76 @@ export function ExtendReservationDialog({
               .single();
             
             if (category) {
-              // Se a categoria tem building_id e o building tem establishment_id, usar esse
               if ((category as any).buildings && (category as any).buildings.establishment_id) {
                 establishmentId = (category as any).buildings.establishment_id;
-              }
-              // Se não tem building mas tem establishment_id direto na categoria, usar esse
-              else if ((category as any).establishment_id) {
+              } else if ((category as any).establishment_id) {
                 establishmentId = (category as any).establishment_id;
               }
             }
           } catch (error) {
-            console.warn("Erro ao buscar establishment_id da categoria:", error);
+            console.warn("[checkAvailability] Erro ao buscar establishment_id da categoria:", error);
           }
         }
       }
 
       if (!establishmentId) {
+        console.error("[checkAvailability] Estabelecimento não identificado");
         toast.error("Estabelecimento não identificado");
         return false;
       }
 
-      // Usar a mesma lógica do sistema principal (validateCategoryAvailability)
+      // Se há roomId específico, usar validateRoomAvailability que é mais confiável
+      if (roomId) {
+        console.log("[checkAvailability] Verificando disponibilidade do quarto específico:", {
+          roomId,
+          originalCheckout: format(originalCheckout, "yyyy-MM-dd"),
+          newCheckoutDate: format(newCheckoutDate, "yyyy-MM-dd"),
+          reservationId: reservation.id
+        });
+
+        // Importar validateRoomAvailability
+        const { validateRoomAvailability } = await import("@/lib/reservationUtils");
+        
+        // Verificar disponibilidade para o período completo (checkin original até novo checkout)
+        // Mas precisamos do checkin original também
+        const originalCheckin = reservation.checkin_date ? parseISO(reservation.checkin_date) : null;
+        const checkinDate = originalCheckin ? format(startOfDay(originalCheckin), "yyyy-MM-dd") : format(startOfDay(originalCheckout), "yyyy-MM-dd");
+        const checkoutDate = format(startOfDay(newCheckoutDate), "yyyy-MM-dd");
+
+        console.log("[checkAvailability] Parâmetros para validateRoomAvailability:", {
+          roomId,
+          checkinDate,
+          checkoutDate,
+          excludeReservationId: reservation.id
+        });
+
+        const availabilityCheck = await validateRoomAvailability(
+          roomId,
+          checkinDate,
+          checkoutDate,
+          reservation.id // Excluir a reserva atual da verificação
+        );
+
+        console.log("[checkAvailability] Resultado da verificação:", {
+          available: availabilityCheck.available,
+          reason: availabilityCheck.reason,
+          conflictingReservation: availabilityCheck.conflictingReservation
+        });
+
+        return availabilityCheck.available;
+      }
+
+      // Se não tem roomId específico, verificar disponibilidade na categoria
+      console.log("[checkAvailability] Verificando disponibilidade na categoria:", {
+        categoryId,
+        originalCheckout: format(originalCheckout, "yyyy-MM-dd"),
+        newCheckoutDate: format(newCheckoutDate, "yyyy-MM-dd"),
+        reservationId: reservation.id
+      });
+
       const extensionCheckin = format(startOfDay(originalCheckout), "yyyy-MM-dd");
       const extensionCheckout = format(startOfDay(newCheckoutDate), "yyyy-MM-dd");
 
-      // 1. PRIMEIRO: Verificar se o quarto específico da reserva está disponível no período
-      if (roomId) {
-        // Buscar informações do quarto específico
-        let roomQuery = supabase
-          .from("rooms")
-          .select("id, name, status, is_blocked, category_id")
-          .eq("id", roomId)
-          .single();
-
-        if (establishmentId) {
-          roomQuery = roomQuery.eq("establishment_id", establishmentId);
-        }
-
-        const { data: currentRoom, error: roomError } = await roomQuery;
-
-        if (roomError) {
-          console.error("Erro ao buscar quarto:", roomError);
-        }
-
-        if (currentRoom) {
-          // Verificar status do quarto
-          if (currentRoom.is_blocked === true) {
-            // Quarto está bloqueado - não pode estender
-            return false;
-          }
-
-          if (!["available", "cleaning"].includes(currentRoom.status)) {
-            // Quarto não está disponível (manutenção, etc) - não pode estender
-            return false;
-          }
-
-          // Verificar se há reservas conflitantes no MESMO QUARTO no período de extensão
-          let roomReservationsQuery = supabase
-            .from("reservations")
-            .select("id, checkin_date, checkout_date, status, notes, reservation_code")
-            .eq("room_id", roomId)
-            .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"] as any)
-            .neq("id", reservation.id) // Excluir a reserva atual
-            .or(
-              `and(checkin_date.lt.${extensionCheckout},checkout_date.gt.${extensionCheckin})`
-            );
-
-          if (establishmentId) {
-            roomReservationsQuery = roomReservationsQuery.eq("establishment_id", establishmentId);
-          }
-
-          const { data: roomConflicts, error: roomConflictsError } = await roomReservationsQuery;
-
-          if (roomConflictsError) {
-            console.error("Erro ao verificar conflitos no quarto:", roomConflictsError);
-          }
-
-          // Se há conflitos no quarto específico, não pode estender
-          if (roomConflicts && roomConflicts.length > 0) {
-            // Há reservas conflitantes no quarto específico
-            return false;
-          }
-
-          // Quarto específico está disponível e sem conflitos - pode estender
-          return true;
-        }
-      }
-
-      // 2. SEGUNDO: Se não tem quarto específico ou o quarto não foi encontrado,
-      // verificar disponibilidade na categoria
       // Buscar todos os quartos da categoria que estão disponíveis
       let roomsQuery = supabase
         .from("rooms")
@@ -533,16 +515,19 @@ export function ExtendReservationDialog({
         .in("status", ["available", "cleaning"])
         .eq("is_blocked", false);
 
-      // Só adicionar filtro de establishment_id se ele existir e for válido
       if (establishmentId) {
         roomsQuery = roomsQuery.eq("establishment_id", establishmentId);
       }
 
       const { data: rooms, error: roomsError } = await roomsQuery;
 
-      if (roomsError) throw roomsError;
+      if (roomsError) {
+        console.error("[checkAvailability] Erro ao buscar quartos:", roomsError);
+        throw roomsError;
+      }
+
       if (!rooms || rooms.length === 0) {
-        // Nenhum quarto disponível na categoria
+        console.log("[checkAvailability] Nenhum quarto disponível na categoria");
         return false;
       }
 
@@ -557,19 +542,22 @@ export function ExtendReservationDialog({
           `and(checkin_date.lt.${extensionCheckout},checkout_date.gt.${extensionCheckin})`
         );
 
-      // Só adicionar filtro de establishment_id se ele existir e for válido
       if (establishmentId) {
         reservationsQuery = reservationsQuery.eq("establishment_id", establishmentId);
       }
 
       const { data: conflictingReservations, error: reservationsError } = await reservationsQuery;
 
-      if (reservationsError) throw reservationsError;
+      if (reservationsError) {
+        console.error("[checkAvailability] Erro ao buscar reservas conflitantes:", reservationsError);
+        throw reservationsError;
+      }
+
+      console.log("[checkAvailability] Reservas conflitantes encontradas:", conflictingReservations?.length || 0);
 
       // Criar conjunto de quartos ocupados no período de extensão
       const occupiedRoomIds = new Set<string>();
       
-      // Adicionar quartos ocupados por reservas (incluindo bloqueios, pending, confirmed, checkedin, preregistration)
       (conflictingReservations || []).forEach((r) => {
         if (r.room_id) {
           occupiedRoomIds.add(r.room_id);
@@ -584,16 +572,16 @@ export function ExtendReservationDialog({
           ["available", "cleaning"].includes(room.status)
       );
       
-      if (availableRooms.length > 0) {
-        // Há quartos disponíveis na categoria
-        return true;
-      }
-      
-      // Não há quartos disponíveis - não pode estender
-      return false;
+      console.log("[checkAvailability] Quartos disponíveis na categoria:", {
+        totalRooms: rooms.length,
+        occupiedRooms: occupiedRoomIds.size,
+        availableRooms: availableRooms.length
+      });
+
+      return availableRooms.length > 0;
     } catch (error: any) {
-      console.error("Erro ao verificar disponibilidade:", error);
-      toast.error("Erro ao verificar disponibilidade no mapa de reservas");
+      console.error("[checkAvailability] Erro ao verificar disponibilidade:", error);
+      toast.error("Erro ao verificar disponibilidade");
       return false;
     }
   };
