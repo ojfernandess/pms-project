@@ -20,6 +20,7 @@ export interface RoomOccupancyData {
   name?: string;
   category_id: string;
   category_name: string;
+  building_name?: string;
   status: RoomOccupancyStatus;
   
   // Informações da reserva atual (se houver)
@@ -107,7 +108,13 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         .from("rooms")
         .select(`
           *,
-          room_categories (*)
+          room_categories (
+            *,
+            buildings (
+              id,
+              name
+            )
+          )
         `)
         .eq("establishment_id", establishmentId)
         .order("room_number", { ascending: true });
@@ -454,6 +461,16 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           ? (room.room_categories.length > 0 ? room.room_categories[0] : null)
           : room.room_categories;
         
+        // Extrair building_name da categoria (buildings pode ser objeto ou array)
+        let buildingName: string | undefined = undefined;
+        if (category?.buildings) {
+          if (Array.isArray(category.buildings)) {
+            buildingName = category.buildings.length > 0 ? category.buildings[0]?.name : undefined;
+          } else {
+            buildingName = category.buildings?.name;
+          }
+        }
+        
         // ============================================
         // LÓGICA SIMPLIFICADA E DIRETA
         // ============================================
@@ -784,6 +801,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           name: room.name,
           category_id: category?.id || "",
           category_name: category?.name || "Sem categoria",
+          building_name: buildingName,
           status,
           reservation_id: reservationData?.id,
           reservation_code: reservationData?.reservation_code,

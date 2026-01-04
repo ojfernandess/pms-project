@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -159,6 +159,8 @@ const OccupancyMap = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedStatuses, setSelectedStatuses] = useState<Set<RoomOccupancyStatus>>(new Set());
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [expandedBuildings, setExpandedBuildings] = useState<Set<string>>(new Set());
+  const buildingsInitializedRef = useRef(false);
   const [selectedRoom, setSelectedRoom] = useState<RoomOccupancyData | null>(null);
   const [actionDialogOpen, setActionDialogOpen] = useState(false);
   const [reservationDialogOpen, setReservationDialogOpen] = useState(false);
@@ -200,19 +202,68 @@ const OccupancyMap = () => {
     return grouped;
   }, [rooms]);
 
-  // Obter categorias únicas
+  // Obter categorias únicas com informações de prédio
   const categories = useMemo(() => {
-    const categoryMap = new Map<string, { id: string; name: string }>();
+    const categoryMap = new Map<string, { id: string; name: string; building_name?: string }>();
     rooms.forEach((room) => {
       if (room.category_id && !categoryMap.has(room.category_id)) {
         categoryMap.set(room.category_id, {
           id: room.category_id,
           name: room.category_name,
+          building_name: room.building_name,
         });
       }
     });
-    return Array.from(categoryMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(categoryMap.values()).sort((a, b) => {
+      // Ordenar primeiro por prédio, depois por nome da categoria
+      if (a.building_name && b.building_name) {
+        const buildingCompare = a.building_name.localeCompare(b.building_name);
+        if (buildingCompare !== 0) return buildingCompare;
+      } else if (a.building_name && !b.building_name) return -1;
+      else if (!a.building_name && b.building_name) return 1;
+      return a.name.localeCompare(b.name);
+    });
   }, [rooms]);
+
+  // Agrupar categorias por prédio
+  const categoriesByBuilding = useMemo(() => {
+    const grouped = new Map<string | null, typeof categories>();
+    
+    categories.forEach((category) => {
+      const buildingKey = category.building_name || null;
+      if (!grouped.has(buildingKey)) {
+        grouped.set(buildingKey, []);
+      }
+      grouped.get(buildingKey)!.push(category);
+    });
+    
+    return grouped;
+  }, [categories]);
+
+  // Expandir todos os prédios por padrão quando forem carregados (apenas uma vez)
+  useEffect(() => {
+    const buildingsWithCategories = Array.from(categoriesByBuilding.keys()).filter(key => key !== null);
+    if (buildingsWithCategories.length > 0 && !buildingsInitializedRef.current) {
+      setExpandedBuildings(new Set(buildingsWithCategories as string[]));
+      buildingsInitializedRef.current = true;
+    }
+  }, [categoriesByBuilding.size]);
+
+  // Função para toggle do prédio
+  const toggleBuilding = (buildingName: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    setExpandedBuildings((prev) => {
+      const next = new Set(prev);
+      if (next.has(buildingName)) {
+        next.delete(buildingName);
+      } else {
+        next.add(buildingName);
+      }
+      return next;
+    });
+  };
 
   // Filtrar quartos
   const filteredRooms = useMemo(() => {
@@ -729,33 +780,38 @@ const OccupancyMap = () => {
         </Card>
       ) : (
             <div className="space-y-4">
-              {categories.map((category) => {
-                const categoryRooms = filteredRoomsByCategory[category.id] || [];
-                if (categoryRooms.length === 0 && selectedCategory !== "all") return null;
+              {(() => {
+                const result: JSX.Element[] = [];
                 
-                const isExpanded = expandedCategories.has(category.id);
-                
-                return (
-                  <Card key={category.id} className="overflow-hidden">
-                    {/* Cabeçalho da Categoria */}
-                    <div
-                      className="flex items-center justify-between p-3 sm:p-4 bg-slate-50 border-b cursor-pointer hover:bg-slate-100 transition-colors"
-                      onClick={() => toggleCategory(category.id)}
-                    >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        {isExpanded ? (
-                          <ChevronDown className="h-4 w-4 text-slate-600 flex-shrink-0" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4 text-slate-600 flex-shrink-0" />
-                        )}
-                        <h3 className="font-semibold text-sm sm:text-base text-slate-900 truncate">
-                          {category.name}
-                        </h3>
-                        <Badge variant="secondary" className="ml-2 flex-shrink-0">
-                          {categoryRooms.length}
-                        </Badge>
+                // Renderizar categorias sem prédio primeiro
+                const categoriesWithoutBuilding = categoriesByBuilding.get(null) || [];
+                categoriesWithoutBuilding.forEach((category) => {
+                  const categoryRooms = filteredRoomsByCategory[category.id] || [];
+                  if (categoryRooms.length === 0 && selectedCategory !== "all") return;
+                  
+                  const isExpanded = expandedCategories.has(category.id);
+                  
+                  result.push(
+                    <Card key={category.id} className="overflow-hidden">
+                      {/* Cabeçalho da Categoria */}
+                      <div
+                        className="flex items-center justify-between p-3 sm:p-4 bg-slate-50 border-b cursor-pointer hover:bg-slate-100 transition-colors"
+                        onClick={() => toggleCategory(category.id)}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          {isExpanded ? (
+                            <ChevronDown className="h-4 w-4 text-slate-600 flex-shrink-0" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 text-slate-600 flex-shrink-0" />
+                          )}
+                          <h3 className="font-semibold text-sm sm:text-base text-slate-900 truncate">
+                            {category.name}
+                          </h3>
+                          <Badge variant="secondary" className="ml-2 flex-shrink-0">
+                            {categoryRooms.length}
+                          </Badge>
+                        </div>
                       </div>
-                    </div>
 
                     {/* Quartos da Categoria - Visualização em Tabela Minimalista */}
                     {isExpanded && (
@@ -1051,10 +1107,358 @@ const OccupancyMap = () => {
                 </div>
                     )}
               </Card>
-            );
-          })}
-        </div>
-      )}
+                  );
+                });
+                
+                // Renderizar prédios com suas categorias
+                Array.from(categoriesByBuilding.entries())
+                  .filter(([buildingKey]) => buildingKey !== null)
+                  .forEach(([buildingKey, buildingCategories]) => {
+                    const buildingName = buildingKey as string;
+                    const isBuildingExpanded = expandedBuildings.has(buildingName);
+                    
+                    // Contar total de quartos no prédio
+                    const totalRoomsInBuilding = buildingCategories.reduce((sum, cat) => {
+                      return sum + (filteredRoomsByCategory[cat.id]?.length || 0);
+                    }, 0);
+                    
+                    result.push(
+                      <div key={`building-${buildingName}`} className="space-y-2">
+                        {/* Cabeçalho do Prédio */}
+                        <Card className="overflow-hidden">
+                          <div
+                            className="flex items-center justify-between p-4 sm:p-5 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 transition-all shadow-md cursor-pointer"
+                            onClick={(e) => toggleBuilding(buildingName, e)}
+                          >
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              {isBuildingExpanded ? (
+                                <ChevronDown className="h-5 w-5 text-white flex-shrink-0" />
+                              ) : (
+                                <ChevronRight className="h-5 w-5 text-white flex-shrink-0" />
+                              )}
+                              <h2 className="font-bold text-base sm:text-lg text-white uppercase tracking-wide truncate">
+                                {buildingName}
+                              </h2>
+                              <Badge variant="secondary" className="ml-2 flex-shrink-0 bg-white/20 text-white border-white/30">
+                                {totalRoomsInBuilding} {totalRoomsInBuilding === 1 ? 'quarto' : 'quartos'}
+                              </Badge>
+                            </div>
+                          </div>
+                        </Card>
+                        
+                        {/* Categorias do Prédio */}
+                        {isBuildingExpanded && (
+                          <div className="space-y-3 ml-2 sm:ml-4">
+                            {buildingCategories.map((category) => {
+                              const categoryRooms = filteredRoomsByCategory[category.id] || [];
+                              if (categoryRooms.length === 0 && selectedCategory !== "all") return null;
+                              
+                              const isExpanded = expandedCategories.has(category.id);
+                              
+                              return (
+                                <Card key={category.id} className="overflow-hidden">
+                                  {/* Cabeçalho da Categoria */}
+                                  <div
+                                    className="flex items-center justify-between p-3 sm:p-4 bg-slate-50 border-b cursor-pointer hover:bg-slate-100 transition-colors"
+                                    onClick={() => toggleCategory(category.id)}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                                      {isExpanded ? (
+                                        <ChevronDown className="h-4 w-4 text-slate-600 flex-shrink-0" />
+                                      ) : (
+                                        <ChevronRight className="h-4 w-4 text-slate-600 flex-shrink-0" />
+                                      )}
+                                      <h3 className="font-semibold text-sm sm:text-base text-slate-900 truncate">
+                                        {category.name}
+                                      </h3>
+                                      <Badge variant="secondary" className="ml-2 flex-shrink-0">
+                                        {categoryRooms.length}
+                                      </Badge>
+                                    </div>
+                                  </div>
+
+                                  {/* Quartos da Categoria - Reutilizar o mesmo código de renderização */}
+                                  {isExpanded && (
+                                    <div className="overflow-x-auto -mx-1 sm:mx-0">
+                                      {categoryRooms.length === 0 ? (
+                                        <p className="text-xs sm:text-sm text-muted-foreground text-center py-4">
+                                          Nenhum quarto encontrado
+                                        </p>
+                                      ) : (
+                                        <div className="min-w-[800px] sm:min-w-full">
+                                          {/* Cabeçalho da Tabela */}
+                                          <div className="grid grid-cols-12 gap-1 sm:gap-2 px-2 sm:px-3 py-2 bg-slate-50 border-b-2 border-slate-300 text-[10px] sm:text-[11px] font-bold text-slate-800 uppercase tracking-wide">
+                                            <div className="col-span-2">Unidade</div>
+                                            <div className="col-span-4">Clientes</div>
+                                            <div className="col-span-1 text-center">
+                                              <div className="bg-slate-700 text-white px-1 sm:px-2 py-0.5 sm:py-1 rounded text-[9px] sm:text-[10px]">Checkout</div>
+                                            </div>
+                                            <div className="col-span-1 text-center">
+                                              <div className="bg-pink-500 text-white px-1 sm:px-2 py-0.5 sm:py-1 rounded text-[9px] sm:text-[10px]">Checkin</div>
+                                            </div>
+                                            <div className="col-span-2">Status do Quarto</div>
+                                            <div className="col-span-1 text-center">NP</div>
+                                            <div className="col-span-1 text-center">Ações</div>
+                                          </div>
+                                          
+                                          {/* Linhas dos Quartos - Reutilizar o mesmo código */}
+                                          <div className="divide-y divide-slate-200">
+                                            {categoryRooms.map((room) => {
+                                              const isDirtyAvailable = room.status === "available" && room.is_dirty;
+                                              const config = isDirtyAvailable ? statusConfig["dirty"] : statusConfig[room.status];
+                                              const Icon = config.icon;
+                                              
+                                              const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
+                                              const checkoutOccurred = 
+                                                (room.checkout_date === selectedDateStr && room.reservation_status === "checkedout") ||
+                                                (room.previous_checkout_date === selectedDateStr);
+                                              
+                                              const checkinOccurred = 
+                                                (room.next_checkin_date === selectedDateStr && 
+                                                 room.next_guest_name && 
+                                                 room.next_reservation_code) ||
+                                                (room.checkin_date === selectedDateStr && 
+                                                 room.reservation_status === "checkedin");
+                                              
+                                              let roomStatusText = isDirtyAvailable ? "Disponível (Sujo)" : config.label;
+                                              let statusDisplayText = "";
+                                              
+                                              if (room.nights_remaining !== undefined && room.nights_remaining > 0) {
+                                                statusDisplayText = `${room.nights_remaining}º dia`;
+                                              } else if (room.nights_remaining === 0) {
+                                                statusDisplayText = "Último dia";
+                                              } else if (room.status === "available") {
+                                                statusDisplayText = isDirtyAvailable ? "Aguardando Limpeza" : "Disponível";
+                                              } else if (room.status === "dirty" || room.status === "dirty_priority") {
+                                                statusDisplayText = "Aguardando Limpeza";
+                                              } else if (room.status === "maintenance") {
+                                                statusDisplayText = "Em Manutenção";
+                                              } else if (room.status === "blocked") {
+                                                statusDisplayText = "Bloqueado";
+                                              } else if (room.status === "reserved") {
+                                                statusDisplayText = "Reservado";
+                                              } else if (room.status === "occupied") {
+                                                statusDisplayText = "Ocupado";
+                                              }
+                                              
+                                              return (
+                                                <div
+                                                  key={room.id}
+                                                  className="grid grid-cols-12 gap-1 sm:gap-2 px-2 sm:px-3 py-2 sm:py-2.5 hover:bg-slate-50/50 transition-colors cursor-pointer border-b border-slate-100"
+                                                  onClick={() => handleRoomClick(room)}
+                                                >
+                                                  <div className="col-span-2 flex items-center gap-1 sm:gap-1.5 min-w-0">
+                                                    <div className="flex flex-col gap-0.5 min-w-0">
+                                                      <div className="flex items-center gap-1 min-w-0">
+                                                        <span className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                                                          {room.name || room.room_number}
+                                                        </span>
+                                                        {(room.previous_guest_name || room.next_guest_name) && (
+                                                          <AlertCircle className="h-3 w-3 text-orange-500 flex-shrink-0" />
+                                                        )}
+                                                      </div>
+                                                      <span className="text-[9px] sm:text-[10px] text-slate-500 uppercase truncate">
+                                                        {room.category_name}
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                  
+                                                  <div className="col-span-4 flex flex-col gap-0.5 sm:gap-1 py-0.5 min-w-0">
+                                                    <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap min-h-[16px] sm:min-h-[18px]">
+                                                      {room.previous_guest_name ? (
+                                                        <>
+                                                          <div className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0 mt-0.5" />
+                                                          <span className="text-[10px] sm:text-xs text-slate-800 truncate max-w-[120px] sm:max-w-[150px]">
+                                                            {room.previous_guest_name}
+                                                          </span>
+                                                          {room.previous_reservation_code && (
+                                                            <span className="text-[8px] sm:text-[9px] px-0.5 sm:px-1 py-0.5 bg-slate-100 rounded text-slate-600 flex-shrink-0">
+                                                              #{room.previous_reservation_code}
+                                                            </span>
+                                                          )}
+                                                          <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-slate-700 text-white rounded flex-shrink-0 font-medium">
+                                                            CHECKOUT
+                                                          </span>
+                                                          {room.previous_checkout_date && (
+                                                            <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
+                                                              - às {room.previous_checkout_time ? room.previous_checkout_time.substring(0, 5) : "12:00"}
+                                                            </span>
+                                                          )}
+                                                        </>
+                                                      ) : (
+                                                        <span className="text-[10px] sm:text-xs text-slate-400 italic">Sem hóspede anterior</span>
+                                                      )}
+                                                    </div>
+                                                    
+                                                    <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap min-h-[16px] sm:min-h-[18px]">
+                                                      {room.guest_name ? (
+                                                        <>
+                                                          <div className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0 mt-0.5" />
+                                                          <span className="text-[10px] sm:text-xs text-slate-800 truncate max-w-[120px] sm:max-w-[150px] font-semibold">
+                                                            {room.guest_name}
+                                                          </span>
+                                                          {room.reservation_code && (
+                                                            <span className="text-[8px] sm:text-[9px] px-0.5 sm:px-1 py-0.5 bg-slate-100 rounded text-slate-600 flex-shrink-0">
+                                                              #{room.reservation_code}
+                                                            </span>
+                                                          )}
+                                                          {(() => {
+                                                            const reservationStatus = room.reservation_status;
+                                                            const hasCheckedInStatus = reservationStatus === "checkedin";
+                                                            
+                                                            let hasCheckedInByDate = false;
+                                                            if (room.checkin_date) {
+                                                              const checkinDate = parseISO(room.checkin_date);
+                                                              checkinDate.setHours(0, 0, 0, 0);
+                                                              const selectedDateNormalized = startOfDay(selectedDate);
+                                                              hasCheckedInByDate = checkinDate <= selectedDateNormalized;
+                                                            }
+                                                            
+                                                            const isFutureReservation = room.checkin_date && 
+                                                                                      parseISO(room.checkin_date) > startOfDay(selectedDate);
+                                                            
+                                                            const shouldShowCheckin = isFutureReservation || (!hasCheckedInStatus && !hasCheckedInByDate);
+                                                            const shouldShowCheckout = hasCheckedInStatus || (hasCheckedInByDate && !isFutureReservation);
+                                                            
+                                                            if (shouldShowCheckin && room.checkin_date) {
+                                                              return (
+                                                                <>
+                                                                  <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-pink-500 text-white rounded flex-shrink-0 font-medium">
+                                                                    CHECKIN
+                                                                  </span>
+                                                                  <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
+                                                                    - às {room.checkin_time?.substring(0, 5) || "15:00"}
+                                                                  </span>
+                                                                </>
+                                                              );
+                                                            } else if (shouldShowCheckout && room.checkout_date) {
+                                                              return (
+                                                                <>
+                                                                  <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-slate-700 text-white rounded flex-shrink-0 font-medium">
+                                                                    CHECKOUT
+                                                                  </span>
+                                                                  <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
+                                                                    - às {room.checkout_time?.substring(0, 5) || "12:00"}
+                                                                  </span>
+                                                                </>
+                                                              );
+                                                            }
+                                                            return null;
+                                                          })()}
+                                                        </>
+                                                      ) : (
+                                                        <span className="text-[10px] sm:text-xs text-slate-400 italic">Sem hóspede atual</span>
+                                                      )}
+                                                    </div>
+                                                    
+                                                    {room.next_guest_name && (
+                                                      <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap min-h-[16px] sm:min-h-[18px]">
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0 mt-0.5" />
+                                                        <span className="text-[10px] sm:text-xs text-slate-800 truncate max-w-[120px] sm:max-w-[150px]">
+                                                          {room.next_guest_name}
+                                                        </span>
+                                                        {room.next_reservation_code && (
+                                                          <span className="text-[8px] sm:text-[9px] px-0.5 sm:px-1 py-0.5 bg-slate-100 rounded text-slate-600 flex-shrink-0">
+                                                            #{room.next_reservation_code}
+                                                          </span>
+                                                        )}
+                                                        <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-pink-500 text-white rounded flex-shrink-0 font-medium">
+                                                          CHECKIN
+                                                        </span>
+                                                        {room.next_checkin_date && (
+                                                          <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
+                                                            - às {room.next_checkin_time?.substring(0, 5) || "15:00"}
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                  
+                                                  <div className="col-span-1 flex items-center justify-center">
+                                                    <div className="flex flex-col items-center gap-0.5">
+                                                      {checkoutOccurred ? (
+                                                        <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-green-500" />
+                                                      ) : (
+                                                        <>
+                                                          <XCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-red-500" />
+                                                          <span className="text-[8px] sm:text-[9px] text-slate-600 leading-tight hidden sm:block">Não ocorreu</span>
+                                                        </>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                  
+                                                  <div className="col-span-1 flex items-center justify-center">
+                                                    <div className="flex flex-col items-center gap-0.5">
+                                                      {checkinOccurred ? (
+                                                        <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-green-500" />
+                                                      ) : (
+                                                        <>
+                                                          {room.next_guest_name && (
+                                                            <AlertCircle className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-blue-500" />
+                                                          )}
+                                                          <XCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-red-500" />
+                                                          <span className="text-[8px] sm:text-[9px] text-slate-600 leading-tight hidden sm:block">Não ocorreu</span>
+                                                        </>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                  
+                                                  <div className="col-span-2 min-w-0">
+                                                    <div className={cn(
+                                                      "px-1.5 sm:px-2 py-1 sm:py-1.5 rounded text-[10px] sm:text-xs border-2",
+                                                      config.bgColor,
+                                                      config.textColor
+                                                    )}>
+                                                      <div className={cn("font-semibold leading-tight truncate", config.textColor)}>
+                                                        {statusDisplayText}
+                                                      </div>
+                                                      <div className={cn("leading-tight mt-0.5 opacity-90 truncate hidden sm:block", config.textColor)}>
+                                                        {roomStatusText}
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                  
+                                                  <div className="col-span-1 flex items-center justify-center">
+                                                    <div className="bg-slate-100 px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded text-[10px] sm:text-xs font-semibold text-slate-700 border border-slate-200">
+                                                      {room.adults || 0}
+                                                    </div>
+                                                  </div>
+                                                  
+                                                  <div className="col-span-1 flex items-center justify-center">
+                                                    <Button
+                                                      variant="ghost"
+                                                      size="sm"
+                                                      className="h-6 w-6 sm:h-7 sm:w-7 p-0 hover:bg-slate-200"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleRoomClick(room);
+                                                      }}
+                                                      title="Ver detalhes"
+                                                    >
+                                                      <Eye className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-slate-600" />
+                                                    </Button>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </Card>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                
+                return result;
+              })()}
+            </div>
+          )}
         </div>
 
         {/* Resumo - Abaixo das Categorias */}
