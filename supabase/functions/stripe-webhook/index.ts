@@ -823,6 +823,18 @@ async function sendPaymentConfirmedEmail(
       hotelSettings = settings;
     }
 
+    // Buscar configurações do site para obter logo_url
+    let siteSettings: any = null;
+    try {
+      const { data: settings } = await supabaseClient
+        .from("site_settings")
+        .select("logo_url")
+        .maybeSingle();
+      siteSettings = settings;
+    } catch (error) {
+      console.warn("⚠️ Erro ao buscar site_settings:", error);
+    }
+
     // Buscar configurações do estabelecimento para obter URL customizada (se existir campo custom_domain)
     let customDomain: string | null = null;
     try {
@@ -977,6 +989,84 @@ async function sendPaymentConfirmedEmail(
       console.warn("⚠️ Erro ao buscar web_checkin:", error);
     }
 
+    // Processar logo_url e hotel_logo
+    let logoUrl = siteSettings?.logo_url || hotelSettings?.logo || null;
+    let hotelLogo = hotelSettings?.logo || null;
+
+    // Converter logo_url para URL pública do Supabase Storage se necessário
+    if (logoUrl && !logoUrl.startsWith('http://') && !logoUrl.startsWith('https://')) {
+      try {
+        const possibleBuckets = ['hotel-assets', 'uploads', 'hotel-logos'];
+        
+        for (const bucket of possibleBuckets) {
+          try {
+            let filePath = logoUrl;
+            
+            // Se for hotel-assets e o caminho não começar com "hotel/", adicionar
+            if (bucket === 'hotel-assets' && !filePath.startsWith('hotel/') && !filePath.includes('/')) {
+              filePath = `hotel/${filePath}`;
+            }
+            
+            // Se o caminho contém "/storage/v1/object/public/", extrair apenas o caminho do arquivo
+            if (filePath.includes('/storage/v1/object/public/')) {
+              const match = filePath.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
+              if (match && match[1]) {
+                filePath = match[1];
+              }
+            }
+            
+            const { data } = supabaseClient.storage.from(bucket).getPublicUrl(filePath);
+            if (data?.publicUrl && (data.publicUrl.startsWith('http://') || data.publicUrl.startsWith('https://'))) {
+              logoUrl = data.publicUrl;
+              console.log(`✅ Logo convertida para URL pública do bucket "${bucket}"`);
+              break;
+            }
+          } catch (error) {
+            continue;
+          }
+        }
+      } catch (error) {
+        console.warn("⚠️ Erro ao converter logo_url:", error);
+      }
+    }
+
+    // Converter hotel_logo para URL pública do Supabase Storage se necessário
+    if (hotelLogo && !hotelLogo.startsWith('http://') && !hotelLogo.startsWith('https://')) {
+      try {
+        const possibleBuckets = ['hotel-assets', 'uploads', 'hotel-logos'];
+        
+        for (const bucket of possibleBuckets) {
+          try {
+            let filePath = hotelLogo;
+            
+            // Se for hotel-assets e o caminho não começar com "hotel/", adicionar
+            if (bucket === 'hotel-assets' && !filePath.startsWith('hotel/') && !filePath.includes('/')) {
+              filePath = `hotel/${filePath}`;
+            }
+            
+            // Se o caminho contém "/storage/v1/object/public/", extrair apenas o caminho do arquivo
+            if (filePath.includes('/storage/v1/object/public/')) {
+              const match = filePath.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
+              if (match && match[1]) {
+                filePath = match[1];
+              }
+            }
+            
+            const { data } = supabaseClient.storage.from(bucket).getPublicUrl(filePath);
+            if (data?.publicUrl && (data.publicUrl.startsWith('http://') || data.publicUrl.startsWith('https://'))) {
+              hotelLogo = data.publicUrl;
+              console.log(`✅ Hotel logo convertida para URL pública do bucket "${bucket}"`);
+              break;
+            }
+          } catch (error) {
+            continue;
+          }
+        }
+      } catch (error) {
+        console.warn("⚠️ Erro ao converter hotel_logo:", error);
+      }
+    }
+
     const variables: Record<string, any> = {
       guest_name: recipientName || "Hóspede",
       reservation_code: reservationAny.reservation_code || "",
@@ -1009,6 +1099,8 @@ async function sendPaymentConfirmedEmail(
       hotel_policies: hotelSettings?.policies || "",
       policies_link: policiesLink,
       web_checkin_link: webCheckinLink,
+      logo_url: logoUrl || "",
+      hotel_logo: hotelLogo || "",
     };
 
     // Processar template com suporte a condicionais {{#if}}
@@ -1045,6 +1137,9 @@ async function sendPaymentConfirmedEmail(
             return '';
           }
         });
+        
+        // Remover blocos {{/if}} soltos que possam ter sobrado (caso de condicionais aninhadas mal processadas)
+        processed = processed.replace(/\{\{\/if\}\}/g, '');
       }
       return processed;
     };

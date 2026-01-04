@@ -698,15 +698,35 @@ export const ReservationCalendarMap = ({
         return { startIndex: -1, duration: 0, isVisible: false };
       }
       
+      // IMPORTANTE: Não mostrar reservas no dia de checkout
+      // Se o checkout está em um dia visível, a reserva deve terminar ANTES desse dia
+      // Isso evita confusão: uma reserva com checkout em 04/01 não deve aparecer no dia 04/01
+      const firstVisibleDate = startOfDay(visibleDates[0]);
+      
+      // Se o checkout está antes ou no primeiro dia visível, não mostrar a reserva
+      if (checkoutStartOfDay <= firstVisibleDate) {
+        return { startIndex: -1, duration: 0, isVisible: false };
+      }
+      
+      // Verificar se o checkout está em algum dia visível
+      const checkoutIsInVisibleRange = visibleDates.some((visibleDate) => {
+        const visibleDateStr = format(startOfDay(visibleDate), "yyyy-MM-dd");
+        return visibleDateStr === checkoutStr;
+      });
+      
       // Calcular a duração visível (do início visível até o fim visível)
       // O checkout é exclusivo, então uma reserva de check-in 01-01 até checkout 01-02 ocupa apenas o dia 01-01
       let visibleEndDate: Date;
-      if (checkoutStartOfDay <= lastVisibleDate) {
-        // Checkout está dentro do período visível, usar checkout como fim
+      if (checkoutIsInVisibleRange) {
+        // Checkout está em um dia visível, a reserva deve terminar ANTES do checkout
+        // Usar o checkout como fim (já garante que não inclui o dia de checkout)
+        visibleEndDate = checkoutStartOfDay;
+      } else if (checkoutStartOfDay <= lastVisibleDate) {
+        // Checkout está dentro do período visível mas não é um dia visível específico
+        // (caso raro, mas manter lógica original)
         visibleEndDate = checkoutStartOfDay;
       } else {
         // Checkout está depois do período visível, usar o último dia visível + 1
-        // Mas precisamos garantir que não seja menor que o início atual
         visibleEndDate = addDays(lastVisibleDate, 1);
       }
       
