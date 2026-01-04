@@ -6,6 +6,7 @@ import { useEstablishment } from "@/contexts/EstablishmentContext";
 import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { logActivity, createReservationUpdateDescription } from "@/lib/activityLogger";
 import { useEffect } from "react";
+import { format } from "date-fns";
 
 type ReservationInsert = TablesInsert<"reservations">;
 type ReservationUpdate = TablesUpdate<"reservations">;
@@ -949,6 +950,69 @@ export const useReservations = () => {
       return data;
     },
         onSuccess: async (updatedReservation) => {
+          // Criar notificação de limpeza imediatamente após check-out
+          const reservationAny = updatedReservation as any;
+          if (reservationAny.room_id && reservationAny.establishment_id) {
+            try {
+              // Buscar informações do quarto e do hóspede
+              const room = reservationAny.rooms;
+              const guestName = reservationAny.guest?.full_name || 
+                              reservationAny.financial_responsible?.full_name || 
+                              reservationAny.guest_name || 
+                              "Hóspede";
+
+              // Verificar se notificações de limpeza estão habilitadas
+              const { data: hotelSettings } = await (supabase as any)
+                .from("hotel_settings")
+                .select("enable_cleaning_notifications")
+                .eq("establishment_id", reservationAny.establishment_id)
+                .single();
+
+              const isCleaningNotificationsEnabled = hotelSettings?.enable_cleaning_notifications !== false;
+
+              if (isCleaningNotificationsEnabled) {
+                // Verificar se já existe notificação recente (últimas 2 horas) para evitar duplicatas
+                const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+                const { data: recentNotifications } = await (supabase as any)
+                  .from("notifications")
+                  .select("id, metadata")
+                  .eq("establishment_id", reservationAny.establishment_id)
+                  .eq("type", "cleaning_required")
+                  .eq("metadata->>room_id", reservationAny.room_id)
+                  .gte("created_at", twoHoursAgo.toISOString())
+                  .limit(1);
+
+                // Só criar notificação se não existir uma recente
+                if (!recentNotifications || recentNotifications.length === 0) {
+                  await (supabase as any).rpc("create_notification_for_establishment", {
+                    p_establishment_id: reservationAny.establishment_id,
+                    p_type: "cleaning_required",
+                    p_title: "Quarto Precisa de Limpeza",
+                    p_message: `O quarto ${room?.room_number || "N/A"} precisa de limpeza após check-out da reserva ${reservationAny.reservation_code || ""} (${guestName})`,
+                    p_priority: "high",
+                    p_metadata: {
+                      room_id: reservationAny.room_id,
+                      room_number: room?.room_number || "N/A",
+                      reservation_id: reservationAny.id,
+                      reservation_code: reservationAny.reservation_code || "",
+                      guest_name: guestName,
+                      checkout_date: reservationAny.checkout_date || format(new Date(), "yyyy-MM-dd"),
+                      checkout_time: reservationAny.checkout_time || format(new Date(), "HH:mm"),
+                      checkin_date: reservationAny.checkin_date,
+                    },
+                  });
+
+                  console.log("[checkOut] Notificação de limpeza criada imediatamente após check-out");
+                  
+                  // Invalidar queries de notificações para atualizar a UI
+                  queryClient.invalidateQueries({ queryKey: ["notifications"] });
+                }
+              }
+            } catch (notificationError) {
+              // Não bloquear o check-out se houver erro ao criar notificação
+              console.error("Erro ao criar notificação de limpeza após check-out:", notificationError);
+            }
+          }
           // Invalidar e refetch todas as queries relacionadas para atualizar o mapa em tempo real
           queryClient.invalidateQueries({ queryKey: ["reservations"] });
           queryClient.invalidateQueries({ queryKey: ["rooms"] });

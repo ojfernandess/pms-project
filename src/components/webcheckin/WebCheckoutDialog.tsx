@@ -42,6 +42,13 @@ export function WebCheckoutDialog({
   const handleRequestCheckout = async () => {
     setLoading(true);
     try {
+      // Buscar dados completos da reserva antes de atualizar para obter room_id
+      const { data: currentReservation } = await supabase
+        .from("reservations")
+        .select("room_id, establishment_id")
+        .eq("id", reservation.id)
+        .single();
+
       // Atualizar status da reserva para checkedout
       const { error: updateError } = await supabase
         .from("reservations")
@@ -52,6 +59,14 @@ export function WebCheckoutDialog({
         .eq("id", reservation.id);
 
       if (updateError) throw updateError;
+
+      // Atualizar status do quarto para cleaning
+      if (currentReservation?.room_id) {
+        await supabase
+          .from("rooms")
+          .update({ status: "cleaning" })
+          .eq("id", currentReservation.room_id);
+      }
 
       // Atualizar histórico de estada
       const { error: historyError } = await supabase
@@ -92,49 +107,99 @@ export function WebCheckoutDialog({
       // Invalidar query do mapa de ocupação para atualizar informações dos hóspedes (próximas entradas)
       queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       
-      // Criar notificação no sistema informando o check-out do hóspede
-      try {
-        // Buscar dados completos da reserva para obter nome do hóspede
-        const { data: fullReservation } = await supabase
-          .from("reservations")
-          .select(`
-            *,
-            financial_responsible:clients!client_id(full_name, email),
-            guest:clients!guest_id(full_name, email),
-            rooms(room_number, name),
-            establishment:establishments(name)
-          `)
-          .eq("id", reservation.id)
-          .single();
+      // Criar notificação de limpeza imediatamente após check-out
+      if (currentReservation?.room_id && currentReservation?.establishment_id) {
+        try {
+          // Buscar dados completos da reserva para obter informações do hóspede e quarto
+          const { data: fullReservation } = await supabase
+            .from("reservations")
+            .select(`
+              *,
+              financial_responsible:clients!client_id(full_name, email),
+              guest:clients!guest_id(full_name, email),
+              rooms(room_number, name),
+              establishment:establishments(name)
+            `)
+            .eq("id", reservation.id)
+            .single();
 
-        if (fullReservation && fullReservation.establishment_id) {
-          const guestName = fullReservation.guest?.full_name || 
-                           fullReservation.financial_responsible?.full_name || 
-                           "Hóspede";
-          const roomNumber = fullReservation.rooms?.room_number || 
-                            fullReservation.rooms?.name || 
-                            "N/A";
-          const establishmentName = fullReservation.establishment?.name || 
-                                   "Estabelecimento";
+          if (fullReservation) {
+            const guestName = fullReservation.guest?.full_name || 
+                             fullReservation.financial_responsible?.full_name || 
+                             "Hóspede";
+            const roomNumber = fullReservation.rooms?.room_number || 
+                              fullReservation.rooms?.name || 
+                              "N/A";
 
-          await supabase.rpc("create_notification_for_establishment", {
-            p_establishment_id: fullReservation.establishment_id,
-            p_type: "checkout_today",
-            p_title: "Check-out Realizado",
-            p_message: `${guestName} realizou check-out da reserva ${reservation.reservation_code || ''} (Quarto: ${roomNumber})`,
-            p_priority: "medium",
-            p_metadata: {
-              reservation_id: reservation.id,
-              reservation_code: reservation.reservation_code,
-              guest_name: guestName,
-              room_number: roomNumber,
-              checkout_via: "web_checkin",
-            },
-          });
+            // Verificar se notificações de limpeza estão habilitadas
+            const { data: hotelSettings } = await (supabase as any)
+              .from("hotel_settings")
+              .select("enable_cleaning_notifications")
+              .eq("establishment_id", currentReservation.establishment_id)
+              .single();
+
+            const isCleaningNotificationsEnabled = hotelSettings?.enable_cleaning_notifications !== false;
+
+            if (isCleaningNotificationsEnabled) {
+              // Verificar se já existe notificação recente (últimas 2 horas) para evitar duplicatas
+              const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+              const { data: recentNotifications } = await (supabase as any)
+                .from("notifications")
+                .select("id, metadata")
+                .eq("establishment_id", currentReservation.establishment_id)
+                .eq("type", "cleaning_required")
+                .eq("metadata->>room_id", currentReservation.room_id)
+                .gte("created_at", twoHoursAgo.toISOString())
+                .limit(1);
+
+              // Só criar notificação se não existir uma recente
+              if (!recentNotifications || recentNotifications.length === 0) {
+                await (supabase as any).rpc("create_notification_for_establishment", {
+                  p_establishment_id: currentReservation.establishment_id,
+                  p_type: "cleaning_required",
+                  p_title: "Quarto Precisa de Limpeza",
+                  p_message: `O quarto ${roomNumber} precisa de limpeza após check-out da reserva ${reservation.reservation_code || ""} (${guestName})`,
+                  p_priority: "high",
+                  p_metadata: {
+                    room_id: currentReservation.room_id,
+                    room_number: roomNumber,
+                    reservation_id: reservation.id,
+                    reservation_code: reservation.reservation_code || "",
+                    guest_name: guestName,
+                    checkout_date: reservation.checkout_date || format(new Date(), "yyyy-MM-dd"),
+                    checkout_time: reservation.checkout_time || format(new Date(), "HH:mm"),
+                    checkin_date: reservation.checkin_date,
+                    checkout_via: "web_checkin",
+                  },
+                });
+
+                console.log("[WebCheckoutDialog] Notificação de limpeza criada imediatamente após check-out");
+                
+                // Invalidar queries de notificações para atualizar a UI
+                queryClient.invalidateQueries({ queryKey: ["notifications"] });
+              }
+            }
+
+            // Criar notificação informando o check-out do hóspede
+            await supabase.rpc("create_notification_for_establishment", {
+              p_establishment_id: currentReservation.establishment_id,
+              p_type: "checkout_today",
+              p_title: "Check-out Realizado",
+              p_message: `${guestName} realizou check-out da reserva ${reservation.reservation_code || ''} (Quarto: ${roomNumber})`,
+              p_priority: "medium",
+              p_metadata: {
+                reservation_id: reservation.id,
+                reservation_code: reservation.reservation_code,
+                guest_name: guestName,
+                room_number: roomNumber,
+                checkout_via: "web_checkin",
+              },
+            });
+          }
+        } catch (error) {
+          console.error("Erro ao criar notificações após check-out:", error);
+          // Não bloquear o checkout se a notificação falhar
         }
-      } catch (error) {
-        console.error("Erro ao criar notificação de check-out:", error);
-        // Não bloquear o checkout se a notificação falhar
       }
       
       // Disparar evento genérico de check-out concluído
