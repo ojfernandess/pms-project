@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, addDays, eachDayOfInterval, parseISO, startOfDay, isSameDay, differenceInDays, isAfter, isBefore } from "date-fns";
+import { format, addDays, subDays, eachDayOfInterval, parseISO, startOfDay, isSameDay, differenceInDays, isAfter, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -258,7 +258,8 @@ export const ReservationCalendarMap = ({
 
   // Calcular datas visíveis (normalizadas para início do dia para evitar problemas de timezone)
   const visibleDates = useMemo(() => {
-    const start = startOfDay(startDate);
+    // Incluir o dia anterior para mostrar reservas que começaram no dia anterior
+    const start = startOfDay(subDays(startDate, 1));
     const end = startOfDay(addDays(startDate, viewDays - 1));
     return eachDayOfInterval({
       start,
@@ -701,10 +702,20 @@ export const ReservationCalendarMap = ({
       // IMPORTANTE: Não mostrar reservas no dia de checkout
       // Se o checkout está em um dia visível, a reserva deve terminar ANTES desse dia
       // Isso evita confusão: uma reserva com checkout em 04/01 não deve aparecer no dia 04/01
+      // EXCEÇÃO: Permitir mostrar reservas que começaram antes do período visível (dia anterior)
+      // e têm checkout no segundo dia visível (dia atual), para que o usuário veja a continuidade
       const firstVisibleDate = startOfDay(visibleDates[0]);
+      const secondVisibleDate = visibleDates.length > 1 ? startOfDay(visibleDates[1]) : null;
+      const checkinBeforeVisible = checkin < firstVisibleDate;
       
-      // Se o checkout está antes ou no primeiro dia visível, não mostrar a reserva
-      if (checkoutStartOfDay <= firstVisibleDate) {
+      // Se o checkout está antes do primeiro dia visível, não mostrar a reserva
+      if (checkoutStartOfDay < firstVisibleDate) {
+        return { startIndex: -1, duration: 0, isVisible: false };
+      }
+      
+      // Se o checkout está no primeiro dia visível (dia anterior) e a reserva não começou antes,
+      // não mostrar (evita mostrar reservas que já terminaram)
+      if (checkoutStartOfDay.getTime() === firstVisibleDate.getTime() && !checkinBeforeVisible) {
         return { startIndex: -1, duration: 0, isVisible: false };
       }
       
@@ -2306,9 +2317,11 @@ export const ReservationCalendarMap = ({
                 <span className="truncate">Categoria / Quarto</span>
               </div>
               <div className="flex-1 flex" style={{ display: 'grid', gridTemplateColumns: `repeat(${visibleDates.length}, 1fr)`, width: '100%', minWidth: 'fit-content' }}>
-                {visibleDates.map((date) => {
+                {visibleDates.map((date, index) => {
                   const isToday = isSameDay(date, new Date());
                   const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                  // Marcar o primeiro dia (dia anterior) com estilo diferenciado
+                  const isPreviousDay = index === 0;
                   
                   return (
                     <div 
@@ -2316,14 +2329,16 @@ export const ReservationCalendarMap = ({
                       className={cn(
                         "border-r border-slate-200 last:border-r-0 p-1 sm:p-1.5 text-center",
                         isToday && "bg-blue-100",
-                        isWeekend && !isToday && "bg-slate-50",
-                        !isToday && !isWeekend && "bg-slate-100"
+                        isPreviousDay && !isToday && "bg-amber-50/50",
+                        isWeekend && !isToday && !isPreviousDay && "bg-slate-50",
+                        !isToday && !isWeekend && !isPreviousDay && "bg-slate-100"
                       )}
                       style={{ 
                         minWidth: viewDays <= 14 ? '90px' : viewDays <= 30 ? '70px' : viewDays <= 60 ? '50px' : '40px',
                         fontSize: viewDays <= 30 ? '10px' : '9px',
                         width: '100%'
                       }}
+                      title={isPreviousDay ? "Dia anterior (para visualizar reservas em andamento)" : undefined}
                     >
                       <div className="font-bold text-[10px] sm:text-[11px]" style={{ fontSize: viewDays <= 30 ? '11px' : '10px' }}>
                         {viewDays <= 30 ? format(date, "EEE", { locale: ptBR }) : format(date, "EEEEEE", { locale: ptBR })}
