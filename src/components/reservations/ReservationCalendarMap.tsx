@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, addDays, subDays, eachDayOfInterval, parseISO, startOfDay, isSameDay, differenceInDays, isAfter, isBefore } from "date-fns";
+import { format, addDays, eachDayOfInterval, parseISO, startOfDay, isSameDay, differenceInDays, isAfter, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -257,15 +257,55 @@ export const ReservationCalendarMap = ({
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Calcular datas visíveis (normalizadas para início do dia para evitar problemas de timezone)
+  // Inclui o dia anterior ao startDate para mostrar reservas que começaram no dia anterior
   const visibleDates = useMemo(() => {
-    // Incluir o dia anterior para mostrar reservas que começaram no dia anterior
-    const start = startOfDay(subDays(startDate, 1));
+    const start = startOfDay(addDays(startDate, -1)); // Inclui o dia anterior
     const end = startOfDay(addDays(startDate, viewDays - 1));
     return eachDayOfInterval({
       start,
       end
     }).map(date => startOfDay(date)); // Garantir que todas as datas estejam normalizadas
   }, [startDate, viewDays]);
+
+  // Agrupar datas por mês/ano para o cabeçalho
+  const monthGroups = useMemo(() => {
+    const groups: Array<{ monthYear: string; startIndex: number; endIndex: number; month: string; year: string }> = [];
+    let currentMonthYear = "";
+    let groupStartIndex = 0;
+
+    visibleDates.forEach((date, index) => {
+      const monthYear = format(date, "yyyy-MM", { locale: ptBR });
+      const month = format(date, "MMMM", { locale: ptBR });
+      const year = format(date, "yyyy", { locale: ptBR });
+
+      if (monthYear !== currentMonthYear) {
+        if (currentMonthYear !== "") {
+          groups.push({
+            monthYear: currentMonthYear,
+            startIndex: groupStartIndex,
+            endIndex: index - 1,
+            month: format(visibleDates[groupStartIndex], "MMMM", { locale: ptBR }),
+            year: format(visibleDates[groupStartIndex], "yyyy", { locale: ptBR }),
+          });
+        }
+        currentMonthYear = monthYear;
+        groupStartIndex = index;
+      }
+    });
+
+    // Adicionar o último grupo
+    if (currentMonthYear !== "") {
+      groups.push({
+        monthYear: currentMonthYear,
+        startIndex: groupStartIndex,
+        endIndex: visibleDates.length - 1,
+        month: format(visibleDates[groupStartIndex], "MMMM", { locale: ptBR }),
+        year: format(visibleDates[groupStartIndex], "yyyy", { locale: ptBR }),
+      });
+    }
+
+    return groups;
+  }, [visibleDates]);
 
   // Buscar categorias e quartos
   const { data: categories = [], isLoading: categoriesLoading, error: categoriesError } = useQuery({
@@ -702,20 +742,10 @@ export const ReservationCalendarMap = ({
       // IMPORTANTE: Não mostrar reservas no dia de checkout
       // Se o checkout está em um dia visível, a reserva deve terminar ANTES desse dia
       // Isso evita confusão: uma reserva com checkout em 04/01 não deve aparecer no dia 04/01
-      // EXCEÇÃO: Permitir mostrar reservas que começaram antes do período visível (dia anterior)
-      // e têm checkout no segundo dia visível (dia atual), para que o usuário veja a continuidade
       const firstVisibleDate = startOfDay(visibleDates[0]);
-      const secondVisibleDate = visibleDates.length > 1 ? startOfDay(visibleDates[1]) : null;
-      const checkinBeforeVisible = checkin < firstVisibleDate;
       
-      // Se o checkout está antes do primeiro dia visível, não mostrar a reserva
-      if (checkoutStartOfDay < firstVisibleDate) {
-        return { startIndex: -1, duration: 0, isVisible: false };
-      }
-      
-      // Se o checkout está no primeiro dia visível (dia anterior) e a reserva não começou antes,
-      // não mostrar (evita mostrar reservas que já terminaram)
-      if (checkoutStartOfDay.getTime() === firstVisibleDate.getTime() && !checkinBeforeVisible) {
+      // Se o checkout está antes ou no primeiro dia visível, não mostrar a reserva
+      if (checkoutStartOfDay <= firstVisibleDate) {
         return { startIndex: -1, duration: 0, isVisible: false };
       }
       
@@ -2311,17 +2341,38 @@ export const ReservationCalendarMap = ({
         } as React.CSSProperties}>
           {/* Cabeçalho com datas - Estilo Hospedin */}
           <div className="bg-slate-100 border-b-2 border-slate-300">
+            {/* Linha 0: Mês e Ano */}
+            <div className="flex border-b border-slate-200 bg-slate-50/50">
+              <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 p-1.5 sm:p-2 border-r border-slate-300 bg-slate-200"></div>
+              <div className="flex-1 flex" style={{ display: 'grid', gridTemplateColumns: `repeat(${visibleDates.length}, 1fr)`, width: '100%', minWidth: 'fit-content' }}>
+                {monthGroups.map((group) => {
+                  const span = group.endIndex - group.startIndex + 1;
+                  return (
+                    <div
+                      key={group.monthYear}
+                      className="px-2 py-1.5 text-center border-r border-slate-200 last:border-r-0"
+                      style={{
+                        gridColumn: `${group.startIndex + 1} / span ${span}`,
+                      }}
+                    >
+                      <div className="text-slate-600 font-medium text-[10px] sm:text-[11px] uppercase tracking-wider">
+                        {group.month} {group.year}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
             {/* Linha 1: Data e Dia */}
             <div className="flex border-b border-slate-200">
               <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 p-1.5 sm:p-2 border-r border-slate-300 bg-slate-200 font-semibold text-[10px] sm:text-xs flex items-center">
                 <span className="truncate">Categoria / Quarto</span>
               </div>
               <div className="flex-1 flex" style={{ display: 'grid', gridTemplateColumns: `repeat(${visibleDates.length}, 1fr)`, width: '100%', minWidth: 'fit-content' }}>
-                {visibleDates.map((date, index) => {
+                {visibleDates.map((date, dateIndex) => {
                   const isToday = isSameDay(date, new Date());
                   const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-                  // Marcar o primeiro dia (dia anterior) com estilo diferenciado
-                  const isPreviousDay = index === 0;
+                  const isPreviousDay = dateIndex === 0 && isSameDay(date, addDays(startDate, -1));
                   
                   return (
                     <div 
@@ -2338,7 +2389,6 @@ export const ReservationCalendarMap = ({
                         fontSize: viewDays <= 30 ? '10px' : '9px',
                         width: '100%'
                       }}
-                      title={isPreviousDay ? "Dia anterior (para visualizar reservas em andamento)" : undefined}
                     >
                       <div className="font-bold text-[10px] sm:text-[11px]" style={{ fontSize: viewDays <= 30 ? '11px' : '10px' }}>
                         {viewDays <= 30 ? format(date, "EEE", { locale: ptBR }) : format(date, "EEEEEE", { locale: ptBR })}

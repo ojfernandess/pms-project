@@ -232,10 +232,6 @@ export const useCheckoutCleaning = () => {
                             checkout.guest_name || 
                             "Hóspede";
 
-            // Formatar datas para log
-            const nowDateStr = `${nowYear}-${nowMonth.toString().padStart(2, '0')}-${nowDay.toString().padStart(2, '0')} ${nowHour.toString().padStart(2, '0')}:${nowMinute.toString().padStart(2, '0')}`;
-            const checkoutDateStr = `${checkoutYear}-${checkoutMonth.toString().padStart(2, '0')}-${checkoutDay.toString().padStart(2, '0')} ${checkoutHourValue.toString().padStart(2, '0')}:${checkoutMinuteValue.toString().padStart(2, '0')}`;
-
             console.log(`[useCheckoutCleaning] Check-out passou do horário:`, {
               reservationCode: checkout.reservation_code,
               roomNumber: room?.room_number,
