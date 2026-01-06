@@ -2959,20 +2959,20 @@ export const ReservationCalendarMap = ({
                   result.push(
                     <div key={`building-${buildingId}`}>
                       {/* Cabeçalho do prédio */}
-                      <div className="flex border-b border-slate-400 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 transition-all shadow-md overflow-visible" style={{ minHeight: '40px', width: '100%' }}>
-                        <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 p-1.5 sm:p-2 border-r-2 border-slate-500 bg-gradient-to-br from-slate-700 to-slate-800 flex items-center gap-1.5 sm:gap-2 shadow-inner">
+                      <div className="flex border-b border-slate-300 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 transition-all overflow-visible" style={{ minHeight: '32px', width: '100%' }}>
+                        <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 px-2 py-1 border-r-2 border-slate-500 bg-gradient-to-br from-slate-700 to-slate-800 flex items-center gap-1.5 shadow-inner">
                           <button
                             onClick={() => toggleBuilding(buildingId)}
-                            className="p-1 sm:p-1.5 hover:bg-slate-600 rounded transition-colors shadow-sm bg-white/10 hover:bg-white/20 flex-shrink-0 touch-manipulation"
+                            className="p-0.5 hover:bg-slate-600 rounded transition-colors bg-white/10 hover:bg-white/20 flex-shrink-0 touch-manipulation"
                             aria-label={isBuildingExpanded ? "Recolher prédio" : "Expandir prédio"}
                           >
                             {isBuildingExpanded ? (
-                              <ChevronDown className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white" />
+                              <ChevronDown className="h-3 w-3 text-white" />
                             ) : (
-                              <ChevronRight className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white" />
+                              <ChevronRight className="h-3 w-3 text-white" />
                             )}
                           </button>
-                          <span className="font-bold text-[10px] sm:text-xs uppercase text-white tracking-wide drop-shadow-sm truncate">{buildingName}</span>
+                          <span className="font-semibold text-[10px] sm:text-[11px] uppercase text-white tracking-wide truncate">{buildingName}</span>
                         </div>
                         <div className="flex-1 overflow-visible" style={{ 
                           display: 'grid', 
@@ -2986,7 +2986,7 @@ export const ReservationCalendarMap = ({
                               className="border-r last:border-r-0 bg-gradient-to-r from-slate-600/30 to-slate-700/30"
                               style={{ 
                                 minWidth: viewDays <= 14 ? '90px' : viewDays <= 30 ? '70px' : viewDays <= 60 ? '50px' : '40px',
-                                minHeight: '40px'
+                                minHeight: '32px'
                               }}
                             />
                           ))}
