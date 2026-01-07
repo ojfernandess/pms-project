@@ -2539,7 +2539,7 @@ export const ReservationCalendarMap = ({
                           <div
                             key={date.toISOString()}
                             className={cn(
-                              "border-r last:border-r-0 p-1.5 text-center cursor-pointer transition-colors flex flex-col justify-center bg-gradient-to-r from-blue-50/80 to-indigo-50/80",
+                              "border-r last:border-r-0 p-1.5 text-center transition-colors flex flex-col justify-center bg-gradient-to-r from-blue-50/80 to-indigo-50/80",
                               isOccupied
                                 ? "bg-red-50/50 opacity-60" 
                                 : isSelected 
@@ -2599,38 +2599,7 @@ export const ReservationCalendarMap = ({
                                 handleMouseUp(category.id, undefined, date);
                               }
                             }}
-                            onClick={(e) => {
-                              // Verificar se há quartos disponíveis não interditados
-                              const availableRooms = rooms.filter((room: any) => {
-                                if (room.is_blocked === true) return false;
-                                return !isDateOccupied(date, room.id);
-                              });
-                              
-                              if (availableRooms.length === 0) {
-                                const blockedRooms = rooms.filter((room: any) => room.is_blocked === true);
-                                if (blockedRooms.length > 0 && blockedRooms.length === rooms.length) {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  toast.error("Todos os quartos desta categoria estão interditados");
-                                  return;
-                                }
-                              }
-                              
-                              // Se não estiver arrastando e não estiver ocupado, abrir modal de tarifários
-                              if (!draggedReservation && !isDragging && !isOccupied && totalRooms > 0) {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                // Garantir que a data seja normalizada e seja a mesma exibida no calendário
-                                const normalizedDate = startOfDay(date);
-                                setRatePlansModalData({
-                                  categoryId: category.id,
-                                  categoryName: category.name,
-                                  date: normalizedDate,
-                                });
-                                setRatePlansModalOpen(true);
-                              }
-                            }}
-                            title={isOccupied ? "Data ocupada" : "Clique para ver tarifários"}
+                            title={isOccupied ? "Data ocupada" : undefined}
                           >
                             {/* Exibir tarifário e disponibilidade */}
                             {totalRooms > 0 && (
@@ -2645,6 +2614,7 @@ export const ReservationCalendarMap = ({
                                   <div 
                                     className="font-bold text-emerald-700 cursor-pointer hover:text-emerald-800 hover:underline transition-colors" 
                                     style={{ fontSize: viewDays <= 30 ? '9px' : '8px' }}
+                                    title="Clique para ver tarifários"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       e.preventDefault();

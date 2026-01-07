@@ -46,6 +46,15 @@ interface RatePlan {
   id: string;
   name: string;
   code?: string;
+  plan_type?: string;
+  is_active: boolean;
+}
+
+interface PlanType {
+  id: string;
+  name: string;
+  description?: string;
+  color?: string;
   is_active: boolean;
 }
 
@@ -58,7 +67,9 @@ export const PriceDashboardView = () => {
   const [endDate, setEndDate] = useState<Date>(startOfDay(new Date()));
   const [categoryAdjustments, setCategoryAdjustments] = useState<Record<string, number>>({});
   const [ratePlanAdjustments, setRatePlanAdjustments] = useState<Record<string, { adjustment: number; active: boolean }>>({});
+  const [planTypeAdjustments, setPlanTypeAdjustments] = useState<Record<string, { adjustment: number; active: boolean }>>({});
   const [activePlanTab, setActivePlanTab] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<"plans" | "types">("plans");
   const [isSaving, setIsSaving] = useState(false);
   const [hasSavedAdjustments, setHasSavedAdjustments] = useState(false);
   const [showDynamicRulesWarning, setShowDynamicRulesWarning] = useState(false);
@@ -90,7 +101,7 @@ export const PriceDashboardView = () => {
       
       const { data, error } = await supabase
         .from("pricing_plans")
-        .select("id, name, code, is_active")
+        .select("id, name, code, plan_type, is_active")
         .eq("establishment_id", establishmentId)
         .eq("is_active", true)
         .order("sort_order", { ascending: true })
@@ -100,6 +111,22 @@ export const PriceDashboardView = () => {
       return (data || []) as RatePlan[];
     },
     enabled: !!establishmentId,
+  });
+
+  // Buscar tipos de planos tarifários
+  const { data: planTypes = [], isLoading: isLoadingPlanTypes } = useQuery({
+    queryKey: ["price_dashboard_plan_types"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pricing_plan_types")
+        .select("id, name, description, color, is_active")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("name");
+
+      if (error) throw error;
+      return (data || []) as PlanType[];
+    },
   });
 
   // Buscar configurações do sistema tarifário para verificar se regras dinâmicas estão ativas
@@ -276,6 +303,33 @@ export const PriceDashboardView = () => {
     }
   }, [ratePlans, loadSavedAdjustments]);
 
+  // Inicializar ajustes de tipos de planos tarifários
+  useEffect(() => {
+    if (planTypes.length > 0) {
+      // Tentar carregar ajustes salvos primeiro
+      const savedAdjustments = loadSavedAdjustments();
+      if (savedAdjustments?.planTypeAdjustments) {
+        // Verificar se os tipos salvos ainda existem
+        const validAdjustments: Record<string, { adjustment: number; active: boolean }> = {};
+        planTypes.forEach((type) => {
+          if (savedAdjustments.planTypeAdjustments[type.name]) {
+            validAdjustments[type.name] = savedAdjustments.planTypeAdjustments[type.name];
+          } else {
+            validAdjustments[type.name] = { adjustment: 0, active: true };
+          }
+        });
+        setPlanTypeAdjustments(validAdjustments);
+        setHasSavedAdjustments(true);
+      } else {
+        const adjustments: Record<string, { adjustment: number; active: boolean }> = {};
+        planTypes.forEach((type) => {
+          adjustments[type.name] = { adjustment: 0, active: true };
+        });
+        setPlanTypeAdjustments(adjustments);
+      }
+    }
+  }, [planTypes, loadSavedAdjustments]);
+
   // Salvar ajustes no localStorage
   const saveAdjustments = () => {
     if (!establishmentId) {
@@ -288,6 +342,7 @@ export const PriceDashboardView = () => {
         basePrice,
         categoryAdjustments,
         ratePlanAdjustments,
+        planTypeAdjustments,
         savedAt: new Date().toISOString(),
         establishmentId,
       };
@@ -342,6 +397,19 @@ export const PriceDashboardView = () => {
       setRatePlanAdjustments(validPlanAdjustments);
     }
 
+    // Carregar ajustes de tipos de planos tarifários (verificar se os tipos ainda existem)
+    if (saved.planTypeAdjustments) {
+      const validTypeAdjustments: Record<string, { adjustment: number; active: boolean }> = {};
+      planTypes.forEach((type) => {
+        if (saved.planTypeAdjustments[type.name]) {
+          validTypeAdjustments[type.name] = saved.planTypeAdjustments[type.name];
+        } else {
+          validTypeAdjustments[type.name] = { adjustment: 0, active: true };
+        }
+      });
+      setPlanTypeAdjustments(validTypeAdjustments);
+    }
+
     toast.success("Ajustes carregados com sucesso!");
   };
 
@@ -385,6 +453,13 @@ export const PriceDashboardView = () => {
       });
       setRatePlanAdjustments(planAdjustments);
 
+      // Resetar ajustes de tipos de planos tarifários para valores padrão
+      const typeAdjustments: Record<string, { adjustment: number; active: boolean }> = {};
+      planTypes.forEach((type) => {
+        typeAdjustments[type.name] = { adjustment: 0, active: true };
+      });
+      setPlanTypeAdjustments(typeAdjustments);
+
       toast.success("Configurações resetadas para os valores padrão!");
     } catch (error) {
       console.error("Erro ao resetar configurações:", error);
@@ -425,14 +500,23 @@ export const PriceDashboardView = () => {
       ratePlans.forEach((plan) => {
         const planData = ratePlanAdjustments[plan.id];
         if (planData?.active) {
-          const finalPrice = Math.round(categoryPrice * (1 + (planData.adjustment || 0) / 100));
+          let finalPrice = Math.round(categoryPrice * (1 + (planData.adjustment || 0) / 100));
+          
+          // Aplicar ajuste por tipo de plano se viewMode for "types" e o plano tiver um tipo
+          if (viewMode === "types" && plan.plan_type) {
+            const typeData = planTypeAdjustments[plan.plan_type];
+            if (typeData?.active) {
+              finalPrice = Math.round(finalPrice * (1 + (typeData.adjustment || 0) / 100));
+            }
+          }
+          
           prices[cat.id][plan.id] = finalPrice;
         }
       });
     });
     
     return prices;
-  }, [categoryPrices, ratePlanAdjustments, ratePlans, categories, basePrice]);
+  }, [categoryPrices, ratePlanAdjustments, planTypeAdjustments, ratePlans, categories, basePrice, viewMode]);
 
   const handleQuickAdjust = (amount: number) => {
     const currentBasePrice = basePrice ?? 250;
@@ -463,6 +547,26 @@ export const PriceDashboardView = () => {
       ...prev,
       [planId]: {
         ...prev[planId],
+        active,
+      },
+    }));
+  };
+
+  const handlePlanTypeAdjustmentChange = (typeName: string, value: number) => {
+    setPlanTypeAdjustments((prev) => ({
+      ...prev,
+      [typeName]: {
+        ...prev[typeName],
+        adjustment: Math.max(-20, Math.min(30, value)),
+      },
+    }));
+  };
+
+  const handlePlanTypeToggle = (typeName: string, active: boolean) => {
+    setPlanTypeAdjustments((prev) => ({
+      ...prev,
+      [typeName]: {
+        ...prev[typeName],
         active,
       },
     }));
@@ -524,8 +628,15 @@ export const PriceDashboardView = () => {
           const categoryPrice = Math.round(currentBasePrice * (1 + categoryAdjustment / 100));
           
           // Aplicar ajuste do plano tarifário ao preço da categoria
-          const planAdjustment = planData.adjustment || 0;
-          const finalPrice = Math.round(categoryPrice * (1 + planAdjustment / 100));
+          let finalPrice = Math.round(categoryPrice * (1 + (planData.adjustment || 0) / 100));
+          
+          // Aplicar ajuste por tipo de plano se viewMode for "types" e o plano tiver um tipo
+          if (viewMode === "types" && plan.plan_type) {
+            const typeData = planTypeAdjustments[plan.plan_type];
+            if (typeData?.active) {
+              finalPrice = Math.round(finalPrice * (1 + (typeData.adjustment || 0) / 100));
+            }
+          }
          
           // Preparar dados para inserção em lote - APENAS para as datas do período selecionado
           const calendarEntries = dates.map((date) => ({
@@ -598,7 +709,7 @@ export const PriceDashboardView = () => {
     setPendingApply(false);
   };
 
-  if (isLoadingCategories || isLoadingRatePlans) {
+  if (isLoadingCategories || isLoadingRatePlans || isLoadingPlanTypes) {
     return (
       <div className="flex items-center justify-center py-12">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
@@ -907,81 +1018,167 @@ export const PriceDashboardView = () => {
           </div>
         </Card>
 
-        {/* Ajustes por Plano Tarifário */}
+        {/* Ajustes por Plano Tarifário ou Tipo de Plano */}
         <Card>
           <div className="p-6">
-            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <TrendingDown className="h-5 w-5 text-primary" />
-              % Ajustes por Plano Tarifário
-            </h3>
-            <Tabs value={activePlanTab} onValueChange={setActivePlanTab}>
-              <TabsList className="mb-4">
-                <TabsTrigger value="all">Todos</TabsTrigger>
-                {ratePlans.map((plan) => (
-                  <TabsTrigger key={plan.id} value={plan.id}>
-                    {plan.code || plan.name}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-            <div className="space-y-4">
-              {ratePlans.map((plan) => {
-                if (activePlanTab !== "all" && activePlanTab !== plan.id) return null;
-                
-                const planData = ratePlanAdjustments[plan.id] || { adjustment: 0, active: true };
-                
-                return (
-                  <div key={plan.id} className="flex items-center gap-3 p-3 border rounded-lg">
-                    <Switch
-                      checked={planData.active}
-                      onCheckedChange={(checked) => handleRatePlanToggle(plan.id, checked)}
-                    />
-                    <div className="w-32 font-medium text-sm">
-                      {plan.code || plan.name}
-                    </div>
-                    <div className="flex-1">
-                      <input
-                        type="range"
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <TrendingDown className="h-5 w-5 text-primary" />
+                % Ajustes por {viewMode === "plans" ? "Plano Tarifário" : "Tipo de Plano"}
+              </h3>
+              <div className="flex gap-2">
+                <Button
+                  variant={viewMode === "plans" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("plans")}
+                >
+                  Planos
+                </Button>
+                <Button
+                  variant={viewMode === "types" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("types")}
+                >
+                  Tipos
+                </Button>
+              </div>
+            </div>
+            
+            {viewMode === "plans" ? (
+              <>
+                <Tabs value={activePlanTab} onValueChange={setActivePlanTab}>
+                  <TabsList className="mb-4">
+                    <TabsTrigger value="all">Todos</TabsTrigger>
+                    {ratePlans.map((plan) => (
+                      <TabsTrigger key={plan.id} value={plan.id}>
+                        {plan.code || plan.name}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+                <div className="space-y-4">
+                  {ratePlans.map((plan) => {
+                    if (activePlanTab !== "all" && activePlanTab !== plan.id) return null;
+                    
+                    const planData = ratePlanAdjustments[plan.id] || { adjustment: 0, active: true };
+                    
+                    return (
+                      <div key={plan.id} className="flex items-center gap-3 p-3 border rounded-lg">
+                        <Switch
+                          checked={planData.active}
+                          onCheckedChange={(checked) => handleRatePlanToggle(plan.id, checked)}
+                        />
+                        <div className="w-32 font-medium text-sm">
+                          {plan.code || plan.name}
+                        </div>
+                        <div className="flex-1">
+                          <input
+                            type="range"
+                            min="-20"
+                            max="30"
+                            value={planData.adjustment}
+                            onChange={(e) => handleRatePlanAdjustmentChange(plan.id, parseInt(e.target.value))}
+                            className={cn(
+                              "w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500",
+                              "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-green-500 [&::-webkit-slider-thumb]:cursor-pointer",
+                              "[&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-green-500 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer",
+                              !planData.active && "opacity-50 cursor-not-allowed"
+                            )}
+                            disabled={!planData.active}
+                          />
+                        </div>
+                        <Input
+                          type="number"
+                          value={planData.adjustment}
+                          onChange={(e) => handleRatePlanAdjustmentChange(plan.id, parseInt(e.target.value) || 0)}
+                          min="-20"
+                          max="30"
+                          className="w-16 text-center"
+                          disabled={!planData.active}
+                        />
+                        <div className="w-16 text-center">
+                          <span className={cn(
+                            "text-sm font-semibold text-green-600 dark:text-green-500",
+                            !planData.active && "opacity-50"
+                          )}>
+                            {planData.adjustment > 0 && "+"}
+                            {planData.adjustment}%
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {ratePlans.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-8">
+                      Nenhum plano tarifário ativo encontrado. Crie um plano tarifário primeiro.
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="space-y-4">
+                {planTypes.map((type) => {
+                  const typeData = planTypeAdjustments[type.name] || { adjustment: 0, active: true };
+                  
+                  return (
+                    <div key={type.id} className="flex items-center gap-3 p-3 border rounded-lg">
+                      <Switch
+                        checked={typeData.active}
+                        onCheckedChange={(checked) => handlePlanTypeToggle(type.name, checked)}
+                      />
+                      <div className="w-32 font-medium text-sm flex items-center gap-2">
+                        {type.color && (
+                          <div
+                            className="w-3 h-3 rounded-full border border-gray-300"
+                            style={{ backgroundColor: type.color }}
+                          />
+                        )}
+                        {type.name}
+                      </div>
+                      <div className="flex-1">
+                        <input
+                          type="range"
+                          min="-20"
+                          max="30"
+                          value={typeData.adjustment}
+                          onChange={(e) => handlePlanTypeAdjustmentChange(type.name, parseInt(e.target.value))}
+                          className={cn(
+                            "w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500",
+                            "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-green-500 [&::-webkit-slider-thumb]:cursor-pointer",
+                            "[&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-green-500 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer",
+                            !typeData.active && "opacity-50 cursor-not-allowed"
+                          )}
+                          disabled={!typeData.active}
+                        />
+                      </div>
+                      <Input
+                        type="number"
+                        value={typeData.adjustment}
+                        onChange={(e) => handlePlanTypeAdjustmentChange(type.name, parseInt(e.target.value) || 0)}
                         min="-20"
                         max="30"
-                        value={planData.adjustment}
-                        onChange={(e) => handleRatePlanAdjustmentChange(plan.id, parseInt(e.target.value))}
-                        className={cn(
-                          "w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500",
-                          "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-green-500 [&::-webkit-slider-thumb]:cursor-pointer",
-                          "[&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-green-500 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer",
-                          !planData.active && "opacity-50 cursor-not-allowed"
-                        )}
-                        disabled={!planData.active}
+                        className="w-16 text-center"
+                        disabled={!typeData.active}
                       />
+                      <div className="w-16 text-center">
+                        <span className={cn(
+                          "text-sm font-semibold text-green-600 dark:text-green-500",
+                          !typeData.active && "opacity-50"
+                        )}>
+                          {typeData.adjustment > 0 && "+"}
+                          {typeData.adjustment}%
+                        </span>
+                      </div>
                     </div>
-                    <Input
-                      type="number"
-                      value={planData.adjustment}
-                      onChange={(e) => handleRatePlanAdjustmentChange(plan.id, parseInt(e.target.value) || 0)}
-                      min="-20"
-                      max="30"
-                      className="w-16 text-center"
-                      disabled={!planData.active}
-                    />
-                    <div className="w-16 text-center">
-                      <span className={cn(
-                        "text-sm font-semibold text-green-600 dark:text-green-500",
-                        !planData.active && "opacity-50"
-                      )}>
-                        {planData.adjustment > 0 && "+"}
-                        {planData.adjustment}%
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-              {ratePlans.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-8">
-                  Nenhum plano tarifário ativo encontrado. Crie um plano tarifário primeiro.
-                </p>
-              )}
-            </div>
+                  );
+                })}
+                {planTypes.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    Nenhum tipo de plano tarifário ativo encontrado. Crie um tipo de plano primeiro.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </Card>
       </div>
