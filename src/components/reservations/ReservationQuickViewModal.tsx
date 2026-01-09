@@ -175,10 +175,17 @@ export function ReservationQuickViewModal({
             <div className="space-y-1">
               <label className="text-sm font-medium text-slate-600 flex items-center gap-1.5">
                 <DollarSign className="h-3.5 w-3.5" />
-                Valor
+                Valor Total
               </label>
               <div className="text-sm font-bold text-slate-900 border border-slate-200 rounded-md p-2.5 bg-slate-50">
-                R$ {Number(reservation.total_amount || 0).toFixed(2).replace('.', ',')}
+                {(() => {
+                  const baseTotalAmount = Number(reservation.total_amount || 0);
+                  const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum: number, fee: any) => {
+                    return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
+                  }, 0);
+                  const totalWithFees = baseTotalAmount + serviceFeesTotal;
+                  return `R$ ${totalWithFees.toFixed(2).replace('.', ',')}`;
+                })()}
               </div>
             </div>
           </div>

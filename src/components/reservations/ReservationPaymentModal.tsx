@@ -90,7 +90,25 @@ export function ReservationPaymentModal({
       if (!reservation?.id) return [];
       const { data, error } = await supabase
         .from("payments")
-        .select("id, amount, notes, payment_date, created_at")
+        .select(`
+          id, 
+          amount, 
+          notes, 
+          payment_date, 
+          created_at,
+          carrier_id,
+          payment_type_id,
+          payment_carriers:carrier_id (
+            id,
+            code,
+            description
+          ),
+          payment_types:payment_type_id (
+            id,
+            name,
+            payment_method
+          )
+        `)
         .eq("reservation_id", reservation.id)
         .order("created_at", { ascending: true });
       
@@ -116,12 +134,39 @@ export function ReservationPaymentModal({
     const detectExtension = async () => {
       if (!reservation || !open) return;
 
-      let originalCheckout: string | null = null;
+      // IMPORTANTE: Buscar dados mais recentes da reserva para detectar alterações recentes
+      let currentReservation = reservation;
+      try {
+        const { data: freshReservation } = await supabase
+          .from("reservations")
+          .select(`
+            id,
+            checkin_date,
+            checkout_date,
+            total_amount,
+            paid_amount,
+            category_id,
+            pricing_plan_id
+          `)
+          .eq("id", reservation.id)
+          .single();
+        
+        if (freshReservation) {
+          currentReservation = { ...reservation, ...freshReservation };
+        }
+      } catch (error) {
+        console.warn("Erro ao buscar dados atualizados da reserva:", error);
+        // Continuar com os dados da reserva original
+      }
 
-      // Estratégia 1: Buscar a data de checkout original nos logs de criação ou alteração de datas
+      let originalCheckin: string | null = null;
+      let originalCheckout: string | null = null;
+      let originalTotalAmount: number | null = null;
+
+      // Estratégia 1: Buscar as datas originais nos logs de criação ou alteração de datas
       const createdLog = activityLogs?.find((log: any) => log.action_type === "created");
       const checkoutChangeLogs = activityLogs?.filter((log: any) => 
-        (log.action_type === "dates_changed" || log.action_type === "moved") && 
+        (log.action_type === "dates_changed" || log.action_type === "moved" || log.action_type === "updated") && 
         log.old_values?.checkout_date && 
         log.new_values?.checkout_date
       ) || [];
@@ -131,16 +176,23 @@ export function ReservationPaymentModal({
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
       );
 
-      if (createdLog && createdLog.new_values?.checkout_date) {
-        // Se houver log de criação, usar a data de checkout original da criação
+      // Verificar se a reserva foi criada sem pagamento inicial
+      let originalPaidAmount = 0;
+      if (createdLog && createdLog.new_values) {
+        // Se houver log de criação, usar as datas originais da criação
+        originalCheckin = createdLog.new_values.checkin_date || null;
         originalCheckout = createdLog.new_values.checkout_date;
+        originalTotalAmount = createdLog.new_values.total_amount || null;
+        // IMPORTANTE: Verificar o paid_amount no momento da criação
+        originalPaidAmount = Number(createdLog.new_values.paid_amount || 0);
       } else if (checkoutChangeLogs.length > 0) {
-        // Se não houver log de criação, pegar a primeira alteração (mais antiga) para obter a data original
+        // Se não houver log de criação, pegar a primeira alteração (mais antiga) para obter as datas originais
         const firstChange = checkoutChangeLogs[0];
+        originalCheckin = firstChange.old_values.checkin_date || null;
         originalCheckout = firstChange.old_values.checkout_date;
+        originalTotalAmount = firstChange.old_values.total_amount || null;
       } else {
         // Estratégia 2: Se não houver logs, buscar a primeira data de checkout registrada
-        // Buscar todos os logs que mencionam checkout_date, ordenados por data
         const allCheckoutLogs = activityLogs?.filter((log: any) => 
           (log.old_values?.checkout_date || log.new_values?.checkout_date)
         ) || [];
@@ -149,15 +201,15 @@ export function ReservationPaymentModal({
           allCheckoutLogs.sort((a: any, b: any) => 
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           );
-          // Pegar a primeira menção de checkout_date (pode ser old_values ou new_values)
           const firstLog = allCheckoutLogs[0];
+          originalCheckin = firstLog.old_values?.checkin_date || firstLog.new_values?.checkin_date || null;
           originalCheckout = firstLog.old_values?.checkout_date || firstLog.new_values?.checkout_date || null;
+          originalTotalAmount = firstLog.old_values?.total_amount || firstLog.new_values?.total_amount || null;
         }
       }
 
-      // Se ainda não encontrou a data original, usar a data atual como referência
-      // Mas isso significa que não há extensão
-      if (!originalCheckout) {
+      // Se ainda não encontrou as datas originais, não há extensão
+      if (!originalCheckout || !currentReservation.checkout_date) {
         setOriginalCheckoutDate(null);
         setExtensionAmount(0);
         return;
@@ -165,38 +217,136 @@ export function ReservationPaymentModal({
 
       setOriginalCheckoutDate(originalCheckout);
 
+      // Normalizar datas para comparação
+      const normalizeDate = (dateStr: string | null | undefined): string | null => {
+        if (!dateStr) return null;
+        return dateStr.split('T')[0]; // Pegar apenas a parte da data (YYYY-MM-DD)
+      };
+
+      const normalizedOriginalCheckin = normalizeDate(originalCheckin);
+      const normalizedOriginalCheckout = normalizeDate(originalCheckout);
+      const normalizedCurrentCheckin = normalizeDate(currentReservation.checkin_date);
+      const normalizedCurrentCheckout = normalizeDate(currentReservation.checkout_date);
+
+      // Verificar se há alteração nas datas
+      const datesChanged = 
+        (normalizedOriginalCheckin !== normalizedCurrentCheckin) ||
+        (normalizedOriginalCheckout !== normalizedCurrentCheckout);
+
+      if (!datesChanged) {
+        // Não há alteração nas datas, não há extensão
+        setExtensionAmount(0);
+        return;
+      }
+
+      // Calcular quantidade de diárias original e atual
+      let originalNights = 0;
+      let currentNights = 0;
+      
+      if (normalizedOriginalCheckin && normalizedOriginalCheckout) {
+        const originalCheckinDate = parseISO(normalizedOriginalCheckin);
+        const originalCheckoutDate = parseISO(normalizedOriginalCheckout);
+        originalNights = differenceInDays(originalCheckoutDate, originalCheckinDate);
+      }
+      
+      if (normalizedCurrentCheckin && normalizedCurrentCheckout) {
+        const currentCheckinDate = parseISO(normalizedCurrentCheckin);
+        const currentCheckoutDate = parseISO(normalizedCurrentCheckout);
+        currentNights = differenceInDays(currentCheckoutDate, currentCheckinDate);
+      }
+
       // Verificar se há extensão (checkout atual > checkout original)
-      if (reservation.checkout_date && originalCheckout !== reservation.checkout_date) {
-        const originalDate = parseISO(originalCheckout);
-        const currentDate = parseISO(reservation.checkout_date);
-        
-        if (currentDate > originalDate) {
-          // Há extensão! Calcular valor da extensão
-          const categoryId = reservation.room_category_id || reservation.category_id;
-          if (categoryId) {
-            try {
-              const extensionPrice = await calculatePrice(
-                categoryId,
-                format(originalDate, "yyyy-MM-dd"),
-                format(currentDate, "yyyy-MM-dd"),
-                undefined,
-                reservation.pricing_plan_id,
-                undefined
-              );
+      const originalDate = parseISO(normalizedOriginalCheckout);
+      const currentDate = parseISO(normalizedCurrentCheckout);
+      const isExtension = currentDate > originalDate;
+
+      if (!isExtension) {
+        // Checkout foi reduzido ou não mudou, não há extensão
+        setExtensionAmount(0);
+        return;
+      }
+
+      // IMPORTANTE: Se a reserva foi criada SEM pagamento inicial (paid_amount === 0 no momento da criação),
+      // não tratar como extensão separada, mesmo que seja estendida depois.
+      // Nesse caso, o valor base deve ser atualizado para incluir a extensão, tornando tudo um único valor
+      const wasCreatedWithoutPayment = originalPaidAmount === 0 || originalPaidAmount < 0.01;
+      
+      if (wasCreatedWithoutPayment) {
+        // Reserva criada sem pagamento inicial: não calcular extensão separada, tudo será tratado como valor base único
+        // Mesmo que seja estendida depois, não deve mostrar extensão separada
+        setExtensionAmount(0);
+        setOriginalCheckoutDate(null);
+        return;
+      }
+      
+      // Há extensão! Verificar se quantidade de diárias mudou ou se apenas o valor mudou
+      const nightsChanged = originalNights !== currentNights;
+      const valueChanged = originalTotalAmount !== null && 
+        currentReservation.total_amount !== null &&
+        Math.abs((originalTotalAmount || 0) - (currentReservation.total_amount || 0)) > 0.01; // Tolerância para diferenças de centavos
+
+      // Se quantidade de diárias é a mesma MAS o valor mudou, ainda há extensão (reajuste de preço)
+      // Se quantidade de diárias mudou, há extensão
+      if (nightsChanged || valueChanged) {
+        // Calcular valor da extensão baseado no período estendido
+        const categoryId = currentReservation.category_id;
+        if (categoryId) {
+          try {
+            const extensionPrice = await calculatePrice(
+              categoryId,
+              format(originalDate, "yyyy-MM-dd"),
+              format(currentDate, "yyyy-MM-dd"),
+              undefined,
+              currentReservation.pricing_plan_id,
+              undefined
+            );
+            
+            // Se o valor calculado for maior que zero, há extensão
+            if (extensionPrice > 0) {
               setExtensionAmount(extensionPrice);
-            } catch (error) {
-              console.error("Erro ao calcular valor da extensão:", error);
+            } else {
+              // Se não conseguiu calcular ou valor é zero, verificar se houve mudança de valor
+              if (valueChanged && originalTotalAmount !== null && currentReservation.total_amount !== null) {
+                // Calcular diferença de valor como extensão
+                const valueDifference = (currentReservation.total_amount || 0) - (originalTotalAmount || 0);
+                if (valueDifference > 0) {
+                  setExtensionAmount(valueDifference);
+                } else {
+                  setExtensionAmount(0);
+                }
+              } else {
+                setExtensionAmount(0);
+              }
+            }
+          } catch (error) {
+            console.error("Erro ao calcular valor da extensão:", error);
+            // Em caso de erro, tentar calcular pela diferença de valores
+            if (valueChanged && originalTotalAmount !== null && currentReservation.total_amount !== null) {
+              const valueDifference = (currentReservation.total_amount || 0) - (originalTotalAmount || 0);
+              if (valueDifference > 0) {
+                setExtensionAmount(valueDifference);
+              } else {
+                setExtensionAmount(0);
+              }
+            } else {
+              setExtensionAmount(0);
+            }
+          }
+        } else {
+          // Sem categoryId, tentar calcular pela diferença de valores
+          if (valueChanged && originalTotalAmount !== null && currentReservation.total_amount !== null) {
+            const valueDifference = (currentReservation.total_amount || 0) - (originalTotalAmount || 0);
+            if (valueDifference > 0) {
+              setExtensionAmount(valueDifference);
+            } else {
               setExtensionAmount(0);
             }
           } else {
             setExtensionAmount(0);
           }
-        } else {
-          // Checkout foi reduzido, não há extensão
-          setExtensionAmount(0);
         }
       } else {
-        // Não há alteração na data de checkout
+        // Mesma quantidade de diárias E mesmo valor = não há extensão
         setExtensionAmount(0);
       }
     };
@@ -216,31 +366,64 @@ export function ReservationPaymentModal({
   // Calcular breakdown do valor
   const paymentBreakdown = useMemo(() => {
     const baseAmount = reservation?.total_amount || 0;
+    const paidAmount = Number(reservation?.paid_amount || 0);
+    
+    // IMPORTANTE: Verificar se a reserva foi criada sem pagamento inicial
+    // Buscar o log de criação para verificar o paid_amount inicial
+    const createdLog = activityLogs?.find((log: any) => log.action_type === "created");
+    const originalPaidAmount = createdLog?.new_values?.paid_amount 
+      ? Number(createdLog.new_values.paid_amount) 
+      : 0;
+    const wasCreatedWithoutPayment = originalPaidAmount === 0 || originalPaidAmount < 0.01;
+    
     const serviceFeesTotal = (serviceFees || []).reduce((sum: number, fee: any) => {
       return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
     }, 0);
     
-    // Se houver extensão, calcular valor base original
+    // IMPORTANTE: Se foi criada sem pagamento inicial, não separar extensão - tudo é valor base único
+    // Se foi criada COM pagamento inicial E houver extensão, calcular valor base original separando a extensão
     let originalBaseAmount = baseAmount;
-    if (extensionAmount > 0 && originalCheckoutDate) {
-      // Tentar calcular o valor original baseado nas datas originais
+    let effectiveExtensionAmount = extensionAmount;
+    
+    if (wasCreatedWithoutPayment) {
+      // Reserva criada sem pagamento inicial: não há extensão separada, tudo é valor base único
+      // Mesmo que seja estendida depois, não deve mostrar extensão separada
+      effectiveExtensionAmount = 0;
+      originalBaseAmount = baseAmount; // Valor total é o valor base
+    } else if (extensionAmount > 0 && originalCheckoutDate) {
+      // Reserva criada COM pagamento inicial E tem extensão: calcular valor base original separando a extensão
       originalBaseAmount = Math.max(0, baseAmount - extensionAmount);
+    } else {
+      // Reserva criada COM pagamento inicial mas sem extensão: usar valor total como base
+      effectiveExtensionAmount = 0;
+      originalBaseAmount = baseAmount;
     }
     
-    const totalWithFees = originalBaseAmount + extensionAmount + serviceFeesTotal;
+    const totalWithFees = originalBaseAmount + effectiveExtensionAmount + serviceFeesTotal;
     const totalPaid = (reservation?.paid_amount || 0);
     
     // Determinar quando a extensão foi adicionada (usando logs de atividade)
+    // IMPORTANTE: Só calcular se foi criada COM pagamento inicial E tem extensão
     let extensionAddedAt: Date | null = null;
-    if (extensionAmount > 0 && activityLogs) {
-      const extensionLog = activityLogs.find((log: any) => 
-        log.action_type === "dates_changed" && 
-        log.old_values?.checkout_date && 
-        log.new_values?.checkout_date &&
-        parseISO(log.new_values.checkout_date) > parseISO(log.old_values.checkout_date)
-      );
-      if (extensionLog) {
-        extensionAddedAt = new Date(extensionLog.created_at);
+    if (!wasCreatedWithoutPayment && effectiveExtensionAmount > 0 && activityLogs && originalCheckoutDate) {
+      // Buscar logs que indicam extensão (checkout aumentou)
+      const extensionLogs = activityLogs.filter((log: any) => {
+        if (!log.old_values?.checkout_date || !log.new_values?.checkout_date) return false;
+        try {
+          const oldCheckout = parseISO(log.old_values.checkout_date);
+          const newCheckout = parseISO(log.new_values.checkout_date);
+          return newCheckout > oldCheckout;
+        } catch {
+          return false;
+        }
+      });
+      
+      // Ordenar por data (mais recente primeiro) e pegar o mais recente
+      if (extensionLogs.length > 0) {
+        extensionLogs.sort((a: any, b: any) => 
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        extensionAddedAt = new Date(extensionLogs[0].created_at);
       }
     }
     
@@ -263,8 +446,9 @@ export function ReservationPaymentModal({
     });
     
     // Processar pagamentos sequencialmente, aplicando apenas aos componentes corretos
+    // IMPORTANTE: Se foi criada sem pagamento inicial, tudo é valor base único
     let remainingForBase = originalBaseAmount;
-    let remainingForExtension = extensionAmount;
+    let remainingForExtension = wasCreatedWithoutPayment ? 0 : effectiveExtensionAmount;
     const feesPaid: Record<string, number> = {}; // Rastrear quanto foi pago de cada taxa
     
     sortedPayments.forEach((payment: any) => {
@@ -293,8 +477,8 @@ export function ReservationPaymentModal({
           return;
         } else if (paymentComponent === "extension") {
           // Aplicar APENAS à extensão - não tocar em base ou taxas
-          // Remover verificação de extensionAddedAt pois o componente já especifica que é para extensão
-          if (extensionAmount > 0 && remainingForExtension > 0 && remaining > 0) {
+          // IMPORTANTE: Só aplicar se foi criada COM pagamento inicial E tem extensão separada
+          if (!wasCreatedWithoutPayment && effectiveExtensionAmount > 0 && remainingForExtension > 0 && remaining > 0) {
             const appliedToExtension = Math.min(remaining, remainingForExtension);
             remainingForExtension -= appliedToExtension;
           }
@@ -330,10 +514,16 @@ export function ReservationPaymentModal({
         }
         
         // 2. Aplicar à extensão (se houver e se o pagamento foi depois da extensão)
-        if (extensionAmount > 0 && extensionAddedAt && paymentDate >= extensionAddedAt && remainingForExtension > 0 && remaining > 0) {
+        // IMPORTANTE: Só aplicar se foi criada COM pagamento inicial E tem extensão separada
+        // IMPORTANTE: Só aplicar se extensionAddedAt existir E o pagamento foi feito DEPOIS da extensão
+        // Se extensionAddedAt não existir, não aplicar pagamentos antigos à extensão
+        if (!wasCreatedWithoutPayment && effectiveExtensionAmount > 0 && extensionAddedAt && paymentDate >= extensionAddedAt && remainingForExtension > 0 && remaining > 0) {
           const appliedToExtension = Math.min(remaining, remainingForExtension);
           remainingForExtension -= appliedToExtension;
           remaining -= appliedToExtension;
+        } else if (!wasCreatedWithoutPayment && effectiveExtensionAmount > 0 && !extensionAddedAt) {
+          // Se há extensão mas não há data de quando foi adicionada, não aplicar pagamentos antigos à extensão
+          // Isso evita que pagamentos feitos antes da extensão sejam aplicados incorretamente
         }
         
         // 3. Aplicar às taxas que existiam quando o pagamento foi feito
@@ -376,18 +566,43 @@ export function ReservationPaymentModal({
 
     // Calcular saldos pendentes finais usando os valores processados sequencialmente
     const baseAmountPending = Math.max(0, remainingForBase);
-    const extensionAmountPending = Math.max(0, remainingForExtension);
+    // IMPORTANTE: Se foi criada sem pagamento inicial, não há extensão separada - tudo é valor base único
+    // Garantir que extensionAmountPending seja 0 se não houver extensão ou se já foi totalmente pago
+    // Usar Math.round para evitar problemas de precisão de ponto flutuante
+    const extensionAmountPending = (!wasCreatedWithoutPayment && effectiveExtensionAmount > 0)
+      ? Math.round(Math.max(0, remainingForExtension) * 100) / 100 
+      : 0;
+
+    // Debug: Log para verificar valores (apenas em desenvolvimento)
+    if (process.env.NODE_ENV === 'development') {
+      console.log("🔍 Debug extensão:", {
+        wasCreatedWithoutPayment,
+        originalPaidAmount,
+        currentPaidAmount: paidAmount,
+        extensionAmount,
+        effectiveExtensionAmount,
+        remainingForExtension,
+        extensionAmountPending,
+        totalPayments: sortedPayments.length,
+        extensionAddedAt: extensionAddedAt?.toISOString(),
+        paymentsWithExtension: sortedPayments.filter((p: any) => {
+          const componentMatch = p.notes?.match(/\[COMPONENT:([^\]]+)\]/);
+          return componentMatch && componentMatch[1] === "extension";
+        }).length,
+      });
+    }
 
     return {
       originalBaseAmount: Math.max(0, originalBaseAmount),
       originalBaseAmountPending: baseAmountPending,
-      extensionAmount,
+      extensionAmount: effectiveExtensionAmount, // Usar valor efetivo (0 se criada sem pagamento inicial)
       extensionAmountPending: extensionAmountPending,
       serviceFeesTotal,
       serviceFeesPending: feesPending,
       baseAmount,
       totalWithFees,
       remainingBalance: Math.max(0, totalWithFees - totalPaid),
+      hasNoPayments: wasCreatedWithoutPayment, // Expor flag para uso na UI
     };
   }, [reservation?.total_amount, reservation?.paid_amount, serviceFees, extensionAmount, originalCheckoutDate, existingPayments, activityLogs]);
 
@@ -418,15 +633,33 @@ export function ReservationPaymentModal({
       // Por padrão, selecionar o valor base se houver saldo pendente
       if (paymentBreakdown.originalBaseAmountPending > 0) {
         setSelectedComponent("base");
+      } else if (paymentBreakdown.extensionAmountPending > 0 && extensionAmount > 0) {
+        // Se não houver valor base pendente mas houver extensão pendente, selecionar extensão
+        setSelectedComponent("extension");
       } else {
-        // Se não houver valor base pendente, não selecionar nada
-        setSelectedComponent("");
+        // Se não houver valor base pendente nem extensão pendente, verificar taxas
+        const hasPendingFees = Object.values(paymentBreakdown.serviceFeesPending || {}).some((amount: number) => amount > 0);
+        if (hasPendingFees) {
+          // Selecionar a primeira taxa pendente
+          const firstPendingFee = serviceFees?.find((fee: any) => {
+            const feePending = paymentBreakdown.serviceFeesPending[fee.id] || 0;
+            return feePending > 0;
+          });
+          if (firstPendingFee) {
+            setSelectedComponent(`fee-${firstPendingFee.id}`);
+          } else {
+            setSelectedComponent("");
+          }
+        } else {
+          // Não há nada pendente, não selecionar nada
+          setSelectedComponent("");
+        }
       }
     } else if (!open) {
       // Resetar quando o modal fechar
       setSelectedComponent("");
     }
-  }, [open, reservation?.id, paymentBreakdown]);
+  }, [open, reservation?.id, paymentBreakdown, extensionAmount, serviceFees]);
 
   // Atualizar valor do campo quando seleções mudarem
   useEffect(() => {
@@ -437,16 +670,44 @@ export function ReservationPaymentModal({
     }
   }, [selectedAmount, open]);
 
-  // Preencher dados iniciais ao abrir
+  // Preencher dados iniciais ao abrir e atualizar reserva se necessário
   useEffect(() => {
     if (open && reservation) {
+      // Buscar dados atualizados da reserva para garantir que temos as informações mais recentes
+      const refreshReservation = async () => {
+        try {
+          const { data: freshReservation } = await supabase
+            .from("reservations")
+            .select(`
+              *,
+              financial_responsible:clients!client_id(*),
+              guest:clients!guest_id(*),
+              rooms (*),
+              room_categories (*)
+            `)
+            .eq("id", reservation.id)
+            .single();
+          
+          if (freshReservation) {
+            // Invalidar queries para atualizar dados em outros componentes
+            queryClient.invalidateQueries({ queryKey: ["reservations"] });
+            queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
+          }
+        } catch (error) {
+          console.warn("Erro ao atualizar dados da reserva:", error);
+          // Continuar mesmo se houver erro
+        }
+      };
+      
+      refreshReservation();
+      
       setPaymentDate(new Date());
       setObservations("");
       setSelectedCarrierId("");
       setSelectedPaymentTypeId("");
       setInstallments("1");
     }
-  }, [open, reservation]);
+  }, [open, reservation, queryClient]);
 
   const handleSubmit = async () => {
     if (!selectedComponent) {
@@ -832,16 +1093,20 @@ export function ReservationPaymentModal({
 
       toast.success("Pagamento lançado com sucesso!");
       
-      // Invalidar e refetch todas as queries relacionadas para atualizar o mapa em tempo real
-      await queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
-      await queryClient.invalidateQueries({ queryKey: ["reservations"] });
-      await queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+      // Invalidar todas as queries relacionadas para forçar atualização
+      queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       
-      // Aguardar um pouco para garantir que o banco processou a inserção
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Aguardar um pouco para garantir que o banco processou a inserção e propagou os relacionamentos
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       // Refetch explícito para garantir que os dados sejam atualizados imediatamente
-      await queryClient.refetchQueries({ queryKey: ["reservation_payments", reservation.id] });
+      // Isso garante que os relacionamentos (payment_carriers, payment_types) sejam carregados
+      await queryClient.refetchQueries({ 
+        queryKey: ["reservation_payments", reservation.id],
+        exact: true 
+      });
       await queryClient.refetchQueries({ queryKey: ["reservations"] });
       
       // Resetar estados antes de fechar o modal
@@ -941,7 +1206,15 @@ export function ReservationPaymentModal({
                 )}
                 
                 {/* Extensão da Reserva (Diárias Adicionadas) */}
-                {extensionAmount > 0 && paymentBreakdown.extensionAmountPending > 0 && (
+                {/* IMPORTANTE: Só mostrar se NÃO estamos em modo "sem pagamentos" (onde não há extensão separada) */}
+                {/* Só mostrar se houver extensão E saldo pendente maior que 0.01 (tolerância para diferenças de centavos) */}
+                {/* Verificação adicional: garantir que realmente há saldo pendente e que não foi totalmente pago */}
+                {!paymentBreakdown.hasNoPayments &&
+                 paymentBreakdown.extensionAmount > 0 && 
+                 paymentBreakdown.extensionAmountPending > 0.01 && 
+                 originalCheckoutDate &&
+                 paymentBreakdown.extensionAmountPending <= paymentBreakdown.extensionAmount &&
+                 Math.round(paymentBreakdown.extensionAmountPending * 100) > 0 && (
                   <div className="flex items-center justify-between p-2 rounded-md bg-blue-50 hover:bg-blue-100 transition-colors border-2 border-blue-200">
                     <div className="flex items-center gap-3 flex-1">
                       <RadioGroupItem value="extension" id="extension" />
@@ -949,7 +1222,7 @@ export function ReservationPaymentModal({
                         <TrendingUp className="h-4 w-4 text-blue-600" />
                         <div className="flex flex-col">
                           <span className="text-sm text-blue-700 font-semibold">Diárias Adicionadas (Extensão da Reserva)</span>
-                          {originalCheckoutDate && reservation?.checkout_date && (
+                          {reservation?.checkout_date && (
                             <span className="text-xs text-blue-600 mt-0.5 font-medium">
                               Período estendido: {format(parseISO(originalCheckoutDate), "dd/MM/yyyy", { locale: ptBR })} → {format(parseISO(reservation.checkout_date), "dd/MM/yyyy", { locale: ptBR })}
                             </span>

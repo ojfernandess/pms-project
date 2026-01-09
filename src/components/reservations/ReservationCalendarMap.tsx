@@ -255,6 +255,8 @@ export const ReservationCalendarMap = ({
   const mouseDownPositionRef = useRef<{ x: number; y: number } | null>(null);
   const isActualDragRef = useRef<boolean>(false);
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const cellCacheRef = useRef<Map<string, HTMLElement>>(new Map());
+  const lastHoveredCellRef = useRef<{ dateIndex: number; roomId: string } | null>(null);
 
   // Calcular datas visíveis (normalizadas para início do dia para evitar problemas de timezone)
   // Inclui o dia anterior ao startDate para mostrar reservas que começaram no dia anterior
@@ -676,7 +678,6 @@ export const ReservationCalendarMap = ({
     try {
       // Validar dados da reserva
       if (!isValidReservation(reservation)) {
-        console.warn("⚠️ Reserva inválida em getReservationPosition:", reservation.id);
         return { startIndex: -1, duration: 0, isVisible: false };
       }
 
@@ -696,7 +697,6 @@ export const ReservationCalendarMap = ({
 
       // Validar datas parseadas
       if (isNaN(checkin.getTime()) || isNaN(checkout.getTime())) {
-        console.warn("⚠️ Datas inválidas em getReservationPosition:", { checkinStr, checkoutStr });
         return { startIndex: -1, duration: 0, isVisible: false };
       }
 
@@ -735,7 +735,6 @@ export const ReservationCalendarMap = ({
       
       // Se a duração total é inválida, não mostrar
       if (totalDuration <= 0) {
-        console.warn("⚠️ Duração total inválida em getReservationPosition:", totalDuration, { checkinStr, checkoutStr });
         return { startIndex: -1, duration: 0, isVisible: false };
       }
       
@@ -1090,7 +1089,7 @@ export const ReservationCalendarMap = ({
     toast.success(`Reserva ${reservation.reservation_code} selecionada para troca. Clique em outra reserva para trocar.`);
   };
 
-  const handleReservationMouseDown = (e: React.MouseEvent, reservation: any) => {
+  const handleReservationMouseDown = useCallback((e: React.MouseEvent, reservation: any) => {
     // Se for botão direito, não fazer drag
     if (e.button === 2) {
       return;
@@ -1140,15 +1139,7 @@ export const ReservationCalendarMap = ({
     // Armazenar temporariamente (será usado se houver movimento)
     setDraggedReservation(dragData);
     setDragPosition({ x: e.clientX, y: e.clientY });
-    
-    console.log("🎯 Mouse down na reserva:", {
-      reservation: reservation.reservation_code,
-      offsetX,
-      offsetY,
-      clientX: e.clientX,
-      clientY: e.clientY
-    });
-  };
+  }, [canUpdate, canAccess, getReservationPosition]);
 
   const handleReservationMouseMove = useCallback((e: MouseEvent) => {
     if (!draggedReservation || !mouseDownPositionRef.current) return;
@@ -1183,7 +1174,7 @@ export const ReservationCalendarMap = ({
     setDragPosition({ x: mouseX, y: mouseY });
     lastMousePositionRef.current = { x: mouseX, y: mouseY };
 
-    // Usar requestAnimationFrame apenas para detecção de célula (pode ser throttled)
+    // Usar requestAnimationFrame apenas para detecção de célula (throttled)
     if (animationFrameRef.current) {
       return; // Já tem uma detecção em andamento, pular esta
     }
@@ -1192,26 +1183,44 @@ export const ReservationCalendarMap = ({
       animationFrameRef.current = null;
 
       const pos = lastMousePositionRef.current;
-      if (!pos) return;
+      if (!pos || !gridRef.current) return;
 
       // Usar elementFromPoint para encontrar a célula exata sob o cursor
       const elementUnderMouse = document.elementFromPoint(pos.x, pos.y);
       
       if (!elementUnderMouse) return;
 
-      // Buscar a célula mais próxima com data-room-id
+      // Buscar a célula mais próxima com data-room-id (otimizado com cache)
       let cellElement = elementUnderMouse.closest('[data-room-id]') as HTMLElement;
       
-      if (!cellElement && gridRef.current?.contains(elementUnderMouse)) {
-        // Se não encontrou diretamente, buscar no grid
-        const cells = gridRef.current.querySelectorAll('[data-room-id]');
-        cells.forEach((cell) => {
-          const rect = cell.getBoundingClientRect();
+      if (!cellElement && gridRef.current.contains(elementUnderMouse)) {
+        // Se não encontrou diretamente, tentar usar cache primeiro
+        const cacheKey = `${Math.floor(pos.x / 100)}_${Math.floor(pos.y / 50)}`;
+        const cachedCell = cellCacheRef.current.get(cacheKey);
+        
+        if (cachedCell && gridRef.current.contains(cachedCell)) {
+          const rect = cachedCell.getBoundingClientRect();
           if (pos.x >= rect.left && pos.x <= rect.right &&
               pos.y >= rect.top && pos.y <= rect.bottom) {
-            cellElement = cell as HTMLElement;
+            cellElement = cachedCell;
           }
-        });
+        }
+        
+        // Se cache não funcionou, buscar no grid (mais lento)
+        if (!cellElement) {
+          const cells = gridRef.current.querySelectorAll('[data-room-id]');
+          for (let i = 0; i < cells.length; i++) {
+            const cell = cells[i] as HTMLElement;
+            const rect = cell.getBoundingClientRect();
+            if (pos.x >= rect.left && pos.x <= rect.right &&
+                pos.y >= rect.top && pos.y <= rect.bottom) {
+              cellElement = cell;
+              // Atualizar cache
+              cellCacheRef.current.set(cacheKey, cell);
+              break;
+            }
+          }
+        }
       }
 
       if (cellElement) {
@@ -1221,22 +1230,16 @@ export const ReservationCalendarMap = ({
         if (roomId && dateIndexStr !== null) {
           const dateIndex = parseInt(dateIndexStr, 10);
           
-          // Só atualizar se mudou
-          if (!hoveredCell || hoveredCell.roomId !== roomId || hoveredCell.dateIndex !== dateIndex) {
+          // Só atualizar se mudou (usar ref para evitar re-render desnecessário)
+          const lastCell = lastHoveredCellRef.current;
+          if (!lastCell || lastCell.roomId !== roomId || lastCell.dateIndex !== dateIndex) {
+            lastHoveredCellRef.current = { dateIndex, roomId };
             setHoveredCell({ dateIndex, roomId });
-            
-            console.log("🎯 Nova célula detectada:", {
-              dateIndex,
-              date: format(visibleDates[dateIndex], "dd/MM/yyyy"),
-              roomId: roomId.substring(0, 8),
-              mouseX: pos.x,
-              mouseY: pos.y
-            });
           }
         }
       }
     });
-  }, [draggedReservation, visibleDates, hoveredCell]);
+  }, [draggedReservation]);
 
   const handleReservationMouseUp = useCallback(async () => {
     // Limpar animation frame
@@ -1249,12 +1252,14 @@ export const ReservationCalendarMap = ({
     const wasDrag = isActualDragRef.current;
     mouseDownPositionRef.current = null;
     isActualDragRef.current = false;
+    lastHoveredCellRef.current = null;
 
     // Se não foi um drag real (foi apenas um clique), limpar e retornar
     if (!wasDrag) {
       setDraggedReservation(null);
       setDragPosition(null);
       setHoveredCell(null);
+      cellCacheRef.current.clear();
       return;
     }
 
@@ -1262,6 +1267,7 @@ export const ReservationCalendarMap = ({
       setDraggedReservation(null);
       setDragPosition(null);
       setHoveredCell(null);
+      cellCacheRef.current.clear();
       return;
     }
 
@@ -1269,11 +1275,12 @@ export const ReservationCalendarMap = ({
       // Validar dados da reserva original
       if (!isValidReservation(draggedReservation.reservation)) {
         toast.error("Dados da reserva inválidos");
-      setDraggedReservation(null);
+        setDraggedReservation(null);
         setDragPosition(null);
-      setHoveredCell(null);
-      return;
-    }
+        setHoveredCell(null);
+        cellCacheRef.current.clear();
+        return;
+      }
 
       // Validar índice da célula
       if (hoveredCell.dateIndex < 0 || hoveredCell.dateIndex >= visibleDates.length) {
@@ -1281,6 +1288,7 @@ export const ReservationCalendarMap = ({
         setDraggedReservation(null);
         setDragPosition(null);
         setHoveredCell(null);
+        cellCacheRef.current.clear();
         return;
       }
 
@@ -2225,26 +2233,36 @@ export const ReservationCalendarMap = ({
     setPendingSwap(null);
   }, []);
 
+  // Limpar cache de células quando necessário
+  useEffect(() => {
+    // Limpar cache quando as datas visíveis mudarem
+    cellCacheRef.current.clear();
+    lastHoveredCellRef.current = null;
+  }, [visibleDates]);
+
   // Listener global para drag de reserva
   useEffect(() => {
     if (!draggedReservation) {
       // Limpar referências quando não há drag
       mouseDownPositionRef.current = null;
       isActualDragRef.current = false;
+      lastHoveredCellRef.current = null;
       if (clickTimeoutRef.current) {
         clearTimeout(clickTimeoutRef.current);
         clickTimeoutRef.current = null;
       }
+      // Limpar cache quando drag termina
+      cellCacheRef.current.clear();
       return;
     }
 
-    document.addEventListener("mousemove", handleReservationMouseMove);
+    document.addEventListener("mousemove", handleReservationMouseMove, { passive: true });
     document.addEventListener("mouseup", handleReservationMouseUp);
     
     // Só mudar cursor se for drag real
     if (isActualDragRef.current) {
-    document.body.style.cursor = "grabbing";
-    document.body.style.userSelect = "none";
+      document.body.style.cursor = "grabbing";
+      document.body.style.userSelect = "none";
     }
 
     return () => {
@@ -2252,6 +2270,11 @@ export const ReservationCalendarMap = ({
       document.removeEventListener("mouseup", handleReservationMouseUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      // Limpar animation frame ao desmontar
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
     };
   }, [draggedReservation, handleReservationMouseMove, handleReservationMouseUp]);
 

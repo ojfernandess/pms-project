@@ -2666,10 +2666,10 @@ export async function sendStayReviewRequestEmail(
  */
 async function findEmailTemplate(eventType: string, establishmentId?: string) {
   let templatesQuery = supabase
-    .from('email_templates')
-    .select('*')
-    .eq('event_type', eventType)
-    .eq('is_active', true)
+      .from('email_templates')
+      .select('*')
+      .eq('event_type', eventType)
+      .eq('is_active', true)
     .order('updated_at', { ascending: false });
   
   // Se houver establishment_id, filtrar templates que permitem este estabelecimento
@@ -2766,14 +2766,14 @@ async function findEmailTemplate(eventType: string, establishmentId?: string) {
   
   if (error) {
     console.warn(`⚠️ Erro ao buscar template para evento: ${eventType}`, error);
-    return null;
-  }
-  
-  if (!templates || templates.length === 0) {
-    console.warn(`⚠️ Template não encontrado para evento: ${eventType}`);
-    return null;
-  }
-  
+      return null;
+    }
+
+    if (!templates || templates.length === 0) {
+      console.warn(`⚠️ Template não encontrado para evento: ${eventType}`);
+      return null;
+    }
+
   return templates[0];
 }
 
