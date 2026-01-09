@@ -84,6 +84,7 @@ export function EmailTemplatesManager() {
     { value: "reservation.cancelled", label: "Reserva Cancelada" },
     { value: "reservation.overbooking", label: "Overbooking Detectado" },
     { value: "reservation.extended", label: "Extensão de Reserva" },
+    { value: "reservation.modified", label: "Alteração de Reserva" },
     { value: "preregistration.expired", label: "Pré-reserva Cancelada por Expiração" },
     { value: "payment.confirmed", label: "Pagamento Confirmado" },
     { value: "payment.pending", label: "Pagamento Pendente" },

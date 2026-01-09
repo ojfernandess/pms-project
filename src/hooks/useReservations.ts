@@ -554,47 +554,45 @@ export const useReservations = () => {
     mutationFn: async ({ id, ...updates }: { id: string } & ReservationUpdate) => {
       console.log("🔄 useReservations.updateReservation chamado:", { id: id.substring(0, 8), updates });
       
+      // IMPORTANTE: Buscar dados ANTIGOS da reserva ANTES de atualizar para detectar alterações
+      const { data: oldReservation } = await supabase
+        .from("reservations")
+        .select(`
+          checkin_date,
+          checkout_date,
+          room_id,
+          category_id,
+          rooms (room_number, name),
+          room_categories (name)
+        `)
+        .eq("id", id)
+        .single();
+      
       // Detectar se é uma extensão de reserva (checkout_date sendo atualizado para uma data posterior)
       // IMPORTANTE: Verificar ANTES de fazer o update para ter a data original
       let isExtension = false;
       let oldCheckoutDate: string | null = null;
       let newCheckoutDate: string | null = null;
       
-      if (updates.checkout_date) {
-        // Buscar checkout_date atual da reserva ANTES de atualizar
-        const { data: currentReservation } = await supabase
-          .from("reservations")
-          .select("checkout_date")
-          .eq("id", id)
-          .single();
+      if (updates.checkout_date && oldReservation?.checkout_date) {
+        oldCheckoutDate = oldReservation.checkout_date;
+        newCheckoutDate = updates.checkout_date;
         
-        if (currentReservation?.checkout_date) {
-          oldCheckoutDate = currentReservation.checkout_date;
-          newCheckoutDate = updates.checkout_date;
-          
-          // Comparar datas para verificar se é uma extensão
-          // Normalizar datas para comparação (ignorar hora)
-          const oldDate = new Date(oldCheckoutDate);
-          oldDate.setHours(0, 0, 0, 0);
-          const newDate = new Date(newCheckoutDate);
-          newDate.setHours(0, 0, 0, 0);
-          
-          if (newDate > oldDate) {
-            isExtension = true;
-            console.log("📅 Extensão de reserva detectada:", {
-              oldCheckout: oldCheckoutDate,
-              newCheckout: newCheckoutDate,
-              oldDate: oldDate.toISOString(),
-              newDate: newDate.toISOString()
-            });
-          } else {
-            console.log("📅 Não é extensão (data não aumentou):", {
-              oldCheckout: oldCheckoutDate,
-              newCheckout: newCheckoutDate
-            });
-          }
-        } else {
-          console.warn("⚠️ Não foi possível obter checkout_date atual da reserva para verificar extensão");
+        // Comparar datas para verificar se é uma extensão
+        // Normalizar datas para comparação (ignorar hora)
+        const oldDate = new Date(oldCheckoutDate);
+        oldDate.setHours(0, 0, 0, 0);
+        const newDate = new Date(newCheckoutDate);
+        newDate.setHours(0, 0, 0, 0);
+        
+        if (newDate > oldDate) {
+          isExtension = true;
+          console.log("📅 Extensão de reserva detectada:", {
+            oldCheckout: oldCheckoutDate,
+            newCheckout: newCheckoutDate,
+            oldDate: oldDate.toISOString(),
+            newDate: newDate.toISOString()
+          });
         }
       }
       
@@ -648,6 +646,113 @@ export const useReservations = () => {
           oldCheckout: oldCheckoutDate,
           newCheckout: newCheckoutDate
         });
+      }
+      
+      // Detectar alterações relevantes para enviar email de modificação
+      if (oldReservation) {
+        // Normalizar datas para comparação (remover hora se houver)
+        const normalizeDate = (dateStr: string | null | undefined): string | null => {
+          if (!dateStr) return null;
+          return dateStr.split('T')[0]; // Pegar apenas a parte da data (YYYY-MM-DD)
+        };
+        
+        const oldCheckinNormalized = normalizeDate(oldReservation.checkin_date);
+        const newCheckinNormalized = normalizeDate(updates.checkin_date);
+        const oldCheckoutNormalized = normalizeDate(oldReservation.checkout_date);
+        const newCheckoutNormalized = normalizeDate(updates.checkout_date);
+        
+        const checkinChanged = updates.checkin_date !== undefined && oldCheckinNormalized !== newCheckinNormalized;
+        const checkoutChanged = updates.checkout_date !== undefined && oldCheckoutNormalized !== newCheckoutNormalized && !isExtension; // Não enviar se for extensão (já tem email próprio)
+        // Verificar mudança de quarto: quando room_id está no updates e é diferente do antigo, OU quando era null e agora tem valor, OU quando tinha valor e agora é null
+        const roomChanged = updates.room_id !== undefined && (
+          (updates.room_id !== null && oldReservation.room_id !== updates.room_id) ||
+          (updates.room_id === null && oldReservation.room_id !== null) ||
+          (updates.room_id !== null && oldReservation.room_id === null)
+        );
+        // Verificar mudança de categoria: quando category_id está no updates e é diferente do antigo, OU quando era null e agora tem valor, OU quando tinha valor e agora é null
+        const categoryChanged = updates.category_id !== undefined && (
+          (updates.category_id !== null && oldReservation.category_id !== updates.category_id) ||
+          (updates.category_id === null && oldReservation.category_id !== null) ||
+          (updates.category_id !== null && oldReservation.category_id === null)
+        );
+        
+        // Verificar se houve alteração de categoria mesmo sem mudança explícita de category_id (quando muda o quarto)
+        const categoryChangedByRoom = roomChanged && data.room_categories?.name && oldReservation.room_categories?.name && 
+          data.room_categories.name !== oldReservation.room_categories.name;
+        
+        console.log("🔍 Verificando alterações na reserva:", {
+          updatesKeys: Object.keys(updates),
+          checkinChanged,
+          checkoutChanged,
+          roomChanged,
+          categoryChanged,
+          categoryChangedByRoom,
+          isExtension,
+          oldCheckin: oldCheckinNormalized,
+          newCheckin: newCheckinNormalized,
+          oldCheckout: oldCheckoutNormalized,
+          newCheckout: newCheckoutNormalized,
+          oldRoomId: oldReservation.room_id?.substring(0, 8) || "null",
+          newRoomId: updates.room_id?.substring(0, 8) || "null",
+          oldCategoryId: oldReservation.category_id?.substring(0, 8) || "null",
+          newCategoryId: updates.category_id?.substring(0, 8) || "null",
+        });
+        
+        if (checkinChanged || checkoutChanged || roomChanged || categoryChanged || categoryChangedByRoom) {
+          console.log("📧 Alteração detectada na reserva, enviando email de modificação:", {
+            checkinChanged,
+            checkoutChanged,
+            roomChanged,
+            categoryChanged,
+            categoryChangedByRoom,
+            oldCheckin: oldCheckinNormalized,
+            newCheckin: newCheckinNormalized,
+            oldCheckout: oldCheckoutNormalized,
+            newCheckout: newCheckoutNormalized
+          });
+          
+          try {
+            const { triggerEmail } = await import("@/lib/emailService");
+            const { formatDate } = await import("@/lib/emailTemplateEngine");
+            
+            // Preparar variáveis adicionais para o template
+            const additionalVariables: Record<string, any> = {
+              checkin_date_changed: checkinChanged || checkoutChanged,
+              room_changed: roomChanged,
+              category_changed: categoryChanged || categoryChangedByRoom,
+            };
+            
+            // Adicionar valores antigos se houver alteração
+            if (checkinChanged || checkoutChanged) {
+              if (oldReservation.checkin_date) {
+                additionalVariables.old_checkin_date = formatDate(oldReservation.checkin_date);
+              }
+              if (oldReservation.checkout_date) {
+                additionalVariables.old_checkout_date = formatDate(oldReservation.checkout_date);
+              }
+            }
+            
+            if (roomChanged) {
+              if (oldReservation.rooms?.room_number) {
+                additionalVariables.old_room_number = oldReservation.rooms.room_number;
+              }
+              if (oldReservation.rooms?.name) {
+                additionalVariables.old_room_name = oldReservation.rooms.name;
+              }
+            }
+            
+            if (categoryChanged || categoryChangedByRoom) {
+              if (oldReservation.room_categories?.name) {
+                additionalVariables.old_category_name = oldReservation.room_categories.name;
+              }
+            }
+            
+            await triggerEmail('reservation.modified', data, additionalVariables);
+          } catch (emailError) {
+            console.error("❌ Erro ao enviar email de modificação:", emailError);
+            // Não bloquear a atualização se o email falhar
+          }
+        }
       }
       
       // Invalidar cache de web_checkin sempre que a reserva for atualizada

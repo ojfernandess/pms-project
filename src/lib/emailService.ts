@@ -2778,7 +2778,7 @@ async function findEmailTemplate(eventType: string, establishmentId?: string) {
 }
 
 export async function triggerEmail(
-  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification' | 'checkout.completed' | 'preregistration.expired',
+  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification' | 'checkout.completed' | 'preregistration.expired' | 'reservation.modified',
   reservation: any,
   additionalVariables?: TemplateVariables,
   customRecipientEmail?: string

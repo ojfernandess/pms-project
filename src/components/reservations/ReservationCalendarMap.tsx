@@ -1474,6 +1474,28 @@ export const ReservationCalendarMap = ({
         return;
       }
 
+      // Normalizar datas antigas para comparação
+      const normalizeDate = (dateStr: string): string => {
+        if (!dateStr || dateStr === "N/A") return "";
+        // Se já está no formato YYYY-MM-DD, retornar como está
+        if (dateStr.includes('-') && dateStr.length === 10) return dateStr.split('T')[0];
+        // Se está no formato DD/MM/YYYY, converter
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+          return `${parts[2]}-${parts[1]}-${parts[0]}`;
+        }
+        return dateStr.split('T')[0];
+      };
+
+      const oldCheckinNormalized = normalizeDate(pendingMove.oldCheckin);
+      const oldCheckoutNormalized = normalizeDate(pendingMove.oldCheckout);
+      
+      // Detectar alterações antes de atualizar
+      const checkinChanged = oldCheckinNormalized !== newCheckinDB;
+      const checkoutChanged = oldCheckoutNormalized !== newCheckoutDB;
+      const roomChanged = pendingMove.reservation.room_id !== pendingMove.newRoomId;
+      const categoryChanged = pendingMove.reservation.category_id !== pendingMove.newCategoryId;
+
       const { error } = await supabase
         .from("reservations")
         .update({
@@ -1490,10 +1512,16 @@ export const ReservationCalendarMap = ({
         return;
       }
 
-      // Buscar dados atualizados da reserva para log
+      // Buscar dados atualizados da reserva para log e email
       const { data: updatedReservation } = await supabase
         .from("reservations")
-        .select("reservation_code, rooms(room_number), room_categories(name)")
+        .select(`
+          *,
+          financial_responsible:clients!client_id(*),
+          guest:clients!guest_id(*),
+          rooms (*),
+          room_categories (*)
+        `)
         .eq("id", pendingMove.reservation.id)
         .single();
 
@@ -1529,6 +1557,58 @@ export const ReservationCalendarMap = ({
         });
       } catch (logError) {
         console.error("Erro ao registrar log de movimentação:", logError);
+      }
+
+      // Enviar email de modificação se houver alterações relevantes
+      if (updatedReservation && (checkinChanged || checkoutChanged || roomChanged || categoryChanged)) {
+        try {
+          const { triggerEmail } = await import("@/lib/emailService");
+          const { formatDate } = await import("@/lib/emailTemplateEngine");
+          
+          console.log("📧 Alteração detectada na movimentação de reserva, enviando email:", {
+            checkinChanged,
+            checkoutChanged,
+            roomChanged,
+            categoryChanged
+          });
+          
+          // Preparar variáveis adicionais para o template
+          const additionalVariables: Record<string, any> = {
+            checkin_date_changed: checkinChanged || checkoutChanged,
+            room_changed: roomChanged,
+            category_changed: categoryChanged,
+          };
+          
+          // Adicionar valores antigos se houver alteração
+          if (checkinChanged || checkoutChanged) {
+            if (pendingMove.oldCheckin) {
+              additionalVariables.old_checkin_date = formatDate(normalizeDate(pendingMove.oldCheckin));
+            }
+            if (pendingMove.oldCheckout) {
+              additionalVariables.old_checkout_date = formatDate(normalizeDate(pendingMove.oldCheckout));
+            }
+          }
+          
+          if (roomChanged) {
+            if (pendingMove.reservation.rooms?.room_number) {
+              additionalVariables.old_room_number = pendingMove.reservation.rooms.room_number;
+            }
+            if (pendingMove.reservation.rooms?.name) {
+              additionalVariables.old_room_name = pendingMove.reservation.rooms.name;
+            }
+          }
+          
+          if (categoryChanged) {
+            if (pendingMove.reservation.room_categories?.name) {
+              additionalVariables.old_category_name = pendingMove.reservation.room_categories.name;
+            }
+          }
+          
+          await triggerEmail('reservation.modified', updatedReservation, additionalVariables);
+        } catch (emailError) {
+          console.error("❌ Erro ao enviar email de modificação:", emailError);
+          // Não bloquear a movimentação se o email falhar
+        }
       }
 
       // Invalidar queries para atualizar a UI
