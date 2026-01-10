@@ -199,7 +199,7 @@ const UserDashboard = () => {
   const isEmployee = employeeEstablishmentIds.size > 0;
 
   // Filtrar empresas baseado se o usuário é funcionário ou proprietário
-  // - Se o usuário É funcionário (tem registros em employees): mostrar APENAS empresas onde ele é funcionário
+  // - Se o usuário É funcionário (tem registros em employees): mostrar empresas onde ele é proprietário (owner/admin) OU onde trabalha como funcionário
   // - Se o usuário NÃO é funcionário: mostrar todas as empresas (é proprietário)
   const companies = useMemo(() => {
     if (isLoadingEmployeeData) {
@@ -208,11 +208,26 @@ const UserDashboard = () => {
     }
     
     if (isEmployee) {
-      // Usuário é funcionário: mostrar apenas empresas onde ele trabalha
+      // Usuário é funcionário: mostrar empresas onde ele é proprietário (owner/admin ou sem role definido) OU onde trabalha como funcionário
       const filtered = userCompanies
-        .map((uc: any) => uc.companies)
-        .filter((company: any) => company && employeeCompanyIds.has(company.id));
-      console.log("Funcionário - Empresas filtradas:", filtered.length, "de", userCompanies.length);
+        .map((uc: any) => {
+          const company = uc.companies;
+          if (!company) return null;
+          
+          // Verificar se é proprietário:
+          // - Se tiver role definido: role = 'owner' ou 'admin'
+          // - Se não tiver role definido: está em user_companies, então é proprietário por padrão
+          const hasRole = uc.role !== undefined && uc.role !== null;
+          const isOwner = hasRole 
+            ? (uc.role === 'owner' || uc.role === 'admin')
+            : true; // Se não tem role definido, assume que é proprietário
+          const isEmployeeOfCompany = employeeCompanyIds.has(company.id);
+          
+          // Mostrar se for proprietário OU funcionário
+          return (isOwner || isEmployeeOfCompany) ? company : null;
+        })
+        .filter(Boolean);
+      console.log("Funcionário - Empresas filtradas:", filtered.length, "de", userCompanies.length, "(proprietário + funcionário)");
       return filtered;
     } else {
       // Usuário não é funcionário: mostrar todas as empresas (é proprietário)
@@ -264,7 +279,15 @@ const UserDashboard = () => {
 
       if (userCompanyError) throw userCompanyError;
 
-      queryClient.invalidateQueries({ queryKey: ["user_companies"] });
+      // Invalidar todas as queries relacionadas a user_companies (incluindo as com userId)
+      await queryClient.invalidateQueries({ 
+        queryKey: ["user_companies"],
+        exact: false // Invalida todas as queries que começam com ["user_companies"]
+      });
+      // Invalidar também all_user_companies para atualizar outras partes do sistema
+      await queryClient.invalidateQueries({ queryKey: ["all_user_companies"] });
+      // Refetch imediatamente para atualizar a lista
+      await refetchUserCompanies();
       toast.success("Empresa criada com sucesso!");
       setCompanyDialogOpen(false);
       setCompanyFormData({ name: "", cnpj: "", email: "" });
@@ -331,7 +354,11 @@ const UserDashboard = () => {
         )}
       </div>
 
-      {isLoadingCompanies || isLoadingEmployeeData ? (
+      {isLoadingCompanies ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : isLoadingEmployeeData && companies.length === 0 ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>

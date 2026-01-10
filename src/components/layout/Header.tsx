@@ -1,4 +1,4 @@
-import { Menu, User, Settings, LogOut, UserCircle, Building2, ChevronDown } from "lucide-react";
+import { Menu, User, Settings, LogOut, UserCircle, Building2, ChevronDown, Briefcase } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,6 +17,8 @@ import { LanguageSelector } from "./LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { useCurrentEmployeeRole } from "@/hooks/useEmployees";
 import { useIsSuperAdmin } from "@/hooks/useUsers";
+import { useUserCompanies } from "@/hooks/useUserCompanies";
+import { useMemo } from "react";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -30,12 +32,42 @@ export const Header = ({ onMenuClick }: HeaderProps) => {
   const { role } = useCurrentEmployeeRole();
   const { isSuperAdmin } = useIsSuperAdmin();
   const { t } = useTranslation();
+  const { userCompanies } = useUserCompanies();
   
   // Verificar se o usuário pode acessar configurações (apenas gerente ou super admin)
   const canAccessSettings = role?.code === "manager" || isSuperAdmin;
   
   // Usar establishmentId da URL ou do contexto (numeric_id)
   const currentEstablishmentId = establishmentId || (selectedEstablishment?.numeric_id?.toString());
+  
+  // Agrupar estabelecimentos por empresa
+  const establishmentsByCompany = useMemo(() => {
+    const grouped: Record<string, { company: any; establishments: Array<typeof selectedEstablishment> }> = {};
+    
+    establishments.forEach((est: any) => {
+      if (!est.company_id) return;
+      
+      // Buscar a empresa correspondente
+      const userCompany = userCompanies.find((uc: any) => uc.company_id === est.company_id);
+      if (!userCompany?.companies) return;
+      
+      const company = userCompany.companies;
+      
+      if (!grouped[company.id]) {
+        grouped[company.id] = {
+          company,
+          establishments: [],
+        };
+      }
+      
+      grouped[company.id].establishments.push(est);
+    });
+    
+    return grouped;
+  }, [establishments, userCompanies]);
+  
+  // Verificar se há mais de uma empresa com estabelecimentos
+  const hasMultipleCompanies = Object.keys(establishmentsByCompany).length > 1;
   
   // Handler para trocar de estabelecimento
   const handleEstablishmentChange = (establishment: typeof selectedEstablishment) => {
@@ -105,26 +137,59 @@ export const Header = ({ onMenuClick }: HeaderProps) => {
                 <ChevronDown className="h-4 w-4 opacity-50" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuContent align="start" className={hasMultipleCompanies ? "w-72" : "w-56"}>
               <DropdownMenuLabel>
                 {t("header.selectEstablishment") || "Selecionar Estabelecimento"}
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {establishments.map((establishment) => (
-                <DropdownMenuItem
-                  key={establishment.id}
-                  onSelect={() => handleEstablishmentChange(establishment)}
-                  className={selectedEstablishment.id === establishment.id ? "bg-accent" : ""}
-                >
-                  <div className="flex items-center gap-2">
-                    <Building2 className="h-4 w-4" />
-                    <span>{establishment.name}</span>
-                    {selectedEstablishment.id === establishment.id && (
-                      <span className="ml-auto text-xs text-muted-foreground">✓</span>
+              {hasMultipleCompanies ? (
+                // Mostrar agrupado por empresa se houver múltiplas empresas
+                Object.values(establishmentsByCompany).map(({ company, establishments: companyEstablishments }, companyIndex, companiesArray) => (
+                  <div key={company.id}>
+                    <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground px-2 py-1.5">
+                      <div className="flex items-center gap-2">
+                        <Briefcase className="h-3.5 w-3.5" />
+                        <span>{company.name}</span>
+                      </div>
+                    </DropdownMenuLabel>
+                    {companyEstablishments.map((establishment) => (
+                      <DropdownMenuItem
+                        key={establishment.id}
+                        onSelect={() => handleEstablishmentChange(establishment)}
+                        className={`pl-6 ${selectedEstablishment.id === establishment.id ? "bg-accent" : ""}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4" />
+                          <span>{establishment.name}</span>
+                          {selectedEstablishment.id === establishment.id && (
+                            <span className="ml-auto text-xs text-muted-foreground">✓</span>
+                          )}
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                    {companyIndex < companiesArray.length - 1 && (
+                      <DropdownMenuSeparator />
                     )}
                   </div>
-                </DropdownMenuItem>
-              ))}
+                ))
+              ) : (
+                // Mostrar lista simples se houver apenas uma empresa
+                establishments.map((establishment) => (
+                  <DropdownMenuItem
+                    key={establishment.id}
+                    onSelect={() => handleEstablishmentChange(establishment)}
+                    className={selectedEstablishment.id === establishment.id ? "bg-accent" : ""}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4" />
+                      <span>{establishment.name}</span>
+                      {selectedEstablishment.id === establishment.id && (
+                        <span className="ml-auto text-xs text-muted-foreground">✓</span>
+                      )}
+                    </div>
+                  </DropdownMenuItem>
+                ))
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
