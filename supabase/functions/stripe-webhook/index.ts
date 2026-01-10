@@ -399,6 +399,7 @@ async function sendReservationExtensionEmail(
     console.log(`📧 Enviando email de extensão de reserva para reserva: ${reservationId}, nova data de check-out: ${newCheckoutDate}`);
     
     // Buscar dados da reserva
+    // IMPORTANTE: Incluir reservation_service_fees para calcular valor total correto
     const { data: reservation, error: reservationError } = await supabaseClient
       .from("reservations")
       .select(`
@@ -406,7 +407,8 @@ async function sendReservationExtensionEmail(
         financial_responsible:clients!client_id(*),
         guest:clients!guest_id(*),
         rooms (id, room_number, name, fixed_password),
-        room_categories (id, name, description, building_id)
+        room_categories (id, name, description, building_id),
+        reservation_service_fees (amount, quantity)
       `)
       .eq("id", reservationId)
       .single();
@@ -578,6 +580,94 @@ async function sendReservationExtensionEmail(
       console.warn("⚠️ Erro ao buscar web_checkin:", error);
     }
 
+    // Buscar configurações do site para obter logo_url
+    let siteSettings: any = null;
+    try {
+      const { data: settings } = await supabaseClient
+        .from("site_settings")
+        .select("logo_url")
+        .maybeSingle();
+      siteSettings = settings;
+    } catch (error) {
+      console.warn("⚠️ Erro ao buscar site_settings:", error);
+    }
+
+    // Processar logo_url e hotel_logo
+    let logoUrl = siteSettings?.logo_url || hotelSettings?.logo_url || null;
+    let hotelLogo = hotelSettings?.logo_url || null;
+
+    // Converter logo_url para URL pública do Supabase Storage se necessário
+    if (logoUrl && !logoUrl.startsWith('http://') && !logoUrl.startsWith('https://')) {
+      try {
+        const possibleBuckets = ['hotel-assets', 'uploads', 'hotel-logos'];
+        
+        for (const bucket of possibleBuckets) {
+          try {
+            let filePath = logoUrl;
+            
+            // Se for hotel-assets e o caminho não começar com "hotel/", adicionar
+            if (bucket === 'hotel-assets' && !filePath.startsWith('hotel/') && !filePath.includes('/')) {
+              filePath = `hotel/${filePath}`;
+            }
+            
+            // Se o caminho contém "/storage/v1/object/public/", extrair apenas o caminho do arquivo
+            if (filePath.includes('/storage/v1/object/public/')) {
+              const match = filePath.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
+              if (match && match[1]) {
+                filePath = match[1];
+              }
+            }
+            
+            const { data } = supabaseClient.storage.from(bucket).getPublicUrl(filePath);
+            if (data?.publicUrl && (data.publicUrl.startsWith('http://') || data.publicUrl.startsWith('https://'))) {
+              logoUrl = data.publicUrl;
+              break;
+            }
+          } catch (error) {
+            continue;
+          }
+        }
+      } catch (error) {
+        console.warn("⚠️ Erro ao converter logo_url:", error);
+      }
+    }
+
+    // Converter hotel_logo para URL pública do Supabase Storage se necessário
+    if (hotelLogo && !hotelLogo.startsWith('http://') && !hotelLogo.startsWith('https://')) {
+      try {
+        const possibleBuckets = ['hotel-assets', 'uploads', 'hotel-logos'];
+        
+        for (const bucket of possibleBuckets) {
+          try {
+            let filePath = hotelLogo;
+            
+            // Se for hotel-assets e o caminho não começar com "hotel/", adicionar
+            if (bucket === 'hotel-assets' && !filePath.startsWith('hotel/') && !filePath.includes('/')) {
+              filePath = `hotel/${filePath}`;
+            }
+            
+            // Se o caminho contém "/storage/v1/object/public/", extrair apenas o caminho do arquivo
+            if (filePath.includes('/storage/v1/object/public/')) {
+              const match = filePath.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
+              if (match && match[1]) {
+                filePath = match[1];
+              }
+            }
+            
+            const { data } = supabaseClient.storage.from(bucket).getPublicUrl(filePath);
+            if (data?.publicUrl && (data.publicUrl.startsWith('http://') || data.publicUrl.startsWith('https://'))) {
+              hotelLogo = data.publicUrl;
+              break;
+            }
+          } catch (error) {
+            continue;
+          }
+        }
+      } catch (error) {
+        console.warn("⚠️ Erro ao converter hotel_logo:", error);
+      }
+    }
+
     const variables: Record<string, any> = {
       guest_name: recipientName || "Hóspede",
       reservation_code: reservationAny.reservation_code || "",
@@ -586,10 +676,17 @@ async function sendReservationExtensionEmail(
       new_checkout_date: newCheckoutDateFormatted, // Nova data de check-out após extensão
       checkin_time: checkinTime,
       checkout_time: checkoutTime,
-      total_amount: new Intl.NumberFormat("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-      }).format(Number(reservationAny.total_amount || 0)),
+      total_amount: (() => {
+        const baseTotalAmount = Number(reservationAny.total_amount || 0);
+        const serviceFeesTotal = (reservationAny.reservation_service_fees || []).reduce((sum: number, fee: any) => {
+          return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
+        }, 0);
+        const totalWithFees = baseTotalAmount + serviceFeesTotal;
+        return new Intl.NumberFormat("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+        }).format(totalWithFees);
+      })(),
       paid_amount: new Intl.NumberFormat("pt-BR", {
         style: "currency",
         currency: "BRL",
@@ -607,6 +704,8 @@ async function sendReservationExtensionEmail(
       hotel_phone: hotelPhone,
       hotel_website: hotelSettings?.website || "",
       web_checkin_link: webCheckinLink,
+      logo_url: logoUrl || "",
+      hotel_logo: hotelLogo || "",
     };
 
     // Processar template com suporte a condicionais {{#if}}
@@ -642,6 +741,10 @@ async function sendReservationExtensionEmail(
           }
         });
       }
+      
+      // Remover qualquer {{/if}} que não foi processado (evitar que apareça no email final)
+      processed = processed.replace(/\{\{\/if\}\}/g, '');
+      
       return processed;
     };
 

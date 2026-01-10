@@ -843,7 +843,11 @@ export async function generateReservationVariables(
       
       // Verificar se há pagamento pendente
       const paymentStatus = reservation.payment_status || 'pending';
-      const totalAmount = Number(reservation.total_amount) || 0;
+      const baseTotalAmount = Number(reservation.total_amount) || 0;
+      const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum: number, fee: any) => {
+        return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
+      }, 0);
+      const totalAmount = baseTotalAmount + serviceFeesTotal;
       const paidAmount = Number(reservation.paid_amount) || 0;
       const pendingAmount = totalAmount - paidAmount;
       
@@ -851,6 +855,8 @@ export async function generateReservationVariables(
         reservation_id: reservation.id,
         establishment_id: establishmentId,
         payment_status: paymentStatus,
+        base_total_amount: baseTotalAmount,
+        service_fees_total: serviceFeesTotal,
         total_amount: totalAmount,
         paid_amount: paidAmount,
         pending_amount: pendingAmount
@@ -1185,6 +1191,13 @@ export async function generateReservationVariables(
     ? reservation.room_categories[0]
     : reservation.room_categories;
 
+  // Calcular valor total incluindo taxas extras
+  const baseTotalAmount = Number(reservation.total_amount || 0);
+  const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum: number, fee: any) => {
+    return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
+  }, 0);
+  const totalWithFees = baseTotalAmount + serviceFeesTotal;
+
   return {
     guest_name: guest?.full_name || client?.full_name || 'Hóspede',
     reservation_code: reservation.reservation_code || '',
@@ -1208,7 +1221,7 @@ export async function generateReservationVariables(
       }
       return time;
     })(),
-    total_amount: reservation.total_amount?.toFixed(2).replace('.', ',') || '0,00',
+    total_amount: totalWithFees.toFixed(2).replace('.', ','),
     paid_amount: reservation.paid_amount?.toFixed(2).replace('.', ',') || '0,00',
     payment_status: getPaymentStatusLabel(reservation.payment_status),
     room_number: roomsData?.room_number || '',

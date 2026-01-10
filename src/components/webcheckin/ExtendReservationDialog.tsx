@@ -73,11 +73,42 @@ export function ExtendReservationDialog({
   const [showContactModal, setShowContactModal] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [occupiedDates, setOccupiedDates] = useState<Set<string>>(new Set());
+  const [serviceFees, setServiceFees] = useState<any[]>([]);
 
   const originalCheckout = reservation?.checkout_date
     ? parseISO(reservation.checkout_date)
     : null;
   const minDate = originalCheckout ? addDays(originalCheckout, 1) : new Date();
+
+  // Buscar taxas extras da reserva se não estiverem presentes
+  useEffect(() => {
+    if (!open || !reservation?.id) return;
+
+    const fetchServiceFees = async () => {
+      // Se já tem reservation_service_fees na reserva, usar elas
+      if (reservation.reservation_service_fees && Array.isArray(reservation.reservation_service_fees)) {
+        setServiceFees(reservation.reservation_service_fees);
+        return;
+      }
+
+      // Caso contrário, buscar do banco
+      try {
+        const { data: fees, error } = await supabase
+          .from("reservation_service_fees")
+          .select("amount, quantity")
+          .eq("reservation_id", reservation.id);
+
+        if (!error && fees) {
+          setServiceFees(fees);
+        }
+      } catch (error) {
+        console.warn("Erro ao buscar taxas extras:", error);
+        setServiceFees([]);
+      }
+    };
+
+    fetchServiceFees();
+  }, [open, reservation?.id, reservation?.reservation_service_fees]);
 
   // Buscar datas ocupadas quando o diálogo abrir
   useEffect(() => {
@@ -382,12 +413,21 @@ export function ExtendReservationDialog({
     const additionalNights = differenceInDays(newCheckoutDate, originalCheckout);
     if (additionalNights <= 0) return null;
 
+    // Calcular valor total atual da reserva incluindo taxas extras
+    const baseTotalAmount = Number(reservation?.total_amount || 0);
+    // Usar serviceFees do estado (que pode vir da reserva ou ser buscado separadamente)
+    const feesToUse = reservation?.reservation_service_fees || serviceFees || [];
+    const serviceFeesTotal = feesToUse.reduce((sum: number, fee: any) => {
+      return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
+    }, 0);
+    const currentTotalWithFees = baseTotalAmount + serviceFeesTotal;
+
     // Se temos preço calculado do tarifário, usar ele
     if (calculatedPrice !== null && calculatedPrice > 0) {
       return {
         additionalNights,
         additionalAmount: calculatedPrice,
-        newTotalAmount: (reservation?.total_amount || 0) + calculatedPrice,
+        newTotalAmount: currentTotalWithFees + calculatedPrice,
       };
     }
 
@@ -400,9 +440,9 @@ export function ExtendReservationDialog({
     return {
       additionalNights,
       additionalAmount,
-      newTotalAmount: (reservation?.total_amount || 0) + additionalAmount,
+      newTotalAmount: currentTotalWithFees + additionalAmount,
     };
-  }, [newCheckoutDate, originalCheckout, reservation, calculatedPrice]);
+  }, [newCheckoutDate, originalCheckout, reservation, calculatedPrice, serviceFees]);
 
   // Verificar disponibilidade antes de permitir extensão usando validateRoomAvailability
   const checkAvailability = async (): Promise<boolean> => {

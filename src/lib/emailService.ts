@@ -2841,6 +2841,7 @@ export async function triggerEmail(
 
     // Buscar dados da reserva com relacionamentos
     // IMPORTANTE: Incluir fixed_password do quarto para variável room_password
+    // IMPORTANTE: Incluir reservation_service_fees para calcular valor total correto
     const { data: fullReservation, error: reservationError } = await supabase
       .from('reservations')
       .select(`
@@ -2848,7 +2849,8 @@ export async function triggerEmail(
         financial_responsible:clients!client_id(*),
         guest:clients!guest_id(*),
         rooms (id, room_number, name, fixed_password, authentication_type),
-        room_categories (id, name, description, building_id)
+        room_categories (id, name, description, building_id),
+        reservation_service_fees (amount, quantity)
       `)
       .eq('id', reservation.id || reservation)
       .single();
