@@ -48,6 +48,7 @@ import { EmployeePermissionsDialog } from "@/components/employees/EmployeePermis
 import { RolePermissionsDialog } from "@/components/employees/RolePermissionsDialog";
 import { sendEmployeeAddedToEstablishmentEmail } from "@/lib/emailService";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
 
 const Employees = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -61,6 +62,7 @@ const Employees = () => {
   const [activeTab, setActiveTab] = useState("employees");
 
   const queryClient = useQueryClient();
+  const { selectedEstablishment } = useEstablishment();
   const { employees, isLoading, createEmployee, updateEmployee, deleteEmployee, refetch } = useEmployees();
   const { roles, isLoading: isLoadingRoles, refetch: refetchRoles } = useEmployeeRoles();
   const { role } = useCurrentEmployeeRole();
@@ -69,9 +71,9 @@ const Employees = () => {
   
   // Buscar usuários da empresa do estabelecimento atual
   const { data: companyUsers = [], isLoading: isLoadingCompanyUsers } = useQuery({
-    queryKey: ["company_users"],
+    queryKey: ["company_users", selectedEstablishment?.id],
     queryFn: async () => {
-      const establishmentId = localStorage.getItem("selectedEstablishmentId");
+      const establishmentId = selectedEstablishment?.id || localStorage.getItem("selectedEstablishmentId");
       if (!establishmentId) {
         return [];
       }
@@ -129,7 +131,7 @@ const Employees = () => {
         phone: user.phone,
       }));
     },
-    enabled: !!localStorage.getItem("selectedEstablishmentId"),
+    enabled: !!(selectedEstablishment?.id || localStorage.getItem("selectedEstablishmentId")),
   });
 
   // Verificar se tem permissão para acessar funcionários (apenas gerentes)
@@ -168,7 +170,7 @@ const Employees = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const establishmentId = localStorage.getItem("selectedEstablishmentId");
+      const establishmentId = selectedEstablishment?.id || localStorage.getItem("selectedEstablishmentId");
       if (!establishmentId) {
         toast.error("Nenhum estabelecimento selecionado");
         return;
@@ -509,14 +511,14 @@ const Employees = () => {
     if (selectedUser) {
       setFormData({
         ...formData,
-        user_id: userId,
+        user_id: userId || "",
         full_name: selectedUser.full_name || "",
         cpf: selectedUser.cpf || "",
         phone: selectedUser.phone || "",
         email: selectedUser.email || "",
       });
     } else {
-      setFormData({ ...formData, user_id: userId });
+      setFormData({ ...formData, user_id: userId || "" });
     }
   };
 
@@ -524,20 +526,20 @@ const Employees = () => {
     setSelectedEmployeeId(employee.id);
     setCreateNewUser(false);
     setFormData({
-      user_id: employee.user_id,
-      role_id: employee.role_id,
-      full_name: employee.full_name,
+      user_id: employee.user_id || "",
+      role_id: employee.role_id || "",
+      full_name: employee.full_name || "",
       cpf: employee.cpf || "",
       phone: employee.phone || "",
       email: employee.email || "",
       password: "",
-      address: "",
-      city: "",
-      state: "",
-      postal_code: "",
-      country: "Brasil",
-      birth_date: "",
-      is_active: employee.is_active,
+      address: employee.address || "",
+      city: employee.city || "",
+      state: employee.state || "",
+      postal_code: employee.postal_code || "",
+      country: employee.country || "Brasil",
+      birth_date: employee.birth_date || "",
+      is_active: employee.is_active ?? true,
     });
     setDialogOpen(true);
   };
@@ -573,6 +575,12 @@ const Employees = () => {
               phone: "",
               email: "",
               password: "",
+              address: "",
+              city: "",
+              state: "",
+              postal_code: "",
+              country: "Brasil",
+              birth_date: "",
               is_active: true,
             });
             setDialogOpen(true);
