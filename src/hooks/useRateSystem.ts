@@ -989,7 +989,7 @@ export const useRateSystem = () => {
 };
 
 // Hook para buscar recomendações de preços
-export const useRateRecommendations = (startDate: Date, endDate: Date, categoryId?: string) => {
+export const useRateRecommendations = (startDate: Date, endDate: Date, categoryId?: string, featureEnabled: boolean = true) => {
   const { selectedEstablishment } = useEstablishment();
   
   return useQuery({
@@ -1011,7 +1011,7 @@ export const useRateRecommendations = (startDate: Date, endDate: Date, categoryI
 
       return data || [];
     },
-    enabled: !!selectedEstablishment?.id,
+    enabled: !!selectedEstablishment?.id && featureEnabled,
   });
 };
 

@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { BarChart3, TrendingUp, DollarSign, Users, Download, Calendar as CalendarIcon, FileSpreadsheet, FileText, ChevronDown } from "lucide-react";
+import { BarChart3, TrendingUp, DollarSign, Users, Download, Calendar as CalendarIcon, FileSpreadsheet, FileText, ChevronDown, CheckCircle2, Loader2 } from "lucide-react";
 import { format, subDays, startOfDay, endOfDay, startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { formatCurrency } from "@/lib/reservationUtils";
+import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import {
   LineChart,
   Line,
@@ -69,15 +70,41 @@ export const RateAnalyticsView = ({
   const [isExporting, setIsExporting] = useState(false);
   const [updatedPrices, setUpdatedPrices] = useState<Record<string, number>>({});
   const [selectedPlansForRecommendations, setSelectedPlansForRecommendations] = useState<Record<string, string>>({});
+  const [planPrices, setPlanPrices] = useState<Record<string, number>>({});
+  const [calculatedSuggestedPrices, setCalculatedSuggestedPrices] = useState<Record<string, number>>({});
 
   const { getMetricsForPeriod } = useRateMetrics();
   const { refetch: refetchRateSystem } = useRateSystem();
   
-  // Buscar recomendações
+  // Verificar se a feature flag de recomendações está habilitada
+  const { data: siteSettings } = useQuery({
+    queryKey: ["site_settings"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('site_settings')
+        .select('features_enabled')
+        .eq('id', '00000000-0000-0000-0000-000000000001')
+        .maybeSingle();
+      
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const isRateRecommendationsEnabled = useMemo(() => {
+    if (!establishmentId || !siteSettings?.features_enabled) return false;
+    return isFeatureEnabledForEstablishment(
+      siteSettings.features_enabled?.rate_recommendations,
+      establishmentId
+    );
+  }, [establishmentId, siteSettings]);
+  
+  // Buscar recomendações (apenas se a feature flag estiver habilitada)
   const { data: allRecommendations, isLoading: recommendationsLoading, refetch: refetchRecommendations } = useRateRecommendations(
     dateRange.start,
     dateRange.end,
-    selectedCategory !== "all" ? selectedCategory : undefined
+    selectedCategory !== "all" ? selectedCategory : undefined,
+    isRateRecommendationsEnabled // Passar o estado da feature flag
   );
 
   // Filtrar recomendações por data (ocultar passadas por padrão) e aplicar preços atualizados em tempo real
@@ -149,20 +176,31 @@ export const RateAnalyticsView = ({
 
     setApplyingRecommendation(recommendationKey);
     
+    // Determinar qual preço sugerido usar
+    // Se há um plano selecionado diferente do original e há preço sugerido calculado, usar ele
+    // Caso contrário, usar o preço sugerido da recomendação original
+    let priceToApply = rec.suggested_price;
+    if (selectedPlanId && selectedPlanId !== rec.pricing_plan_id && calculatedSuggestedPrices[recommendationKey]) {
+      priceToApply = calculatedSuggestedPrices[recommendationKey];
+    } else if (selectedPlanId === rec.pricing_plan_id && calculatedSuggestedPrices[recommendationKey]) {
+      // Se o plano selecionado é o mesmo da recomendação mas há preço calculado, usar ele (pode ter sido recalculado)
+      priceToApply = calculatedSuggestedPrices[recommendationKey];
+    }
+    
     try {
       const result = await applyRecommendationPrice(
         establishmentId,
         rec.category_id,
         selectedPlan.id,
         new Date(rec.date),
-        rec.suggested_price
+        priceToApply
       );
 
       // Buscar informações da categoria para a mensagem
       const category = categories.find((c: any) => c.id === rec.category_id);
       const categoryName = category?.name || 'Categoria';
       const dateFormatted = format(new Date(rec.date), "dd/MM/yyyy", { locale: ptBR });
-      const priceFormatted = formatCurrency(rec.suggested_price);
+      const priceFormatted = formatCurrency(priceToApply);
       const planName = selectedPlan.name || 'Plano';
 
       toast.success(
@@ -199,16 +237,29 @@ export const RateAnalyticsView = ({
         exact: false
       });
       
-      // Aguardar um pouco mais antes de recarregar recomendações para garantir que o preço foi atualizado
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Atualizar o preço atual em tempo real na lista de recomendações
+      // Atualizar o preço atual em tempo real imediatamente após aplicar
       const recommendationKey = `${rec.category_id}-${rec.date}`;
       setUpdatedPrices(prev => ({
         ...prev,
-        [recommendationKey]: rec.suggested_price
+        [recommendationKey]: priceToApply
       }));
+      
+      // Atualizar também o preço do plano selecionado
+      setPlanPrices(prev => ({
+        ...prev,
+        [recommendationKey]: priceToApply
+      }));
+      
+      // Limpar o preço sugerido calculado já que foi aplicado
+      setCalculatedSuggestedPrices(prev => {
+        const updated = { ...prev };
+        delete updated[recommendationKey];
+        return updated;
+      });
 
+      // Aguardar um pouco antes de recarregar recomendações para garantir que o banco foi atualizado
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
       // Recarregar recomendações para atualizar o "Preço Atual" (em background)
       refetchRecommendations();
     } catch (error: any) {
@@ -769,12 +820,15 @@ export const RateAnalyticsView = ({
       <Tabs defaultValue="overview" className="w-full">
         <TabsList>
           <TabsTrigger value="overview">Visão Geral</TabsTrigger>
-          <TabsTrigger value="recommendations">Recomendações</TabsTrigger>
+          {isRateRecommendationsEnabled && (
+            <TabsTrigger value="recommendations">Recomendações</TabsTrigger>
+          )}
           <TabsTrigger value="revenue">Receita</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
           <TabsTrigger value="forecast">Forecast</TabsTrigger>
         </TabsList>
 
+        {isRateRecommendationsEnabled && (
         <TabsContent value="recommendations" className="space-y-4">
           <Card className="p-6">
             <div className="flex items-center justify-between mb-4">
@@ -807,8 +861,16 @@ export const RateAnalyticsView = ({
               </div>
             ) : recommendations && recommendations.length > 0 ? (
               <div className="space-y-4">
-                {recommendations.map((rec: any, index: number) => (
-                  <Card key={index} className="p-4 border-l-4 border-l-blue-500">
+                {recommendations.map((rec: any, index: number) => {
+                  const recommendationKey = `${rec.category_id}-${rec.date}`;
+                  const isApplying = applyingRecommendation === recommendationKey;
+                  return (
+                  <Card 
+                    key={index} 
+                    className={`p-4 border-l-4 border-l-blue-500 transition-all duration-300 ${
+                      isApplying ? 'ring-2 ring-blue-400 ring-opacity-50 bg-blue-50/30' : ''
+                    }`}
+                  >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
@@ -837,16 +899,80 @@ export const RateAnalyticsView = ({
                         <div className="grid grid-cols-3 gap-4 text-sm mb-4">
                           <div>
                             <span className="text-gray-500">Preço Atual:</span>
-                            <p className="font-semibold text-gray-900">{formatCurrency(rec.current_price)}</p>
+                            <p className="font-semibold text-gray-900 transition-all duration-300">
+                              {(() => {
+                                const recommendationKey = `${rec.category_id}-${rec.date}`;
+                                const selectedPlanId = selectedPlansForRecommendations[recommendationKey] || rec.pricing_plan_id;
+                                
+                                // Se o plano selecionado é diferente do plano original da recomendação
+                                if (selectedPlanId && selectedPlanId !== rec.pricing_plan_id) {
+                                  // Se há preço do plano selecionado, usar ele (prioridade)
+                                  if (planPrices[recommendationKey]) {
+                                    return formatCurrency(planPrices[recommendationKey]);
+                                  }
+                                  // Caso contrário, usar o preço atual da recomendação (será atualizado quando buscar)
+                                  return formatCurrency(rec.current_price);
+                                }
+                                
+                                // Se o plano é o mesmo da recomendação e há preço atualizado (após aplicar), usar ele
+                                if (updatedPrices[recommendationKey] !== undefined) {
+                                  return (
+                                    <span className="flex items-center gap-1">
+                                      {formatCurrency(updatedPrices[recommendationKey])}
+                                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                    </span>
+                                  );
+                                }
+                                
+                                // Caso contrário, usar o preço atual da recomendação
+                                return formatCurrency(rec.current_price);
+                              })()}
+                            </p>
                           </div>
                           <div>
                             <span className="text-gray-500">Preço Sugerido:</span>
-                            <p className="font-semibold text-green-600">{formatCurrency(rec.suggested_price)}</p>
+                            <p className="font-semibold text-green-600">
+                              {(() => {
+                                const recommendationKey = `${rec.category_id}-${rec.date}`;
+                                const selectedPlanId = selectedPlansForRecommendations[recommendationKey] || rec.pricing_plan_id;
+                                // Se há um plano selecionado diferente do original e há preço sugerido calculado, usar ele
+                                if (selectedPlanId && selectedPlanId !== rec.pricing_plan_id && calculatedSuggestedPrices[recommendationKey]) {
+                                  return formatCurrency(calculatedSuggestedPrices[recommendationKey]);
+                                }
+                                // Caso contrário, usar o preço sugerido da recomendação
+                                return formatCurrency(rec.suggested_price);
+                              })()}
+                            </p>
                           </div>
                           <div>
                             <span className="text-gray-500">Impacto na Receita:</span>
-                            <p className={`font-semibold ${rec.estimated_revenue_impact >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {formatCurrency(rec.estimated_revenue_impact)}
+                            <p className={`font-semibold ${(() => {
+                              const recommendationKey = `${rec.category_id}-${rec.date}`;
+                              const selectedPlanId = selectedPlansForRecommendations[recommendationKey] || rec.pricing_plan_id;
+                              if (selectedPlanId && selectedPlanId !== rec.pricing_plan_id && calculatedSuggestedPrices[recommendationKey] && planPrices[recommendationKey]) {
+                                const currentPrice = planPrices[recommendationKey];
+                                const suggestedPrice = calculatedSuggestedPrices[recommendationKey];
+                                const impact = suggestedPrice - currentPrice;
+                                return impact >= 0 ? 'text-green-600' : 'text-red-600';
+                              }
+                              return rec.estimated_revenue_impact >= 0 ? 'text-green-600' : 'text-red-600';
+                            })()}`}>
+                              {(() => {
+                                const recommendationKey = `${rec.category_id}-${rec.date}`;
+                                const selectedPlanId = selectedPlansForRecommendations[recommendationKey] || rec.pricing_plan_id;
+                                // Se há um plano selecionado diferente do original, calcular impacto baseado nos novos preços
+                                if (selectedPlanId && selectedPlanId !== rec.pricing_plan_id && calculatedSuggestedPrices[recommendationKey] && planPrices[recommendationKey]) {
+                                  const currentPrice = planPrices[recommendationKey];
+                                  const suggestedPrice = calculatedSuggestedPrices[recommendationKey];
+                                  // O impacto é a diferença entre preço sugerido e atual
+                                  // Para uma estimativa mais precisa, precisaríamos da quantidade de quartos disponíveis
+                                  // Por enquanto, usamos apenas a diferença de preço
+                                  const impact = suggestedPrice - currentPrice;
+                                  return formatCurrency(impact);
+                                }
+                                // Caso contrário, usar o impacto da recomendação
+                                return formatCurrency(rec.estimated_revenue_impact);
+                              })()}
                             </p>
                           </div>
                         </div>
@@ -857,11 +983,107 @@ export const RateAnalyticsView = ({
                             </Label>
                             <Select
                               value={selectedPlansForRecommendations[`${rec.category_id}-${rec.date}`] || rec.pricing_plan_id || ''}
-                              onValueChange={(value) => {
+                              disabled={isApplying}
+                              onValueChange={async (value) => {
+                                const recommendationKey = `${rec.category_id}-${rec.date}`;
+                                const previousPlanId = selectedPlansForRecommendations[recommendationKey] || rec.pricing_plan_id;
+                                
+                                // Se o plano foi trocado, limpar os preços atualizados para forçar recálculo
+                                if (previousPlanId !== value) {
+                                  setUpdatedPrices(prev => {
+                                    const updated = { ...prev };
+                                    delete updated[recommendationKey];
+                                    return updated;
+                                  });
+                                }
+                                
                                 setSelectedPlansForRecommendations(prev => ({
                                   ...prev,
-                                  [`${rec.category_id}-${rec.date}`]: value
+                                  [recommendationKey]: value
                                 }));
+                                
+                                // Buscar o preço atual do plano selecionado e calcular o preço sugerido
+                                if (establishmentId && rec.category_id && rec.date) {
+                                  try {
+                                    const dateStr = format(new Date(rec.date), 'yyyy-MM-dd');
+                                    
+                                    // Buscar preço atual do plano
+                                    const { data: rateData, error: rateError } = await supabase
+                                      .from('rate_calendar')
+                                      .select('base_price')
+                                      .eq('establishment_id', establishmentId)
+                                      .eq('category_id', rec.category_id)
+                                      .eq('pricing_plan_id', value)
+                                      .eq('date', dateStr)
+                                      .maybeSingle();
+                                    
+                                    let currentPrice = rateData?.base_price;
+                                    
+                                    // Se não encontrou no calendário, buscar preço base da categoria
+                                    if (!currentPrice) {
+                                      const category = categories.find((c: any) => c.id === rec.category_id);
+                                      currentPrice = category?.base_price || 0;
+                                    }
+                                    
+                                    if (currentPrice) {
+                                      setPlanPrices(prev => ({
+                                        ...prev,
+                                        [recommendationKey]: currentPrice
+                                      }));
+                                      
+                                      // Buscar ocupação para calcular preço sugerido
+                                      const { count: occupiedCount } = await supabase
+                                        .from('reservations')
+                                        .select('*', { count: 'exact', head: true })
+                                        .eq('establishment_id', establishmentId)
+                                        .eq('category_id', rec.category_id)
+                                        .gte('checkin_date', dateStr)
+                                        .lt('checkout_date', dateStr)
+                                        .neq('status', 'cancelled');
+                                      
+                                      const { count: roomsCount } = await supabase
+                                        .from('rooms')
+                                        .select('*', { count: 'exact', head: true })
+                                        .eq('establishment_id', establishmentId)
+                                        .eq('category_id', rec.category_id);
+                                      
+                                      const occupiedRooms = occupiedCount || 0;
+                                      const availableRooms = roomsCount || 0;
+                                      
+                                      if (availableRooms > 0) {
+                                        const occupancy = (occupiedRooms / availableRooms) * 100;
+                                        
+                                        // Buscar configurações de recomendação
+                                        const { data: settingsData } = await supabase
+                                          .from('hotel_settings')
+                                          .select('rate_system_settings')
+                                          .eq('establishment_id', establishmentId)
+                                          .maybeSingle();
+                                        
+                                        const settings = settingsData?.rate_system_settings as any;
+                                        const highThreshold = settings?.recommendation_threshold_occupancy || 90;
+                                        const lowThreshold = settings?.recommendation_threshold_low_occupancy || 30;
+                                        const increasePercent = settings?.price_increase_percentage || 15;
+                                        const decreasePercent = settings?.price_decrease_percentage || 10;
+                                        
+                                        // Calcular preço sugerido baseado na ocupação
+                                        let suggestedPrice = currentPrice;
+                                        if (occupancy >= highThreshold) {
+                                          suggestedPrice = currentPrice * (1 + (increasePercent / 100));
+                                        } else if (occupancy < lowThreshold) {
+                                          suggestedPrice = currentPrice * (1 - (decreasePercent / 100));
+                                        }
+                                        
+                                        setCalculatedSuggestedPrices(prev => ({
+                                          ...prev,
+                                          [recommendationKey]: suggestedPrice
+                                        }));
+                                      }
+                                    }
+                                  } catch (err) {
+                                    console.error('Erro ao buscar preço do plano:', err);
+                                  }
+                                }
                               }}
                             >
                               <SelectTrigger id={`plan-select-${rec.category_id}-${rec.date}`} className="w-full">
@@ -882,12 +1104,14 @@ export const RateAnalyticsView = ({
                             <Button
                               size="sm"
                               onClick={() => handleApplyRecommendation(rec)}
-                              disabled={applyingRecommendation === `${rec.category_id}-${rec.date}`}
-                              className="gap-2"
+                              disabled={isApplying}
+                              className={`gap-2 transition-all duration-200 ${
+                                isApplying ? 'opacity-75 cursor-not-allowed' : 'hover:scale-105'
+                              }`}
                             >
-                              {applyingRecommendation === `${rec.category_id}-${rec.date}` ? (
+                              {isApplying ? (
                                 <>
-                                  <Download className="w-4 h-4 animate-spin" />
+                                  <Loader2 className="w-4 h-4 animate-spin" />
                                   Aplicando...
                                 </>
                               ) : (
@@ -902,7 +1126,8 @@ export const RateAnalyticsView = ({
                       </div>
                     </div>
                   </Card>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-8">
@@ -914,6 +1139,7 @@ export const RateAnalyticsView = ({
             )}
           </Card>
         </TabsContent>
+        )}
 
         <TabsContent value="overview" className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

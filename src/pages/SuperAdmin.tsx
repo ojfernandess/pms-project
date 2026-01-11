@@ -2957,6 +2957,7 @@ const FeatureFlagsManager = () => {
     stay_reviews: { enabled: false, establishment_ids: [] },
     dynamic_pricing_automation: { enabled: false, company_ids: [] },
     client_deduplication: { enabled: false, establishment_ids: [] },
+    rate_recommendations: { enabled: false, establishment_ids: [] },
   });
   const [expandedFeature, setExpandedFeature] = useState<string | null>(null);
   const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
@@ -2981,6 +2982,9 @@ const FeatureFlagsManager = () => {
         client_deduplication: typeof fe.client_deduplication === 'boolean' 
           ? { enabled: fe.client_deduplication, establishment_ids: [] }
           : (fe.client_deduplication || { enabled: false, establishment_ids: [] }),
+        rate_recommendations: typeof fe.rate_recommendations === 'boolean' 
+          ? { enabled: fe.rate_recommendations, establishment_ids: [] }
+          : (fe.rate_recommendations || { enabled: false, establishment_ids: [] }),
       });
     }
   }, [settings]);
@@ -2989,8 +2993,8 @@ const FeatureFlagsManager = () => {
     const currentFeatures = settings?.features_enabled || {};
     const newFeatures = { ...currentFeatures };
     
-    // Se for dynamic_pricing_automation, stay_reviews, client_deduplication ou email, manter estrutura de objeto
-    if (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email') {
+    // Se for dynamic_pricing_automation, stay_reviews, client_deduplication, email ou rate_recommendations, manter estrutura de objeto
+    if (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email' || feature === 'rate_recommendations') {
       const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
         ? newFeatures[feature]
         : { enabled: false, [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: [] };
@@ -3002,7 +3006,7 @@ const FeatureFlagsManager = () => {
     
     setFeatures((prev: any) => ({
       ...prev,
-      [feature]: (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email')
+      [feature]: (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email' || feature === 'rate_recommendations')
         ? { 
             enabled: value, 
             [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: prev[feature]?.[feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids'] || [] 
@@ -3228,6 +3232,14 @@ const FeatureFlagsManager = () => {
       label: "Centralização de Clientes",
       description: "Permite identificar e mesclar clientes duplicados baseado em CPF, email ou telefone",
       icon: Users,
+      supportsCompanies: false,
+      supportsEstablishments: true,
+    },
+    {
+      key: "rate_recommendations" as const,
+      label: "Recomendações de Preços",
+      description: "Habilita o sistema de recomendações automáticas de ajuste de preços baseado em ocupação e demanda",
+      icon: TrendingUp,
       supportsCompanies: false,
       supportsEstablishments: true,
     },
