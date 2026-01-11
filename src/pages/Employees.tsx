@@ -69,7 +69,7 @@ const Employees = () => {
   const { canAccess } = usePermissions();
   const { createOrUpdateUserLimit } = useUserLimits();
   
-  // Buscar usuários da empresa do estabelecimento atual
+  // Buscar usuários de todas as empresas onde o gerente atual é gerente
   const { data: companyUsers = [], isLoading: isLoadingCompanyUsers } = useQuery({
     queryKey: ["company_users", selectedEstablishment?.id],
     queryFn: async () => {
@@ -78,29 +78,115 @@ const Employees = () => {
         return [];
       }
 
-      // Buscar a empresa do estabelecimento
-      const { data: establishmentData, error: establishmentError } = await supabase
-        .from("establishments")
-        .select("company_id")
-        .eq("id", establishmentId)
-        .single();
-
-      if (establishmentError || !establishmentData?.company_id) {
-        console.error("Erro ao buscar empresa do estabelecimento:", establishmentError);
+      // Buscar o usuário logado
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) {
         return [];
       }
 
-      const companyId = establishmentData.company_id;
+      // Buscar o role_id do gerente
+      const { data: managerRole, error: roleError } = await supabase
+        .from("employee_roles")
+        .select("id")
+        .eq("code", "manager")
+        .maybeSingle();
 
-      // Buscar user_ids associados à empresa via user_companies
+      if (roleError || !managerRole) {
+        console.error("Erro ao buscar role de gerente:", roleError);
+        return [];
+      }
+
+      // Buscar todos os estabelecimentos onde o usuário atual é gerente
+      const { data: managerEmployees, error: employeesError } = await supabase
+        .from("employees")
+        .select("establishment_id")
+        .eq("user_id", currentUser.id)
+        .eq("role_id", managerRole.id)
+        .eq("is_active", true);
+
+      if (employeesError) {
+        console.error("Erro ao buscar estabelecimentos do gerente:", employeesError);
+        return [];
+      }
+
+      if (!managerEmployees || managerEmployees.length === 0) {
+        // Se não for gerente de nenhum estabelecimento, buscar apenas da empresa atual
+        const { data: establishmentData, error: establishmentError } = await supabase
+          .from("establishments")
+          .select("company_id")
+          .eq("id", establishmentId)
+          .single();
+
+        if (establishmentError || !establishmentData?.company_id) {
+          return [];
+        }
+
+        const companyId = establishmentData.company_id;
+
+        // Buscar user_ids associados à empresa via user_companies
+        const { data: userCompanies, error: userCompaniesError } = await supabase
+          .from("user_companies")
+          .select("user_id")
+          .eq("company_id", companyId)
+          .eq("is_active", true);
+
+        if (userCompaniesError || !userCompanies || userCompanies.length === 0) {
+          return [];
+        }
+
+        const userIds = userCompanies.map((uc: any) => uc.user_id);
+
+        const { data: users, error: usersError } = await supabase
+          .from("users")
+          .select("id, email, full_name, cpf, phone")
+          .in("id", userIds);
+
+        if (usersError) {
+          return [];
+        }
+
+        return (users || []).map((user: any) => ({
+          id: user.id,
+          email: user.email,
+          full_name: user.full_name,
+          cpf: user.cpf,
+          phone: user.phone,
+        }));
+      }
+
+      // Extrair IDs dos estabelecimentos
+      const establishmentIds = managerEmployees.map((emp: any) => emp.establishment_id);
+
+      // Buscar os estabelecimentos para obter os company_ids
+      const { data: establishments, error: establishmentsError } = await supabase
+        .from("establishments")
+        .select("company_id")
+        .in("id", establishmentIds);
+
+      if (establishmentsError || !establishments || establishments.length === 0) {
+        return [];
+      }
+
+      // Extrair company_ids únicos dos estabelecimentos onde é gerente
+      const companyIds = [...new Set(
+        establishments
+          .map((est: any) => est.company_id)
+          .filter(Boolean)
+      )];
+
+      if (companyIds.length === 0) {
+        return [];
+      }
+
+      // Buscar user_ids associados a todas essas empresas via user_companies
       const { data: userCompanies, error: userCompaniesError } = await supabase
         .from("user_companies")
         .select("user_id")
-        .eq("company_id", companyId)
+        .in("company_id", companyIds)
         .eq("is_active", true);
 
       if (userCompaniesError) {
-        console.error("Erro ao buscar usuários da empresa:", userCompaniesError);
+        console.error("Erro ao buscar usuários das empresas:", userCompaniesError);
         return [];
       }
 
@@ -108,8 +194,8 @@ const Employees = () => {
         return [];
       }
 
-      // Extrair os user_ids
-      const userIds = userCompanies.map((uc: any) => uc.user_id);
+      // Extrair os user_ids únicos
+      const userIds = [...new Set(userCompanies.map((uc: any) => uc.user_id))];
 
       // Buscar os dados dos usuários
       const { data: users, error: usersError } = await supabase
