@@ -1022,9 +1022,17 @@ export const applyRecommendationPrice = async (
   pricingPlanId: string,
   date: Date,
   suggestedPrice: number
-): Promise<boolean> => {
+): Promise<{ success: boolean; action: string; price: number; date: string }> => {
   if (!establishmentId) {
     throw new Error('Estabelecimento não selecionado');
+  }
+
+  if (!categoryId) {
+    throw new Error('Categoria não selecionada');
+  }
+
+  if (!pricingPlanId) {
+    throw new Error('Plano tarifário não selecionado');
   }
 
   const { data, error } = await supabase.rpc('apply_recommendation_price', {
@@ -1037,9 +1045,27 @@ export const applyRecommendationPrice = async (
 
   if (error) {
     console.error('Erro ao aplicar preço sugerido:', error);
-    throw error;
+    throw new Error(`Erro ao aplicar preço sugerido: ${error.message}`);
   }
 
-  return data === true;
+  // A função agora retorna JSONB com {success: boolean, error?: string, action?: string}
+  if (!data || typeof data !== 'object') {
+    throw new Error('Resposta inválida do servidor');
+  }
+
+  const result = data as { success: boolean; error?: string; action?: string };
+
+  if (!result.success) {
+    const errorMessage = result.error || 'Falha ao aplicar preço sugerido. Verifique os dados e tente novamente.';
+    throw new Error(errorMessage);
+  }
+
+  // Retornar informações sobre a ação realizada
+  return {
+    success: true,
+    action: result.action || 'applied',
+    price: suggestedPrice,
+    date: format(date, 'yyyy-MM-dd'),
+  };
 };
 

@@ -15,11 +15,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { BarChart3, TrendingUp, DollarSign, Users, Download, Calendar as CalendarIcon, FileSpreadsheet, FileText, ChevronDown } from "lucide-react";
-import { format, subDays, startOfDay, endOfDay } from "date-fns";
+import { format, subDays, startOfDay, endOfDay, startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useRateMetrics } from "@/hooks/useRateMetrics";
-import { useRateRecommendations, applyRecommendationPrice } from "@/hooks/useRateSystem";
+import { useRateRecommendations, applyRecommendationPrice, useRateSystem } from "@/hooks/useRateSystem";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -55,17 +55,23 @@ export const RateAnalyticsView = ({
 }: RateAnalyticsViewProps) => {
   const queryClient = useQueryClient();
   const establishmentId = getSelectedEstablishmentId();
-  const [dateRange, setDateRange] = useState({
-    start: startOfDay(subDays(new Date(), 30)),
-    end: endOfDay(new Date()),
+  const [dateRange, setDateRange] = useState(() => {
+    const now = new Date();
+    return {
+      start: startOfDay(startOfMonth(now)),
+      end: endOfDay(endOfMonth(now)),
+    };
   });
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedPlan, setSelectedPlan] = useState<string>("all");
   const [applyingRecommendation, setApplyingRecommendation] = useState<string | null>(null);
   const [showPastRecommendations, setShowPastRecommendations] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [updatedPrices, setUpdatedPrices] = useState<Record<string, number>>({});
+  const [selectedPlansForRecommendations, setSelectedPlansForRecommendations] = useState<Record<string, string>>({});
 
   const { getMetricsForPeriod } = useRateMetrics();
+  const { refetch: refetchRateSystem } = useRateSystem();
   
   // Buscar recomendações
   const { data: allRecommendations, isLoading: recommendationsLoading, refetch: refetchRecommendations } = useRateRecommendations(
@@ -74,23 +80,32 @@ export const RateAnalyticsView = ({
     selectedCategory !== "all" ? selectedCategory : undefined
   );
 
-  // Filtrar recomendações por data (ocultar passadas por padrão)
+  // Filtrar recomendações por data (ocultar passadas por padrão) e aplicar preços atualizados em tempo real
   const recommendations = useMemo(() => {
     if (!allRecommendations) return [];
     
     const today = startOfDay(new Date());
     
-    if (showPastRecommendations) {
-      return allRecommendations;
-    }
+    let filtered = showPastRecommendations 
+      ? allRecommendations 
+      : allRecommendations.filter((rec: any) => {
+          if (!rec.date) return false;
+          const recDate = startOfDay(new Date(rec.date));
+          return recDate >= today;
+        });
     
-    // Filtrar apenas datas atuais e futuras
-    return allRecommendations.filter((rec: any) => {
-      if (!rec.date) return false;
-      const recDate = startOfDay(new Date(rec.date));
-      return recDate >= today;
+    // Aplicar preços atualizados em tempo real
+    return filtered.map((rec: any) => {
+      const recommendationKey = `${rec.category_id}-${rec.date}`;
+      if (updatedPrices[recommendationKey] !== undefined) {
+        return {
+          ...rec,
+          current_price: updatedPrices[recommendationKey]
+        };
+      }
+      return rec;
     });
-  }, [allRecommendations, showPastRecommendations]);
+  }, [allRecommendations, showPastRecommendations, updatedPrices]);
 
   // Função para aplicar recomendação
   const handleApplyRecommendation = async (rec: any) => {
@@ -99,12 +114,31 @@ export const RateAnalyticsView = ({
       return;
     }
 
-    // Buscar plano padrão (BAR) ou primeiro plano ativo
-    const defaultPlan = ratePlans.find(p => p.code === 'BAR' && p.is_active) || 
-                       ratePlans.find(p => p.is_active);
+    const recommendationKey = `${rec.category_id}-${rec.date}`;
     
-    if (!defaultPlan) {
-      toast.error('Nenhum plano tarifário ativo encontrado');
+    // Buscar plano selecionado ou usar o plano padrão da recomendação
+    let selectedPlanId = selectedPlansForRecommendations[recommendationKey];
+    
+    if (!selectedPlanId) {
+      // Se não há plano selecionado, usar o plano da recomendação ou buscar padrão
+      if (rec.pricing_plan_id) {
+        selectedPlanId = rec.pricing_plan_id;
+      } else {
+        // Buscar plano padrão (BAR) ou primeiro plano ativo
+        const defaultPlan = ratePlans.find(p => p.code === 'BAR' && p.is_active) || 
+                           ratePlans.find(p => p.is_active);
+        if (!defaultPlan) {
+          toast.error('Nenhum plano tarifário ativo encontrado. Por favor, selecione um plano.');
+          return;
+        }
+        selectedPlanId = defaultPlan.id;
+      }
+    }
+
+    const selectedPlan = ratePlans.find(p => p.id === selectedPlanId);
+    
+    if (!selectedPlan) {
+      toast.error('Plano tarifário selecionado não encontrado');
       return;
     }
 
@@ -113,24 +147,69 @@ export const RateAnalyticsView = ({
       return;
     }
 
-    setApplyingRecommendation(`${rec.category_id}-${rec.date}`);
+    setApplyingRecommendation(recommendationKey);
     
     try {
-      await applyRecommendationPrice(
+      const result = await applyRecommendationPrice(
         establishmentId,
         rec.category_id,
-        defaultPlan.id,
+        selectedPlan.id,
         new Date(rec.date),
         rec.suggested_price
       );
 
-      toast.success('Preço sugerido aplicado com sucesso!');
+      // Buscar informações da categoria para a mensagem
+      const category = categories.find((c: any) => c.id === rec.category_id);
+      const categoryName = category?.name || 'Categoria';
+      const dateFormatted = format(new Date(rec.date), "dd/MM/yyyy", { locale: ptBR });
+      const priceFormatted = formatCurrency(rec.suggested_price);
+      const planName = selectedPlan.name || 'Plano';
+
+      toast.success(
+        `Preço atualizado com sucesso! ${categoryName} - ${planName} - ${dateFormatted}: ${priceFormatted}`,
+        { duration: 5000 }
+      );
       
-      // Invalidar queries relacionadas
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
-      queryClient.invalidateQueries({ queryKey: ["rate_recommendations"] });
+      // Aguardar um pouco mais para garantir que o banco foi atualizado e propagado
+      await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Recarregar recomendações
+      // Invalidar todas as queries relacionadas ao rate_calendar
+      await queryClient.invalidateQueries({ 
+        queryKey: ["rate_calendar"],
+        exact: false // Invalida todas as queries que começam com ["rate_calendar"]
+      });
+      
+      // Invalidar recomendações primeiro
+      await queryClient.invalidateQueries({ 
+        queryKey: ["rate_recommendations"],
+        exact: false
+      });
+      
+      await queryClient.invalidateQueries({ 
+        queryKey: ["rate_calendar_modal"],
+        exact: false
+      });
+      
+      // Refetch completo do sistema tarifário
+      await refetchRateSystem();
+      
+      // Refetch forçado de todas as queries de rate_calendar
+      await queryClient.refetchQueries({ 
+        queryKey: ["rate_calendar"],
+        exact: false
+      });
+      
+      // Aguardar um pouco mais antes de recarregar recomendações para garantir que o preço foi atualizado
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Atualizar o preço atual em tempo real na lista de recomendações
+      const recommendationKey = `${rec.category_id}-${rec.date}`;
+      setUpdatedPrices(prev => ({
+        ...prev,
+        [recommendationKey]: rec.suggested_price
+      }));
+
+      // Recarregar recomendações para atualizar o "Preço Atual" (em background)
       refetchRecommendations();
     } catch (error: any) {
       console.error('Erro ao aplicar recomendação:', error);
@@ -739,6 +818,15 @@ export const RateAnalyticsView = ({
                           {rec.category_name && (
                             <span className="text-sm text-gray-600">Categoria: {rec.category_name}</span>
                           )}
+                          {(() => {
+                            const recommendationKey = `${rec.category_id}-${rec.date}`;
+                            const selectedPlanId = selectedPlansForRecommendations[recommendationKey] || rec.pricing_plan_id;
+                            const selectedPlan = selectedPlanId ? ratePlans.find(p => p.id === selectedPlanId) : null;
+                            const planName = selectedPlan?.name || rec.pricing_plan_name;
+                            return planName && (
+                              <span className="text-sm text-gray-600">Plano: {planName}</span>
+                            );
+                          })()}
                           {rec.date && (
                             <span className="text-sm text-gray-600">
                               Data: {format(new Date(rec.date), 'dd/MM/yyyy', { locale: ptBR })}
@@ -762,25 +850,54 @@ export const RateAnalyticsView = ({
                             </p>
                           </div>
                         </div>
-                        <div className="flex justify-end">
-                          <Button
-                            size="sm"
-                            onClick={() => handleApplyRecommendation(rec)}
-                            disabled={applyingRecommendation === `${rec.category_id}-${rec.date}`}
-                            className="gap-2"
-                          >
-                            {applyingRecommendation === `${rec.category_id}-${rec.date}` ? (
-                              <>
-                                <Download className="w-4 h-4 animate-spin" />
-                                Aplicando...
-                              </>
-                            ) : (
-                              <>
-                                <DollarSign className="w-4 h-4" />
-                                Aplicar Preço Sugerido
-                              </>
-                            )}
-                          </Button>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex-1 max-w-xs">
+                            <Label htmlFor={`plan-select-${rec.category_id}-${rec.date}`} className="text-sm text-gray-600 mb-1 block">
+                              Plano Tarifário:
+                            </Label>
+                            <Select
+                              value={selectedPlansForRecommendations[`${rec.category_id}-${rec.date}`] || rec.pricing_plan_id || ''}
+                              onValueChange={(value) => {
+                                setSelectedPlansForRecommendations(prev => ({
+                                  ...prev,
+                                  [`${rec.category_id}-${rec.date}`]: value
+                                }));
+                              }}
+                            >
+                              <SelectTrigger id={`plan-select-${rec.category_id}-${rec.date}`} className="w-full">
+                                <SelectValue placeholder="Selecione o plano" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {ratePlans
+                                  .filter(p => p.is_active)
+                                  .map((plan) => (
+                                    <SelectItem key={plan.id} value={plan.id}>
+                                      {plan.name} {plan.code && `(${plan.code})`}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="flex items-end">
+                            <Button
+                              size="sm"
+                              onClick={() => handleApplyRecommendation(rec)}
+                              disabled={applyingRecommendation === `${rec.category_id}-${rec.date}`}
+                              className="gap-2"
+                            >
+                              {applyingRecommendation === `${rec.category_id}-${rec.date}` ? (
+                                <>
+                                  <Download className="w-4 h-4 animate-spin" />
+                                  Aplicando...
+                                </>
+                              ) : (
+                                <>
+                                  <DollarSign className="w-4 h-4" />
+                                  Aplicar Preço Sugerido
+                                </>
+                              )}
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     </div>
