@@ -29,7 +29,8 @@ export type ActionType =
   | "guest_changed"
   | "resolved"
   | "rate_updated"
-  | "dynamic_rule_applied";
+  | "dynamic_rule_applied"
+  | "price_recommendation_applied";
 
 export type EntityType =
   | "reservation"

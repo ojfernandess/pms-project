@@ -101,6 +101,9 @@ const ReservationDetails = () => {
     amount_changed: "Valor Alterado",
     guest_changed: "Hóspede Alterado",
     resolved: "Resolvido",
+    rate_updated: "Tarifa Atualizada",
+    dynamic_rule_applied: "Regra Dinâmica Aplicada",
+    price_recommendation_applied: "Recomendação de Preço Aplicada",
   };
   
   const actionTypeColors: Record<string, string> = {
@@ -122,6 +125,9 @@ const ReservationDetails = () => {
     service_fee_updated: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
     service_fee_removed: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
     resolved: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+    rate_updated: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
+    dynamic_rule_applied: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100",
+    price_recommendation_applied: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-100",
   };
   
   // Estados para edição de datas e valores

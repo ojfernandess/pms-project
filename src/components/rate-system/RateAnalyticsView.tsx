@@ -27,6 +27,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
+import { logActivity } from "@/lib/activityLogger";
 import {
   LineChart,
   Line,
@@ -187,6 +188,26 @@ export const RateAnalyticsView = ({
       priceToApply = calculatedSuggestedPrices[recommendationKey];
     }
     
+    // Buscar informações da categoria para a mensagem e log
+    const category = categories.find((c: any) => c.id === rec.category_id);
+    const categoryName = category?.name || 'Categoria';
+    const dateFormatted = format(new Date(rec.date), "dd/MM/yyyy", { locale: ptBR });
+    const dateStr = format(new Date(rec.date), 'yyyy-MM-dd');
+    const priceFormatted = formatCurrency(priceToApply);
+    const planName = selectedPlan.name || 'Plano';
+
+    // Buscar preço anterior ANTES de aplicar o novo preço
+    const { data: previousRate } = await supabase
+      .from('rate_calendar')
+      .select('base_price')
+      .eq('establishment_id', establishmentId)
+      .eq('category_id', rec.category_id)
+      .eq('pricing_plan_id', selectedPlan.id)
+      .eq('date', dateStr)
+      .maybeSingle();
+    
+    const previousPrice = previousRate?.base_price || (planPrices[recommendationKey] || rec.current_price || 0);
+    
     try {
       const result = await applyRecommendationPrice(
         establishmentId,
@@ -196,12 +217,34 @@ export const RateAnalyticsView = ({
         priceToApply
       );
 
-      // Buscar informações da categoria para a mensagem
-      const category = categories.find((c: any) => c.id === rec.category_id);
-      const categoryName = category?.name || 'Categoria';
-      const dateFormatted = format(new Date(rec.date), "dd/MM/yyyy", { locale: ptBR });
-      const priceFormatted = formatCurrency(priceToApply);
-      const planName = selectedPlan.name || 'Plano';
+      // Registrar log de atividade
+      await logActivity({
+        actionType: "price_recommendation_applied",
+        entityType: "rate_calendar",
+        entityCode: `${categoryName} - ${planName} - ${dateFormatted}`,
+        description: `Preço sugerido aplicado: ${categoryName} - ${planName} - ${dateFormatted}. Preço anterior: ${formatCurrency(previousPrice)}, Preço aplicado: ${priceFormatted}`,
+        oldValues: {
+          price: previousPrice,
+          category_id: rec.category_id,
+          category_name: categoryName,
+          pricing_plan_id: selectedPlan.id,
+          pricing_plan_name: planName,
+          date: dateStr,
+        },
+        newValues: {
+          price: priceToApply,
+          category_id: rec.category_id,
+          category_name: categoryName,
+          pricing_plan_id: selectedPlan.id,
+          pricing_plan_name: planName,
+          date: dateStr,
+        },
+        metadata: {
+          recommendation_type: rec.priority,
+          recommendation_message: rec.message,
+          suggested_price: rec.suggested_price,
+        },
+      });
 
       toast.success(
         `Preço atualizado com sucesso! ${categoryName} - ${planName} - ${dateFormatted}: ${priceFormatted}`,
@@ -225,6 +268,12 @@ export const RateAnalyticsView = ({
       
       await queryClient.invalidateQueries({ 
         queryKey: ["rate_calendar_modal"],
+        exact: false
+      });
+      
+      // Invalidar logs de atividades para atualizar a interface
+      await queryClient.invalidateQueries({ 
+        queryKey: ["activity_logs"],
         exact: false
       });
       

@@ -75,6 +75,7 @@ const actionTypeLabels: Record<string, string> = {
   resolved: "Resolvido",
   rate_updated: "Tarifa Atualizada",
   dynamic_rule_applied: "Regra Dinâmica Aplicada",
+  price_recommendation_applied: "Recomendação de Preço Aplicada",
 };
 
 const entityTypeLabels: Record<string, string> = {
@@ -110,6 +111,7 @@ const actionTypeColors: Record<string, string> = {
   resolved: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
   rate_updated: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
   dynamic_rule_applied: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100",
+  price_recommendation_applied: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-100",
 };
 
 const ActivityLogs = () => {
