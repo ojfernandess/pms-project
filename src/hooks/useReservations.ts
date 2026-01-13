@@ -1507,15 +1507,15 @@ export const useReservations = () => {
               queryClient.invalidateQueries({ queryKey: ["reservations"] });
               queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
               
-              // Processar emails pendentes na fila após cancelamento
+              // Processar emails pendentes na fila imediatamente após cancelamento
               // Aguardar um pouco para garantir que o email foi adicionado à fila pela função SQL
               setTimeout(async () => {
                 try {
                   const { processEmailQueue } = await import("@/lib/emailService");
                   
                   // Buscar emails pendentes relacionados a pré-reservas expiradas criados recentemente
-                  // Buscar emails criados nos últimos 5 segundos para garantir que pegamos os recém-criados
-                  const fiveSecondsAgo = new Date(Date.now() - 5000).toISOString();
+                  // Buscar emails criados nos últimos 10 segundos para garantir que pegamos os recém-criados
+                  const tenSecondsAgo = new Date(Date.now() - 10000).toISOString();
                   
                   // Usar 'as any' para contornar limitação de tipos do Supabase
                   const { data: pendingEmails, error: emailFetchError } = await (supabase as any)
@@ -1523,7 +1523,7 @@ export const useReservations = () => {
                     .select("id, created_at, reservation_id, recipient_email")
                     .eq("status", "pending")
                     .eq("event_type", "preregistration.expired")
-                    .gte("created_at", fiveSecondsAgo) // Apenas emails criados recentemente
+                    .gte("created_at", tenSecondsAgo) // Apenas emails criados recentemente
                     .order("created_at", { ascending: false })
                     .limit(cancelledCount * 2); // Buscar até 2x o número de cancelamentos para garantir
                   
@@ -1533,7 +1533,7 @@ export const useReservations = () => {
                   }
                   
                   if (pendingEmails && pendingEmails.length > 0) {
-                    console.log(`📧 Encontrados ${pendingEmails.length} email(s) pendente(s) de pré-reservas expiradas para processar...`);
+                    console.log(`📧 Encontrados ${pendingEmails.length} email(s) pendente(s) de pré-reservas expiradas. Processando imediatamente...`);
                     // Processar os emails mais recentes primeiro (os que acabaram de ser criados)
                     for (const email of pendingEmails) {
                       try {
@@ -1550,35 +1550,37 @@ export const useReservations = () => {
                       }
                     }
                   } else {
-                    console.warn(`⚠️ Nenhum email pendente encontrado para pré-reservas expiradas criado nos últimos 5 segundos`);
-                    // Tentar buscar sem filtro de tempo como fallback
-                    const { data: allPendingEmails } = await (supabase as any)
-                      .from("email_queue")
-                      .select("id, created_at, recipient_email")
-                      .eq("status", "pending")
-                      .eq("event_type", "preregistration.expired")
-                      .order("created_at", { ascending: false })
-                      .limit(5);
-                    
-                    if (allPendingEmails && allPendingEmails.length > 0) {
-                      console.log(`📧 Encontrados ${allPendingEmails.length} email(s) pendente(s) sem filtro de tempo. Processando...`);
-                      for (const email of allPendingEmails) {
-                        try {
-                          console.log(`📧 Processando email ${email.id} para ${email.recipient_email}...`);
-                          const success = await processEmailQueue(email.id);
-                          if (success) {
-                            console.log(`✅ Email ${email.id} processado e enviado com sucesso`);
+                    console.warn(`⚠️ Nenhum email pendente encontrado para pré-reservas expiradas criado nos últimos 10 segundos. Tentando novamente...`);
+                    // Aguardar mais um pouco e tentar novamente
+                    setTimeout(async () => {
+                      const { data: retryPendingEmails } = await (supabase as any)
+                        .from("email_queue")
+                        .select("id, created_at, recipient_email")
+                        .eq("status", "pending")
+                        .eq("event_type", "preregistration.expired")
+                        .order("created_at", { ascending: false })
+                        .limit(cancelledCount * 2);
+                      
+                      if (retryPendingEmails && retryPendingEmails.length > 0) {
+                        console.log(`📧 Encontrados ${retryPendingEmails.length} email(s) pendente(s) na segunda tentativa. Processando...`);
+                        for (const email of retryPendingEmails) {
+                          try {
+                            console.log(`📧 Processando email ${email.id} para ${email.recipient_email}...`);
+                            const success = await processEmailQueue(email.id);
+                            if (success) {
+                              console.log(`✅ Email ${email.id} processado e enviado com sucesso`);
+                            }
+                          } catch (emailError: any) {
+                            console.error(`❌ Erro ao processar email ${email.id}:`, emailError?.message || emailError);
                           }
-                        } catch (emailError: any) {
-                          console.error(`❌ Erro ao processar email ${email.id}:`, emailError?.message || emailError);
                         }
                       }
-                    }
+                    }, 2000); // Aguardar mais 2 segundos antes da segunda tentativa
                   }
                 } catch (emailProcessError: any) {
                   console.error("❌ Erro ao processar emails pendentes:", emailProcessError?.message || emailProcessError);
                 }
-              }, 1500); // Aguardar 1.5 segundos para garantir que o email foi adicionado à fila
+              }, 300); // Reduzir para 300ms para processar mais rapidamente
             } else if (expiredReservations.length > 0) {
               console.warn(`⚠️ Função RPC retornou 0, mas encontramos ${expiredReservations.length} pré-reserva(s) expirada(s). Cancelando diretamente...`);
               
