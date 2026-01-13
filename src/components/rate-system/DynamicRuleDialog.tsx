@@ -53,6 +53,7 @@ export const DynamicRuleDialog = ({
     start_date: undefined as Date | undefined,
     end_date: undefined as Date | undefined,
     use_occupancy: false,
+    use_establishment_occupancy: false,
     use_pickup_rate: false,
     use_demand_history: false,
   });
@@ -165,6 +166,7 @@ export const DynamicRuleDialog = ({
             start_date: ruleStartDate,
             end_date: ruleEndDate,
           use_occupancy: rule.use_occupancy ?? false,
+          use_establishment_occupancy: rule.use_establishment_occupancy ?? false,
           use_pickup_rate: rule.use_pickup_rate ?? false,
           use_demand_history: rule.use_demand_history ?? false,
         });
@@ -189,6 +191,7 @@ export const DynamicRuleDialog = ({
           start_date: undefined,
           end_date: undefined,
           use_occupancy: false,
+          use_establishment_occupancy: false,
           use_pickup_rate: false,
           use_demand_history: false,
         });
@@ -266,6 +269,7 @@ export const DynamicRuleDialog = ({
       start_date: startDateStr,
       end_date: endDateStr,
       use_occupancy: formData.use_occupancy,
+      use_establishment_occupancy: formData.use_establishment_occupancy,
       use_pickup_rate: formData.use_pickup_rate,
       use_demand_history: formData.use_demand_history,
     };
@@ -701,14 +705,59 @@ export const DynamicRuleDialog = ({
           <div className="space-y-4 border-t pt-4">
             <h3 className="font-semibold">Métricas a Utilizar</h3>
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="use_occupancy">Considerar Ocupação Atual</Label>
-                <Switch
-                  id="use_occupancy"
-                  checked={formData.use_occupancy}
-                  onCheckedChange={(checked) => setFormData({ ...formData, use_occupancy: checked })}
-                />
-              </div>
+              {formData.trigger_type === 'occupancy' && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <Label htmlFor="use_occupancy">Considerar Ocupação da Categoria</Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Usa a ocupação específica da categoria de quartos
+                      </p>
+                    </div>
+                    <Switch
+                      id="use_occupancy"
+                      checked={formData.use_occupancy && !formData.use_establishment_occupancy}
+                      onCheckedChange={(checked) => {
+                        setFormData({ 
+                          ...formData, 
+                          use_occupancy: checked,
+                          use_establishment_occupancy: checked ? false : formData.use_establishment_occupancy
+                        });
+                      }}
+                      disabled={formData.use_establishment_occupancy}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <Label htmlFor="use_establishment_occupancy">Considerar Ocupação Total do Estabelecimento</Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Usa a ocupação total de todos os quartos do estabelecimento
+                      </p>
+                    </div>
+                    <Switch
+                      id="use_establishment_occupancy"
+                      checked={formData.use_establishment_occupancy}
+                      onCheckedChange={(checked) => {
+                        setFormData({ 
+                          ...formData, 
+                          use_establishment_occupancy: checked,
+                          use_occupancy: checked ? false : formData.use_occupancy
+                        });
+                      }}
+                    />
+                  </div>
+                </>
+              )}
+              {formData.trigger_type !== 'occupancy' && (
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="use_occupancy">Considerar Ocupação Atual</Label>
+                  <Switch
+                    id="use_occupancy"
+                    checked={formData.use_occupancy}
+                    onCheckedChange={(checked) => setFormData({ ...formData, use_occupancy: checked })}
+                  />
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <Label htmlFor="use_pickup_rate">Considerar Pickup Rate</Label>
                 <Switch

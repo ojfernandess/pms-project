@@ -47,6 +47,10 @@ export interface DynamicPricingRule {
   applicable_plans?: string[];
   start_date?: string;
   end_date?: string;
+  use_occupancy?: boolean;
+  use_establishment_occupancy?: boolean;
+  use_pickup_rate?: boolean;
+  use_demand_history?: boolean;
 }
 
 export interface RateRestriction {
