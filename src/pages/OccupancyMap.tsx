@@ -830,7 +830,7 @@ const OccupancyMap = () => {
                                 <div className="bg-slate-700 text-white px-1 sm:px-2 py-0.5 sm:py-1 rounded text-[9px] sm:text-[10px]">Checkout</div>
                               </div>
                               <div className="col-span-1 text-center">
-                                <div className="bg-pink-500 text-white px-1 sm:px-2 py-0.5 sm:py-1 rounded text-[9px] sm:text-[10px]">Checkin</div>
+                                <div className="bg-emerald-500 text-white px-1 sm:px-2 py-0.5 sm:py-1 rounded text-[9px] sm:text-[10px]">Checkin</div>
                               </div>
                               <div className="col-span-2">Status do Quarto</div>
                               <div className="col-span-1 text-center">NP</div>
@@ -977,7 +977,7 @@ const OccupancyMap = () => {
                                               if (shouldShowCheckin && room.checkin_date) {
                                                 return (
                                                   <>
-                                                    <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-pink-500 text-white rounded flex-shrink-0 font-medium">
+                                                    <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-emerald-500 text-white rounded flex-shrink-0 font-medium">
                                                       CHECKIN
                                                     </span>
                                                     <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
@@ -1017,7 +1017,7 @@ const OccupancyMap = () => {
                                               #{room.next_reservation_code}
                                             </span>
                                           )}
-                                          <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-pink-500 text-white rounded flex-shrink-0 font-medium">
+                                          <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-emerald-500 text-white rounded flex-shrink-0 font-medium">
                                             CHECKIN
                                           </span>
                                           {room.next_checkin_date && (
@@ -1194,7 +1194,7 @@ const OccupancyMap = () => {
                                               <div className="bg-slate-700 text-white px-1 sm:px-2 py-0.5 sm:py-1 rounded text-[9px] sm:text-[10px]">Checkout</div>
                                             </div>
                                             <div className="col-span-1 text-center">
-                                              <div className="bg-pink-500 text-white px-1 sm:px-2 py-0.5 sm:py-1 rounded text-[9px] sm:text-[10px]">Checkin</div>
+                                              <div className="bg-emerald-500 text-white px-1 sm:px-2 py-0.5 sm:py-1 rounded text-[9px] sm:text-[10px]">Checkin</div>
                                             </div>
                                             <div className="col-span-2">Status do Quarto</div>
                                             <div className="col-span-1 text-center">NP</div>
@@ -1323,7 +1323,7 @@ const OccupancyMap = () => {
                                                             if (shouldShowCheckin && room.checkin_date) {
                                                               return (
                                                                 <>
-                                                                  <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-pink-500 text-white rounded flex-shrink-0 font-medium">
+                                                                  <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-emerald-500 text-white rounded flex-shrink-0 font-medium">
                                                                     CHECKIN
                                                                   </span>
                                                                   <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
@@ -1362,7 +1362,7 @@ const OccupancyMap = () => {
                                                             #{room.next_reservation_code}
                                                           </span>
                                                         )}
-                                                        <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-pink-500 text-white rounded flex-shrink-0 font-medium">
+                                                        <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-emerald-500 text-white rounded flex-shrink-0 font-medium">
                                                           CHECKIN
                                                         </span>
                                                         {room.next_checkin_date && (
