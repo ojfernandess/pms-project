@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
-import { parseISO, format } from "date-fns";
+import { parseISO, format, isAfter, isBefore, differenceInMinutes } from "date-fns";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 
 /**
  * Hook para detectar check-outs que passaram do horário e criar notificações de limpeza
+ * Melhorado para ser mais robusto e funcional
  */
 export const useCheckoutCleaning = () => {
   const { selectedEstablishment } = useEstablishment();
@@ -20,7 +21,7 @@ export const useCheckoutCleaning = () => {
       try {
         const { data, error } = await supabase
           .from("hotel_settings")
-          .select("enable_cleaning_notifications")
+          .select("enable_cleaning_notifications, checkout_time, timezone")
           .eq("establishment_id", selectedEstablishment.id)
           .single();
 
@@ -48,6 +49,7 @@ export const useCheckoutCleaning = () => {
     },
     enabled: !!selectedEstablishment?.id,
     retry: false, // Não tentar novamente se a coluna não existir
+    refetchInterval: 60000, // Refetch a cada minuto para pegar mudanças nas configurações
   });
 
   // Verificar se notificações de limpeza estão habilitadas (padrão: true se coluna não existir)
@@ -57,27 +59,25 @@ export const useCheckoutCleaning = () => {
     if (!selectedEstablishment?.id) return;
     
     // Se notificações de limpeza estão desativadas, não executar
-    if (!isCleaningNotificationsEnabled) return;
+    if (!isCleaningNotificationsEnabled) {
+      console.log("[useCheckoutCleaning] Notificações de limpeza desativadas");
+      return;
+    }
 
     const checkCheckoutsAndNotify = async () => {
       try {
+        console.log("[useCheckoutCleaning] Iniciando verificação de check-outs para limpeza...");
+        
         const now = new Date();
         const today = format(now, "yyyy-MM-dd");
         
         // Não criar notificações para reservas muito antigas (mais de 7 dias)
         const sevenDaysAgo = format(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), "yyyy-MM-dd");
 
-        // Buscar configurações do hotel para obter checkout_time padrão e timezone
-        const { data: hotelSettings } = await supabase
-          .from("hotel_settings")
-          .select("checkout_time, timezone")
-          .eq("establishment_id", selectedEstablishment.id)
-          .single();
-
         // Horário padrão de checkout (12:00) se não encontrar nas configurações
         let defaultCheckoutHour = 12;
         let defaultCheckoutMinute = 0;
-        let hotelTimezone = "America/Sao_Paulo";
+        let hotelTimezone = hotelSettings?.timezone || "America/Sao_Paulo";
 
         if (hotelSettings?.checkout_time) {
           const timeParts = hotelSettings.checkout_time.toString().split(':');
@@ -85,12 +85,16 @@ export const useCheckoutCleaning = () => {
           defaultCheckoutMinute = parseInt(timeParts[1]) || 0;
         }
 
-        if (hotelSettings?.timezone) {
-          hotelTimezone = hotelSettings.timezone;
-        }
+        console.log("[useCheckoutCleaning] Configurações:", {
+          defaultCheckoutHour,
+          defaultCheckoutMinute,
+          hotelTimezone,
+        });
 
-        // Buscar reservas com check-out recente (últimos 7 dias) que ainda não foram notificadas
-        // e que já passaram do horário de check-out
+        // Buscar reservas que precisam de verificação:
+        // 1. Reservas com status "checkedout" (já fizeram checkout)
+        // 2. Reservas com status "checkedin" mas que já passaram do horário de checkout
+        // 3. Apenas reservas dos últimos 7 dias até hoje
         const { data: checkouts, error } = await supabase
           .from("reservations")
           .select(`
@@ -107,11 +111,16 @@ export const useCheckoutCleaning = () => {
           .not("room_id", "is", null);
 
         if (error) {
-          console.error("Erro ao buscar check-outs:", error);
+          console.error("[useCheckoutCleaning] Erro ao buscar check-outs:", error);
           return;
         }
 
-        if (!checkouts || checkouts.length === 0) return;
+        if (!checkouts || checkouts.length === 0) {
+          console.log("[useCheckoutCleaning] Nenhuma reserva encontrada para verificação");
+          return;
+        }
+
+        console.log(`[useCheckoutCleaning] ${checkouts.length} reserva(s) encontrada(s) para verificação`);
 
         // Verificar quais check-outs já passaram do horário
         const roomsNeedingCleaning: Array<{
@@ -130,23 +139,38 @@ export const useCheckoutCleaning = () => {
           .map(c => c.room_id)
           .filter((id): id is string => id !== null);
         
-        const { data: roomsData } = await supabase
+        if (roomIds.length === 0) {
+          console.log("[useCheckoutCleaning] Nenhum room_id encontrado nas reservas");
+          return;
+        }
+
+        const { data: roomsData, error: roomsError } = await supabase
           .from("rooms")
-          .select("id, status")
+          .select("id, status, room_number")
           .in("id", roomIds);
 
-        const roomStatusMap = new Map<string, string>();
+        if (roomsError) {
+          console.error("[useCheckoutCleaning] Erro ao buscar status dos quartos:", roomsError);
+          return;
+        }
+
+        const roomStatusMap = new Map<string, { status: string; room_number: string }>();
         roomsData?.forEach(room => {
-          roomStatusMap.set(room.id, room.status);
+          roomStatusMap.set(room.id, { status: room.status, room_number: room.room_number });
         });
 
+        // Processar cada reserva
         for (const checkout of checkouts) {
-          if (!checkout.room_id || !checkout.checkout_date) continue;
+          if (!checkout.room_id || !checkout.checkout_date) {
+            console.warn("[useCheckoutCleaning] Reserva sem room_id ou checkout_date:", checkout.id);
+            continue;
+          }
 
-          // Verificar se o quarto já foi limpo (status não é "cleaning" ou "dirty")
-          const roomStatus = roomStatusMap.get(checkout.room_id);
-          if (roomStatus && roomStatus !== "cleaning" && roomStatus !== "dirty") {
-            // Quarto já foi limpo ou está disponível, pular
+          // Verificar se o quarto já foi limpo (status é "available")
+          const roomData = roomStatusMap.get(checkout.room_id);
+          if (roomData && roomData.status === "available") {
+            // Quarto já foi limpo e está disponível, pular
+            console.log(`[useCheckoutCleaning] Quarto ${roomData.room_number} já está disponível, pulando`);
             continue;
           }
 
@@ -163,92 +187,49 @@ export const useCheckoutCleaning = () => {
             checkoutMinute = parseInt(timeParts[1]) || defaultCheckoutMinute;
           }
 
-          // Criar data/hora de checkout no timezone do hotel
-          // Usar a data de checkout e aplicar o horário
+          // Criar data/hora de checkout no timezone local (assumindo que checkout_date já está no timezone correto)
           const checkoutDateTime = new Date(checkoutDate);
           checkoutDateTime.setHours(checkoutHour, checkoutMinute, 0, 0);
 
-          // Obter a data/hora atual no timezone do hotel para comparação
-          const formatter = new Intl.DateTimeFormat('en-US', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false,
-            timeZone: hotelTimezone
-          });
-
-          // Obter componentes da data/hora atual e do checkout no timezone do hotel
-          const nowParts = formatter.formatToParts(now);
-          const checkoutParts = formatter.formatToParts(checkoutDateTime);
-
-          // Extrair valores numéricos para comparação
-          const getValue = (parts: Intl.DateTimeFormatPart[], type: string) => 
-            parseInt(parts.find(p => p.type === type)?.value || '0');
-
-          const nowYear = getValue(nowParts, 'year');
-          const nowMonth = getValue(nowParts, 'month');
-          const nowDay = getValue(nowParts, 'day');
-          const nowHour = getValue(nowParts, 'hour');
-          const nowMinute = getValue(nowParts, 'minute');
-
-          const checkoutYear = getValue(checkoutParts, 'year');
-          const checkoutMonth = getValue(checkoutParts, 'month');
-          const checkoutDay = getValue(checkoutParts, 'day');
-          const checkoutHourValue = getValue(checkoutParts, 'hour');
-          const checkoutMinuteValue = getValue(checkoutParts, 'minute');
-
-          // Comparar: primeiro data, depois hora
+          // Se a reserva ainda está "checkedin", verificar se já passou do horário de checkout
+          // Se já está "checkedout", considerar que já passou
           let hasPassed = false;
-          if (nowYear > checkoutYear) {
+          
+          if (checkout.status === "checkedout") {
+            // Reserva já fez checkout, considerar que passou do horário
             hasPassed = true;
-          } else if (nowYear === checkoutYear) {
-            if (nowMonth > checkoutMonth) {
-              hasPassed = true;
-            } else if (nowMonth === checkoutMonth) {
-              if (nowDay > checkoutDay) {
-                hasPassed = true;
-              } else if (nowDay === checkoutDay) {
-                // Mesmo dia: comparar hora
-                if (nowHour > checkoutHourValue) {
-                  hasPassed = true;
-                } else if (nowHour === checkoutHourValue) {
-                  // Mesma hora: comparar minuto
-                  if (nowMinute >= checkoutMinuteValue) {
-                    hasPassed = true;
-                  }
-                }
-              }
+            console.log(`[useCheckoutCleaning] Reserva ${checkout.reservation_code} já fez checkout`);
+          } else if (checkout.status === "checkedin") {
+            // Reserva ainda está checkedin, verificar se já passou do horário
+            // Comparar data/hora atual com data/hora de checkout
+            hasPassed = isAfter(now, checkoutDateTime) || now.getTime() >= checkoutDateTime.getTime();
+            
+            if (hasPassed) {
+              const minutesPassed = differenceInMinutes(now, checkoutDateTime);
+              console.log(`[useCheckoutCleaning] Reserva ${checkout.reservation_code} passou do horário de checkout há ${minutesPassed} minutos`);
             }
           }
 
-          // Se já passou do horário de check-out (considerando timezone do hotel)
+          // Se já passou do horário de check-out
           if (hasPassed) {
-            const room = checkout.rooms;
+            const room = checkout.rooms || roomData;
             const guestName = checkout.guest?.full_name || 
                             checkout.financial_responsible?.full_name || 
                             checkout.guest_name || 
                             "Hóspede";
 
-            // Formatar datas para o log
-            const nowDateStr = `${nowYear}-${nowMonth.toString().padStart(2, '0')}-${nowDay.toString().padStart(2, '0')} ${nowHour.toString().padStart(2, '0')}:${nowMinute.toString().padStart(2, '0')}`;
-            const checkoutDateStr = `${checkoutYear}-${checkoutMonth.toString().padStart(2, '0')}-${checkoutDay.toString().padStart(2, '0')} ${checkoutHourValue.toString().padStart(2, '0')}:${checkoutMinuteValue.toString().padStart(2, '0')}`;
-
-            console.log(`[useCheckoutCleaning] Check-out passou do horário:`, {
+            console.log(`[useCheckoutCleaning] Quarto precisa de limpeza:`, {
               reservationCode: checkout.reservation_code,
-              roomNumber: room?.room_number,
+              roomNumber: room?.room_number || roomData?.room_number || "N/A",
               checkoutDate: checkout.checkout_date,
               checkoutTime: `${checkoutHour.toString().padStart(2, '0')}:${checkoutMinute.toString().padStart(2, '0')}`,
-              hotelTimezone,
-              nowInHotelTimezone: nowDateStr,
-              checkoutInHotelTimezone: checkoutDateStr,
+              guestName,
+              roomStatus: roomData?.status || "unknown",
             });
 
             roomsNeedingCleaning.push({
               roomId: checkout.room_id,
-              roomNumber: room?.room_number || "N/A",
+              roomNumber: room?.room_number || roomData?.room_number || "N/A",
               reservationId: checkout.id,
               reservationCode: checkout.reservation_code || "",
               guestName,
@@ -259,17 +240,26 @@ export const useCheckoutCleaning = () => {
           }
         }
 
-        if (roomsNeedingCleaning.length === 0) return;
+        if (roomsNeedingCleaning.length === 0) {
+          console.log("[useCheckoutCleaning] Nenhum quarto precisa de limpeza no momento");
+          return;
+        }
+
+        console.log(`[useCheckoutCleaning] ${roomsNeedingCleaning.length} quarto(s) precisa(m) de limpeza`);
 
         // Verificar se já existe notificação recente (últimas 2 horas) para evitar spam
         const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
-        const { data: recentNotifications } = await supabase
+        const { data: recentNotifications, error: notificationsError } = await supabase
           .from("notifications")
           .select("id, metadata")
           .eq("establishment_id", selectedEstablishment.id)
           .eq("type", "cleaning_required")
-          .gte("created_at", twoHoursAgo.toISOString())
-          .limit(10);
+          .gte("created_at", twoHoursAgo.toISOString());
+
+        if (notificationsError) {
+          console.error("[useCheckoutCleaning] Erro ao buscar notificações recentes:", notificationsError);
+          // Continuar mesmo com erro, para não bloquear a criação de notificações
+        }
 
         // Verificar quais quartos já foram notificados recentemente
         const notifiedRoomIds = new Set<string>();
@@ -285,43 +275,70 @@ export const useCheckoutCleaning = () => {
           (room) => !notifiedRoomIds.has(room.roomId)
         );
 
-        if (roomsToNotify.length === 0) return;
-
-        // Criar notificações para cada quarto que precisa de limpeza
-        for (const room of roomsToNotify) {
-          await supabase.rpc("create_notification_for_establishment", {
-            p_establishment_id: selectedEstablishment.id,
-            p_type: "cleaning_required",
-            p_title: "Quarto Precisa de Limpeza",
-            p_message: `O quarto ${room.roomNumber} precisa de limpeza após check-out da reserva ${room.reservationCode} (${room.guestName})`,
-            p_priority: "high",
-            p_metadata: {
-              room_id: room.roomId,
-              room_number: room.roomNumber,
-              reservation_id: room.reservationId,
-              reservation_code: room.reservationCode,
-              guest_name: room.guestName,
-              checkout_date: room.checkoutDate || format(room.checkoutDateTime, "yyyy-MM-dd"),
-              checkout_time: format(room.checkoutDateTime, "HH:mm"),
-              checkin_date: room.checkinDate,
-            },
-          });
+        if (roomsToNotify.length === 0) {
+          console.log("[useCheckoutCleaning] Todos os quartos já foram notificados recentemente");
+          return;
         }
 
-        // Invalidar queries para atualizar notificações
-        queryClient.invalidateQueries({ queryKey: ["notifications"] });
+        console.log(`[useCheckoutCleaning] Criando notificações para ${roomsToNotify.length} quarto(s)`);
+
+        // Criar notificações para cada quarto que precisa de limpeza
+        let successCount = 0;
+        let errorCount = 0;
+
+        for (const room of roomsToNotify) {
+          try {
+            const { error: rpcError } = await supabase.rpc("create_notification_for_establishment", {
+              p_establishment_id: selectedEstablishment.id,
+              p_type: "cleaning_required",
+              p_title: "Quarto Precisa de Limpeza",
+              p_message: `O quarto ${room.roomNumber} precisa de limpeza após check-out da reserva ${room.reservationCode} (${room.guestName})`,
+              p_priority: "high",
+              p_metadata: {
+                room_id: room.roomId,
+                room_number: room.roomNumber,
+                reservation_id: room.reservationId,
+                reservation_code: room.reservationCode,
+                guest_name: room.guestName,
+                checkout_date: room.checkoutDate || format(room.checkoutDateTime, "yyyy-MM-dd"),
+                checkout_time: format(room.checkoutDateTime, "HH:mm"),
+                checkin_date: room.checkinDate,
+              },
+            });
+
+            if (rpcError) {
+              console.error(`[useCheckoutCleaning] Erro ao criar notificação para quarto ${room.roomNumber}:`, rpcError);
+              errorCount++;
+            } else {
+              console.log(`[useCheckoutCleaning] Notificação criada com sucesso para quarto ${room.roomNumber}`);
+              successCount++;
+            }
+          } catch (error) {
+            console.error(`[useCheckoutCleaning] Exceção ao criar notificação para quarto ${room.roomNumber}:`, error);
+            errorCount++;
+          }
+        }
+
+        console.log(`[useCheckoutCleaning] Resultado: ${successCount} notificação(ões) criada(s), ${errorCount} erro(s)`);
+
+        // Invalidar queries para atualizar notificações apenas se houver sucesso
+        if (successCount > 0) {
+          queryClient.invalidateQueries({ queryKey: ["notifications"] });
+        }
       } catch (error) {
-        console.error("Erro ao verificar check-outs para limpeza:", error);
+        console.error("[useCheckoutCleaning] Erro ao verificar check-outs para limpeza:", error);
       }
     };
 
     // Verificar imediatamente
     checkCheckoutsAndNotify();
 
-    // Verificar a cada 5 minutos
-    const interval = setInterval(checkCheckoutsAndNotify, 5 * 60 * 1000);
+    // Verificar a cada 2 minutos (reduzido de 5 para ser mais responsivo)
+    const interval = setInterval(checkCheckoutsAndNotify, 2 * 60 * 1000);
 
-    return () => clearInterval(interval);
-  }, [selectedEstablishment?.id, queryClient, isCleaningNotificationsEnabled]);
+    return () => {
+      clearInterval(interval);
+      console.log("[useCheckoutCleaning] Limpeza: intervalo cancelado");
+    };
+  }, [selectedEstablishment?.id, queryClient, isCleaningNotificationsEnabled, hotelSettings]);
 };
-
