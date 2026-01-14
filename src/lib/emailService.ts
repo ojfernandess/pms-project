@@ -732,16 +732,28 @@ async function sendViaSMTP(queueItem: any, settings: EmailSettings, hotelName?: 
 }
 
 /**
- * Envia e-mail via SendGrid
+ * Envia e-mail via SendGrid usando Edge Function (evita problemas de CORS)
  */
 async function sendViaSendGrid(queueItem: any, settings: EmailSettings, hotelName?: string): Promise<boolean> {
   try {
+    // Validar configurações
     if (!settings.api_key) {
       throw new Error('API Key do SendGrid não configurada');
     }
 
     if (!settings.sender_email) {
       throw new Error('E-mail do remetente não configurado');
+    }
+
+    // Validar dados antes de enviar
+    if (!queueItem.recipient_email) {
+      throw new Error('E-mail do destinatário não informado');
+    }
+    if (!queueItem.subject) {
+      throw new Error('Assunto do e-mail não informado');
+    }
+    if (!queueItem.body_html) {
+      throw new Error('Corpo do e-mail (HTML) não informado');
     }
 
     // Processar CC e BCC
@@ -756,80 +768,88 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings, hotelNam
       cc_count: ccEmails.length,
       bcc_count: bccEmails.length
     });
-    
-    const personalizations: any = {
-      to: [{ email: queueItem.recipient_email, name: queueItem.recipient_name || undefined }],
-    };
-    
-    if (ccEmails.length > 0) {
-      personalizations.cc = ccEmails.map(email => ({ email }));
-      console.log('✅ SendGrid - CC adicionado:', personalizations.cc);
-    }
-    
-    if (bccEmails.length > 0) {
-      personalizations.bcc = bccEmails.map(email => ({ email }));
-      console.log('✅ SendGrid - BCC adicionado:', personalizations.bcc);
-    }
 
-    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${settings.api_key}`,
-        'Content-Type': 'application/json',
+    // Garantir que sender_name não esteja vazio - usar nome do hotel como fallback
+    const senderName = settings.sender_name?.trim() || hotelName || 'PMS System';
+
+    // Chamar Edge Function para enviar e-mail (evita CORS)
+    const result = await supabase.functions.invoke('send-email-sendgrid', {
+      body: {
+        to: queueItem.recipient_email,
+        to_name: queueItem.recipient_name || undefined,
+        from: settings.sender_email,
+        from_name: senderName,
+        reply_to: settings.reply_to_email || settings.sender_email,
+        subject: queueItem.subject,
+        html: queueItem.body_html,
+        text: queueItem.body_text || undefined,
+        api_key: settings.api_key,
+        ...(ccEmails.length > 0 ? { cc: ccEmails } : {}),
+        ...(bccEmails.length > 0 ? { bcc: bccEmails } : {}),
       },
-      body: (() => {
-        // Garantir que sender_name não esteja vazio - usar nome do hotel como fallback
-        const senderName = settings.sender_name?.trim() || hotelName || 'PMS System';
-        
-        const payload = {
-          personalizations: [personalizations],
-          from: { email: settings.sender_email, name: senderName },
-          reply_to: { email: settings.reply_to_email || settings.sender_email },
-          subject: queueItem.subject,
-          content: [
-            { type: 'text/html', value: queueItem.body_html },
-            ...(queueItem.body_text ? [{ type: 'text/plain', value: queueItem.body_text }] : []),
-          ],
-        };
-        console.log('📧 SendGrid - Payload completo sendo enviado:', {
-          ...payload,
-          from: { ...payload.from, name: senderName },
-          original_sender_name: settings.sender_name
-        });
-        return JSON.stringify(payload);
-      })(),
     });
+    
+    if (ccEmails.length > 0 || bccEmails.length > 0) {
+      console.log('✅ SendGrid - Payload enviado com CC/BCC:', {
+        cc: ccEmails.length > 0 ? ccEmails : undefined,
+        bcc: bccEmails.length > 0 ? bccEmails : undefined
+      });
+    }
 
-    if (!response.ok) {
-      const responseText = await response.text();
-      let errorMessage = `Erro HTTP ${response.status}`;
+    if (result.error) {
+      const errorMessage = result.error.message || result.error.toString();
       
-      try {
-        const errorData = JSON.parse(responseText);
-        errorMessage = errorData.errors?.[0]?.message || errorData.message || errorMessage;
-        console.error('❌ SendGrid - Erro na resposta:', {
-          status: response.status,
-          errors: errorData.errors,
-          message: errorMessage
-        });
-      } catch {
-        errorMessage = responseText || errorMessage;
-        console.error('❌ SendGrid - Erro ao parsear resposta:', responseText);
+      // Tentar obter detalhes do erro da resposta (status 400, 500, etc)
+      let details = errorMessage;
+      let hint = '';
+      
+      if (result.data && typeof result.data === 'object') {
+        const data = result.data as any;
+        details = data.details || data.error || errorMessage;
+        hint = data.hint || '';
       }
 
-      if (response.status === 401 || response.status === 403) {
-        throw new Error(`API Key inválida: ${errorMessage}`);
-      } else if (response.status === 400) {
-        throw new Error(`Dados inválidos: ${errorMessage}`);
+      // Mensagens de erro mais específicas
+      if (errorMessage.includes('API Key') || errorMessage.includes('401') || errorMessage.includes('403')) {
+        throw new Error(`API Key do SendGrid inválida ou sem permissão: ${details}${hint ? `\nDica: ${hint}` : ''}`);
+      } else if (errorMessage.includes('400') || errorMessage.includes('Dados inválidos')) {
+        throw new Error(`Dados inválidos para envio via SendGrid: ${details}${hint ? `\nDica: ${hint}` : ''}`);
+      } else if (errorMessage.includes('429') || errorMessage.includes('Limite')) {
+        throw new Error(`Limite de envio excedido no SendGrid: ${details}${hint ? `\nDica: ${hint}` : ''}`);
       } else {
-        throw new Error(`Erro ao enviar via SendGrid: ${errorMessage}`);
+        throw new Error(`Erro ao enviar via SendGrid: ${details}${hint ? `\nDica: ${hint}` : ''}`);
       }
     }
 
-    console.log('✅ SendGrid - Email enviado com sucesso (incluindo CC/BCC se configurado)');
+    // Verificar se a resposta indica sucesso
+    if (result.data && typeof result.data === 'object') {
+      const data = result.data as any;
+      if (data.success === true || data.message) {
+        console.log('✅ SendGrid - Email enviado com sucesso (incluindo CC/BCC se configurado)');
+        return true;
+      }
+    }
+
+    // Se chegou aqui, considerar como sucesso (Edge Function retornou sem erro)
+    console.log('✅ SendGrid - Email enviado com sucesso');
     return true;
   } catch (error: any) {
     console.error('Erro ao enviar via SendGrid:', error);
+    
+    // Verificar se é erro de Edge Function não encontrada
+    if (error.message?.includes('Function not found') || 
+        error.message?.includes('404') ||
+        error.code === 'FUNCTION_NOT_FOUND') {
+      throw new Error(
+        'Edge Function "send-email-sendgrid" não encontrada ou não configurada. ' +
+        'Por favor, crie a Edge Function no Supabase Dashboard: ' +
+        '1. Vá em Edge Functions > Create a new function ' +
+        '2. Nome: send-email-sendgrid ' +
+        '3. Cole o código de supabase/functions/send-email-sendgrid/index.ts ' +
+        '4. Deploy. Veja o guia completo em GUIA_SENDGRID_EDGE_FUNCTION.md'
+      );
+    }
+    
     throw error;
   }
 }

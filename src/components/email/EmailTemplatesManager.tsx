@@ -92,6 +92,7 @@ export function EmailTemplatesManager() {
     { value: "checkin.reception.notification", label: "Notificação de Check-in para Portaria" },
     { value: "checkout.completed", label: "Check-out Concluído" },
     { value: "checkout.reminder", label: "Lembrete de Check-out Próximo" },
+    { value: "guest.password_reset", label: "Recuperação de Senha do Hóspede" },
     { value: "fiscal_document.request", label: "Solicitação de Documento Fiscal" },
     { value: "employee.added_to_establishment", label: "Funcionário Adicionado ao Estabelecimento" },
   ];
