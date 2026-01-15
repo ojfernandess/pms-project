@@ -40,6 +40,7 @@ interface EmployeePermissionsDialogProps {
 }
 
 // Módulos disponíveis para edição de permissões
+// Nota: Super Admin foi removido por segurança - não deve ser configurável via Gerenciar Permissões
 const MODULES = [
   { key: "dashboard", label: "Dashboard" },
   { key: "reservations", label: "Reservas" },
@@ -49,6 +50,8 @@ const MODULES = [
   { key: "units", label: "Unidades" },
   { key: "maintenance", label: "Manutenção" },
   { key: "occupancy_map", label: "Mapa de Ocupação" },
+  { key: "availability_map", label: "Mapa de Disponibilidades" },
+  { key: "stay_reviews", label: "Avaliações" },
   { key: "channel_manager", label: "Channel Manager" },
   { key: "logs", label: "Logs" },
   { key: "settings", label: "Configurações" },

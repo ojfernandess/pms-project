@@ -15,7 +15,8 @@ import {
   FileText,
   BookOpen,
   BarChart3,
-  Star
+  Star,
+  Map
 } from "lucide-react";
 import { NavLink, useParams } from "react-router-dom";
 import { useIsSuperAdmin } from "@/hooks/useUsers";
@@ -38,6 +39,7 @@ const getMenuItems = (t: (key: string) => string) => [
   { icon: LayoutDashboard, label: t("sidebar.dashboard"), path: "/", feature: "dashboard" },
   { icon: BarChart3, label: "Dashboard Proprietário", path: "/proprietario", feature: "owner_dashboard" },
   { icon: Bed, label: t("sidebar.occupancyMap"), path: "/ocupacao", feature: "occupancy_map" },
+  { icon: Map, label: "Mapa de Disponibilidades", path: "/disponibilidade", feature: "availability_map" },
   { icon: Calendar, label: t("sidebar.reservations"), path: "/reservas", feature: "reservations" },
   { icon: Users, label: t("sidebar.clients"), path: "/clientes", feature: "clients" },
   { icon: Building2, label: t("sidebar.units"), path: "/unidades", feature: "units" },
@@ -129,8 +131,28 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
       if (!isStayReviewsEnabled) {
         return false;
       }
-      // Se o feature flag estiver habilitado, mostrar o item (não verificar permissão adicional)
-      return true;
+      // Se o feature flag estiver habilitado, verificar permissão
+      return checkPermission(role, item.feature, undefined, customPermissions);
+    }
+
+    // Verificar feature flag para availability_map
+    if (item.feature === "availability_map") {
+      // Não mostrar se não houver estabelecimento selecionado
+      if (!selectedEstablishment?.id) {
+        return false;
+      }
+      
+      const featureConfig = settings?.features_enabled?.availability_map;
+      const isAvailabilityMapEnabled = isFeatureEnabledForEstablishment(
+        featureConfig,
+        selectedEstablishment.id
+      );
+      
+      if (!isAvailabilityMapEnabled) {
+        return false;
+      }
+      // Se o feature flag estiver habilitado, verificar permissão
+      return checkPermission(role, item.feature, undefined, customPermissions);
     }
 
     // Verificar permissão para o recurso (usando customPermissions se disponível)

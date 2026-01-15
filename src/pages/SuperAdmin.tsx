@@ -82,7 +82,7 @@ import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { Textarea } from "@/components/ui/textarea";
 import { StripeGlobalConfigDialog } from "@/components/stripe/StripeGlobalConfigDialog";
 import { useStripe } from "@/hooks/useStripe";
-import { CreditCard, Settings, Zap, Key, Star } from "lucide-react";
+import { CreditCard, Settings, Zap, Key, Star, Map as MapIcon } from "lucide-react";
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
@@ -2958,6 +2958,7 @@ const FeatureFlagsManager = () => {
     dynamic_pricing_automation: { enabled: false, company_ids: [] },
     client_deduplication: { enabled: false, establishment_ids: [] },
     rate_recommendations: { enabled: false, establishment_ids: [] },
+    availability_map: { enabled: false, establishment_ids: [] },
   });
   const [expandedFeature, setExpandedFeature] = useState<string | null>(null);
   const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
@@ -2985,6 +2986,9 @@ const FeatureFlagsManager = () => {
         rate_recommendations: typeof fe.rate_recommendations === 'boolean' 
           ? { enabled: fe.rate_recommendations, establishment_ids: [] }
           : (fe.rate_recommendations || { enabled: false, establishment_ids: [] }),
+        availability_map: typeof fe.availability_map === 'boolean' 
+          ? { enabled: fe.availability_map, establishment_ids: [] }
+          : (fe.availability_map || { enabled: false, establishment_ids: [] }),
       });
     }
   }, [settings]);
@@ -2993,8 +2997,8 @@ const FeatureFlagsManager = () => {
     const currentFeatures = settings?.features_enabled || {};
     const newFeatures = { ...currentFeatures };
     
-    // Se for dynamic_pricing_automation, stay_reviews, client_deduplication, email ou rate_recommendations, manter estrutura de objeto
-    if (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email' || feature === 'rate_recommendations') {
+    // Se for dynamic_pricing_automation, stay_reviews, client_deduplication, email, rate_recommendations ou availability_map, manter estrutura de objeto
+    if (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email' || feature === 'rate_recommendations' || feature === 'availability_map') {
       const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
         ? newFeatures[feature]
         : { enabled: false, [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: [] };
@@ -3006,7 +3010,7 @@ const FeatureFlagsManager = () => {
     
     setFeatures((prev: any) => ({
       ...prev,
-      [feature]: (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email' || feature === 'rate_recommendations')
+      [feature]: (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email' || feature === 'rate_recommendations' || feature === 'availability_map')
         ? { 
             enabled: value, 
             [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: prev[feature]?.[feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids'] || [] 
@@ -3240,6 +3244,14 @@ const FeatureFlagsManager = () => {
       label: "Recomendações de Preços",
       description: "Habilita o sistema de recomendações automáticas de ajuste de preços baseado em ocupação e demanda",
       icon: TrendingUp,
+      supportsCompanies: false,
+      supportsEstablishments: true,
+    },
+    {
+      key: "availability_map" as const,
+      label: "Mapa de Disponibilidades",
+      description: "Habilita o mapa de disponibilidades para visualizar a disponibilidade de quartos por categoria e data",
+      icon: MapIcon,
       supportsCompanies: false,
       supportsEstablishments: true,
     },

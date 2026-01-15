@@ -10,6 +10,7 @@ import { SuperAdminRoute } from "./components/layout/SuperAdminRoute";
 import { EstablishmentRoute } from "./components/layout/EstablishmentRoute";
 import Dashboard from "./pages/Dashboard";
 import OccupancyMap from "./pages/OccupancyMap";
+import AvailabilityMap from "./pages/AvailabilityMap";
 import Reservations from "./pages/Reservations";
 import PendingReservations from "./pages/PendingReservations";
 import ActivityLogs from "./pages/ActivityLogs";
@@ -118,6 +119,8 @@ const AppContent = () => {
             <Route path="/:establishmentId/proprietario" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><OwnerDashboard /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/ocupacao" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><OccupancyMap /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/occupancy-map" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><OccupancyMap /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/disponibilidade" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><AvailabilityMap /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/availability-map" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><AvailabilityMap /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/reservas" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Reservations /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/reservas/pendencias" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><PendingReservations /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/reservas/:reservationCode" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ReservationDetails /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
