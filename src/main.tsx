@@ -2,6 +2,10 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
+import { initializeConsoleOverride } from "./lib/logger";
+
+// Inicializar override do console ANTES de qualquer outro código
+initializeConsoleOverride();
 
 // Suprimir erros comuns de extensões do navegador que não afetam a aplicação
 window.addEventListener("error", (event) => {

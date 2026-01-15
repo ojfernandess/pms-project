@@ -36,7 +36,8 @@ import {
   Globe,
   Eye,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Terminal
 } from "lucide-react";
 import {
   Table,
@@ -67,6 +68,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { invalidateLogConfigCache } from "@/lib/logger";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -96,6 +98,7 @@ const SiteSettingsManager = () => {
     og_title: "",
     og_description: "",
   });
+  const [consoleLogsEnabled, setConsoleLogsEnabled] = useState<boolean>(true);
   const [faviconFile, setFaviconFile] = useState<File | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [ogImageFile, setOgImageFile] = useState<File | null>(null);
@@ -112,6 +115,7 @@ const SiteSettingsManager = () => {
         og_title: settings.og_title || "",
         og_description: settings.og_description || "",
       });
+      setConsoleLogsEnabled(settings.console_logs_enabled ?? true);
       if (settings.favicon_url) setFaviconPreview(settings.favicon_url);
       if (settings.logo_url) setLogoPreview(settings.logo_url);
       if (settings.og_image) setOgImagePreview(settings.og_image);
@@ -179,11 +183,15 @@ const SiteSettingsManager = () => {
         favicon_url: faviconUrl,
         logo_url: logoUrl,
         og_image: ogImageUrl,
+        console_logs_enabled: consoleLogsEnabled,
       });
 
       setFaviconFile(null);
       setLogoFile(null);
       setOgImageFile(null);
+      
+      // Invalidar cache do logger para aplicar a nova configuração imediatamente
+      await invalidateLogConfigCache();
     } catch (error: any) {
       console.error("Erro ao salvar configurações:", error);
     }
@@ -444,6 +452,42 @@ const SiteSettingsManager = () => {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Controle de Logs do Console */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Terminal className="h-4 w-4" />
+            <Label className="text-base font-semibold">Logs do Console</Label>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Controla se os logs do console (console.log, console.warn, console.info, console.debug) são exibidos no navegador.
+            Quando desativado, todos os logs são suprimidos para melhorar o desempenho e reduzir o ruído no console.
+          </p>
+          <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/50">
+            <div className="space-y-0.5">
+              <Label htmlFor="console-logs-enabled" className="text-base font-medium">
+                Habilitar Logs do Console
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                {consoleLogsEnabled 
+                  ? "Os logs do console estão ativos e serão exibidos no navegador" 
+                  : "Os logs do console estão desativados e serão suprimidos"}
+              </p>
+            </div>
+            <Switch
+              id="console-logs-enabled"
+              checked={consoleLogsEnabled}
+              onCheckedChange={setConsoleLogsEnabled}
+            />
+          </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800">
+              <strong>Nota:</strong> Esta configuração afeta apenas os logs do console do navegador. 
+              Os logs de erro críticos (console.error) continuarão sendo exibidos mesmo quando desativado, 
+              para garantir que problemas importantes sejam visíveis.
+            </p>
           </div>
         </div>
 

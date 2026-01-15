@@ -12,6 +12,7 @@ export interface SiteSettings {
   og_title: string;
   og_description: string;
   og_image: string | null;
+  console_logs_enabled?: boolean;
   features_enabled?: {
     api_integrations?: boolean;
     stripe?: boolean;
