@@ -220,6 +220,7 @@ export const ReservationCalendarMap = ({
   
   // Estado para diálogo de confirmação de movimentação
   const [moveConfirmOpen, setMoveConfirmOpen] = useState(false);
+  const [isMoving, setIsMoving] = useState(false);
   const [pendingMove, setPendingMove] = useState<{
     reservation: any;
     oldCheckin: string;
@@ -1488,7 +1489,9 @@ export const ReservationCalendarMap = ({
 
   // Função para confirmar a movimentação
   const confirmMove = useCallback(async () => {
-    if (!pendingMove) return;
+    if (!pendingMove || isMoving) return;
+
+    setIsMoving(true);
 
     try {
       // Converter datas de DD/MM/YYYY para YYYY-MM-DD
@@ -1506,6 +1509,7 @@ export const ReservationCalendarMap = ({
 
       if (!newCheckinDB || !newCheckoutDB) {
         toast.error("Datas inválidas");
+        setIsMoving(false);
         return;
       }
 
@@ -1521,11 +1525,13 @@ export const ReservationCalendarMap = ({
 
         if (!availabilityCheck.available) {
           toast.error(availabilityCheck.reason || "Quarto não está disponível neste período");
+          setIsMoving(false);
           return;
         }
       } catch (error) {
         console.error("❌ Erro ao verificar disponibilidade:", error);
         toast.error("Erro ao verificar disponibilidade do quarto");
+        setIsMoving(false);
         return;
       }
 
@@ -1551,7 +1557,8 @@ export const ReservationCalendarMap = ({
       const roomChanged = pendingMove.reservation.room_id !== pendingMove.newRoomId;
       const categoryChanged = pendingMove.reservation.category_id !== pendingMove.newCategoryId;
 
-      const { error } = await supabase
+      // ⚡ OTIMIZAÇÃO: Atualizar reserva primeiro (operação mais importante)
+      const { error, data: updatedReservation } = await supabase
         .from("reservations")
         .update({
           checkin_date: newCheckinDB,
@@ -1559,17 +1566,7 @@ export const ReservationCalendarMap = ({
           room_id: pendingMove.newRoomId,
           category_id: pendingMove.newCategoryId
         })
-        .eq("id", pendingMove.reservation.id);
-
-      if (error) {
-      console.error("❌ Erro ao atualizar reserva:", error);
-        toast.error(error.message || "Erro ao mover reserva");
-        return;
-      }
-
-      // Buscar dados atualizados da reserva para log e email
-      const { data: updatedReservation } = await supabase
-        .from("reservations")
+        .eq("id", pendingMove.reservation.id)
         .select(`
           *,
           financial_responsible:clients!client_id(*),
@@ -1577,117 +1574,126 @@ export const ReservationCalendarMap = ({
           rooms (*),
           room_categories (*)
         `)
-        .eq("id", pendingMove.reservation.id)
         .single();
 
-      // Registrar log de movimentação
-      try {
-        const oldRoomName = pendingMove.reservation.rooms?.room_number || "N/A";
-        const newRoomName = updatedReservation?.rooms?.room_number || "N/A";
-        
-        await logActivity({
-          actionType: "moved",
-          entityType: "reservation",
-          entityId: pendingMove.reservation.id,
-          entityCode: pendingMove.reservation.reservation_code,
-          description: createMoveDescription(
-            pendingMove.reservation.reservation_code,
-            oldRoomName,
-            newRoomName,
-            pendingMove.oldCheckin,
-            pendingMove.newCheckin,
-            pendingMove.oldCheckout,
-            pendingMove.newCheckout
-          ),
-          oldValues: {
-            room_id: pendingMove.reservation.room_id,
-            checkin_date: pendingMove.oldCheckin,
-            checkout_date: pendingMove.oldCheckout,
-          },
-          newValues: {
-            room_id: pendingMove.newRoomId,
-            checkin_date: newCheckinDB,
-            checkout_date: newCheckoutDB,
-          },
-        });
-      } catch (logError) {
-        console.error("Erro ao registrar log de movimentação:", logError);
+      if (error) {
+        console.error("❌ Erro ao atualizar reserva:", error);
+        toast.error(error.message || "Erro ao mover reserva");
+        setIsMoving(false);
+        return;
       }
 
-      // Enviar email de modificação se houver alterações relevantes
-      if (updatedReservation && (checkinChanged || checkoutChanged || roomChanged || categoryChanged)) {
-        try {
-          const { triggerEmail } = await import("@/lib/emailService");
-          const { formatDate } = await import("@/lib/emailTemplateEngine");
-          
-          console.log("📧 Alteração detectada na movimentação de reserva, enviando email:", {
-            checkinChanged,
-            checkoutChanged,
-            roomChanged,
-            categoryChanged
-          });
-          
-          // Preparar variáveis adicionais para o template
-          const additionalVariables: Record<string, any> = {
-            checkin_date_changed: checkinChanged || checkoutChanged,
-            room_changed: roomChanged,
-            category_changed: categoryChanged,
-          };
-          
-          // Adicionar valores antigos se houver alteração
-          if (checkinChanged || checkoutChanged) {
-            if (pendingMove.oldCheckin) {
-              additionalVariables.old_checkin_date = formatDate(normalizeDate(pendingMove.oldCheckin));
-            }
-            if (pendingMove.oldCheckout) {
-              additionalVariables.old_checkout_date = formatDate(normalizeDate(pendingMove.oldCheckout));
-            }
-          }
-          
-          if (roomChanged) {
-            if (pendingMove.reservation.rooms?.room_number) {
-              additionalVariables.old_room_number = pendingMove.reservation.rooms.room_number;
-            }
-            if (pendingMove.reservation.rooms?.name) {
-              additionalVariables.old_room_name = pendingMove.reservation.rooms.name;
-            }
-          }
-          
-          if (categoryChanged) {
-            if (pendingMove.reservation.room_categories?.name) {
-              additionalVariables.old_category_name = pendingMove.reservation.room_categories.name;
-            }
-          }
-          
-          await triggerEmail('reservation.modified', updatedReservation, additionalVariables);
-        } catch (emailError) {
-          console.error("❌ Erro ao enviar email de modificação:", emailError);
-          // Não bloquear a movimentação se o email falhar
-        }
-      }
+      // ⚡ OTIMIZAÇÃO: Invalidar queries imediatamente para atualizar UI rapidamente
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
 
-      // Invalidar queries para atualizar a UI
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["reservations"] }),
-        queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] }),
-        queryClient.invalidateQueries({ queryKey: ["rooms"] }),
-        queryClient.invalidateQueries({ queryKey: ["web_checkin"] })
-      ]);
-
-      toast.success("Reserva movida com sucesso!");
+      // Fechar diálogo e mostrar sucesso imediatamente
       setMoveConfirmOpen(false);
       setPendingMove(null);
+      setIsMoving(false);
+      toast.success("Reserva movida com sucesso!");
+
+      // ⚡ OTIMIZAÇÃO: Executar log e email em paralelo (não bloqueante)
+      Promise.all([
+        // Registrar log de movimentação
+        (async () => {
+          try {
+            const oldRoomName = pendingMove.reservation.rooms?.room_number || "N/A";
+            const newRoomName = updatedReservation?.rooms?.room_number || "N/A";
+            
+            await logActivity({
+              actionType: "moved",
+              entityType: "reservation",
+              entityId: pendingMove.reservation.id,
+              entityCode: pendingMove.reservation.reservation_code,
+              description: createMoveDescription(
+                pendingMove.reservation.reservation_code,
+                oldRoomName,
+                newRoomName,
+                pendingMove.oldCheckin,
+                pendingMove.newCheckin,
+                pendingMove.oldCheckout,
+                pendingMove.newCheckout
+              ),
+              oldValues: {
+                room_id: pendingMove.reservation.room_id,
+                checkin_date: pendingMove.oldCheckin,
+                checkout_date: pendingMove.oldCheckout,
+              },
+              newValues: {
+                room_id: pendingMove.newRoomId,
+                checkin_date: newCheckinDB,
+                checkout_date: newCheckoutDB,
+              },
+            });
+          } catch (logError) {
+            console.error("Erro ao registrar log de movimentação:", logError);
+          }
+        })(),
+        // Enviar email de modificação se houver alterações relevantes
+        (async () => {
+          if (updatedReservation && (checkinChanged || checkoutChanged || roomChanged || categoryChanged)) {
+            try {
+              const { triggerEmail } = await import("@/lib/emailService");
+              const { formatDate } = await import("@/lib/emailTemplateEngine");
+              
+              // Preparar variáveis adicionais para o template
+              const additionalVariables: Record<string, any> = {
+                checkin_date_changed: checkinChanged || checkoutChanged,
+                room_changed: roomChanged,
+                category_changed: categoryChanged,
+              };
+              
+              // Adicionar valores antigos se houver alteração
+              if (checkinChanged || checkoutChanged) {
+                if (pendingMove.oldCheckin) {
+                  additionalVariables.old_checkin_date = formatDate(normalizeDate(pendingMove.oldCheckin));
+                }
+                if (pendingMove.oldCheckout) {
+                  additionalVariables.old_checkout_date = formatDate(normalizeDate(pendingMove.oldCheckout));
+                }
+              }
+              
+              if (roomChanged) {
+                if (pendingMove.reservation.rooms?.room_number) {
+                  additionalVariables.old_room_number = pendingMove.reservation.rooms.room_number;
+                }
+                if (pendingMove.reservation.rooms?.name) {
+                  additionalVariables.old_room_name = pendingMove.reservation.rooms.name;
+                }
+              }
+              
+              if (categoryChanged) {
+                if (pendingMove.reservation.room_categories?.name) {
+                  additionalVariables.old_category_name = pendingMove.reservation.room_categories.name;
+                }
+              }
+              
+              await triggerEmail('reservation.modified', updatedReservation, additionalVariables);
+            } catch (emailError) {
+              console.error("❌ Erro ao enviar email de modificação:", emailError);
+              // Não bloquear a movimentação se o email falhar
+            }
+          }
+        })()
+      ]).catch((error) => {
+        console.error("Erro ao processar tarefas em background:", error);
+      });
     } catch (error: any) {
       console.error("❌ Erro ao confirmar movimentação:", error);
       toast.error(error.message || "Erro ao mover reserva");
+      setIsMoving(false);
     }
-  }, [pendingMove, queryClient]);
+  }, [pendingMove, queryClient, isMoving]);
 
   // Função para cancelar a movimentação
   const cancelMove = useCallback(() => {
+    if (isMoving) return; // Não permitir cancelar durante a movimentação
     setMoveConfirmOpen(false);
     setPendingMove(null);
-  }, []);
+  }, [isMoving]);
 
   // Função para validar compatibilidade de espaço entre reserva e quarto
   const validateSpaceCompatibility = useCallback(async (
@@ -3429,11 +3435,40 @@ export const ReservationCalendarMap = ({
       )}
 
       {/* Diálogo de Confirmação de Movimentação */}
-      <AlertDialog open={moveConfirmOpen} onOpenChange={setMoveConfirmOpen}>
+      <AlertDialog open={moveConfirmOpen} onOpenChange={(open) => !isMoving && setMoveConfirmOpen(open)}>
         <AlertDialogContent className="max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar Movimentação de Reserva</AlertDialogTitle>
-            <div className="space-y-4 mt-4 text-sm text-muted-foreground">
+            <AlertDialogTitle>
+              {isMoving ? "Movendo Reserva..." : "Confirmar Movimentação de Reserva"}
+            </AlertDialogTitle>
+            {isMoving && (
+              <div className="flex items-center justify-center py-4">
+                <div className="flex flex-col items-center gap-3">
+                  <svg
+                    className="animate-spin h-8 w-8 text-primary"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  <p className="text-sm text-muted-foreground">Processando movimentação...</p>
+                </div>
+              </div>
+            )}
+            <div className={`space-y-4 mt-4 text-sm text-muted-foreground ${isMoving ? 'opacity-50' : ''}`}>
               <div>
                 <p className="font-semibold mb-2">Reserva: {pendingMove?.reservation.reservation_code || "N/A"}</p>
                 
@@ -3467,9 +3502,41 @@ export const ReservationCalendarMap = ({
             </div>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={cancelMove}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmMove} className="bg-primary">
-              Confirmar Movimentação
+            <AlertDialogCancel onClick={cancelMove} disabled={isMoving}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmMove} 
+              className="bg-primary"
+              disabled={isMoving}
+            >
+              {isMoving ? (
+                <span className="flex items-center gap-2">
+                  <svg
+                    className="animate-spin h-4 w-4 text-white"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  Movendo...
+                </span>
+              ) : (
+                "Confirmar Movimentação"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
