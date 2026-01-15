@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, CheckCircle2, AlertCircle, Search, MessageCircle, ArrowLeft, Home, Phone, Mail, Building2 } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Search, MessageCircle, ArrowLeft, Home, Phone, Mail, Building2, ChevronDown, ChevronUp, User, LogOut } from "lucide-react";
 import { GuestAuthStep } from "@/components/webcheckin/GuestAuthStep";
 import { VerifyReservationStep } from "@/components/webcheckin/VerifyReservationStep";
 import { PoliciesStep } from "@/components/webcheckin/PoliciesStep";
@@ -21,6 +21,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export default function WebCheckin() {
   const { locator: locatorFromUrl } = useParams<{ locator?: string }>();
@@ -42,12 +51,16 @@ export default function WebCheckin() {
     { id: "complete", title: t("webCheckin.steps.complete"), component: CheckinCompleteStep },
   ];
   const { getWebCheckinByLocator, getWebCheckinByToken, startWebCheckin, getPreviousCheckinData } = useWebCheckin();
-  const { getCurrentSession, linkReservationToAccount, logout } = useGuestAccount();
+  const { getCurrentSession, linkReservationToAccount, logout, getCurrentAccount } = useGuestAccount();
   
   const [locator, setLocator] = useState<string>(locatorFromUrl || "");
   // Inicializar step baseado no estado de autenticação
   const session = getCurrentSession();
   const isAuthenticated = !!session.accountId;
+  const accountId = session.accountId;
+  
+  // Buscar dados da conta do hóspede
+  const { data: accountData } = getCurrentAccount(accountId || "");
   const [currentStep, setCurrentStep] = useState(() => {
     // Se já está autenticado, começar na etapa de localizador (1)
     if (isAuthenticated && session.accountId) {
@@ -69,6 +82,7 @@ export default function WebCheckin() {
     email?: string;
   } | null>(null);
   const [isSearchingLocator, setIsSearchingLocator] = useState(false);
+  const [showAllStepsMobile, setShowAllStepsMobile] = useState(false);
 
   // SEGURANÇA: Buscar informações iniciais pelo localizador APENAS se estiver autenticado
   // Isso previne que dados da reserva sejam expostos sem autenticação
@@ -1411,30 +1425,126 @@ export default function WebCheckin() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 py-8 px-4">
-      <div className="max-w-4xl mx-auto relative">
-        {/* Seletor de Idioma */}
-        <div className="absolute top-0 right-0">
-          <LanguageSelector />
-        </div>
-        
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">{t("webCheckin.title")}</h1>
-          <p className="text-slate-600">{t("webCheckin.subtitle")}</p>
-        </div>
+  // Obter nome do usuário para saudação e avatar
+  const getUserName = () => {
+    return (accountData as any)?.full_name?.split(" ")[0] || t("webCheckin.guest") || "Hóspede";
+  };
 
-        {/* Progress Stepper - Moderno e Minimalista */}
+  const getUserInitials = () => {
+    const name = (accountData as any)?.full_name || "";
+    if (!name) return "GU";
+    return name
+      .split(" ")
+      .map((n: string) => n[0])
+      .join("")
+      .toUpperCase()
+      .substring(0, 2);
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate("/web-checkin");
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+      {/* Navbar Header - Mesma estrutura do GuestDashboard */}
+      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/60 sticky top-0 z-50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+          <div className="flex items-center justify-between">
+            {/* Logo e Título do App */}
+            <div className="flex items-center gap-3">
+              {settings?.logo_url ? (
+                <img 
+                  src={settings.logo_url} 
+                  alt="Logo" 
+                  className="h-10 w-10 sm:h-12 sm:w-12 object-contain rounded-lg flex-shrink-0"
+                />
+              ) : (
+                <div className="h-10 w-10 sm:h-12 sm:w-12 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <Home className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+                </div>
+              )}
+              <div className="hidden sm:block">
+                <h1 className="text-lg font-bold text-slate-900">{t("webCheckin.title")}</h1>
+                <p className="text-xs text-slate-500">{t("webCheckin.subtitle") || "Check-in Online"}</p>
+              </div>
+            </div>
+
+            {/* Direita: Saudação, Idioma, Avatar */}
+            <div className="flex items-center gap-3">
+              {/* Saudação - apenas desktop */}
+              {isAuthenticated && accountData && (
+                <div className="hidden md:block text-right">
+                  <p className="text-sm font-medium text-slate-900">
+                    Olá, {getUserName()} 👋
+                  </p>
+                </div>
+              )}
+
+              {/* Idioma */}
+              <LanguageSelector />
+
+              {/* Avatar com Menu - apenas se autenticado */}
+              {isAuthenticated && accountData && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="flex items-center gap-2 p-1 rounded-full hover:bg-slate-100 transition-colors">
+                      <Avatar className="h-9 w-9 ring-2 ring-slate-200">
+                        <AvatarFallback className="bg-gradient-to-br from-blue-600 to-indigo-600 text-white text-sm font-semibold">
+                          {getUserInitials()}
+                        </AvatarFallback>
+                      </Avatar>
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{(accountData as any)?.full_name || "Usuário"}</span>
+                        <span className="text-xs text-slate-500">{(accountData as any)?.email || ""}</span>
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => {
+                      // Aqui pode abrir um diálogo de perfil se necessário
+                      // Por enquanto, apenas fecha o menu
+                    }}>
+                      <User className="h-4 w-4 mr-2" />
+                      Meu Perfil
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Sair
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Conteúdo Principal */}
+      <div className="max-w-4xl mx-auto py-8 px-4">
+        {/* Saudação Mobile */}
+        {isAuthenticated && accountData && (
+          <div className="mb-6 md:hidden">
+            <h2 className="text-2xl font-bold text-slate-900 mb-1">
+              Olá, {getUserName()} 👋
+            </h2>
+            <p className="text-sm text-slate-600">{t("webCheckin.subtitle") || "Bem-vindo ao check-in online"}</p>
+          </div>
+        )}
+
+        {/* Progress Stepper - Responsivo: Vertical com cards no mobile, horizontal no desktop */}
         <div className="mb-8 overflow-hidden">
-          <div className="relative py-4">
-            {/* Container responsivo: scroll horizontal no mobile, flex normal no desktop */}
-            <div className="relative overflow-x-auto md:overflow-visible pb-2 md:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-              <div className="flex items-center justify-center md:justify-between relative min-w-max md:min-w-0 gap-3 md:gap-2 px-2 md:px-0">
-                {/* Linha de progresso de fundo - alinhada ao centro exato dos círculos */}
-                {/* Mobile: círculo 40px (w-10), centro em 20px | Desktop: círculo 48px (w-12), centro em 24px */}
-                <div className="absolute left-0 right-0 h-[2px] bg-slate-100 hidden md:block" style={{ top: '24px' }} />
-                <div className="absolute left-0 right-0 h-[2px] bg-slate-100 md:hidden" style={{ top: '20px' }} />
+          {/* Desktop: Layout horizontal (mantém o original) */}
+          <div className="hidden md:block relative py-4">
+            <div className="relative overflow-visible">
+              <div className="flex items-center justify-between relative gap-2">
+                {/* Linha de progresso de fundo */}
+                <div className="absolute left-0 right-0 h-[2px] bg-slate-100" style={{ top: '24px' }} />
                 
                 {/* Linha de progresso preenchida */}
                 {(() => {
@@ -1456,21 +1566,14 @@ export default function WebCheckin() {
                   const progressPercent = totalSteps > 1 ? (completedSteps / (totalSteps - 1)) * 100 : 0;
                   
                   return (
-                    <>
-                      <div 
-                        className="absolute left-0 h-[2px] bg-emerald-500 transition-all duration-500 ease-out hidden md:block"
-                        style={{ width: `${progressPercent}%`, top: '24px' }}
-                      />
-                      <div 
-                        className="absolute left-0 h-[2px] bg-emerald-500 transition-all duration-500 ease-out md:hidden"
-                        style={{ width: `${progressPercent}%`, top: '20px' }}
-                      />
-                    </>
+                    <div 
+                      className="absolute left-0 h-[2px] bg-emerald-500 transition-all duration-500 ease-out"
+                      style={{ width: `${progressPercent}%`, top: '24px' }}
+                    />
                   );
                 })()}
                 
                 {STEPS.filter(step => step.component !== null && step.id !== "locator").map((step, index, array) => {
-                  // Mapear índices reais: auth=0, verify=2 (após locator=1), policies=3, guests=4, etc.
                   const stepIndexMap: Record<string, number> = {
                     auth: 0,
                     verify: 2,
@@ -1484,35 +1587,19 @@ export default function WebCheckin() {
                   const actualIndex = stepIndexMap[step.id] ?? index;
                   const isActive = currentStep === actualIndex || (currentStep === 1 && step.id === "verify");
                   const isCompleted = currentStep > actualIndex;
-                  const isLast = index === array.length - 1;
-                  // Se é a etapa "complete" e está ativa, considerar como concluída
                   const isCompleteStep = step.id === "complete";
                   const showAsCompleted = isCompleted || (isCompleteStep && isActive);
                   const showAsActive = isActive && !isCompleteStep;
 
                   return (
                     <div key={step.id} className="flex flex-col items-center relative z-10 flex-shrink-0">
-                      {/* Linha conectora entre etapas - apenas no mobile, alinhada ao centro exato (20px) */}
-                      {!isLast && (
-                        <div className="absolute h-[2px] md:hidden z-0" style={{ top: '20px', left: 'calc(50% + 20px)', right: 'calc(-50% + 20px)' }}>
-                          <div
-                            className={`h-full transition-all duration-500 ${
-                              showAsCompleted ? "bg-emerald-500" : "bg-slate-200"
-                            }`}
-                            style={{ width: showAsCompleted ? "100%" : "0%" }}
-                          />
-                        </div>
-                      )}
-                      
-                      {/* Indicador circular - tamanho fixo para alinhamento perfeito */}
-                      <div className="relative w-10 h-10 md:w-12 md:h-12 flex items-center justify-center flex-shrink-0">
-                        {/* Círculo de fundo com animação sutil */}
+                      <div className="relative w-12 h-12 flex items-center justify-center flex-shrink-0">
                         {showAsActive && (
                           <div className="absolute inset-0 rounded-full bg-blue-100/50 animate-pulse" style={{ transform: 'scale(1.4)' }} />
                         )}
                         
                         <div
-                          className={`relative w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-all duration-300 ${
+                          className={`relative w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 ${
                             showAsActive
                               ? "bg-blue-600 shadow-lg shadow-blue-200/50 scale-110"
                               : showAsCompleted
@@ -1521,21 +1608,20 @@ export default function WebCheckin() {
                           }`}
                         >
                           {showAsCompleted ? (
-                            <CheckCircle2 className="h-5 w-5 md:h-6 md:w-6 text-white" />
+                            <CheckCircle2 className="h-6 w-6 text-white" />
                           ) : showAsActive ? (
-                            <Loader2 className="h-4 w-4 md:h-5 md:w-5 text-white animate-spin" />
+                            <Loader2 className="h-5 w-5 text-white animate-spin" />
                           ) : (
-                            <span className={`text-xs md:text-sm font-medium ${showAsActive ? "text-white" : "text-slate-400"}`}>
+                            <span className="text-sm font-medium text-slate-400">
                               {index + 1}
                             </span>
                           )}
                         </div>
                       </div>
                       
-                      {/* Label da etapa */}
-                      <div className="mt-2 md:mt-3 text-center w-full px-1 max-w-[90px] md:max-w-none">
+                      <div className="mt-3 text-center w-full">
                         <span
-                          className={`text-[10px] md:text-xs font-medium transition-colors duration-200 leading-tight ${
+                          className={`text-xs font-medium transition-colors duration-200 leading-tight ${
                             showAsActive 
                               ? "text-blue-600 font-semibold" 
                               : showAsCompleted 
@@ -1551,6 +1637,163 @@ export default function WebCheckin() {
                 })}
               </div>
             </div>
+          </div>
+
+          {/* Mobile: Layout vertical com cards */}
+          <div className="md:hidden">
+            {(() => {
+              const stepIndexMap: Record<string, number> = {
+                auth: 0,
+                verify: 2,
+                policies: 3,
+                guests: 4,
+                documents: 5,
+                preferences: 6,
+                review: 7,
+                complete: 8,
+              };
+              
+              // Verificar se está na etapa de conclusão
+              const isComplete = currentStep === 8 || STEPS[currentStep]?.id === "complete";
+              
+              // Filtrar steps para mostrar
+              const allSteps = STEPS.filter(step => step.component !== null && step.id !== "locator");
+              const stepsToShow = isComplete && !showAllStepsMobile 
+                ? allSteps.slice(-3) // Mostrar apenas os últimos 3 steps quando concluído
+                : allSteps;
+              
+              const totalSteps = allSteps.length;
+              const visibleSteps = stepsToShow.length;
+              
+              return (
+                <div className="flex gap-4 relative">
+                  {/* Barra de progresso vertical à esquerda */}
+                  <div className="relative flex-shrink-0 w-1">
+                    <div className="relative" style={{ minHeight: '100%' }}>
+                      {/* Barra de fundo - altura baseada nos steps visíveis */}
+                      {(() => {
+                        const totalHeight = visibleSteps * 76 - 12; // 64px card + 12px gap
+                        
+                        return (
+                          <div 
+                            className="absolute top-2 left-0 w-1 bg-slate-100 rounded-full"
+                            style={{ height: `${totalHeight}px` }}
+                          >
+                            {(() => {
+                              const completedSteps = STEPS.filter(step => {
+                                const actualIndex = stepIndexMap[step.id] ?? -1;
+                                return actualIndex >= 0 && currentStep > actualIndex;
+                              }).length;
+                              const progressPercent = totalSteps > 1 ? (completedSteps / (totalSteps - 1)) * 100 : 0;
+                              
+                              // Ajustar altura da barra de progresso baseado nos steps visíveis
+                              const visibleProgressHeight = isComplete && !showAllStepsMobile
+                                ? 100 // 100% quando mostra apenas os últimos
+                                : progressPercent;
+                              
+                              return (
+                                <div 
+                                  className="absolute top-0 left-0 w-1 bg-blue-600 transition-all duration-500 ease-out rounded-full"
+                                  style={{ height: `${visibleProgressHeight}%` }}
+                                />
+                              );
+                            })()}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Cards verticais */}
+                  <div className="flex-1 space-y-3">
+                    {/* Botão para expandir/colapsar quando concluído */}
+                    {isComplete && !showAllStepsMobile && (
+                      <button
+                        onClick={() => setShowAllStepsMobile(true)}
+                        className="w-full flex items-center justify-center gap-2 py-2 px-4 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                        <span>Ver todos os passos</span>
+                      </button>
+                    )}
+                    
+                    {isComplete && showAllStepsMobile && (
+                      <button
+                        onClick={() => setShowAllStepsMobile(false)}
+                        className="w-full flex items-center justify-center gap-2 py-2 px-4 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                      >
+                        <ChevronUp className="h-4 w-4" />
+                        <span>Ocultar passos anteriores</span>
+                      </button>
+                    )}
+                    
+                    {stepsToShow.map((step, index, array) => {
+                      const actualIndex = stepIndexMap[step.id] ?? -1;
+                      const isActive = currentStep === actualIndex || (currentStep === 1 && step.id === "verify");
+                      const isCompleted = currentStep > actualIndex;
+                      const isCompleteStep = step.id === "complete";
+                      const showAsCompleted = isCompleted || (isCompleteStep && isActive);
+                      const showAsActive = isActive && !isCompleteStep;
+                      
+                      // Calcular o índice real no array completo
+                      const realIndex = allSteps.findIndex(s => s.id === step.id);
+
+                      return (
+                        <div
+                          key={step.id}
+                          className={`relative rounded-lg border-2 transition-all duration-300 ${
+                            showAsActive
+                              ? "bg-blue-600 border-blue-600 shadow-md"
+                              : showAsCompleted
+                              ? "bg-white border-blue-200"
+                              : "bg-white border-slate-200"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between p-4">
+                            <div className="flex-1">
+                              <h3
+                                className={`text-sm font-semibold ${
+                                  showAsActive
+                                    ? "text-white"
+                                    : showAsCompleted
+                                    ? "text-blue-600"
+                                    : "text-slate-600"
+                                }`}
+                              >
+                                {step.title}
+                              </h3>
+                            </div>
+                            
+                            {/* Ícone circular à direita */}
+                            <div className="flex-shrink-0 ml-4">
+                              <div
+                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 ${
+                                  showAsActive
+                                    ? "bg-white"
+                                    : showAsCompleted
+                                    ? "bg-blue-600"
+                                    : "bg-slate-100 border-2 border-slate-300"
+                                }`}
+                              >
+                                {showAsCompleted ? (
+                                  <CheckCircle2 className={`h-5 w-5 ${showAsActive ? "text-blue-600" : "text-white"}`} />
+                                ) : showAsActive ? (
+                                  <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
+                                ) : (
+                                  <span className="text-xs font-medium text-slate-400">
+                                    {realIndex + 1}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
