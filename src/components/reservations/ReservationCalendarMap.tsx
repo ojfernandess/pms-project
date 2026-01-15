@@ -670,7 +670,7 @@ export const ReservationCalendarMap = ({
   }, [reservationsByRoom, normalizeDate, isValidReservation]);
 
   // Calcular posição de uma reserva no grid
-  const getReservationPosition = useCallback((reservation: any) => {
+  const getReservationPosition = useCallback((reservation: any, otherReservations?: any[]) => {
     if (!reservation) {
       return { startIndex: -1, duration: 0, isVisible: false };
     }
@@ -738,9 +738,6 @@ export const ReservationCalendarMap = ({
         return { startIndex: -1, duration: 0, isVisible: false };
       }
       
-      // IMPORTANTE: Não mostrar reservas no dia de checkout
-      // Se o checkout está em um dia visível, a reserva deve terminar ANTES desse dia
-      // Isso evita confusão: uma reserva com checkout em 04/01 não deve aparecer no dia 04/01
       const firstVisibleDate = startOfDay(visibleDates[0]);
       
       // Se o checkout está antes ou no primeiro dia visível, não mostrar a reserva
@@ -754,16 +751,42 @@ export const ReservationCalendarMap = ({
         return visibleDateStr === checkoutStr;
       });
       
+      // AJUSTE: Verificar se há outra reserva com check-in no dia de checkout
+      // Se houver, vamos ajustar o posicionamento para que fiquem visualmente justas
+      let hasCheckinOnCheckoutDay = false;
+      let conflictingReservation: any = null;
+      if (checkoutIsInVisibleRange && otherReservations && otherReservations.length > 0) {
+        conflictingReservation = otherReservations.find((otherReservation: any) => {
+          // Pular a própria reserva
+          if (otherReservation.id === reservation.id) return false;
+          
+          // Pular reservas canceladas
+          if (otherReservation.status === "cancelled") return false;
+          
+          // Verificar se é uma reserva válida
+          if (!isValidReservation(otherReservation)) return false;
+          
+          // Verificar se o check-in da outra reserva é no dia de checkout desta reserva
+          const otherCheckinStr = normalizeDate(otherReservation.checkin_date);
+          return otherCheckinStr === checkoutStr;
+        });
+        hasCheckinOnCheckoutDay = !!conflictingReservation;
+      }
+      
       // Calcular a duração visível (do início visível até o fim visível)
-      // O checkout é exclusivo, então uma reserva de check-in 01-01 até checkout 01-02 ocupa apenas o dia 01-01
+      // AJUSTE: Sempre estender visualmente quando checkout está no dia seguinte visível
+      // Se houver conflito, ajustaremos o posicionamento da reserva com check-in depois
       let visibleEndDate: Date;
+      let shouldExtendToNextDay = false;
+      
       if (checkoutIsInVisibleRange) {
-        // Checkout está em um dia visível, a reserva deve terminar ANTES do checkout
-        // Usar o checkout como fim (já garante que não inclui o dia de checkout)
+        // Checkout está em um dia visível (dia seguinte)
+        // Sempre incluir uma pequena porção visual no grid do dia de checkout para indicar quando termina
+        shouldExtendToNextDay = true;
+        // Usar o checkout como fim, mas vamos estender visualmente depois
         visibleEndDate = checkoutStartOfDay;
       } else if (checkoutStartOfDay <= lastVisibleDate) {
         // Checkout está dentro do período visível mas não é um dia visível específico
-        // (caso raro, mas manter lógica original)
         visibleEndDate = checkoutStartOfDay;
       } else {
         // Checkout está depois do período visível, usar o último dia visível + 1
@@ -782,21 +805,43 @@ export const ReservationCalendarMap = ({
       // Não pode ultrapassar a duração total da reserva
       duration = Math.min(duration, totalDuration);
       
-      // Não pode ultrapassar o período visível
-      duration = Math.min(duration, visibleDates.length - startIndex);
+      // AJUSTE: Se o checkout está no dia seguinte visível, estender a duração para incluir visualmente
+      // uma pequena porção do dia de checkout (cerca de 15% da largura da coluna)
+      // Se houver conflito com check-in no mesmo dia, limitar a extensão para não sobrepor
+      let visualExtension = 0;
+      if (shouldExtendToNextDay && startIndex + duration < visibleDates.length) {
+        if (hasCheckinOnCheckoutDay) {
+          // Se há check-in no mesmo dia, limitar a extensão para 10% para deixar espaço para a outra reserva
+          visualExtension = 0.10;
+        } else {
+          // Se não há conflito, usar 15% da largura da coluna
+          visualExtension = 0.15;
+        }
+        duration = duration + visualExtension;
+      }
+      
+      // Não pode ultrapassar o período visível (mas permitir a fração visual)
+      const maxDuration = visibleDates.length - startIndex;
+      if (duration > maxDuration) {
+        duration = maxDuration;
+      }
       
       if (duration <= 0) {
         console.warn("⚠️ Duração inválida em getReservationPosition:", duration, { checkinStr, checkoutStr, totalDuration, startIndex });
-        return { startIndex: -1, duration: 0, isVisible: false };
+        return { startIndex: -1, duration: 0, isVisible: false, visualExtension: 0 };
       }
 
       // Verificar se está visível (não ultrapassa o grid)
-      const isVisible = startIndex >= 0 && startIndex + duration <= visibleDates.length;
+      // Permitir uma pequena extensão visual (até 0.2 dias) além do limite para indicar checkout no dia seguinte
+      const maxAllowedDuration = visibleDates.length - startIndex;
+      const isVisible = startIndex >= 0 && (duration <= maxAllowedDuration || (shouldExtendToNextDay && duration <= maxAllowedDuration + 0.2));
 
       return {
         startIndex,
         duration,
-        isVisible
+        isVisible,
+        visualExtension,
+        hasCheckinOnCheckoutDay
       };
     } catch (error) {
       console.error("❌ Erro em getReservationPosition:", error, reservation);
@@ -1114,7 +1159,9 @@ export const ReservationCalendarMap = ({
     if (["blocked", "cancelled", "checkedout"].includes(reservation.status)) return;
     if (!reservation.room_id) return;
 
-    const pos = getReservationPosition(reservation);
+    // Buscar outras reservas do mesmo quarto para verificar sobreposição
+    const roomReservations = reservationsByRoom[reservation.room_id] || [];
+    const pos = getReservationPosition(reservation, roomReservations);
     if (!pos.isVisible) return;
     
     // Armazenar posição inicial do mouse para detectar movimento
@@ -2754,7 +2801,7 @@ export const ReservationCalendarMap = ({
                   {isExpanded && rooms.map((room: any) => {
                     const roomReservations = reservationsByRoom[room.id] || [];
                     const visibleReservations = roomReservations.filter((r: any) => {
-                      const pos = getReservationPosition(r);
+                      const pos = getReservationPosition(r, roomReservations);
                       return pos.isVisible;
                     });
 
@@ -2863,8 +2910,34 @@ export const ReservationCalendarMap = ({
 
                           {/* Reservas */}
                           {visibleReservations.map((reservation: any) => {
-                              const pos = getReservationPosition(reservation);
+                              const pos = getReservationPosition(reservation, roomReservations);
                             if (!pos.isVisible) return null;
+
+                            // AJUSTE: Calcular offset de posição se esta reserva começa no dia de checkout de outra
+                            let leftOffset = 0;
+                            const reservationCheckinStr = normalizeDate(reservation.checkin_date);
+                            
+                            // Verificar se há outra reserva que termina (checkout) no dia de check-in desta reserva
+                            if (reservationCheckinStr) {
+                              const reservationWithCheckoutOnThisCheckin = roomReservations.find((otherReservation: any) => {
+                                if (otherReservation.id === reservation.id) return false;
+                                if (otherReservation.status === "cancelled") return false;
+                                if (!isValidReservation(otherReservation)) return false;
+                                
+                                const otherCheckoutStr = normalizeDate(otherReservation.checkout_date);
+                                return otherCheckoutStr === reservationCheckinStr;
+                              });
+                              
+                              if (reservationWithCheckoutOnThisCheckin) {
+                                // Calcular posição da outra reserva para obter sua extensão visual
+                                const otherPos = getReservationPosition(reservationWithCheckoutOnThisCheckin, roomReservations);
+                                if (otherPos.isVisible && otherPos.visualExtension > 0) {
+                                  // Ajustar o left desta reserva para começar após a extensão visual da outra
+                                  // A extensão visual é uma fração de dia, então convertemos para porcentagem
+                                  leftOffset = (otherPos.visualExtension / visibleDates.length) * 100;
+                                }
+                              }
+                            }
 
                             // Determinar cor baseada no pagamento
                             // NOVA LÓGICA:
@@ -2923,8 +2996,8 @@ export const ReservationCalendarMap = ({
                                     : "cursor-grab active:cursor-grabbing hover:shadow-md hover:scale-[1.01] z-10"
                                   )}
                                   style={{
-                                  left: `${(pos.startIndex / visibleDates.length) * 100}%`,
-                                  width: `${(pos.duration / visibleDates.length) * 100}%`,
+                                  left: `${(pos.startIndex / visibleDates.length) * 100 + leftOffset}%`,
+                                  width: `${Math.min((pos.duration / visibleDates.length) * 100 - leftOffset, 100 - ((pos.startIndex / visibleDates.length) * 100 + leftOffset))}%`,
                                   height: "28px",
                                   top: "6px",
                                   margin: "0 2px",
