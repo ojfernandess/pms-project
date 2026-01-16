@@ -316,27 +316,48 @@ async function registerStripePaymentInPMS(
 
 /**
  * Detecta o domínio base do sistema automaticamente
+ * Detecta automaticamente se está em localhost (desenvolvimento) ou produção
  */
 function detectBaseUrl(req: Request | null = null, supabaseUrl: string | null = null): string {
-  // 1. Tentar variável de ambiente SITE_URL
+  // 1. Tentar variável de ambiente SITE_URL (prioridade máxima)
   const siteUrl = Deno.env.get("SITE_URL");
   if (siteUrl) {
+    console.log(`🌐 [detectBaseUrl] Usando SITE_URL: ${siteUrl}`);
     return siteUrl;
   }
 
-  // 2. Tentar extrair do SUPABASE_URL (remover partes do Supabase)
-  if (supabaseUrl) {
-    try {
-      const url = new URL(supabaseUrl);
-      // Se for um projeto Supabase, tentar inferir o domínio
-      // Exemplo: https://xxxxx.supabase.co -> pode inferir domínio customizado
-      // Por enquanto, vamos usar o domínio do Supabase como fallback
-    } catch {
-      // Ignorar erro
-    }
+  // 2. Verificar variáveis de ambiente de plataformas de produção
+  // Vercel
+  const vercelUrl = Deno.env.get("VERCEL_URL");
+  if (vercelUrl) {
+    const url = `https://${vercelUrl}`;
+    console.log(`🌐 [detectBaseUrl] Usando VERCEL_URL: ${url}`);
+    return url;
   }
 
-  // 3. Tentar extrair do header Referer ou Origin se disponível
+  // Render
+  const renderUrl = Deno.env.get("RENDER_EXTERNAL_URL");
+  if (renderUrl) {
+    console.log(`🌐 [detectBaseUrl] Usando RENDER_EXTERNAL_URL: ${renderUrl}`);
+    return renderUrl;
+  }
+
+  // Netlify
+  const netlifyUrl = Deno.env.get("URL");
+  if (netlifyUrl) {
+    console.log(`🌐 [detectBaseUrl] Usando Netlify URL: ${netlifyUrl}`);
+    return netlifyUrl;
+  }
+
+  // Railway
+  const railwayUrl = Deno.env.get("RAILWAY_PUBLIC_DOMAIN");
+  if (railwayUrl) {
+    const url = `https://${railwayUrl}`;
+    console.log(`🌐 [detectBaseUrl] Usando RAILWAY_PUBLIC_DOMAIN: ${url}`);
+    return url;
+  }
+
+  // 3. Tentar extrair do header Referer ou Origin se disponível (útil para webhooks)
   if (req) {
     const referer = req.headers.get("referer");
     const origin = req.headers.get("origin");
@@ -344,7 +365,11 @@ function detectBaseUrl(req: Request | null = null, supabaseUrl: string | null = 
     if (origin) {
       try {
         const url = new URL(origin);
-        return url.origin;
+        // Verificar se não é localhost
+        if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
+          console.log(`🌐 [detectBaseUrl] Usando Origin header: ${url.origin}`);
+          return url.origin;
+        }
       } catch {
         // Ignorar erro
       }
@@ -353,28 +378,53 @@ function detectBaseUrl(req: Request | null = null, supabaseUrl: string | null = 
     if (referer) {
       try {
         const url = new URL(referer);
-        return url.origin;
+        // Verificar se não é localhost
+        if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
+          console.log(`🌐 [detectBaseUrl] Usando Referer header: ${url.origin}`);
+          return url.origin;
+        }
       } catch {
         // Ignorar erro
       }
     }
   }
 
-  // 4. Fallback: tentar usar variável de ambiente do Supabase para inferir
-  // Se o SUPABASE_URL contém um domínio customizado, podemos tentar inferir
-  const supabaseUrlEnv = Deno.env.get("SUPABASE_URL");
+  // 4. Analisar SUPABASE_URL para detectar ambiente
+  const supabaseUrlEnv = supabaseUrl || Deno.env.get("SUPABASE_URL");
   if (supabaseUrlEnv) {
     try {
       const url = new URL(supabaseUrlEnv);
+      const hostname = url.hostname;
+      
+      // Se for localhost, retornar localhost
+      if (hostname.includes('localhost') || hostname.includes('127.0.0.1')) {
+        console.log(`🌐 [detectBaseUrl] Detectado localhost via SUPABASE_URL: http://localhost:8080`);
+        return "http://localhost:8080";
+      }
+      
+      // Se for um projeto Supabase (.supabase.co), tentar inferir domínio de produção
+      if (hostname.includes('.supabase.co')) {
+        // Extrair o ID do projeto do hostname
+        // Exemplo: xxxxxx.supabase.co -> pode inferir domínio customizado se configurado
+        // Por enquanto, vamos tentar usar variáveis de ambiente ou inferir
+        console.log(`🌐 [detectBaseUrl] Detectado Supabase Cloud, tentando inferir domínio de produção...`);
+      }
+      
       // Se não for um domínio .supabase.co, pode ser um domínio customizado
-      if (!url.hostname.includes('.supabase.co')) {
-        // Tentar inferir removendo partes do Supabase
-        // Por exemplo: se for https://api.seudominio.com, retornar https://seudominio.com
-        const parts = url.hostname.split('.');
+      if (!hostname.includes('.supabase.co')) {
+        // Tentar inferir removendo subdomínios como 'api', 'app', etc.
+        const parts = hostname.split('.');
         if (parts.length > 2) {
           // Remover subdomínios como 'api', 'app', etc.
           const domain = parts.slice(-2).join('.');
-          return `${url.protocol}//${domain}`;
+          const inferredUrl = `${url.protocol}//${domain}`;
+          console.log(`🌐 [detectBaseUrl] Domínio customizado inferido: ${inferredUrl}`);
+          return inferredUrl;
+        } else {
+          // Se for um domínio direto, usar como está
+          const directUrl = `${url.protocol}//${hostname}`;
+          console.log(`🌐 [detectBaseUrl] Usando domínio direto do SUPABASE_URL: ${directUrl}`);
+          return directUrl;
         }
       }
     } catch {
@@ -382,7 +432,35 @@ function detectBaseUrl(req: Request | null = null, supabaseUrl: string | null = 
     }
   }
 
-  // 5. Último fallback: usar localhost para desenvolvimento
+  // 5. Verificar variável de ambiente de ambiente (NODE_ENV, DENO_ENV, etc.)
+  const env = Deno.env.get("ENVIRONMENT") || Deno.env.get("NODE_ENV") || Deno.env.get("DENO_ENV");
+  if (env === "production" || env === "prod") {
+    // Em produção, tentar usar o SUPABASE_URL como base
+    if (supabaseUrlEnv) {
+      try {
+        const url = new URL(supabaseUrlEnv);
+        // Se não for localhost, tentar inferir
+        if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
+          console.log(`🌐 [detectBaseUrl] Ambiente de produção detectado, usando SUPABASE_URL como base`);
+          // Retornar apenas o protocolo e hostname (sem path)
+          return `${url.protocol}//${url.hostname}`;
+        }
+      } catch {
+        // Ignorar erro
+      }
+    }
+  }
+
+  // 6. Último fallback: detectar baseado no SUPABASE_URL
+  // Se SUPABASE_URL contém localhost, usar localhost
+  if (supabaseUrlEnv && (supabaseUrlEnv.includes('localhost') || supabaseUrlEnv.includes('127.0.0.1'))) {
+    console.log(`🌐 [detectBaseUrl] Fallback: Detectado localhost, usando http://localhost:8080`);
+    return "http://localhost:8080";
+  }
+
+  // 7. Se chegou aqui e não é localhost, tentar inferir domínio de produção
+  // Por padrão, se não conseguir detectar, usar localhost (mais seguro para desenvolvimento)
+  console.log(`🌐 [detectBaseUrl] Fallback final: Usando localhost (desenvolvimento)`);
   return "http://localhost:8080";
 }
 
@@ -531,35 +609,42 @@ async function sendReservationExtensionEmail(
       ? `${hotelSettings.phone_ddi} ${hotelSettings.phone_number}`
       : hotelSettings?.phone_number || hotelSettings?.phone || '';
 
-    // Detectar domínio base
+    // Buscar configurações do site para obter logo_url e pms_base_url (antes de detectar baseUrl)
+    let siteSettings: any = null;
+    try {
+      const { data: settings } = await supabaseClient
+        .from("site_settings")
+        .select("logo_url, pms_base_url")
+        .maybeSingle();
+      siteSettings = settings;
+      console.log(`📧 [sendReservationExtensionEmail] Site settings carregadas, pms_base_url: ${siteSettings?.pms_base_url || 'não configurado'}`);
+    } catch (error) {
+      console.warn("⚠️ Erro ao buscar site_settings:", error);
+    }
+
+    // Detectar domínio base (priorizar pms_base_url de site_settings, depois detecção automática)
+    // NOTA: Não usar custom_domain ou website do hotel_settings aqui, pois esses são para o site do estabelecimento
+    // e não para o sistema PMS. O pms_base_url é a URL do sistema PMS que gera os links de check-in e políticas.
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     let baseUrl = detectBaseUrl(request, supabaseUrl);
     
-    // Priorizar domínio customizado do estabelecimento
-    if (customDomain) {
-      const domain = customDomain.trim();
-      if (domain) {
-        if (domain.startsWith('http://') || domain.startsWith('https://')) {
-          try {
-            const url = new URL(domain);
-            baseUrl = url.origin;
-          } catch {
-            baseUrl = domain;
-          }
-        } else {
-          baseUrl = `https://${domain}`;
-        }
-      }
-    } else if (hotelSettings?.website) {
-      try {
-        const website = hotelSettings.website.trim();
-        if (website) {
-          const url = new URL(website.startsWith('http') ? website : `https://${website}`);
+    // Priorizar pms_base_url de site_settings
+    if (siteSettings?.pms_base_url) {
+      const pmsUrl = siteSettings.pms_base_url.trim();
+      if (pmsUrl) {
+        try {
+          // Garantir que tenha protocolo
+          const url = new URL(pmsUrl.startsWith('http://') || pmsUrl.startsWith('https://') ? pmsUrl : `https://${pmsUrl}`);
           baseUrl = url.origin;
+          console.log(`🌐 [sendReservationExtensionEmail] Usando URL base do PMS (site_settings): ${baseUrl}`);
+        } catch {
+          // Se falhar, usar como está
+          baseUrl = pmsUrl;
+          console.log(`🌐 [sendReservationExtensionEmail] Usando URL base do PMS (site_settings) como está: ${baseUrl}`);
         }
-      } catch {
-        // Usar detecção automática
       }
+    } else {
+      console.log(`🌐 [sendReservationExtensionEmail] URL base do PMS não configurada, usando detecção automática: ${baseUrl}`);
     }
 
     // Gerar link de web check-in
@@ -580,19 +665,7 @@ async function sendReservationExtensionEmail(
       console.warn("⚠️ Erro ao buscar web_checkin:", error);
     }
 
-    // Buscar configurações do site para obter logo_url
-    let siteSettings: any = null;
-    try {
-      const { data: settings } = await supabaseClient
-        .from("site_settings")
-        .select("logo_url")
-        .maybeSingle();
-      siteSettings = settings;
-    } catch (error) {
-      console.warn("⚠️ Erro ao buscar site_settings:", error);
-    }
-
-    // Processar logo_url e hotel_logo
+    // Processar logo_url e hotel_logo (siteSettings já foi carregado acima)
     let logoUrl = siteSettings?.logo_url || hotelSettings?.logo_url || null;
     let hotelLogo = hotelSettings?.logo_url || null;
 
@@ -765,42 +838,52 @@ async function sendReservationExtensionEmail(
     const processedSubject = processTemplate(template.subject, variables);
     const processedBody = processTemplate(template.body_html, variables);
 
-    // Tentar enviar email diretamente primeiro
+    // Tentar enviar email diretamente primeiro (apenas para Resend/SendGrid)
+    // Para SMTP, ir direto para a fila que já tem a lógica correta
     let emailSent = false;
-    try {
-      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-      const emailFunctionName = emailSettings.provider === "resend" 
-        ? "send-email-resend" 
-        : "send-email-smtp";
+    
+    // Apenas tentar envio direto se for Resend ou SendGrid (não SMTP)
+    if (emailSettings.provider === "resend" || emailSettings.provider === "sendgrid") {
+      try {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+        const emailFunctionName = emailSettings.provider === "resend" 
+          ? "send-email-resend" 
+          : "send-email-sendgrid";
 
-      console.log(`📧 Tentando enviar email de extensão via ${emailFunctionName} para: ${recipientEmail}`);
+        console.log(`📧 Tentando enviar email de extensão via ${emailFunctionName} para: ${recipientEmail}`);
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/${emailFunctionName}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-        },
-        body: JSON.stringify({
+        const requestBody: any = {
           to: recipientEmail,
           to_name: recipientName,
           subject: processedSubject,
           html: processedBody,
           from: emailSettings.sender_email,
           from_name: emailSettings.sender_name,
-          api_key: emailSettings.api_key || emailSettings.smtp_password || "",
-        }),
-      });
+          api_key: emailSettings.api_key || "",
+        };
 
-      if (response.ok) {
-        emailSent = true;
-        console.log(`✅ Email de extensão enviado com sucesso para: ${recipientEmail}`);
-      } else {
-        const errorText = await response.text();
-        console.warn(`⚠️ Erro ao enviar email de extensão (${response.status}):`, errorText);
+        const response = await fetch(`${supabaseUrl}/functions/v1/${emailFunctionName}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (response.ok) {
+          emailSent = true;
+          console.log(`✅ Email de extensão enviado com sucesso para: ${recipientEmail}`);
+        } else {
+          const errorText = await response.text();
+          console.warn(`⚠️ Erro ao enviar email de extensão (${response.status}):`, errorText);
+        }
+      } catch (fetchError) {
+        console.warn("⚠️ Erro ao chamar Edge Function de email:", fetchError);
       }
-    } catch (fetchError) {
-      console.warn("⚠️ Erro ao chamar Edge Function de email:", fetchError);
+    } else {
+      // Para SMTP, não tentar envio direto - ir direto para a fila
+      console.log(`📧 Provider SMTP detectado, adicionando email de extensão à fila para processamento: ${recipientEmail}`);
     }
 
     // Se não foi enviado, adicionar à fila de emails usando função SQL que bypassa RLS
@@ -861,7 +944,7 @@ async function sendPaymentConfirmedEmail(
   request?: Request
 ): Promise<void> {
   try {
-    console.log(`📧 Enviando email de pagamento confirmado para reserva: ${reservationId}`);
+    console.log(`📧 [sendPaymentConfirmedEmail] Iniciando envio de email para reserva: ${reservationId}`);
     
     // Buscar dados da reserva
     const { data: reservation, error: reservationError } = await supabaseClient
@@ -877,9 +960,11 @@ async function sendPaymentConfirmedEmail(
       .single();
 
     if (reservationError || !reservation) {
-      console.error("❌ Erro ao buscar reserva para email:", reservationError);
+      console.error(`❌ [sendPaymentConfirmedEmail] Erro ao buscar reserva ${reservationId} para email:`, reservationError);
       return;
     }
+
+    console.log(`📧 [sendPaymentConfirmedEmail] Reserva encontrada: ${reservationId}, código: ${reservation.reservation_code}`);
 
     // Buscar template de email
     const { data: template, error: templateError } = await supabaseClient
@@ -890,9 +975,12 @@ async function sendPaymentConfirmedEmail(
       .single();
 
     if (templateError || !template) {
-      console.warn("⚠️ Template de email 'payment.confirmed' não encontrado ou inativo");
+      console.warn(`⚠️ [sendPaymentConfirmedEmail] Template de email 'payment.confirmed' não encontrado ou inativo para reserva ${reservationId}`);
+      console.warn(`⚠️ [sendPaymentConfirmedEmail] Erro do template:`, templateError);
       return;
     }
+
+    console.log(`📧 [sendPaymentConfirmedEmail] Template encontrado: ${template.id}, nome: ${template.name}`);
 
     // Buscar configurações de email
     const { data: emailSettings, error: settingsError } = await supabaseClient
@@ -902,18 +990,24 @@ async function sendPaymentConfirmedEmail(
       .maybeSingle();
 
     if (settingsError || !emailSettings) {
-      console.warn("⚠️ Configurações de email não encontradas ou inativas");
+      console.warn(`⚠️ [sendPaymentConfirmedEmail] Configurações de email não encontradas ou inativas para reserva ${reservationId}`);
+      console.warn(`⚠️ [sendPaymentConfirmedEmail] Erro das configurações:`, settingsError);
       return;
     }
+
+    console.log(`📧 [sendPaymentConfirmedEmail] Configurações de email encontradas, provider: ${emailSettings.provider}`);
 
     // Determinar destinatário
     const recipientEmail = reservation.guest?.email || reservation.financial_responsible?.email;
     const recipientName = reservation.guest?.full_name || reservation.financial_responsible?.full_name;
 
     if (!recipientEmail) {
-      console.warn("⚠️ Nenhum email encontrado para hóspede ou responsável financeiro");
+      console.warn(`⚠️ [sendPaymentConfirmedEmail] Nenhum email encontrado para hóspede ou responsável financeiro na reserva ${reservationId}`);
+      console.warn(`⚠️ [sendPaymentConfirmedEmail] Guest email: ${reservation.guest?.email || 'N/A'}, Financial responsible email: ${reservation.financial_responsible?.email || 'N/A'}`);
       return;
     }
+
+    console.log(`📧 [sendPaymentConfirmedEmail] Destinatário: ${recipientEmail} (${recipientName || 'N/A'})`);
 
     // Buscar configurações do hotel
     let hotelSettings: any = null;
@@ -926,14 +1020,15 @@ async function sendPaymentConfirmedEmail(
       hotelSettings = settings;
     }
 
-    // Buscar configurações do site para obter logo_url
+    // Buscar configurações do site para obter logo_url e pms_base_url
     let siteSettings: any = null;
     try {
       const { data: settings } = await supabaseClient
         .from("site_settings")
-        .select("logo_url")
+        .select("logo_url, pms_base_url")
         .maybeSingle();
       siteSettings = settings;
+      console.log(`📧 [sendPaymentConfirmedEmail] Site settings carregadas, pms_base_url: ${siteSettings?.pms_base_url || 'não configurado'}`);
     } catch (error) {
       console.warn("⚠️ Erro ao buscar site_settings:", error);
     }
@@ -1251,42 +1346,52 @@ async function sendPaymentConfirmedEmail(
     const subject = processTemplate(template.subject, variables);
     const bodyHtml = processTemplate(template.body_html, variables);
 
-    // Tentar enviar email diretamente primeiro
+    // Tentar enviar email diretamente primeiro (apenas para Resend/SendGrid)
+    // Para SMTP, ir direto para a fila que já tem a lógica correta
     let emailSent = false;
-    try {
-      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-      const emailFunctionName = emailSettings.provider === "resend" 
-        ? "send-email-resend" 
-        : "send-email-smtp";
+    
+    // Apenas tentar envio direto se for Resend ou SendGrid (não SMTP)
+    if (emailSettings.provider === "resend" || emailSettings.provider === "sendgrid") {
+      try {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+        const emailFunctionName = emailSettings.provider === "resend" 
+          ? "send-email-resend" 
+          : "send-email-sendgrid";
 
-      console.log(`📧 Tentando enviar email via ${emailFunctionName} para: ${recipientEmail}`);
+        console.log(`📧 Tentando enviar email via ${emailFunctionName} para: ${recipientEmail}`);
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/${emailFunctionName}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-        },
-          body: JSON.stringify({
-            to: recipientEmail,
-            to_name: recipientName,
-            subject: subject,
-            html: bodyHtml,
-            from: emailSettings.sender_email,
-            from_name: emailSettings.sender_name,
-            api_key: emailSettings.api_key || emailSettings.smtp_password || "", // Passar API key ou senha SMTP
-          }),
-      });
+        const requestBody: any = {
+          to: recipientEmail,
+          to_name: recipientName,
+          subject: subject,
+          html: bodyHtml,
+          from: emailSettings.sender_email,
+          from_name: emailSettings.sender_name,
+          api_key: emailSettings.api_key || "",
+        };
 
-      if (response.ok) {
-        emailSent = true;
-        console.log(`✅ Email de pagamento confirmado enviado com sucesso para: ${recipientEmail}`);
-      } else {
-        const errorText = await response.text();
-        console.warn(`⚠️ Erro ao enviar email (${response.status}):`, errorText);
+        const response = await fetch(`${supabaseUrl}/functions/v1/${emailFunctionName}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (response.ok) {
+          emailSent = true;
+          console.log(`✅ Email de pagamento confirmado enviado com sucesso para: ${recipientEmail}`);
+        } else {
+          const errorText = await response.text();
+          console.warn(`⚠️ Erro ao enviar email (${response.status}):`, errorText);
+        }
+      } catch (fetchError) {
+        console.warn("⚠️ Erro ao chamar Edge Function de email:", fetchError);
       }
-    } catch (fetchError) {
-      console.warn("⚠️ Erro ao chamar Edge Function de email:", fetchError);
+    } else {
+      // Para SMTP, não tentar envio direto - ir direto para a fila
+      console.log(`📧 Provider SMTP detectado, adicionando email à fila para processamento: ${recipientEmail}`);
     }
 
     // Se não foi enviado, adicionar à fila de emails usando função SQL que bypassa RLS
@@ -1330,14 +1435,194 @@ async function sendPaymentConfirmedEmail(
             console.log(`✅ Email adicionado à fila via inserção direta para: ${recipientEmail}`);
           }
         } else {
-          console.log(`✅ Email de pagamento confirmado adicionado à fila (ID: ${queueId}) para: ${recipientEmail}`);
+          console.log(`✅ [sendPaymentConfirmedEmail] Email de pagamento confirmado adicionado à fila (ID: ${queueId}) para: ${recipientEmail}`);
+          
+          // Processar email imediatamente após adicionar à fila
+          try {
+            console.log(`📧 [sendPaymentConfirmedEmail] Processando email da fila imediatamente (ID: ${queueId})...`);
+            
+            // Buscar item da fila
+            const { data: queueItem, error: fetchError } = await supabaseClient
+              .from("email_queue")
+              .select("*")
+              .eq("id", queueId)
+              .maybeSingle();
+
+            if (fetchError || !queueItem) {
+              console.warn(`⚠️ [sendPaymentConfirmedEmail] Erro ao buscar item da fila (ID: ${queueId}):`, fetchError);
+            } else {
+              // Atualizar status para "sending"
+              await supabaseClient
+                .from("email_queue")
+                .update({ status: "sending" })
+                .eq("id", queueId);
+
+              // Processar email baseado no provider
+              let emailProcessed = false;
+              try {
+                const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+                
+                if (emailSettings.provider === "smtp") {
+                  // Chamar Edge Function send-email-smtp
+                  const smtpResponse = await fetch(`${supabaseUrl}/functions/v1/send-email-smtp`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+                    },
+                    body: JSON.stringify({
+                      to: queueItem.recipient_email,
+                      to_name: queueItem.recipient_name,
+                      from: emailSettings.sender_email,
+                      from_name: emailSettings.sender_name,
+                      reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+                      subject: queueItem.subject,
+                      html: queueItem.body_html,
+                      text: queueItem.body_text || "",
+                      smtp_config: {
+                        host: emailSettings.smtp_host,
+                        port: emailSettings.smtp_port || 587,
+                        secure: emailSettings.smtp_secure || false,
+                        auth: {
+                          user: emailSettings.smtp_username,
+                          pass: emailSettings.smtp_password,
+                        },
+                      },
+                    }),
+                  });
+
+                  if (smtpResponse.ok) {
+                    emailProcessed = true;
+                    await supabaseClient
+                      .from("email_queue")
+                      .update({
+                        status: "sent",
+                        sent_at: new Date().toISOString(),
+                      })
+                      .eq("id", queueId);
+                    console.log(`✅ [sendPaymentConfirmedEmail] Email SMTP processado e enviado com sucesso (ID: ${queueId})`);
+                  } else {
+                    const errorText = await smtpResponse.text();
+                    console.warn(`⚠️ [sendPaymentConfirmedEmail] Erro ao processar email SMTP (ID: ${queueId}):`, errorText);
+                    await supabaseClient
+                      .from("email_queue")
+                      .update({
+                        status: "pending",
+                        error_message: errorText.substring(0, 500),
+                      })
+                      .eq("id", queueId);
+                  }
+                } else if (emailSettings.provider === "resend") {
+                  // Chamar Edge Function send-email-resend
+                  const resendResponse = await fetch(`${supabaseUrl}/functions/v1/send-email-resend`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+                    },
+                    body: JSON.stringify({
+                      to: queueItem.recipient_email,
+                      to_name: queueItem.recipient_name,
+                      from: emailSettings.sender_email,
+                      from_name: emailSettings.sender_name,
+                      reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+                      subject: queueItem.subject,
+                      html: queueItem.body_html,
+                      text: queueItem.body_text || "",
+                      api_key: emailSettings.api_key || "",
+                    }),
+                  });
+
+                  if (resendResponse.ok) {
+                    emailProcessed = true;
+                    await supabaseClient
+                      .from("email_queue")
+                      .update({
+                        status: "sent",
+                        sent_at: new Date().toISOString(),
+                      })
+                      .eq("id", queueId);
+                    console.log(`✅ [sendPaymentConfirmedEmail] Email Resend processado e enviado com sucesso (ID: ${queueId})`);
+                  } else {
+                    const errorText = await resendResponse.text();
+                    console.warn(`⚠️ [sendPaymentConfirmedEmail] Erro ao processar email Resend (ID: ${queueId}):`, errorText);
+                    await supabaseClient
+                      .from("email_queue")
+                      .update({
+                        status: "pending",
+                        error_message: errorText.substring(0, 500),
+                      })
+                      .eq("id", queueId);
+                  }
+                } else if (emailSettings.provider === "sendgrid") {
+                  // Chamar Edge Function send-email-sendgrid
+                  const sendgridResponse = await fetch(`${supabaseUrl}/functions/v1/send-email-sendgrid`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+                    },
+                    body: JSON.stringify({
+                      to: queueItem.recipient_email,
+                      to_name: queueItem.recipient_name,
+                      from: emailSettings.sender_email,
+                      from_name: emailSettings.sender_name,
+                      reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+                      subject: queueItem.subject,
+                      html: queueItem.body_html,
+                      text: queueItem.body_text || "",
+                      api_key: emailSettings.api_key || "",
+                    }),
+                  });
+
+                  if (sendgridResponse.ok) {
+                    emailProcessed = true;
+                    await supabaseClient
+                      .from("email_queue")
+                      .update({
+                        status: "sent",
+                        sent_at: new Date().toISOString(),
+                      })
+                      .eq("id", queueId);
+                    console.log(`✅ [sendPaymentConfirmedEmail] Email SendGrid processado e enviado com sucesso (ID: ${queueId})`);
+                  } else {
+                    const errorText = await sendgridResponse.text();
+                    console.warn(`⚠️ [sendPaymentConfirmedEmail] Erro ao processar email SendGrid (ID: ${queueId}):`, errorText);
+                    await supabaseClient
+                      .from("email_queue")
+                      .update({
+                        status: "pending",
+                        error_message: errorText.substring(0, 500),
+                      })
+                      .eq("id", queueId);
+                  }
+                }
+              } catch (processError) {
+                console.error(`❌ [sendPaymentConfirmedEmail] Erro ao processar email da fila (ID: ${queueId}):`, processError);
+                await supabaseClient
+                  .from("email_queue")
+                  .update({
+                    status: "pending",
+                    error_message: processError instanceof Error ? processError.message.substring(0, 500) : String(processError).substring(0, 500),
+                  })
+                  .eq("id", queueId);
+              }
+            }
+          } catch (processError) {
+            console.warn(`⚠️ [sendPaymentConfirmedEmail] Erro ao processar email da fila (ID: ${queueId}):`, processError);
+            // Não falhar aqui, pois o email está na fila e pode ser processado depois
+          }
         }
       } catch (queueInsertError) {
-        console.error("❌ Erro ao inserir na fila de emails:", queueInsertError);
+        console.error(`❌ [sendPaymentConfirmedEmail] Erro ao inserir na fila de emails para reserva ${reservationId}:`, queueInsertError);
+        console.error(`❌ [sendPaymentConfirmedEmail] Stack trace:`, queueInsertError instanceof Error ? queueInsertError.stack : 'N/A');
       }
+    } else {
+      console.log(`✅ [sendPaymentConfirmedEmail] Email enviado diretamente com sucesso para: ${recipientEmail}`);
     }
   } catch (error) {
-    console.error("❌ Erro ao enviar email de pagamento confirmado:", error);
+    console.error(`❌ [sendPaymentConfirmedEmail] Erro geral ao enviar email de pagamento confirmado para reserva ${reservationId}:`, error);
+    console.error(`❌ [sendPaymentConfirmedEmail] Stack trace:`, error instanceof Error ? error.stack : 'N/A');
   }
 }
 
@@ -1493,10 +1778,10 @@ serve(async (req) => {
 
           // Se houver reservation_id, registrar pagamento no PMS e atualizar reserva
           if (payment?.reservation_id) {
-            // Buscar a reserva atual para obter o paid_amount existente e establishment_id
+            // Buscar a reserva atual para obter o paid_amount existente, establishment_id e status
             const { data: reservation, error: reservationFetchError } = await supabaseClient
               .from("reservations")
-              .select("paid_amount, total_amount, establishment_id")
+              .select("paid_amount, total_amount, establishment_id, status")
               .eq("id", payment.reservation_id)
               .single();
 
@@ -1674,22 +1959,31 @@ serve(async (req) => {
                 console.log(`[Webhook] ✅ Reserva ${payment.reservation_id} atualizada para status "confirmed" com paid_amount: ${newPaidAmount >= totalAmount ? totalAmount : newPaidAmount}${updateDetails.length > 0 ? `, ${updateDetails.join(', ')}` : ''}`);
                 
                 // Enviar email apropriado baseado no tipo de pagamento
+                // IMPORTANTE: Sempre tentar enviar email quando pagamento for confirmado via Stripe
                 try {
+                  console.log(`[Webhook] 📧 Iniciando envio de email para reserva ${payment.reservation_id}, payment_type: ${payment.payment_type}`);
+                  
                   if (payment.payment_type === "extension" && (reservationUpdate as any).checkout_date) {
                     // Se for extensão, enviar email específico de extensão
+                    console.log(`[Webhook] 📧 Enviando email de extensão para reserva ${payment.reservation_id}`);
                     await sendReservationExtensionEmail(
                       payment.reservation_id,
                       (reservationUpdate as any).checkout_date,
                       supabaseClient,
                       req
                     );
+                    console.log(`[Webhook] ✅ Email de extensão processado para reserva ${payment.reservation_id}`);
                   } else {
                     // Caso contrário, enviar email padrão de pagamento confirmado
+                    console.log(`[Webhook] 📧 Enviando email de pagamento confirmado para reserva ${payment.reservation_id}`);
                     await sendPaymentConfirmedEmail(payment.reservation_id, supabaseClient, req);
+                    console.log(`[Webhook] ✅ Email de pagamento confirmado processado para reserva ${payment.reservation_id}`);
                   }
                 } catch (emailError) {
-                  console.error("Error sending email:", emailError);
+                  console.error(`[Webhook] ❌ Erro ao enviar email para reserva ${payment.reservation_id}:`, emailError);
+                  console.error(`[Webhook] ❌ Stack trace:`, emailError instanceof Error ? emailError.stack : 'N/A');
                   // Não lançar erro aqui para não quebrar o processamento do webhook
+                  // Mas garantir que o erro seja logado para debug
                 }
               }
             }
