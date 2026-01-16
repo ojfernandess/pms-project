@@ -1,4 +1,4 @@
-import { Menu, User, Settings, LogOut, UserCircle, Building2, ChevronDown, Briefcase } from "lucide-react";
+import { Menu, User, Settings, LogOut, UserCircle, Building2, ChevronDown, Briefcase, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -119,6 +119,10 @@ export const Header = ({ onMenuClick }: HeaderProps) => {
   const handleSignOut = async () => {
     await signOut();
   };
+
+  const handleSuperAdmin = () => {
+    navigate("/super-admin");
+  };
   
   return (
     <header className="h-16 border-b border-border bg-card flex items-center justify-between px-6 sticky top-0 z-30">
@@ -198,6 +202,19 @@ export const Header = ({ onMenuClick }: HeaderProps) => {
       <div className="flex items-center gap-2">
         <LanguageSelector />
         <NotificationsDropdown />
+        
+        {/* Botão Super Admin - apenas para super admins */}
+        {isSuperAdmin && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleSuperAdmin}
+            className="h-9 w-9"
+            title="Super Admin"
+          >
+            <Shield className="h-5 w-5 text-primary" />
+          </Button>
+        )}
         
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

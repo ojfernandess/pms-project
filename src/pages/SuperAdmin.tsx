@@ -1127,18 +1127,42 @@ const SuperAdmin = () => {
     }
   };
 
-  // Filtrar dados baseado na busca
-  const filteredCompanies = companies.filter((company: any) =>
-    company.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    company.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    company.cnpj?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Função helper para normalizar busca (remove acentos e converte para minúsculas)
+  const normalizeSearch = (text: string) => {
+    return text
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  };
 
-  // Filtrar usuários gerentes e super admins
-  const filteredManagersAndAdmins = managersAndSuperAdmins.filter((user: any) =>
-    user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    user.full_name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Função helper para verificar se um texto corresponde ao termo de busca
+  const matchesSearch = (text: string | null | undefined, searchTerm: string): boolean => {
+    if (!text || !searchTerm) return !searchTerm;
+    return normalizeSearch(text).includes(normalizeSearch(searchTerm));
+  };
+
+  // Filtrar dados baseado na busca (busca mais abrangente)
+  const filteredCompanies = companies.filter((company: any) => {
+    if (!searchTerm) return true;
+    return (
+      matchesSearch(company.name, searchTerm) ||
+      matchesSearch(company.email, searchTerm) ||
+      matchesSearch(company.cnpj, searchTerm) ||
+      matchesSearch(company.phone, searchTerm) ||
+      matchesSearch(company.address, searchTerm)
+    );
+  });
+
+  // Filtrar usuários gerentes e super admins (busca mais abrangente)
+  const filteredManagersAndAdmins = managersAndSuperAdmins.filter((user: any) => {
+    if (!searchTerm) return true;
+    return (
+      matchesSearch(user.email, searchTerm) ||
+      matchesSearch(user.full_name, searchTerm) ||
+      matchesSearch(user.cpf, searchTerm) ||
+      matchesSearch(user.phone, searchTerm)
+    );
+  });
 
   // Agrupar funcionários por user_id e filtrar (não gerentes)
   const groupedEmployees = useMemo(() => {
@@ -1150,15 +1174,16 @@ const SuperAdmin = () => {
       // Excluir gerentes
       if (roleCode === "manager") return false;
       
-      // Filtrar por termo de busca
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = 
-        emp.users?.email?.toLowerCase().includes(searchLower) ||
-        emp.users?.full_name?.toLowerCase().includes(searchLower) ||
-        emp.establishments?.name?.toLowerCase().includes(searchLower) ||
-        emp.employee_roles?.name?.toLowerCase().includes(searchLower);
-      
-      return !searchTerm || matchesSearch;
+      // Filtrar por termo de busca (busca mais abrangente)
+      if (!searchTerm) return true;
+      return (
+        matchesSearch(emp.users?.email, searchTerm) ||
+        matchesSearch(emp.users?.full_name, searchTerm) ||
+        matchesSearch(emp.users?.cpf, searchTerm) ||
+        matchesSearch(emp.users?.phone, searchTerm) ||
+        matchesSearch(emp.establishments?.name, searchTerm) ||
+        matchesSearch(emp.employee_roles?.name, searchTerm)
+      );
     });
 
     // Agrupar por user_id
@@ -1199,10 +1224,15 @@ const SuperAdmin = () => {
     }));
   }, [allEmployees, searchTerm]);
 
-  const filteredEstablishments = establishments.filter((est: any) =>
-    est.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    companies.find((c: any) => c.id === est.company_id)?.name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredEstablishments = establishments.filter((est: any) => {
+    if (!searchTerm) return true;
+    const company = companies.find((c: any) => c.id === est.company_id);
+    return (
+      matchesSearch(est.name, searchTerm) ||
+      matchesSearch(company?.name, searchTerm) ||
+      matchesSearch(est.type, searchTerm)
+    );
+  });
 
   return (
     <div className="space-y-6">
@@ -1640,24 +1670,43 @@ const SuperAdmin = () => {
                   ) : (
                   <div className="p-6 space-y-3">
                     {usersByCompany
-                      .filter((companyData) => {
-                        if (!searchTerm) return true;
-                        const searchLower = searchTerm.toLowerCase();
-                        return (
-                          companyData.company.name?.toLowerCase().includes(searchLower) ||
-                          companyData.users.some((u) =>
-                            u.user.email?.toLowerCase().includes(searchLower) ||
-                            u.user.full_name?.toLowerCase().includes(searchLower)
-                          )
-                        );
-                      })
                       .map((companyData) => {
-                        const isExpanded = expandedCompanies.has(companyData.company.id);
-                        const managersCount = companyData.users.filter((u) => u.isManager).length;
-                        const usersCount = companyData.users.filter((u) => !u.isManager).length;
+                        // Filtrar usuários individualmente quando há busca
+                        const filteredUsers = searchTerm
+                          ? companyData.users.filter((u) => {
+                              const searchLower = normalizeSearch(searchTerm);
+                              return (
+                                matchesSearch(companyData.company.name, searchTerm) ||
+                                matchesSearch(u.user.email, searchTerm) ||
+                                matchesSearch(u.user.full_name, searchTerm) ||
+                                matchesSearch(u.user.cpf, searchTerm) ||
+                                matchesSearch(u.user.phone, searchTerm)
+                              );
+                            })
+                          : companyData.users;
+
+                        // Se não há usuários filtrados e há busca, não mostrar a empresa
+                        if (searchTerm && filteredUsers.length === 0) {
+                          return null;
+                        }
+
+                        // Se há busca mas a empresa não corresponde, expandir automaticamente
+                        const shouldAutoExpand = searchTerm && filteredUsers.length > 0;
+                        const isExpanded = shouldAutoExpand || expandedCompanies.has(companyData.company.id);
                         
+                        const managersCount = filteredUsers.filter((u) => u.isManager).length;
+                        const usersCount = filteredUsers.filter((u) => !u.isManager).length;
+                        
+                        // Verificar se a empresa corresponde à busca
+                        const companyMatches = searchTerm
+                          ? matchesSearch(companyData.company.name, searchTerm)
+                          : false;
+
                         return (
-                          <Card key={companyData.company.id} className="overflow-hidden">
+                          <Card 
+                            key={companyData.company.id} 
+                            className={`overflow-hidden ${searchTerm && (companyMatches || filteredUsers.length > 0) ? "ring-2 ring-primary/50 bg-primary/5" : ""}`}
+                          >
                             <div 
                               className="p-4 hover:bg-muted/30 transition-colors cursor-pointer"
                               onClick={() => toggleCompany(companyData.company.id)}
@@ -1669,11 +1718,27 @@ const SuperAdmin = () => {
                                   ) : (
                                     <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                                   )}
-                                  <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                                    <Building2 className="h-5 w-5 text-primary" />
+                                  <div className={`h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 ${companyMatches ? "bg-primary/20" : "bg-primary/10"}`}>
+                                    <Building2 className={`h-5 w-5 ${companyMatches ? "text-primary" : "text-primary"}`} />
                                   </div>
                                   <div className="flex-1 min-w-0">
-                                    <h3 className="font-semibold text-base truncate">{companyData.company.name}</h3>
+                                    <h3 className={`font-semibold text-base truncate ${companyMatches ? "text-primary" : ""}`}>
+                                      {companyMatches && searchTerm ? (
+                                        <span>
+                                          {companyData.company.name.split(new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')).map((part, i) => 
+                                            matchesSearch(part, searchTerm) ? (
+                                              <mark key={i} className="bg-primary/20 text-primary font-semibold px-1 rounded">
+                                                {part}
+                                              </mark>
+                                            ) : (
+                                              <span key={i}>{part}</span>
+                                            )
+                                          )}
+                                        </span>
+                                      ) : (
+                                        companyData.company.name
+                                      )}
+                                    </h3>
                                     <div className="flex items-center gap-3 mt-1">
                                       <p className="text-xs text-muted-foreground truncate">
                                         {companyData.company.cnpj || companyData.company.email || "Sem informações"}
@@ -1695,7 +1760,12 @@ const SuperAdmin = () => {
                                   </div>
                                 </div>
                                 <Badge variant="outline" className="text-sm flex-shrink-0 ml-2">
-                                  {companyData.users.length} {companyData.users.length === 1 ? "total" : "totais"}
+                                  {filteredUsers.length} {filteredUsers.length === 1 ? "total" : "totais"}
+                                  {searchTerm && filteredUsers.length < companyData.users.length && (
+                                    <span className="ml-1 text-xs opacity-70">
+                                      (de {companyData.users.length})
+                                    </span>
+                                  )}
                                 </Badge>
                               </div>
                             </div>
@@ -1716,25 +1786,60 @@ const SuperAdmin = () => {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                                    {companyData.users.map(({ user, userCompany, isManager, employees }) => {
+                                    {filteredUsers.map(({ user, userCompany, isManager, employees }) => {
+                            // Verificar se o usuário corresponde à busca
+                            const userMatches = searchTerm && (
+                              matchesSearch(user.email, searchTerm) ||
+                              matchesSearch(user.full_name, searchTerm) ||
+                              matchesSearch(user.cpf, searchTerm) ||
+                              matchesSearch(user.phone, searchTerm)
+                            );
+
+                            // Função helper para destacar texto
+                            const highlightText = (text: string | null | undefined) => {
+                              if (!text || !searchTerm || !userMatches) return text;
+                              const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+                              const parts = text.split(regex);
+                              return parts.map((part, i) => 
+                                matchesSearch(part, searchTerm) ? (
+                                  <mark key={i} className="bg-primary/20 text-primary font-semibold px-1 rounded">
+                                    {part}
+                                  </mark>
+                                ) : (
+                                  <span key={i}>{part}</span>
+                                )
+                              );
+                            };
+
                             return (
-                              <TableRow key={user.id} className="hover:bg-muted/50">
+                              <TableRow 
+                                key={user.id} 
+                                className={`hover:bg-muted/50 ${userMatches ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
+                              >
                                 <TableCell>
                                   <div className="flex items-center gap-3">
-                                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                                      <Users className="h-5 w-5 text-primary" />
+                                    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${userMatches ? "bg-primary/20" : "bg-primary/10"}`}>
+                                      <Users className={`h-5 w-5 ${userMatches ? "text-primary" : "text-primary"}`} />
                                     </div>
                                     <div>
-                                      <p className="font-medium">{user.full_name || user.email}</p>
-                                      <p className="text-xs text-muted-foreground">{user.email}</p>
+                                      <p className={`font-medium ${userMatches ? "text-primary" : ""}`}>
+                                        {highlightText(user.full_name || user.email)}
+                                      </p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {highlightText(user.email)}
+                                      </p>
                                     </div>
                                   </div>
                                 </TableCell>
                                 <TableCell>
-                                  <span className="text-sm">{user.cpf || "-"}</span>
+                                  <span className="text-sm">
+                                    {user.cpf ? highlightText(user.cpf) : "-"}
+                                  </span>
                                 </TableCell>
                                 <TableCell>
-                                  <span className="text-sm">{user.phone || "-"}</span>
+                                  <span className="text-sm">
+                                    {user.phone ? highlightText(user.phone) : "-"}
+                                  </span>
                                 </TableCell>
                                 <TableCell>
                                             {isManager ? (
