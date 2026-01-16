@@ -1977,12 +1977,12 @@ export async function sendCheckoutReminderEmail(
       hotelSettings = settings;
     }
 
-    // Buscar site_settings como fallback para logo
+    // Buscar site_settings como fallback para logo e pms_base_url
     let siteSettings = null;
     try {
       const { data: siteData } = await supabase
         .from('site_settings')
-        .select('logo_url')
+        .select('logo_url, pms_base_url')
         .maybeSingle();
       siteSettings = siteData;
     } catch (error) {
@@ -2003,9 +2003,14 @@ export async function sendCheckoutReminderEmail(
     // O generateReservationVariables já inclui identification_number (com #) e web_checkin_link,
     // mas vamos garantir que estão no formato correto
     const identificationNumberRaw = fullReservation.identification_number || fullReservation.reservation_code || '';
-    const baseUrl = typeof window !== 'undefined' 
-      ? window.location.origin 
-      : (process.env.VITE_APP_URL || 'http://localhost:8080');
+    
+    // Usar pms_base_url de site_settings se disponível, senão detectar automaticamente
+    let baseUrl = siteSettings?.pms_base_url || null;
+    if (!baseUrl) {
+      baseUrl = typeof window !== 'undefined' 
+        ? window.location.origin 
+        : (process.env.VITE_APP_URL || 'http://localhost:8080');
+    }
     
     // Garantir que o link do web-checkin está correto (usar o número sem #)
     let webCheckinLink = variables.web_checkin_link || '';

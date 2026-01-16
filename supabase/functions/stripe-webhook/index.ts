@@ -1009,43 +1009,29 @@ async function sendPaymentConfirmedEmail(
     const buildingId = reservationAny.room_categories?.building_id || null;
     const establishmentId = reservationAny.establishment_id || hotelSettings?.establishment_id;
     
-    // Detectar domínio base (priorizar custom_domain do estabelecimento, depois website do hotel_settings, depois detecção automática)
+    // Detectar domínio base (priorizar pms_base_url de site_settings, depois detecção automática)
+    // NOTA: Não usar custom_domain ou website do hotel_settings aqui, pois esses são para o site do estabelecimento
+    // e não para o sistema PMS. O pms_base_url é a URL do sistema PMS que gera os links de check-in e políticas.
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     let baseUrl = detectBaseUrl(request, supabaseUrl);
     
-    // Priorizar domínio customizado do estabelecimento
-    if (customDomain) {
-      const domain = customDomain.trim();
-      if (domain) {
-        // Garantir que tenha protocolo
-        if (domain.startsWith('http://') || domain.startsWith('https://')) {
-          try {
-            const url = new URL(domain);
-            baseUrl = url.origin;
-          } catch {
-            // Se falhar, usar como está
-            baseUrl = domain;
-          }
-        } else {
-          baseUrl = `https://${domain}`;
-        }
-        console.log(`🌐 Usando domínio customizado do estabelecimento: ${baseUrl}`);
-      }
-    } else if (hotelSettings?.website) {
-      // Tentar extrair domínio do website do hotel_settings
-      try {
-        const website = hotelSettings.website.trim();
-        if (website) {
-          const url = new URL(website.startsWith('http') ? website : `https://${website}`);
+    // Priorizar pms_base_url de site_settings
+    if (siteSettings?.pms_base_url) {
+      const pmsUrl = siteSettings.pms_base_url.trim();
+      if (pmsUrl) {
+        try {
+          // Garantir que tenha protocolo
+          const url = new URL(pmsUrl.startsWith('http://') || pmsUrl.startsWith('https://') ? pmsUrl : `https://${pmsUrl}`);
           baseUrl = url.origin;
-          console.log(`🌐 Usando domínio do website do hotel: ${baseUrl}`);
+          console.log(`🌐 Usando URL base do PMS (site_settings): ${baseUrl}`);
+        } catch {
+          // Se falhar, usar como está
+          baseUrl = pmsUrl;
+          console.log(`🌐 Usando URL base do PMS (site_settings) como está: ${baseUrl}`);
         }
-      } catch {
-        // Se falhar, usar detecção automática
-        console.log(`🌐 Domínio base detectado automaticamente: ${baseUrl}`);
       }
     } else {
-      console.log(`🌐 Domínio base detectado automaticamente: ${baseUrl}`);
+      console.log(`🌐 URL base do PMS não configurada, usando detecção automática: ${baseUrl}`);
     }
 
     const generatePoliciesLink = (type: 'establishment' | 'building', id: string | null | undefined): string => {

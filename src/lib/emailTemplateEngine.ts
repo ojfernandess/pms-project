@@ -740,8 +740,8 @@ export async function generateReservationVariables(
       // Formato: "type:id" (ex: "building:uuid" ou "establishment:uuid")
       const tokenData = `${type}:${id}`;
       const token = btoa(tokenData);
-      // Detectar URL base automaticamente
-      const baseUrl = detectBaseUrl();
+      // Usar pms_base_url de site_settings se disponível, senão detectar automaticamente
+      const baseUrl = siteSettings?.pms_base_url || detectBaseUrl();
       // Criar URL amigável usando o nome do hotel como slug
       const hotelName = hotelSettings?.name || 'hotel';
       // Criar slug simples (remover acentos, espaços, caracteres especiais)
@@ -818,8 +818,8 @@ export async function generateReservationVariables(
 
       // Se temos um locator, gerar o link
       if (webCheckin?.locator) {
-        // Detectar URL base automaticamente
-        const baseUrl = detectBaseUrl();
+        // Usar pms_base_url de site_settings se disponível, senão detectar automaticamente
+        const baseUrl = siteSettings?.pms_base_url || detectBaseUrl();
         return `${baseUrl}/web-checkin/${webCheckin.locator}`;
       }
 

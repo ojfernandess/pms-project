@@ -97,6 +97,7 @@ const SiteSettingsManager = () => {
     meta_description: "",
     og_title: "",
     og_description: "",
+    pms_base_url: "",
   });
   const [consoleLogsEnabled, setConsoleLogsEnabled] = useState<boolean>(true);
   const [faviconFile, setFaviconFile] = useState<File | null>(null);
@@ -114,6 +115,7 @@ const SiteSettingsManager = () => {
         meta_description: settings.meta_description || "",
         og_title: settings.og_title || "",
         og_description: settings.og_description || "",
+        pms_base_url: settings.pms_base_url || "",
       });
       setConsoleLogsEnabled(settings.console_logs_enabled ?? true);
       if (settings.favicon_url) setFaviconPreview(settings.favicon_url);
@@ -184,6 +186,7 @@ const SiteSettingsManager = () => {
         logo_url: logoUrl,
         og_image: ogImageUrl,
         console_logs_enabled: consoleLogsEnabled,
+        pms_base_url: formData.pms_base_url || null,
       });
 
       setFaviconFile(null);
@@ -451,6 +454,39 @@ const SiteSettingsManager = () => {
                   </p>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* URL Base do PMS */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Globe className="h-4 w-4" />
+            <Label className="text-base font-semibold">URL Base do PMS</Label>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            URL base do sistema PMS usada para gerar links de check-in online e políticas nos emails.
+            Esta URL é diferente da URL do site do estabelecimento, que pode variar por estabelecimento.
+          </p>
+          <div className="space-y-2">
+            <div>
+              <Label htmlFor="pms_base_url">URL Base do PMS</Label>
+              <Input
+                id="pms_base_url"
+                type="url"
+                value={formData.pms_base_url}
+                onChange={(e) => setFormData({ ...formData, pms_base_url: e.target.value })}
+                placeholder="https://pms.exemplo.com"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Exemplo: https://pms.exemplo.com ou https://app.seudominio.com
+              </p>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <p className="text-sm text-blue-800">
+                <strong>Importante:</strong> Esta URL será usada para gerar links de check-in online e políticas do hotel nos emails.
+                Certifique-se de que a URL está correta e acessível publicamente. Se não configurada, o sistema tentará detectar automaticamente.
+              </p>
             </div>
           </div>
         </div>
