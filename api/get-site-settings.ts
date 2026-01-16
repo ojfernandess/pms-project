@@ -22,17 +22,74 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     // Obter URL do Supabase e Service Role Key das variáveis de ambiente
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    // Tentar múltiplas variáveis de ambiente (Vercel pode usar diferentes nomes)
+    const supabaseUrl = process.env.VITE_SUPABASE_URL 
+      || process.env.SUPABASE_URL 
+      || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY 
+      || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
     
     if (!supabaseUrl) {
-      console.error("VITE_SUPABASE_URL ou SUPABASE_URL não configurado");
-      return res.status(500).json({ error: "Configuração do Supabase não encontrada" });
+      console.error("⚠️ Variáveis de ambiente do Supabase não configuradas. Tentando:", {
+        VITE_SUPABASE_URL: !!process.env.VITE_SUPABASE_URL,
+        SUPABASE_URL: !!process.env.SUPABASE_URL,
+        NEXT_PUBLIC_SUPABASE_URL: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      });
+      
+      // Tentar inferir URL do Supabase a partir do request (se disponível)
+      // Em alguns casos, podemos tentar usar uma URL padrão ou inferir do contexto
+      // Por enquanto, retornar objeto vazio (não quebrar a página)
+      return res.status(200).json({
+        site_title: "",
+        site_description: "",
+        meta_description: "",
+        og_title: "",
+        og_description: "",
+        og_image: null,
+        logo_url: null,
+        favicon_url: null,
+        pms_base_url: null,
+      });
     }
 
     if (!supabaseServiceKey) {
-      console.error("SUPABASE_SERVICE_ROLE_KEY não configurado");
-      return res.status(500).json({ error: "Chave de serviço do Supabase não encontrada" });
+      console.error("⚠️ SUPABASE_SERVICE_ROLE_KEY não configurada");
+      // Tentar usar Edge Function como fallback
+      if (supabaseUrl) {
+        try {
+          const edgeFunctionUrl = `${supabaseUrl.replace("/rest/v1", "").replace(/\/$/, "")}/functions/v1/get-site-settings`;
+          console.log(`🔄 Tentando usar Edge Function como fallback: ${edgeFunctionUrl}`);
+          const edgeResponse = await fetch(edgeFunctionUrl, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+          
+          if (edgeResponse.ok) {
+            const edgeData = await edgeResponse.json();
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.setHeader("Cache-Control", "public, max-age=300, s-maxage=300");
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            return res.status(200).json(edgeData);
+          }
+        } catch (edgeError) {
+          console.error("⚠️ Erro ao chamar Edge Function:", edgeError);
+        }
+      }
+      
+      // Retornar objeto vazio em vez de erro 500 (não quebrar a página)
+      return res.status(200).json({
+        site_title: "",
+        site_description: "",
+        meta_description: "",
+        og_title: "",
+        og_description: "",
+        og_image: null,
+        logo_url: null,
+        favicon_url: null,
+        pms_base_url: null,
+      });
     }
 
     // Buscar diretamente do banco usando REST API do Supabase
@@ -50,7 +107,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (!response.ok) {
-      console.error(`Erro ao buscar configurações: ${response.status} ${response.statusText}`);
+      console.error(`⚠️ Erro ao buscar configurações: ${response.status} ${response.statusText}`);
+      
+      // Tentar usar Edge Function como fallback
+      try {
+        const edgeFunctionUrl = `${supabaseUrl.replace("/rest/v1", "").replace(/\/$/, "")}/functions/v1/get-site-settings`;
+        console.log(`🔄 Tentando usar Edge Function como fallback: ${edgeFunctionUrl}`);
+        const edgeResponse = await fetch(edgeFunctionUrl, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+        
+        if (edgeResponse.ok) {
+          const edgeData = await edgeResponse.json();
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.setHeader("Cache-Control", "public, max-age=300, s-maxage=300");
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          return res.status(200).json(edgeData);
+        }
+      } catch (edgeError) {
+        console.error("⚠️ Erro ao chamar Edge Function:", edgeError);
+      }
+      
       // Retornar objeto vazio se não encontrar (não é erro crítico)
       if (response.status === 404 || response.status === 406) {
         return res.status(200).json({
@@ -65,9 +145,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           pms_base_url: null,
         });
       }
-      return res.status(response.status).json({ 
-        error: "Erro ao buscar configurações do site",
-        status: response.status 
+      
+      // Para outros erros, também retornar objeto vazio (não quebrar a página)
+      return res.status(200).json({
+        site_title: "",
+        site_description: "",
+        meta_description: "",
+        og_title: "",
+        og_description: "",
+        og_image: null,
+        logo_url: null,
+        favicon_url: null,
+        pms_base_url: null,
       });
     }
 
