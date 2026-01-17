@@ -397,6 +397,12 @@ serve(async (req) => {
           ? `${baseUrl}/web-checkin/${locatorForLink}`
           : "";
         
+        // Preparar primeiro quarto (rooms pode ser um array, pegar o primeiro item)
+        // Isso precisa ser feito antes de gerar links de políticas
+        const firstRoom = Array.isArray(reservation.rooms) && reservation.rooms.length > 0
+          ? reservation.rooms[0]
+          : (reservation.rooms as any);
+        
         // Gerar link de políticas (priorizar prédio, senão estabelecimento)
         // O building_id vem através de rooms -> room_categories
         const firstRoomCategory = firstRoom?.room_categories;
@@ -449,11 +455,7 @@ serve(async (req) => {
 
         // Preparar variáveis do template (garantir todas as variáveis necessárias)
         // Nota: Para condicionais {{#if}}, a variável precisa existir e não estar vazia
-        
-        // rooms pode ser um array, pegar o primeiro item
-        const firstRoom = Array.isArray(reservation.rooms) && reservation.rooms.length > 0
-          ? reservation.rooms[0]
-          : (reservation.rooms as any);
+        // firstRoom já foi declarado acima
         
         const variables: Record<string, string> = {
           guest_name: recipientName || "Hóspede",
