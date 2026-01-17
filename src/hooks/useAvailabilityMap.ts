@@ -101,21 +101,29 @@ export const useAvailabilityMap = (
         }
 
         // Buscar todas as reservas ativas para o período e categoria de uma vez
+        // IMPORTANTE: Incluir TODAS as reservas ativas, independente do status de pagamento
+        // Isso inclui: pending, unpaid, confirmed, checkedin, blocked, preregistration
+        // Reservas sem pagamento (status = "unpaid" ou paid_amount = 0) também ocupam o quarto
         const startDateStr = format(dates[0], "yyyy-MM-dd");
         const endDateStr = format(dates[dates.length - 1], "yyyy-MM-dd");
 
         const { data: allReservations, error: reservationsError } = await supabase
           .from("reservations")
-          .select("room_id, checkin_date, checkout_date")
+          .select("room_id, checkin_date, checkout_date, status, paid_amount, total_amount")
           .eq("establishment_id", establishmentId)
           .eq("category_id", category.id)
           .in("status", [
-            "pending",
-            "confirmed",
-            "checkedin",
-            "blocked",
-            "preregistration",
+            "pending",           // Reservas pendentes (com ou sem pagamento)
+            "unpaid",            // Reservas sem pagamento (paid_amount = 0) - IMPORTANTE!
+            "confirmed",         // Reservas confirmadas (com ou sem pagamento)
+            "checkedin",         // Hóspedes já fizeram check-in
+            "blocked",           // Bloqueios de quarto (ocupam o quarto)
+            "preregistration",   // Pré-reservas (ocupam o quarto mesmo sem pagamento)
           ])
+          // Excluir apenas reservas canceladas ou já finalizadas
+          .neq("status", "cancelled")
+          .neq("status", "checkedout")
+          .neq("status", "noshow")
           .lte("checkin_date", endDateStr)
           .gte("checkout_date", startDateStr);
 
@@ -141,8 +149,24 @@ export const useAvailabilityMap = (
 
           // Filtrar reservas ativas para esta data específica
           // Uma reserva está ativa se: checkin_date <= date < checkout_date
+          // IMPORTANTE: Considerar TODAS as reservas ativas, independente do pagamento
+          // Isso inclui:
+          // - Reservas sem pagamento (paid_amount = 0 ou null)
+          // - Bloqueios (status = "blocked")
+          // - Pré-reservas (status = "preregistration")
+          // - Reservas confirmadas mesmo sem pagamento completo
           const activeReservations = (allReservations || []).filter((r) => {
-            return r.checkin_date <= dateStr && r.checkout_date > dateStr;
+            // Verificar se a reserva está ativa nesta data
+            const isActiveOnDate = r.checkin_date <= dateStr && r.checkout_date > dateStr;
+            
+            // Se não está ativa na data, não considerar
+            if (!isActiveOnDate) return false;
+            
+            // Considerar TODAS as reservas ativas, independente de:
+            // - Status de pagamento (paid_amount) - reservas sem pagamento também ocupam
+            // - Status da reserva (já filtrado na query acima)
+            // - Bloqueios sempre ocupam o quarto
+            return true;
           });
 
           const occupiedRoomIds = new Set(

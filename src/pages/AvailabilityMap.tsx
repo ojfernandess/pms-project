@@ -8,7 +8,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, addDays, eachDayOfInterval, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, Search, AlertCircle } from "lucide-react";
+import { CalendarIcon, Search, AlertCircle, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAvailabilityMap } from "@/hooks/useAvailabilityMap";
 import { useRateSystem } from "@/hooks/useRateSystem";
@@ -267,7 +267,8 @@ export default function AvailabilityMap() {
                           <div className="flex flex-col">
                             <span>{category.categoryName}</span>
                             {category.buildingName && (
-                              <span className="text-xs font-normal text-slate-600 mt-0.5">
+                              <span className="text-xs font-normal text-slate-600 mt-0.5 flex items-center gap-1.5">
+                                <Building2 className="h-3 w-3 text-slate-500" />
                                 {category.buildingName}
                               </span>
                             )}
