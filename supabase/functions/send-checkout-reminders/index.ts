@@ -398,7 +398,9 @@ serve(async (req) => {
           : "";
         
         // Gerar link de políticas (priorizar prédio, senão estabelecimento)
-        const buildingId = reservation.room_categories?.building_id || null;
+        // O building_id vem através de rooms -> room_categories
+        const firstRoomCategory = firstRoom?.room_categories;
+        const buildingId = firstRoomCategory?.building_id || null;
         const establishmentId = reservation.establishment_id || null;
         
         const generatePoliciesLink = (type: 'establishment' | 'building', id: string | null | undefined): string => {
