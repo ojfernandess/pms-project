@@ -55,7 +55,9 @@ export function ConfirmCleaningDialog({
   const [notes, setNotes] = useState("");
   const toastShownRef = useRef(false); // Ref para controlar se o toast já foi exibido
 
-  // Verificar se o quarto já foi limpo quando o diálogo abre
+  // Verificar status do quarto quando o diálogo abre (apenas para informação)
+  const [roomStatus, setRoomStatus] = useState<string | null>(null);
+  
   useEffect(() => {
     if (open && roomId && selectedEstablishment?.id) {
       // Resetar ref quando o diálogo abre
@@ -68,62 +70,38 @@ export function ConfirmCleaningDialog({
           .eq("id", roomId)
           .single();
 
-        // Se o quarto já está disponível (não é cleaning), deletar notificações de limpeza
-        if (room && room.status !== "cleaning") {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            // Buscar todas as notificações de limpeza para este quarto
-            const { data: cleaningNotifications } = await supabase
-              .from("notifications")
-              .select("id, metadata")
-              .eq("user_id", user.id)
-              .eq("type", "cleaning_required")
-              .eq("establishment_id", selectedEstablishment.id);
-
-            if (cleaningNotifications && cleaningNotifications.length > 0) {
-              // Deletar notificações que são para este quarto
-              const notificationsToDelete = cleaningNotifications.filter(
-                (notif) => notif.metadata && (notif.metadata as any).room_id === roomId
-              );
-
-              for (const notif of notificationsToDelete) {
-                await supabase
-                  .from("notifications")
-                  .delete()
-                  .eq("id", notif.id);
-              }
-
-              // Invalidar queries
-              queryClient.invalidateQueries({ queryKey: ["notifications"] });
-            }
-          }
-          // Fechar diálogo se quarto já foi limpo
-          onOpenChange(false);
+        if (room) {
+          setRoomStatus(room.status);
           
-          // Mostrar toast apenas uma vez
-          if (!toastShownRef.current) {
-            toastShownRef.current = true;
-            toast.info(`O quarto ${roomNumber} já foi limpo anteriormente.`, {
-              duration: 5000,
-              className: "bg-blue-50 border-2 border-blue-300 text-blue-900 shadow-lg",
-              style: {
-                backgroundColor: "#eff6ff",
-                borderColor: "#93c5fd",
-                color: "#1e3a8a",
-              },
-              closeButton: true,
-              description: "Esta notificação será removida automaticamente.",
-            });
+          // Apenas informar se o quarto já está disponível, mas não fechar o diálogo
+          // O usuário ainda pode querer ver os detalhes ou confirmar manualmente
+          if (room.status === "available") {
+            // Mostrar toast informativo apenas uma vez, mas não fechar o diálogo
+            if (!toastShownRef.current) {
+              toastShownRef.current = true;
+              toast.info(`O quarto ${roomNumber} já está marcado como disponível.`, {
+                duration: 4000,
+                className: "bg-blue-50 border-2 border-blue-300 text-blue-900 shadow-lg",
+                style: {
+                  backgroundColor: "#eff6ff",
+                  borderColor: "#93c5fd",
+                  color: "#1e3a8a",
+                },
+                closeButton: true,
+                description: "Você ainda pode confirmar a limpeza se necessário.",
+              });
+            }
           }
         }
       };
 
       checkRoomStatus();
     } else {
-      // Resetar ref quando o diálogo fecha
+      // Resetar ref e status quando o diálogo fecha
       toastShownRef.current = false;
+      setRoomStatus(null);
     }
-  }, [open, roomId, selectedEstablishment?.id, roomNumber, onOpenChange, queryClient]);
+  }, [open, roomId, selectedEstablishment?.id, roomNumber, queryClient]);
 
   const handleViewReservationDetails = () => {
     if (!reservationCode || !selectedEstablishment) return;
@@ -214,6 +192,11 @@ export function ConfirmCleaningDialog({
           <DialogTitle>Confirmar Limpeza do Quarto</DialogTitle>
           <DialogDescription>
             Confirme que a limpeza do quarto {roomNumber} foi realizada.
+            {roomStatus === "available" && (
+              <span className="block mt-1 text-xs text-blue-600">
+                ℹ️ O quarto já está marcado como disponível.
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
 
