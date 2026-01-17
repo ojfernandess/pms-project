@@ -86,7 +86,7 @@ serve(async (req) => {
         client_id,
         financial_responsible:clients!client_id(id, email, full_name),
         guest:clients!guest_id(id, email, full_name),
-        rooms(id, room_number, name, category_id, room_categories!category_id(id, name, description))
+        rooms(id, room_number, name, category_id, room_categories!category_id(id, name, description, building_id))
       `
       )
       .eq("status", "confirmed") // Apenas reservas confirmadas
@@ -218,10 +218,10 @@ serve(async (req) => {
           hotelSettings = settings as Record<string, unknown> | null;
         }
 
-        // Buscar site settings para valores padrão
+        // Buscar site settings para valores padrão (incluindo pms_base_url)
         const { data: siteSettings } = await supabase
           .from("site_settings")
-          .select("*")
+          .select("*, pms_base_url")
           .maybeSingle();
 
         // Determinar destinatário
@@ -273,15 +273,35 @@ serve(async (req) => {
         // O link deve usar reservation_code (ex: RSV742516) e não identification_number
         
         // Detectar URL base automaticamente (ordem de prioridade):
-        // 1. Headers da requisição (Origin, Referer, X-Forwarded-Host)
-        // 2. hotel_settings.website
-        // 3. site_settings.site_url
-        // 4. Variáveis de ambiente
-        // 5. Fallback para localhost
+        // 1. site_settings.pms_base_url (URL base do PMS - prioridade máxima)
+        // 2. Headers da requisição (Origin, Referer, X-Forwarded-Host)
+        // 3. Variáveis de ambiente (VERCEL_URL, SITE_URL, etc.)
+        // 4. hotel_settings.website (URL do site do estabelecimento - não usar para links do PMS)
+        // 5. site_settings.site_url (URL do site - não usar para links do PMS)
+        // 6. Fallback para localhost
         let baseUrl = "";
         let urlSource = "";
         
-        // 1. Tentar obter dos headers da requisição
+        // 1. Priorizar pms_base_url de site_settings (URL base do PMS)
+        if (siteSettings && siteSettings.pms_base_url) {
+          const pmsUrl = (siteSettings.pms_base_url as string).trim();
+          if (pmsUrl) {
+            try {
+              // Garantir que tenha protocolo
+              const url = new URL(pmsUrl.startsWith('http://') || pmsUrl.startsWith('https://') ? pmsUrl : `https://${pmsUrl}`);
+              baseUrl = url.origin;
+              urlSource = "site_settings-pms_base_url";
+              console.log("🌐 URL base do PMS obtida de site_settings.pms_base_url:", baseUrl);
+            } catch {
+              // Se falhar, usar como está
+              baseUrl = pmsUrl;
+              urlSource = "site_settings-pms_base_url";
+              console.log("🌐 URL base do PMS obtida de site_settings.pms_base_url (como está):", baseUrl);
+            }
+          }
+        }
+        
+        // 2. Se não tem pms_base_url, tentar obter dos headers da requisição
         try {
           const origin = req.headers.get("origin");
           const referer = req.headers.get("referer");
@@ -325,47 +345,50 @@ serve(async (req) => {
           console.log("⚠️ Erro ao processar headers da requisição:", e);
         }
         
-        // 2. Se não obteve dos headers, tentar hotel_settings.website
-        if (!baseUrl && hotelSettings) {
-          const hotelWebsite = (hotelSettings.website as string) || "";
-          if (hotelWebsite && !hotelWebsite.includes(".supabase.co") && 
-              hotelWebsite.trim() !== "" &&
-              (hotelWebsite.startsWith("http://") || hotelWebsite.startsWith("https://"))) {
-            baseUrl = hotelWebsite.replace(/\/$/, "");
-            urlSource = "hotel_settings-website";
-            console.log("🌐 URL base obtida de hotel_settings.website:", baseUrl);
-          }
-        }
-        
-        // 3. Se não obteve, tentar site_settings.site_url
-        if (!baseUrl && siteSettings) {
-          const siteUrl = (siteSettings.site_url as string) || "";
-          if (siteUrl && !siteUrl.includes(".supabase.co") && 
-              siteUrl.trim() !== "" &&
-              (siteUrl.startsWith("http://") || siteUrl.startsWith("https://"))) {
-            baseUrl = siteUrl.replace(/\/$/, "");
-            urlSource = "site_settings-site_url";
-            console.log("🌐 URL base obtida de site_settings.site_url:", baseUrl);
-          }
-        }
-        
-        // 4. Se ainda não tem, tentar variáveis de ambiente
+        // 3. Se ainda não tem, tentar variáveis de ambiente de plataformas
         if (!baseUrl) {
-          const envUrl = Deno.env.get("VITE_APP_URL") || Deno.env.get("SITE_URL") || "";
-          if (envUrl && !envUrl.includes(".supabase.co") && 
-              envUrl.trim() !== "" &&
-              (envUrl.startsWith("http://") || envUrl.startsWith("https://"))) {
-            baseUrl = envUrl.replace(/\/$/, "");
-            urlSource = "environment-variable";
-            console.log("🌐 URL base obtida de variáveis de ambiente:", baseUrl);
+          // Vercel
+          const vercelUrl = Deno.env.get("VERCEL_URL");
+          if (vercelUrl) {
+            baseUrl = `https://${vercelUrl}`;
+            urlSource = "environment-vercel";
+            console.log("🌐 URL base obtida de VERCEL_URL:", baseUrl);
+          }
+          // Render
+          else {
+            const renderUrl = Deno.env.get("RENDER_EXTERNAL_URL");
+            if (renderUrl) {
+              baseUrl = renderUrl;
+              urlSource = "environment-render";
+              console.log("🌐 URL base obtida de RENDER_EXTERNAL_URL:", baseUrl);
+            }
+            // Outras variáveis de ambiente
+            else {
+              const envUrl = Deno.env.get("VITE_APP_URL") || Deno.env.get("SITE_URL") || "";
+              if (envUrl && !envUrl.includes(".supabase.co") && 
+                  envUrl.trim() !== "" &&
+                  (envUrl.startsWith("http://") || envUrl.startsWith("https://"))) {
+                baseUrl = envUrl.replace(/\/$/, "");
+                urlSource = "environment-variable";
+                console.log("🌐 URL base obtida de variáveis de ambiente:", baseUrl);
+              }
+            }
           }
         }
         
-        // 5. Fallback para localhost se ainda não tem
+        // 4. Fallback para localhost se ainda não tem
         if (!baseUrl || baseUrl.includes(".supabase.co") || baseUrl.trim() === "") {
-          baseUrl = "http://localhost:8080";
-          urlSource = "fallback-localhost";
-          console.log("⚠️ URL base usando fallback (localhost) - configure site_url em site_settings ou hotel_settings.website");
+          // Verificar se SUPABASE_URL contém localhost para detectar ambiente
+          const supabaseUrlEnv = Deno.env.get("SUPABASE_URL") || "";
+          if (supabaseUrlEnv.includes("localhost") || supabaseUrlEnv.includes("127.0.0.1")) {
+            baseUrl = "http://localhost:8080";
+            urlSource = "fallback-localhost";
+            console.log("🌐 URL base usando localhost (ambiente de desenvolvimento detectado)");
+          } else {
+            baseUrl = "http://localhost:8080";
+            urlSource = "fallback-localhost";
+            console.log("⚠️ URL base usando fallback (localhost) - configure pms_base_url em site_settings");
+          }
         }
         
         // Para o link, sempre usar reservation_code se disponível, senão identification_number
@@ -374,20 +397,52 @@ serve(async (req) => {
           ? `${baseUrl}/web-checkin/${locatorForLink}`
           : "";
         
-        console.log("🔗 Web-checkin link gerado:", {
+        // Gerar link de políticas (priorizar prédio, senão estabelecimento)
+        const buildingId = reservation.room_categories?.building_id || null;
+        const establishmentId = reservation.establishment_id || null;
+        
+        const generatePoliciesLink = (type: 'establishment' | 'building', id: string | null | undefined): string => {
+          if (!id) return '';
+          try {
+            const tokenData = `${type}:${id}`;
+            const token = btoa(tokenData);
+            // Criar URL amigável usando o nome do hotel como slug
+            const hotelName = (hotelSettings?.name as string) || 'hotel';
+            // Criar slug simples (remover acentos, espaços, caracteres especiais)
+            const slug = hotelName
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+              .replace(/[^a-z0-9]+/g, '-') // Substitui não-alfanuméricos por hífen
+              .replace(/^-+|-+$/g, ''); // Remove hífens no início/fim
+            // URL amigável: /policies/{slug}/{token}
+            return `${baseUrl}/policies/${slug}/${token}`;
+          } catch {
+            return '';
+          }
+        };
+        
+        const policiesLink = buildingId 
+          ? generatePoliciesLink('building', buildingId)
+          : generatePoliciesLink('establishment', establishmentId);
+        
+        console.log("🔗 Links gerados:", {
           baseUrl,
+          urlSource,
           locatorForLink,
           webCheckinLink,
+          policiesLink,
           hasReservationCode: !!reservationCode,
           hasIdentificationNumber: !!identificationNumber,
-          urlSource,
+          buildingId: buildingId || "não disponível",
+          establishmentId: establishmentId || "não disponível",
           headers: {
             origin: req.headers.get("origin") || "não disponível",
             referer: req.headers.get("referer") ? "disponível" : "não disponível",
             forwardedHost: req.headers.get("x-forwarded-host") || "não disponível",
           },
           hotelSettingsWebsite: hotelSettings?.website || "não configurado",
-          siteSettingsUrl: siteSettings?.site_url || "não configurado",
+          siteSettingsPmsBaseUrl: siteSettings?.pms_base_url || "não configurado",
         });
 
         // Preparar variáveis do template (garantir todas as variáveis necessárias)
@@ -417,6 +472,7 @@ serve(async (req) => {
           hotel_website: (hotelSettings?.website as string) || (siteSettings?.site_url as string) || "",
           logo_url: (hotelSettings?.logo_url as string) || (siteSettings?.logo_url as string) || "",
           web_checkin_link: webCheckinLink,
+          policies_link: policiesLink,
         };
 
         // Processar template (suporta Handlebars simples)
