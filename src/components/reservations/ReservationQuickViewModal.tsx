@@ -64,6 +64,12 @@ export function ReservationQuickViewModal({
   const { canDelete } = usePermissions();
   if (!reservation) return null;
 
+  // Debug: verificar estrutura do pricing_plans
+  // O Supabase pode retornar como array ou objeto único dependendo da query
+  const pricingPlanName = Array.isArray(reservation.pricing_plans) 
+    ? reservation.pricing_plans[0]?.name 
+    : reservation.pricing_plans?.name;
+
   // Determinar status real baseado em pagamento (mesma lógica do mapa de reservas)
   const getReservationStatus = () => {
     // Status especiais que não dependem de pagamento
@@ -157,7 +163,7 @@ export function ReservationQuickViewModal({
               Origem / Plano de Tarifa
             </label>
             <div className="text-sm text-slate-900 border border-slate-200 rounded-md p-2.5 bg-slate-50">
-              {reservation.source || reservation.channel || "Direto"} / {reservation.rate_plan || "Padrão"}
+              {reservation.source || reservation.channel || "Direto"} / {pricingPlanName || "Padrão"}
             </div>
           </div>
 

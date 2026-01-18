@@ -509,7 +509,8 @@ export const ReservationCalendarMap = ({
           *,
           room_categories(*),
           web_checkin(status, completed_at),
-          reservation_service_fees(amount, quantity)
+          reservation_service_fees(amount, quantity),
+          pricing_plans (*)
         `)
         .eq("establishment_id", currentEstablishmentId)
         // Buscar reservas que se sobrepõem ao período visível:
@@ -1572,7 +1573,8 @@ export const ReservationCalendarMap = ({
           financial_responsible:clients!client_id(*),
           guest:clients!guest_id(*),
           rooms (*),
-          room_categories (*)
+          room_categories (*),
+          pricing_plans (*)
         `)
         .single();
 

@@ -176,7 +176,10 @@ const ReservationDetails = () => {
       // Buscar dados básicos da reserva primeiro usando o reservation_code
       const { data: reservationData, error: reservationError } = await supabase
         .from("reservations")
-        .select("*")
+        .select(`
+          *,
+          pricing_plans (*)
+        `)
         .eq("reservation_code", reservationCode)
         .single();
 
@@ -447,6 +450,35 @@ const ReservationDetails = () => {
         };
       }
 
+      // Processar dados do plano de tarifa se houver pricing_plan_id
+      let pricingPlan = null;
+      if (reservationData.pricing_plan_id) {
+        // Primeiro tentar usar o relacionamento se vier
+        if (reservationData.pricing_plans) {
+          const planFromRelation = Array.isArray(reservationData.pricing_plans) 
+            ? reservationData.pricing_plans[0] 
+            : reservationData.pricing_plans;
+          if (planFromRelation && planFromRelation.id) {
+            pricingPlan = planFromRelation;
+          }
+        }
+        
+        // Sempre buscar separadamente para garantir que temos os dados (fallback se relacionamento não funcionar)
+        if (!pricingPlan) {
+          const { data: planData, error: planError } = await supabase
+            .from("pricing_plans")
+            .select("*")
+            .eq("id", reservationData.pricing_plan_id)
+            .single();
+          if (!planError && planData) {
+            pricingPlan = planData;
+          } else if (planError && planError.code !== 'PGRST116') {
+            // PGRST116 = não encontrado, não é um erro crítico
+            console.warn("Erro ao buscar plano de tarifa:", planError);
+          }
+        }
+      }
+
       return {
         ...reservationData,
         financial_responsible: financialResponsible,
@@ -456,6 +488,7 @@ const ReservationDetails = () => {
         guest_name: guest?.full_name || financialResponsible?.full_name,
         cancelled_by_user: cancelledByUser,
         web_checkin: webCheckin,
+        pricing_plans: pricingPlan,
       };
     },
     enabled: !!reservationCode,
@@ -2178,15 +2211,34 @@ const ReservationDetails = () => {
                   </div>
                 </div>
 
-                {/* Origem */}
-                {reservation.origin && (
+                {/* Origem / Canal */}
+                {(reservation.origin || reservation.channel) && (
                   <div className="pb-6 border-b border-slate-100">
                     <Label className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2 block">
-                      Origem
+                      Origem / Canal
                     </Label>
-                    <div className="text-base font-medium text-slate-900">{reservation.origin}</div>
+                    <div className="text-base font-medium text-slate-900">
+                      {reservation.origin || reservation.channel || "Direto"}
+                    </div>
                   </div>
                 )}
+
+                {/* Plano de Tarifa */}
+                <div className="pb-6 border-b border-slate-100">
+                  <Label className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2 block">
+                    Plano de Tarifa
+                  </Label>
+                  <div className="text-base font-medium text-slate-900">
+                    {(() => {
+                      const plan = reservation.pricing_plans;
+                      if (!plan) return "Padrão";
+                      if (Array.isArray(plan)) {
+                        return plan[0]?.name || "Padrão";
+                      }
+                      return plan?.name || "Padrão";
+                    })()}
+                  </div>
+                </div>
 
                 {/* Observações */}
                 <Card className="bg-amber-50/50 dark:bg-amber-950/20 border-amber-200/60 dark:border-amber-800/40 shadow-sm">

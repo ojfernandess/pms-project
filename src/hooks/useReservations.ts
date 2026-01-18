@@ -73,7 +73,8 @@ export const useReservations = () => {
           guest:clients!guest_id(*),
           rooms (*),
           room_categories (*),
-          reservation_service_fees(amount, quantity)
+          reservation_service_fees(amount, quantity),
+          pricing_plans (*)
         `);
       
       if (establishmentId) {
@@ -281,6 +282,7 @@ export const useReservations = () => {
           pricing_plan_id: reservation.pricing_plan_id || null,
           created_by: user?.id || null,
           expiration_date: reservation.expiration_date || null,
+          channel: reservation.channel || "direct",
         };
 
         // Chamar função com lock (ordem: obrigatórios primeiro, opcionais depois)
@@ -619,7 +621,8 @@ export const useReservations = () => {
           financial_responsible:clients!client_id(*),
           guest:clients!guest_id(*),
           rooms (*),
-          room_categories (*)
+          room_categories (*),
+          pricing_plans (*)
         `)
         .single();
 
