@@ -42,7 +42,9 @@ serve(async (req) => {
       currency = "BRL",
       payment_type,
       reservation_id,
+      quote_id, // Para pagamentos de orçamentos
       guest_id,
+      guest_email, // Para pagamentos de orçamentos sem guest_id
       description,
       payment_method_id,
       save_payment_method = false,
@@ -117,12 +119,31 @@ serve(async (req) => {
     // Criar ou buscar customer
     let customerId = config.stripe_customer_id;
 
-    if (!customerId && guest_id) {
+    // Se não tem guest_id mas tem quote_id, buscar dados do orçamento
+    let finalGuestId = guest_id;
+    let guestEmail = guest_email;
+    let guestName = "";
+
+    if (!finalGuestId && quote_id) {
+      const { data: quote } = await supabaseClient
+        .from("quotes")
+        .select("guest_id, guest_email, guest_name")
+        .eq("id", quote_id)
+        .single();
+
+      if (quote) {
+        finalGuestId = quote.guest_id || null;
+        guestEmail = quote.guest_email || guestEmail;
+        guestName = quote.guest_name || "";
+      }
+    }
+
+    if (!customerId && finalGuestId) {
       // Buscar dados do hóspede (tabela clients)
       const { data: guest } = await supabaseClient
         .from("clients")
         .select("full_name, email, phone")
-        .eq("id", guest_id)
+        .eq("id", finalGuestId)
         .single();
 
       if (guest) {
@@ -132,7 +153,7 @@ serve(async (req) => {
           name: guest.full_name,
           phone: guest.phone,
           metadata: {
-            guest_id: guest_id,
+            guest_id: finalGuestId,
             establishment_id: establishment_id,
           },
         });
@@ -145,6 +166,18 @@ serve(async (req) => {
           .update({ stripe_customer_id: customerId })
           .eq("id", config.id);
       }
+    } else if (!customerId && guestEmail) {
+      // Criar customer com email do orçamento
+      const customer = await stripe.customers.create({
+        email: guestEmail,
+        name: guestName,
+        metadata: {
+          establishment_id: establishment_id,
+          quote_id: quote_id || "",
+        },
+      });
+
+      customerId = customer.id;
     }
 
     // Criar Payment Intent
@@ -156,7 +189,8 @@ serve(async (req) => {
         establishment_id,
         payment_type,
         reservation_id: reservation_id || "",
-        guest_id: guest_id || "",
+        quote_id: quote_id || "",
+        guest_id: finalGuestId || "",
         ...(finalCheckoutDate ? { checkout_date: finalCheckoutDate } : {}),
         ...(finalTotalAmount ? { total_amount: String(finalTotalAmount) } : {}),
         ...metadata,
@@ -210,7 +244,8 @@ serve(async (req) => {
       .insert({
         establishment_id,
         reservation_id: reservation_id || null,
-        guest_id: guest_id || null,
+        quote_id: quote_id || null,
+        guest_id: finalGuestId || null,
         stripe_payment_intent_id: paymentIntent.id,
         stripe_customer_id: customerId || null,
         stripe_payment_method_id: payment_method_id || null,
@@ -226,6 +261,23 @@ serve(async (req) => {
 
     if (dbError) {
       console.error("Error saving payment to database:", dbError);
+    }
+
+    // Se for um pagamento de orçamento, atualizar o quote com o payment_intent_id
+    if (quote_id && paymentIntent.id) {
+      const { error: updateQuoteError } = await supabaseClient
+        .from("quotes")
+        .update({
+          payment_intent_id: paymentIntent.id,
+        })
+        .eq("id", quote_id);
+
+      if (updateQuoteError) {
+        console.error("Error updating quote with payment_intent_id:", updateQuoteError);
+        // Não lançar erro aqui, pois o pagamento já foi criado
+      } else {
+        console.log(`[stripe-payment] ✅ Quote ${quote_id} atualizado com payment_intent_id: ${paymentIntent.id}`);
+      }
     }
 
     // Se save_payment_method e payment_method_id, salvar método de pagamento

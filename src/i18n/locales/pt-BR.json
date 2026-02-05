@@ -22,7 +22,8 @@
     "phone": "Telefone",
     "address": "Endereço",
     "yes": "Sim",
-    "no": "Não"
+    "no": "Não",
+    "of": "de"
   },
   "languageSelector": {
     "tooltip": "Alterar idioma / Change language / Cambiar idioma",
@@ -632,6 +633,63 @@
     },
     "success": {
       "loginSuccess": "Login realizado com sucesso!"
+    }
+  },
+  "publicReservation": {
+    "title": "Sistema de Reservas",
+    "subtitle": "Reserva Online",
+    "establishmentNotFound": "Estabelecimento não encontrado",
+    "establishmentNotFoundMessage": "O link de reserva é inválido ou o estabelecimento não existe.",
+    "chooseRoom": "Escolha seu quarto",
+    "chooseRoomSubtitle": "Selecione a acomodação perfeita para sua estadia",
+    "noCategoriesAvailable": "Nenhuma categoria disponível no momento.",
+    "selected": "Selecionado",
+    "photos": "fotos",
+    "more": "mais",
+    "priceTotalFor": "Preço total para",
+    "night": "noite",
+    "nights": "noites",
+    "pricePerNight": "Preço por noite",
+    "selectDatesToSeeTotal": "Selecione datas para ver o total",
+    "loading": "Carregando...",
+    "completeReservation": "Complete sua reserva",
+    "checkin": "Check-in",
+    "checkout": "Check-out",
+    "adults": "Adultos",
+    "adult": "adulto",
+    "adultsPlural": "adultos",
+    "children": "Crianças",
+    "child": "criança",
+    "childrenPlural": "crianças",
+    "contactData": "Dados de contato",
+    "firstName": "Nome",
+    "lastName": "Sobrenome",
+    "email": "E-mail",
+    "cpf": "CPF",
+    "phone": "Telefone",
+    "notes": "Observações (opcional)",
+    "notesPlaceholder": "Alguma solicitação especial?",
+    "reservationSummary": "Resumo da reserva",
+    "total": "Total",
+    "reserveNow": "Reservar Agora",
+    "processing": "Processando...",
+    "immediateConfirmation": "Confirmação imediata",
+    "noChargeNow": "Sem cobrança agora",
+    "galleryPhotos": "fotos",
+    "priceAvailabilityNotice": {
+      "title": "Importante",
+      "description": "O valor da reserva pode variar conforme as datas selecionadas e a disponibilidade do quarto. O preço final será confirmado após a seleção das datas."
+    },
+    "errors": {
+      "establishmentNotFound": "Estabelecimento não encontrado",
+      "loadError": "Erro ao carregar informações do estabelecimento",
+      "selectCategory": "Selecione uma categoria de quarto",
+      "selectDates": "Selecione as datas de check-in e check-out",
+      "invalidDates": "A data de check-out deve ser posterior à data de check-in",
+      "fillRequiredFields": "Preencha todos os campos obrigatórios",
+      "quoteCreatedPaymentError": "Orçamento criado, mas erro ao gerar link de pagamento",
+      "quoteCreatedSuccess": "Orçamento criado com sucesso! Redirecionando para pagamento...",
+      "createReservationError": "Erro ao criar reserva. Tente novamente."
     }
   }
 }

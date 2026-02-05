@@ -41,6 +41,10 @@ import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 import PaymentPage from "./pages/PaymentPage";
+import QuotePaymentPage from "./pages/QuotePaymentPage";
+import QuoteRoomSelection from "./pages/QuoteRoomSelection";
+import PublicReservation from "./pages/PublicReservation";
+import Quotes from "./pages/Quotes";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import Documentation from "./pages/Documentation";
 import { EstablishmentProvider } from "./contexts/EstablishmentContext";
@@ -134,6 +138,9 @@ const AppContent = () => {
             <Route path="/payment/:paymentIntentId" element={<PaymentPage />} />
             <Route path="/payment/success/:paymentIntentId" element={<PaymentSuccess />} />
             <Route path="/payment/return" element={<PaymentSuccess />} />
+            <Route path="/quote-payment/:paymentIntentId" element={<QuotePaymentPage />} />
+            <Route path="/quote-room-selection/:selectionToken" element={<QuoteRoomSelection />} />
+            <Route path="/reservar/:establishmentSlug" element={<PublicReservation />} />
             <Route path="/policies/:slug/:token" element={<PublicPolicies />} />
             <Route path="/policies/:token" element={<PublicPolicies />} />
             <Route path="/documentation" element={<ProtectedRoute><AppLayout><Documentation /></AppLayout></ProtectedRoute>} />
@@ -150,6 +157,7 @@ const AppContent = () => {
             <Route path="/:establishmentId/configuracoes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Settings /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/perfil" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Profile /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/funcionarios" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Employees /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/orcamentos" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Quotes /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             {/* Rotas legadas (redirecionar para user-dashboard se não tiver establishmentId) */}
             <Route path="/" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
             <Route path="/ocupacao" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />

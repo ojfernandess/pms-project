@@ -16,7 +16,8 @@ import {
   BookOpen,
   BarChart3,
   Star,
-  Map
+  Map,
+  Receipt
 } from "lucide-react";
 import { NavLink, useParams } from "react-router-dom";
 import { useIsSuperAdmin } from "@/hooks/useUsers";
@@ -41,6 +42,7 @@ const getMenuItems = (t: (key: string) => string) => [
   { icon: Bed, label: t("sidebar.occupancyMap"), path: "/ocupacao", feature: "occupancy_map" },
   { icon: Map, label: "Mapa de Disponibilidades", path: "/disponibilidade", feature: "availability_map" },
   { icon: Calendar, label: t("sidebar.reservations"), path: "/reservas", feature: "reservations" },
+  { icon: Receipt, label: "Orçamentos", path: "/orcamentos", feature: "quotes" },
   { icon: Users, label: t("sidebar.clients"), path: "/clientes", feature: "clients" },
   { icon: Building2, label: t("sidebar.units"), path: "/unidades", feature: "units" },
   { icon: DollarSign, label: t("sidebar.financial"), path: "/financeiro", feature: "financial" },

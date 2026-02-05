@@ -22,7 +22,8 @@
     "phone": "Phone",
     "address": "Address",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "of": "of"
   },
   "languageSelector": {
     "tooltip": "Change language / Alterar idioma / Cambiar idioma",
@@ -585,6 +586,63 @@
       "needAuth": "You need to be authenticated to access this page.",
       "goToCheckin": "Go to Check-in",
       "loadingInfo": "Loading your information..."
+    }
+  },
+  "publicReservation": {
+    "title": "Reservation System",
+    "subtitle": "Online Reservation",
+    "establishmentNotFound": "Establishment not found",
+    "establishmentNotFoundMessage": "The reservation link is invalid or the establishment does not exist.",
+    "chooseRoom": "Choose your room",
+    "chooseRoomSubtitle": "Select the perfect accommodation for your stay",
+    "noCategoriesAvailable": "No categories available at the moment.",
+    "selected": "Selected",
+    "photos": "photos",
+    "more": "more",
+    "priceTotalFor": "Total price for",
+    "night": "night",
+    "nights": "nights",
+    "pricePerNight": "Price per night",
+    "selectDatesToSeeTotal": "Select dates to see total",
+    "loading": "Loading...",
+    "completeReservation": "Complete your reservation",
+    "checkin": "Check-in",
+    "checkout": "Check-out",
+    "adults": "Adults",
+    "adult": "adult",
+    "adultsPlural": "adults",
+    "children": "Children",
+    "child": "child",
+    "childrenPlural": "children",
+    "contactData": "Contact information",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "email": "Email",
+    "cpf": "CPF",
+    "phone": "Phone",
+    "notes": "Notes (optional)",
+    "notesPlaceholder": "Any special requests?",
+    "reservationSummary": "Reservation summary",
+    "total": "Total",
+    "reserveNow": "Reserve Now",
+    "processing": "Processing...",
+    "immediateConfirmation": "Immediate confirmation",
+    "noChargeNow": "No charge now",
+    "galleryPhotos": "photos",
+    "priceAvailabilityNotice": {
+      "title": "Important",
+      "description": "The reservation value may vary according to the selected dates and room availability. The final price will be confirmed after selecting the dates."
+    },
+    "errors": {
+      "establishmentNotFound": "Establishment not found",
+      "loadError": "Error loading establishment information",
+      "selectCategory": "Select a room category",
+      "selectDates": "Select check-in and check-out dates",
+      "invalidDates": "Check-out date must be after check-in date",
+      "fillRequiredFields": "Fill in all required fields",
+      "quoteCreatedPaymentError": "Quote created, but error generating payment link",
+      "quoteCreatedSuccess": "Quote created successfully! Redirecting to payment...",
+      "createReservationError": "Error creating reservation. Please try again."
     }
   },
   "auth": {

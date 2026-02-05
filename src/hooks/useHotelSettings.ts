@@ -74,6 +74,8 @@ export const useHotelSettings = () => {
       show_establishment_cnpj?: boolean;
       enable_cleaning_notifications?: boolean;
       timezone?: string;
+      public_pricing_plan_id?: string | null;
+      establishment_photos?: string[];
     }) => {
       // Buscar establishment_id do localStorage
       const establishmentId = localStorage.getItem("selectedEstablishmentId");
@@ -231,7 +233,26 @@ export const useHotelSettings = () => {
   // Upload de imagem (logo, foto ou assinatura)
   const uploadImage = async (file: File, type: "logo" | "photo" | "signature"): Promise<string | null> => {
     try {
-      const fileExt = file.name.split(".").pop();
+      // Validar tipo MIME suportado
+      const allowedMimeTypes = [
+        'image/jpeg',
+        'image/jpg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'image/svg+xml',
+        'image/x-icon'
+      ];
+
+      // Verificar se o tipo MIME é suportado
+      if (!allowedMimeTypes.includes(file.type)) {
+        const errorMsg = `Formato de imagem não suportado: ${file.type || 'desconhecido'}. Formatos aceitos: JPEG, PNG, WebP, GIF, SVG ou ICO.`;
+        toast.error(errorMsg);
+        console.error("Formato não suportado:", file.type, "Arquivo:", file.name);
+        return null;
+      }
+
+      const fileExt = file.name.split(".").pop()?.toLowerCase() || 'png';
       const fileName = `${type}_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `hotel/${fileName}`;
 
@@ -242,11 +263,20 @@ export const useHotelSettings = () => {
         .upload(filePath, file, {
           cacheControl: "3600",
           upsert: false,
+          contentType: file.type,
         });
 
       if (uploadError) {
-        // Se o bucket não existir, usar data URL como fallback
-        console.warn("Bucket não encontrado, usando data URL:", uploadError);
+        // Verificar se é erro de tipo MIME não suportado
+        if (uploadError.message?.includes('mime type') || uploadError.message?.includes('not supported')) {
+          const errorMsg = `Formato de imagem não suportado pelo servidor. Use JPEG, PNG, WebP ou GIF.`;
+          toast.error(errorMsg);
+          console.error("Erro de tipo MIME:", uploadError);
+          return null;
+        }
+        
+        // Se o bucket não existir ou outro erro, usar data URL como fallback
+        console.warn("Erro no upload, usando data URL como fallback:", uploadError);
         return new Promise((resolve) => {
           const reader = new FileReader();
           reader.onloadend = () => {
@@ -260,14 +290,20 @@ export const useHotelSettings = () => {
       return data.publicUrl;
     } catch (error: any) {
       console.error("Erro ao fazer upload:", error);
-      // Em caso de erro, retornar data URL como fallback
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          resolve(reader.result as string);
-        };
-        reader.readAsDataURL(file);
-      });
+      toast.error(error.message || "Erro ao fazer upload da imagem. Tente novamente.");
+      
+      // Em caso de erro, tentar retornar data URL como fallback apenas se não for erro de formato
+      if (!error.message?.includes('mime type') && !error.message?.includes('not supported')) {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            resolve(reader.result as string);
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+      
+      return null;
     }
   };
 

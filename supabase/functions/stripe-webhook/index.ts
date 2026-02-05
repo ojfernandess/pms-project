@@ -1751,10 +1751,10 @@ serve(async (req) => {
         case "payment_intent.succeeded": {
           const paymentIntent = event.data.object as Stripe.PaymentIntent;
           
-          // Buscar o pagamento no banco para obter reservation_id e payment_type
+          // Buscar o pagamento no banco para obter reservation_id, quote_id e payment_type
           const { data: payment, error: paymentFetchError } = await supabaseClient
             .from("stripe_payments")
-            .select("id, reservation_id, amount, payment_type, establishment_id")
+            .select("id, reservation_id, quote_id, amount, payment_type, establishment_id, metadata")
             .eq("stripe_payment_intent_id", paymentIntent.id)
             .single();
 
@@ -1987,6 +1987,210 @@ serve(async (req) => {
                 }
               }
             }
+          }
+
+          // Processar pagamento de orçamento (quote_payment)
+          const quoteId = payment?.quote_id || paymentIntent.metadata?.quote_id || payment?.metadata?.quote_id;
+          // Verificar se é um pagamento de orçamento: tem quote_id OU payment_type é "quote_payment"
+          if (quoteId) {
+            console.log(`[Webhook] 💰 Processando pagamento de orçamento: ${quoteId} (payment_type: ${payment?.payment_type || 'não definido'})`);
+            
+            try {
+              // Buscar dados do orçamento
+              const { data: quote, error: quoteError } = await supabaseClient
+                .from("quotes")
+                .select("*")
+                .eq("id", quoteId)
+                .single();
+
+              if (quoteError || !quote) {
+                console.error(`[Webhook] ❌ Erro ao buscar orçamento ${quoteId}:`, quoteError);
+                throw quoteError || new Error("Orçamento não encontrado");
+              }
+
+              // Verificar se já foi convertido
+              if (quote.status === "converted" && quote.reservation_id) {
+                console.log(`[Webhook] ℹ️ Orçamento ${quoteId} já foi convertido em reserva ${quote.reservation_id}`);
+                // Atualizar o pagamento para apontar para a reserva existente
+                await supabaseClient
+                  .from("stripe_payments")
+                  .update({ reservation_id: quote.reservation_id })
+                  .eq("stripe_payment_intent_id", paymentIntent.id);
+                break;
+              }
+
+              // Buscar ou criar cliente/hóspede
+              let clientId = quote.client_id;
+              let guestId = quote.guest_id;
+
+              if (!clientId && quote.guest_email) {
+                // Tentar encontrar cliente existente pelo email
+                const { data: existingClient } = await supabaseClient
+                  .from("clients")
+                  .select("id")
+                  .eq("email", quote.guest_email)
+                  .maybeSingle();
+
+                if (existingClient) {
+                  clientId = existingClient.id;
+                  guestId = existingClient.id;
+                } else {
+                  // Criar novo cliente
+                  const { data: newClient, error: clientError } = await supabaseClient
+                    .from("clients")
+                    .insert({
+                      full_name: quote.guest_name || "Cliente",
+                      email: quote.guest_email || null,
+                      phone: quote.guest_phone || null,
+                    })
+                    .select("id")
+                    .single();
+
+                  if (clientError) {
+                    throw new Error(`Erro ao criar cliente: ${clientError.message}`);
+                  }
+
+                  clientId = newClient.id;
+                  guestId = newClient.id;
+                }
+              }
+
+              if (!clientId) {
+                throw new Error("É necessário ter um cliente associado ao orçamento");
+              }
+
+              // Criar reserva usando a função create_reservation_with_lock
+              const reservationData = {
+                establishment_id: quote.establishment_id,
+                room_id: quote.room_id || null,
+                category_id: quote.category_id,
+                guest_id: guestId,
+                client_id: clientId,
+                guest_name: quote.guest_name || null,
+                adults: quote.adults || 1,
+                children: quote.children || 0,
+                total_amount: quote.total_amount || 0,
+                paid_amount: quote.total_amount || 0, // Pagamento completo
+                payment_status: "paid",
+                status: "confirmed",
+                notes: quote.notes || null,
+                pricing_plan_id: quote.pricing_plan_id || null,
+                created_by: quote.created_by || null,
+                channel: quote.channel || "direct",
+              };
+
+              const { data: reservationResult, error: reservationError } = await supabaseClient.rpc(
+                "create_reservation_with_lock",
+                {
+                  p_reservation_data: reservationData,
+                  p_checkin_date: quote.checkin_date,
+                  p_checkout_date: quote.checkout_date,
+                  p_establishment_id: quote.establishment_id,
+                  p_room_id: quote.room_id || null,
+                  p_category_id: quote.category_id,
+                }
+              );
+
+              if (reservationError || !reservationResult?.success) {
+                throw new Error(reservationError?.message || "Erro ao criar reserva");
+              }
+
+              const newReservationId = reservationResult.reservation_id;
+
+              // Atualizar orçamento como convertido
+              const { error: updateQuoteError } = await supabaseClient
+                .from("quotes")
+                .update({
+                  status: "converted",
+                  reservation_id: newReservationId,
+                  converted_at: new Date().toISOString(),
+                })
+                .eq("id", quoteId);
+
+              if (updateQuoteError) {
+                console.error(`[Webhook] ⚠️ Erro ao atualizar orçamento ${quoteId}:`, updateQuoteError);
+                // Não lançar erro aqui, pois a reserva já foi criada
+              }
+
+              // Atualizar pagamento para apontar para a reserva criada
+              await supabaseClient
+                .from("stripe_payments")
+                .update({ reservation_id: newReservationId })
+                .eq("stripe_payment_intent_id", paymentIntent.id);
+
+              // Registrar pagamento no PMS
+              const establishmentId = quote.establishment_id;
+              if (establishmentId) {
+                try {
+                  const { data: globalConfig } = await supabaseClient
+                    .from("stripe_global_config")
+                    .select("test_mode")
+                    .single();
+
+                  const { data: establishmentConfig } = await supabaseClient
+                    .from("stripe_establishment_config")
+                    .select("test_secret_key, live_secret_key")
+                    .eq("establishment_id", establishmentId)
+                    .maybeSingle();
+
+                  const isTestMode = globalConfig?.test_mode ?? true;
+                  const stripeSecretKey = isTestMode
+                    ? establishmentConfig?.test_secret_key
+                    : establishmentConfig?.live_secret_key;
+
+                  if (stripeSecretKey) {
+                    const stripeClient = new Stripe(stripeSecretKey, {
+                      apiVersion: "2023-10-16",
+                    });
+                    
+                    await registerStripePaymentInPMS(
+                      supabaseClient,
+                      newReservationId,
+                      establishmentId,
+                      paymentIntent,
+                      payment.id,
+                      stripeClient
+                    );
+                  }
+                } catch (pmsError) {
+                  console.error(`[Webhook] ❌ Erro ao registrar pagamento no PMS para reserva ${newReservationId}:`, pmsError);
+                }
+              }
+
+              // Enviar email de pagamento confirmado
+              try {
+                console.log(`[Webhook] 📧 Enviando email de pagamento confirmado para reserva ${newReservationId} (convertida de orçamento ${quoteId})`);
+                await sendPaymentConfirmedEmail(newReservationId, supabaseClient, req);
+                console.log(`[Webhook] ✅ Email de pagamento confirmado processado para reserva ${newReservationId}`);
+              } catch (emailError) {
+                console.error(`[Webhook] ❌ Erro ao enviar email para reserva ${newReservationId}:`, emailError);
+              }
+
+              console.log(`[Webhook] ✅ Orçamento ${quoteId} convertido em reserva ${newReservationId} com sucesso`);
+            } catch (quoteError: any) {
+              console.error(`[Webhook] ❌ Erro ao processar pagamento de orçamento ${quoteId}:`, quoteError);
+              console.error(`[Webhook] ❌ Stack trace:`, quoteError?.stack);
+              // Tentar atualizar o status do quote para "sent" mesmo em caso de erro parcial
+              // para indicar que houve tentativa de processamento
+              try {
+                await supabaseClient
+                  .from("quotes")
+                  .update({ 
+                    status: "sent",
+                    // Manter o status atual se já estiver convertido
+                  })
+                  .eq("id", quoteId)
+                  .neq("status", "converted");
+              } catch (updateError) {
+                console.error(`[Webhook] ❌ Erro ao atualizar status do quote após erro:`, updateError);
+              }
+              // Não lançar erro aqui para não quebrar o processamento do webhook
+            }
+          }
+          
+          // Log adicional se quoteId foi encontrado mas não processado
+          if (quoteId && !payment?.reservation_id) {
+            console.warn(`[Webhook] ⚠️ Quote ID encontrado (${quoteId}) mas não foi processado. Payment type: ${payment?.payment_type}, Reservation ID: ${payment?.reservation_id}`);
           }
 
           processed = true;

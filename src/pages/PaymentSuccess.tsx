@@ -33,26 +33,123 @@ const PaymentSuccess = () => {
 
   const loadReservationDataByPaymentIntent = async (paymentIntent: string) => {
     try {
-      const { data: payment, error: paymentError } = await supabase
-        .from("stripe_payments")
-        .select("reservation_id, status")
-        .eq("stripe_payment_intent_id", paymentIntent)
-        .single();
+      // Primeiro, verificar se é um pagamento de orçamento (quote)
+      const { data: quote, error: quoteError } = await supabase
+        .from("quotes")
+        .select("id, status, reservation_id, establishment_id")
+        .eq("payment_intent_id", paymentIntent)
+        .maybeSingle();
 
-      if (paymentError) throw paymentError;
-
-      if (!payment?.reservation_id) {
-        setError("Reserva não encontrada para este pagamento");
-        setIsLoading(false);
+      if (!quoteError && quote) {
+        // É um pagamento de orçamento
+        if (quote.status === "converted" && quote.reservation_id) {
+          // Orçamento já foi convertido, buscar a reserva
+          await loadReservationById(quote.reservation_id);
+        } else {
+          // Aguardar conversão do orçamento em reserva
+          await waitForQuoteConversion(paymentIntent, quote.id);
+        }
         return;
       }
 
-      await loadReservationById(payment.reservation_id);
+      // Não é um quote, tentar buscar como pagamento de reserva normal
+      const { data: payment, error: paymentError } = await supabase
+        .from("stripe_payments")
+        .select("reservation_id, quote_id, status")
+        .eq("stripe_payment_intent_id", paymentIntent)
+        .maybeSingle();
+
+      if (paymentError && paymentError.code !== "PGRST116") {
+        throw paymentError;
+      }
+
+      // Se tem quote_id no payment, aguardar conversão
+      if (payment?.quote_id) {
+        const { data: quoteData } = await supabase
+          .from("quotes")
+          .select("id, status, reservation_id")
+          .eq("id", payment.quote_id)
+          .maybeSingle();
+
+        if (quoteData) {
+          if (quoteData.status === "converted" && quoteData.reservation_id) {
+            await loadReservationById(quoteData.reservation_id);
+          } else {
+            await waitForQuoteConversion(paymentIntent, quoteData.id);
+          }
+          return;
+        }
+      }
+
+      // Se tem reservation_id, buscar a reserva
+      if (payment?.reservation_id) {
+        await loadReservationById(payment.reservation_id);
+        return;
+      }
+
+      // Se não encontrou nem quote nem reservation, pode ser que ainda esteja processando
+      // Tentar aguardar um pouco e verificar novamente
+      await waitForQuoteConversion(paymentIntent, null);
     } catch (error: any) {
       console.error("Erro ao carregar dados:", error);
       setError("Erro ao carregar informações da reserva");
       setIsLoading(false);
     }
+  };
+
+  const waitForQuoteConversion = async (paymentIntent: string, quoteId: string | null) => {
+    let attempts = 0;
+    const maxAttempts = 10; // Aguardar até 15 segundos (10 tentativas x 1.5s)
+
+    while (attempts < maxAttempts) {
+      // Tentar buscar quote primeiro
+      if (quoteId) {
+        const { data: quote } = await supabase
+          .from("quotes")
+          .select("id, status, reservation_id")
+          .eq("id", quoteId)
+          .maybeSingle();
+
+        if (quote?.status === "converted" && quote.reservation_id) {
+          await loadReservationById(quote.reservation_id);
+          return;
+        }
+      }
+
+      // Tentar buscar pelo payment_intent_id
+      const { data: quoteByIntent } = await supabase
+        .from("quotes")
+        .select("id, status, reservation_id")
+        .eq("payment_intent_id", paymentIntent)
+        .maybeSingle();
+
+      if (quoteByIntent?.status === "converted" && quoteByIntent.reservation_id) {
+        await loadReservationById(quoteByIntent.reservation_id);
+        return;
+      }
+
+      // Tentar buscar pelo stripe_payments
+      const { data: payment } = await supabase
+        .from("stripe_payments")
+        .select("reservation_id, quote_id")
+        .eq("stripe_payment_intent_id", paymentIntent)
+        .maybeSingle();
+
+      if (payment?.reservation_id) {
+        await loadReservationById(payment.reservation_id);
+        return;
+      }
+
+      // Aguardar antes de tentar novamente
+      if (attempts < maxAttempts - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+      attempts++;
+    }
+
+    // Se chegou aqui, não conseguiu encontrar a reserva após várias tentativas
+    setError("Pagamento processado! A reserva está sendo criada. Você receberá um email de confirmação em instantes.");
+    setIsLoading(false);
   };
 
   const loadReservationById = async (reservationId: string) => {
@@ -160,11 +257,30 @@ const PaymentSuccess = () => {
   }
 
   if (error || !reservationData) {
+    const isQuotePayment = error?.includes("Pagamento processado") || error?.includes("sendo criada");
+    
     return (
       <div className="min-h-screen flex items-center justify-center px-4 py-8">
         <Card className="p-6 sm:p-8 w-full max-w-md">
           <div className="text-center space-y-4">
-            <p className="text-sm sm:text-base text-red-600">{error || "Reserva não encontrada"}</p>
+            {isQuotePayment ? (
+              <>
+                <div className="flex justify-center mb-4">
+                  <div className="rounded-full bg-green-100 p-4">
+                    <CheckCircle2 className="w-12 h-12 text-green-600" />
+                  </div>
+                </div>
+                <h2 className="text-xl font-bold text-slate-900">Pagamento Confirmado!</h2>
+                <p className="text-sm sm:text-base text-slate-600">{error}</p>
+                <p className="text-xs text-slate-500 mt-2">
+                  Você receberá um email de confirmação com os detalhes da sua reserva assim que ela for criada.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm sm:text-base text-red-600">{error || "Reserva não encontrada"}</p>
+              </>
+            )}
             <Button onClick={() => navigate("/guest-dashboard")} className="w-full sm:w-auto">
               Voltar para o Dashboard
             </Button>

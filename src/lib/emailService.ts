@@ -2802,8 +2802,267 @@ async function findEmailTemplate(eventType: string, establishmentId?: string) {
   return templates[0];
 }
 
+/**
+ * Envia e-mail com link de pagamento de orçamento
+ */
+export async function sendQuotePaymentLinkEmail(
+  quote: any,
+  paymentLink: string
+): Promise<string | null> {
+  try {
+    console.log('📧 Enviando e-mail de link de pagamento para orçamento:', { quoteId: quote.id, quoteCode: quote.quote_code });
+    
+    // Verificar se o sistema de e-mail está habilitado para o estabelecimento
+    if (quote?.establishment_id) {
+      const { data: siteSettingsFeatureFlag } = await supabase
+        .from('site_settings')
+        .select('features_enabled')
+        .eq('id', '00000000-0000-0000-0000-000000000001')
+        .maybeSingle();
+        
+      const { isFeatureEnabledForEstablishment } = await import('@/lib/featureAccess');
+      const isEmailEnabled = isFeatureEnabledForEstablishment(
+        siteSettingsFeatureFlag?.features_enabled?.email,
+        quote.establishment_id
+      );
+      
+      if (!isEmailEnabled) {
+        console.warn('⚠️ Sistema de e-mail está desabilitado para este estabelecimento. E-mail não será enviado.');
+        return null;
+      }
+    }
+    
+    // Verificar se as configurações de e-mail estão ativas
+    const settings = await getEmailSettings();
+    if (!settings || !settings.is_active) {
+      console.warn('⚠️ Configurações de e-mail não encontradas ou inativas. E-mail não será enviado.');
+      return null;
+    }
+    
+    // Verificar se há email do destinatário
+    const recipientEmail = quote.guest_email;
+    if (!recipientEmail) {
+      console.warn('⚠️ E-mail do destinatário não encontrado para o orçamento:', quote.id);
+      return null;
+    }
+    
+    // Buscar template ativo para o evento
+    const template = await findEmailTemplate('quote.payment_link', quote?.establishment_id);
+    
+    if (!template) {
+      console.warn('⚠️ Template de e-mail não encontrado para evento: quote.payment_link');
+      return null;
+    }
+    
+    // Buscar dados adicionais necessários
+    const { data: establishment, error: establishmentError } = await supabase
+      .from('establishments')
+      .select('name')
+      .eq('id', quote.establishment_id)
+      .maybeSingle();
+    
+    if (establishmentError) {
+      console.warn('⚠️ Erro ao buscar estabelecimento:', establishmentError);
+    }
+    
+    const { data: hotelSettings, error: hotelSettingsError } = await supabase
+      .from('hotel_settings')
+      .select('*')
+      .eq('establishment_id', quote.establishment_id)
+      .maybeSingle();
+    
+    if (hotelSettingsError) {
+      console.warn('⚠️ Erro ao buscar configurações do hotel:', hotelSettingsError);
+    }
+    
+    const { data: category, error: categoryError } = await supabase
+      .from('room_categories')
+      .select('name')
+      .eq('id', quote.category_id)
+      .maybeSingle();
+    
+    if (categoryError) {
+      console.warn('⚠️ Erro ao buscar categoria:', categoryError);
+    }
+    
+    let room = null;
+    if (quote.room_id) {
+      const { data: roomData, error: roomError } = await supabase
+        .from('rooms')
+        .select('room_number, name')
+        .eq('id', quote.room_id)
+        .maybeSingle();
+      
+      if (roomError) {
+        console.warn('⚠️ Erro ao buscar quarto:', roomError);
+      } else {
+        room = roomData;
+      }
+    }
+    
+    const { data: siteSettings } = await supabase
+      .from('site_settings')
+      .select('pms_base_url')
+      .eq('id', '00000000-0000-0000-0000-000000000001')
+      .maybeSingle();
+    
+    // Construir endereço completo do hotel
+    const addressParts: string[] = [];
+    if (hotelSettings?.street) {
+      let streetLine = hotelSettings.street;
+      if (hotelSettings.number) {
+        streetLine += `, ${hotelSettings.number}`;
+      }
+      addressParts.push(streetLine);
+    }
+    if (hotelSettings?.neighborhood) {
+      addressParts.push(hotelSettings.neighborhood);
+    }
+    if (hotelSettings?.city) {
+      let cityLine = hotelSettings.city;
+      if (hotelSettings.state) {
+        cityLine += ` - ${hotelSettings.state}`;
+      }
+      if (hotelSettings.zip_code) {
+        cityLine += ` - CEP: ${hotelSettings.zip_code}`;
+      }
+      addressParts.push(cityLine);
+    }
+    const hotelAddress = addressParts.length > 0 ? addressParts.join(', ') : '';
+    
+    // Construir telefone completo
+    const hotelPhone = hotelSettings?.phone 
+      || (hotelSettings?.phone_ddi && hotelSettings?.phone_number
+        ? `${hotelSettings.phone_ddi} ${hotelSettings.phone_number}`
+        : hotelSettings?.phone_number || '');
+    
+    // Formatar valor total
+    const totalAmount = quote.total_amount?.toFixed(2).replace('.', ',') || '0,00';
+    
+    // Formatar datas - evitar problemas de timezone manipulando apenas strings
+    // O PostgreSQL retorna datas no formato YYYY-MM-DD (sem hora)
+    const formatQuoteDate = (dateString: string | null | undefined): string => {
+      if (!dateString) return '';
+      
+      // Se já estiver no formato correto (DD/MM/YYYY), retornar como está
+      if (dateString.includes('/')) return dateString;
+      
+      // Formato esperado: YYYY-MM-DD ou YYYY-MM-DDTHH:mm:ss.sssZ
+      // Pegar apenas a parte da data (antes do T se houver)
+      const dateOnly = dateString.split('T')[0];
+      const parts = dateOnly.split('-');
+      
+      if (parts.length === 3) {
+        // Formato: YYYY-MM-DD -> DD/MM/YYYY (sem conversão de timezone)
+        // Isso evita problemas de timezone porque não usa new Date()
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+      
+      // Fallback: tentar usar Date com UTC para evitar problemas de timezone
+      try {
+        // Adicionar hora do meio-dia UTC para evitar problemas de timezone
+        const date = new Date(dateString + 'T12:00:00Z');
+        return date.toLocaleDateString('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' });
+      } catch {
+        return dateString;
+      }
+    };
+    
+    const checkinDate = formatQuoteDate(quote.checkin_date);
+    const checkoutDate = formatQuoteDate(quote.checkout_date);
+    
+    // Logo do hotel
+    const hotelLogo = hotelSettings?.logo_url || hotelSettings?.logo || '';
+    
+    // URL base do PMS
+    let baseUrl = siteSettings?.pms_base_url || null;
+    if (!baseUrl) {
+      baseUrl = typeof window !== 'undefined' 
+        ? window.location.origin 
+        : (process.env.VITE_APP_URL || 'http://localhost:8080');
+    }
+    
+    // Variáveis do template
+    const variables: TemplateVariables = {
+      quote_code: quote.quote_code || '',
+      guest_name: quote.guest_name || 'Hóspede',
+      hotel_name: establishment?.name || hotelSettings?.name || 'Hotel',
+      hotel_logo: hotelLogo,
+      logo_url: hotelLogo,
+      category_name: category?.name || '',
+      room_number: room?.room_number || '',
+      checkin_date: checkinDate,
+      checkout_date: checkoutDate,
+      adults: quote.adults?.toString() || '1',
+      children: quote.children?.toString() || '0',
+      total_amount: totalAmount,
+      payment_link: paymentLink,
+      expiration_date: quote.expiration_date ? formatQuoteDate(quote.expiration_date) : '',
+      notes: quote.notes || '',
+      hotel_email: hotelSettings?.email || '',
+      hotel_phone: hotelPhone,
+      hotel_address: hotelAddress,
+      hotel_website: hotelSettings?.website || '',
+    };
+    
+    // Processar template
+    const subject = processTemplate(template.subject, variables);
+    const bodyHtml = processTemplate(template.body_html, variables);
+    
+    // Adicionar à fila (incluindo CC e BCC do template)
+    const ccEmails = template.cc_emails?.trim() || undefined;
+    const bccEmails = template.bcc_emails?.trim() || undefined;
+    
+    const queueId = await queueEmail({
+      template_id: template.id,
+      event_type: 'quote.payment_link',
+      recipient_email: recipientEmail,
+      recipient_name: quote.guest_name,
+      subject,
+      body_html: bodyHtml,
+      variables,
+      cc_emails: ccEmails,
+      bcc_emails: bccEmails,
+    });
+    
+    if (!queueId) {
+      console.error('❌ Erro ao adicionar e-mail à fila');
+      return null;
+    }
+    
+    console.log('✅ E-mail de link de pagamento adicionado à fila:', { queueId });
+    
+    // Processar imediatamente após adicionar à fila
+    try {
+      const success = await processEmailQueue(queueId);
+      if (success) {
+        console.log('✅ E-mail de link de pagamento enviado com sucesso:', { queueId });
+      } else {
+        console.warn('⚠️ E-mail adicionado à fila mas não foi enviado:', { queueId });
+      }
+    } catch (processError) {
+      console.error('❌ Erro ao processar e-mail da fila:', processError);
+      // Não retornar null aqui, pois o e-mail já está na fila e pode ser processado depois
+    }
+    
+    // Atualizar status do orçamento para 'sent'
+    await supabase
+      .from('quotes')
+      .update({ 
+        status: 'sent',
+        sent_at: new Date().toISOString()
+      })
+      .eq('id', quote.id);
+    
+    return queueId;
+  } catch (error) {
+    console.error('❌ Erro ao enviar e-mail de link de pagamento:', error);
+    return null;
+  }
+}
+
 export async function triggerEmail(
-  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification' | 'checkout.completed' | 'preregistration.expired' | 'reservation.modified',
+  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification' | 'checkout.completed' | 'preregistration.expired' | 'reservation.modified' | 'quote.payment_link',
   reservation: any,
   additionalVariables?: TemplateVariables,
   customRecipientEmail?: string

@@ -18,7 +18,9 @@ interface PaymentDialogProps {
   currency?: string;
   paymentType: string;
   reservationId?: string;
+  quoteId?: string; // Para pagamentos de orçamentos
   guestId?: string;
+  guestEmail?: string; // Para pagamentos de orçamentos sem guestId
   description?: string;
   savePaymentMethod?: boolean;
   onSuccess?: () => void;
@@ -173,7 +175,9 @@ export const PaymentDialog = ({
   currency = "BRL",
   paymentType,
   reservationId,
+  quoteId,
   guestId,
+  guestEmail,
   description,
   savePaymentMethod = false,
   onSuccess,
@@ -206,7 +210,25 @@ export const PaymentDialog = ({
 
   const fetchExistingPaymentIntent = async (paymentIntentId: string) => {
     try {
-      const establishmentId = propEstablishmentId || getSelectedEstablishmentId();
+      // Se não tiver establishmentId na prop, tentar buscar do quote
+      let establishmentId = propEstablishmentId;
+      
+      if (!establishmentId && quoteId) {
+        const { data: quote } = await supabase
+          .from("quotes")
+          .select("establishment_id")
+          .eq("id", quoteId)
+          .maybeSingle();
+        if (quote?.establishment_id) {
+          establishmentId = quote.establishment_id;
+        }
+      }
+      
+      // Fallback para getSelectedEstablishmentId apenas se não for pagamento de quote
+      if (!establishmentId && !quoteId) {
+        establishmentId = getSelectedEstablishmentId();
+      }
+      
       if (!establishmentId) {
         toast.error("Estabelecimento não encontrado.");
         setError("Estabelecimento não encontrado");
@@ -252,8 +274,24 @@ export const PaymentDialog = ({
 
   const createPaymentIntent = async () => {
     try {
-      // Usar establishmentId da prop, ou tentar obter do contexto
-      const establishmentId = propEstablishmentId || getSelectedEstablishmentId();
+      // Se não tiver establishmentId na prop, tentar buscar do quote
+      let establishmentId = propEstablishmentId;
+      
+      if (!establishmentId && quoteId) {
+        const { data: quote } = await supabase
+          .from("quotes")
+          .select("establishment_id")
+          .eq("id", quoteId)
+          .maybeSingle();
+        if (quote?.establishment_id) {
+          establishmentId = quote.establishment_id;
+        }
+      }
+      
+      // Fallback para getSelectedEstablishmentId apenas se não for pagamento de quote
+      if (!establishmentId && !quoteId) {
+        establishmentId = getSelectedEstablishmentId();
+      }
 
       if (!establishmentId) {
         toast.error("Estabelecimento não encontrado. Por favor, acesse o link de pagamento novamente.");
@@ -269,7 +307,9 @@ export const PaymentDialog = ({
           currency,
           payment_type: paymentType,
           reservation_id: reservationId,
+          quote_id: quoteId,
           guest_id: guestId,
+          guest_email: guestEmail,
           description,
           save_payment_method: savePaymentMethod,
           ...(metadata || {}),

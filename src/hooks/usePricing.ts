@@ -396,14 +396,31 @@ export const usePricing = () => {
     let totalPrice = 0;
     let hasError = false;
     
-    // Buscar preço base da categoria como fallback
-    const { data: category } = await supabase
-      .from("room_categories")
-      .select("base_price")
-      .eq("id", categoryId)
-      .single();
-    
-    const basePrice = category ? Number(category.base_price || 0) : 0;
+    // Buscar preço base da categoria como fallback (com tratamento de erro)
+    let basePrice = 0;
+    try {
+      const { data: category, error: categoryError } = await supabase
+        .from("room_categories")
+        .select("base_price")
+        .eq("id", categoryId)
+        .maybeSingle();
+      
+      if (categoryError) {
+        console.warn("Erro ao buscar preço base da categoria:", categoryError);
+        // Continuar com basePrice = 0, será tratado abaixo
+      } else {
+        basePrice = category ? Number(category.base_price || 0) : 0;
+      }
+    } catch (err: any) {
+      // Se for erro de rede, usar fallback silenciosamente
+      if (err.message?.includes("Failed to fetch") || 
+          err.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
+          err.message?.includes("502")) {
+        console.warn("Erro de rede ao buscar preço base, usando valor padrão");
+      } else {
+        console.warn("Erro ao buscar preço base da categoria:", err);
+      }
+    }
     
     // Se não tem preço base, retornar 0
     if (basePrice === 0) {
@@ -442,21 +459,39 @@ export const usePricing = () => {
             }
           }
         } catch (rpcError: any) {
-          console.error(`Erro ao chamar RPC calculate_rate_price para ${dateStr}:`, rpcError);
-          // Se for erro de CORS ou 502, usar preço base como fallback
-          if (rpcError.message?.includes("CORS") || 
-              rpcError.message?.includes("Failed to fetch") || 
-              rpcError.message?.includes("502") ||
-              rpcError.code === "PGRST301") {
-            console.warn(`Usando preço base como fallback para ${dateStr} devido a erro de rede`);
+          // Capturar erros de rede/CORS/502 e usar fallback silenciosamente
+          const isNetworkError = 
+            rpcError.message?.includes("CORS") || 
+            rpcError.message?.includes("Failed to fetch") || 
+            rpcError.message?.includes("502") ||
+            rpcError.message?.includes("Bad Gateway") ||
+            rpcError.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
+            rpcError.code === "PGRST301" || // Erro de RLS ou função não encontrada
+            rpcError.code === "PGRST116" || // Função não encontrada
+            (rpcError.error && (rpcError.error.code === "PGRST301" || rpcError.error.code === "PGRST116"));
+          
+          if (isNetworkError) {
+            // Usar preço base como fallback silenciosamente (não logar como erro)
             totalPrice += basePrice;
             hasError = true;
           } else {
-            throw rpcError;
+            // Apenas logar erros não relacionados a rede
+            console.error(`Erro ao chamar RPC calculate_rate_price para ${dateStr}:`, rpcError);
+            totalPrice += basePrice;
+            hasError = true;
           }
         }
-      } catch (err) {
-        console.error(`Erro ao calcular preço para ${dateStr}:`, err);
+      } catch (err: any) {
+        // Tratar erros de rede silenciosamente
+        const isNetworkError = 
+          err.message?.includes("Failed to fetch") || 
+          err.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
+          err.message?.includes("502") ||
+          err.message?.includes("CORS");
+        
+        if (!isNetworkError) {
+          console.error(`Erro ao calcular preço para ${dateStr}:`, err);
+        }
         hasError = true;
         totalPrice += basePrice;
       }

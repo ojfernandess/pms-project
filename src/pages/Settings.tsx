@@ -23,6 +23,7 @@ import { StripeEstablishmentConfigDialog } from "@/components/stripe/StripeEstab
 import { useStripe } from "@/hooks/useStripe";
 import { useCurrentEmployeeRole } from "@/hooks/useEmployees";
 import { useIsSuperAdmin } from "@/hooks/useUsers";
+import RoomDisplayConfig from "@/components/settings/RoomDisplayConfig";
 import {
   Table,
   TableBody,
@@ -338,6 +339,7 @@ const Settings = () => {
           <TabsTrigger value="schedule">Horário e Pagamento</TabsTrigger>
           <TabsTrigger value="services">Serviços</TabsTrigger>
           <TabsTrigger value="policies">Políticas</TabsTrigger>
+          <TabsTrigger value="room-display">Exibição de Quartos</TabsTrigger>
           {isApiIntegrationsEnabled && (
             <TabsTrigger value="integration">Integrações</TabsTrigger>
           )}
@@ -909,6 +911,10 @@ const Settings = () => {
 
         <TabsContent value="policies">
           <PoliciesManager />
+        </TabsContent>
+
+        <TabsContent value="room-display">
+          <RoomDisplayConfig />
         </TabsContent>
 
         {isApiIntegrationsEnabled && (
