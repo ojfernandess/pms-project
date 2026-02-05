@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.94.0/+esm";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 
 /**
@@ -120,13 +120,218 @@ async function getOrCreateStripePaymentType(
 /**
  * Registra o pagamento Stripe na tabela payments do PMS
  */
+/**
+ * Aplica pagamento em múltiplas reservas
+ */
+async function applyPaymentToReservations(
+  supabaseClient: any,
+  reservationIds: string[],
+  paymentIntent: Stripe.PaymentIntent,
+  stripePaymentId: string,
+  establishmentId: string
+): Promise<void> {
+  if (reservationIds.length === 0) return;
+
+  console.log(`[Webhook] 💰 Aplicando pagamento em ${reservationIds.length} reservas`);
+
+  // Buscar configuração do Stripe
+  const { data: globalConfig } = await supabaseClient
+    .from("stripe_global_config")
+    .select("test_mode")
+    .single();
+
+  const { data: establishmentConfig } = await supabaseClient
+    .from("stripe_establishment_config")
+    .select("test_secret_key, live_secret_key")
+    .eq("establishment_id", establishmentId)
+    .maybeSingle();
+
+  const isTestMode = globalConfig?.test_mode ?? true;
+  const stripeSecretKey = isTestMode
+    ? establishmentConfig?.test_secret_key
+    : establishmentConfig?.live_secret_key;
+
+  const stripeClient = stripeSecretKey ? new Stripe(stripeSecretKey, {
+    apiVersion: "2023-10-16",
+  }) : null;
+
+  // Calcular valor por reserva (distribuir proporcionalmente ao total_amount de cada reserva)
+  // paymentIntent.amount está em centavos (ex: 113000 = R$ 1.130,00)
+  const totalPaidAmount = Number(paymentIntent.amount) / 100; // Converter de centavos para reais
+  
+  console.log(`[Webhook] 💰 Cálculo de pagamento múltiplo:`);
+  console.log(`[Webhook] 💰 Payment Intent amount (centavos): ${paymentIntent.amount}`);
+  console.log(`[Webhook] 💰 Total amount pago (reais): ${totalPaidAmount}`);
+  console.log(`[Webhook] 💰 Número de reservas: ${reservationIds.length}`);
+
+  // Buscar informações de todas as reservas (incluindo total_amount) para calcular proporção
+  const reservationsInfo: Array<{ id: string; code?: string; amount: number; total_amount: number }> = [];
+  let totalReservationsAmount = 0;
+  
+  for (const reservationId of reservationIds) {
+    try {
+      const { data: reservation } = await supabaseClient
+        .from("reservations")
+        .select("id, reservation_code, total_amount")
+        .eq("id", reservationId)
+        .single();
+      
+      if (reservation) {
+        const reservationTotal = Number(reservation.total_amount || 0);
+        totalReservationsAmount += reservationTotal;
+        reservationsInfo.push({
+          id: reservation.id,
+          code: reservation.reservation_code || undefined,
+          amount: 0, // Será calculado abaixo
+          total_amount: reservationTotal,
+        });
+      }
+    } catch (error) {
+      console.warn(`[Webhook] ⚠️ Erro ao buscar informações da reserva ${reservationId}:`, error);
+      // Adicionar mesmo sem código se não conseguir buscar
+      reservationsInfo.push({
+        id: reservationId,
+        amount: 0,
+        total_amount: 0,
+      });
+    }
+  }
+  
+  // Calcular valor proporcional para cada reserva
+  // Distribuir o pagamento proporcionalmente ao total_amount de cada reserva
+  let distributedTotal = 0;
+  const amountsPerReservation: number[] = [];
+  
+  for (let i = 0; i < reservationsInfo.length; i++) {
+    const reservation = reservationsInfo[i];
+    let amountForReservation: number;
+    
+    if (totalReservationsAmount > 0 && reservation.total_amount > 0) {
+      // Calcular proporção: (total_amount da reserva / total_amount de todas as reservas) * total pago
+      const proportion = reservation.total_amount / totalReservationsAmount;
+      amountForReservation = totalPaidAmount * proportion;
+      
+      // Na última reserva, ajustar para garantir que a soma seja exatamente o total pago
+      if (i === reservationsInfo.length - 1) {
+        amountForReservation = totalPaidAmount - distributedTotal;
+      } else {
+        distributedTotal += amountForReservation;
+      }
+    } else {
+      // Se não há total_amount disponível, dividir igualmente
+      amountForReservation = totalPaidAmount / reservationsInfo.length;
+      if (i === reservationsInfo.length - 1) {
+        amountForReservation = totalPaidAmount - distributedTotal;
+      } else {
+        distributedTotal += amountForReservation;
+      }
+    }
+    
+    // Arredondar para 2 casas decimais
+    amountForReservation = Math.round(amountForReservation * 100) / 100;
+    amountsPerReservation.push(amountForReservation);
+    reservation.amount = amountForReservation;
+    
+    console.log(`[Webhook] 💰 Reserva ${reservation.code || reservation.id}: total_amount=${reservation.total_amount.toFixed(2)}, pagamento=${amountForReservation.toFixed(2)}`);
+  }
+  
+  console.log(`[Webhook] 💰 Total distribuído: ${distributedTotal.toFixed(2)}, Total pago: ${totalPaidAmount.toFixed(2)}`);
+
+  for (let i = 0; i < reservationIds.length; i++) {
+    const reservationId = reservationIds[i];
+    const amountPerReservation = amountsPerReservation[i];
+    
+    try {
+      // Buscar reserva
+      const { data: reservation, error: reservationError } = await supabaseClient
+        .from("reservations")
+        .select("paid_amount, total_amount, status")
+        .eq("id", reservationId)
+        .single();
+
+      if (reservationError || !reservation) {
+        console.error(`[Webhook] ❌ Erro ao buscar reserva ${reservationId}:`, reservationError);
+        continue;
+      }
+
+      // Registrar pagamento no PMS com valor proporcional e informações de todas as reservas
+      if (stripeClient) {
+        await registerStripePaymentInPMS(
+          supabaseClient,
+          reservationId,
+          establishmentId,
+          paymentIntent,
+          stripePaymentId,
+          stripeClient,
+          amountPerReservation, // Valor proporcional desta reserva baseado no total_amount
+          reservationsInfo // Informações de todas as reservas
+        );
+      }
+
+      // Calcular novo paid_amount
+      const currentPaidAmount = Number(reservation.paid_amount || 0);
+      const newPaidAmount = currentPaidAmount + amountPerReservation;
+      const totalAmountReservation = Number(reservation.total_amount || 0);
+      
+      console.log(`[Webhook] 💰 Reserva ${reservationId}:`);
+      console.log(`[Webhook] 💰   Paid amount atual: ${currentPaidAmount.toFixed(2)}`);
+      console.log(`[Webhook] 💰   Valor do pagamento: ${amountPerReservation.toFixed(2)}`);
+      console.log(`[Webhook] 💰   Novo paid amount: ${newPaidAmount.toFixed(2)}`);
+      console.log(`[Webhook] 💰   Total amount da reserva: ${totalAmountReservation.toFixed(2)}`);
+
+      // Preparar atualização
+      const reservationUpdate: any = {
+        paid_amount: newPaidAmount,
+      };
+
+      // Atualizar status se necessário
+      if (newPaidAmount >= totalAmountReservation && totalAmountReservation > 0) {
+        reservationUpdate.status = "confirmed";
+      } else if (newPaidAmount > 0 && reservation.status !== "confirmed") {
+        reservationUpdate.status = "pending";
+      }
+
+      // Atualizar reserva
+      const { error: updateError } = await supabaseClient
+        .from("reservations")
+        .update(reservationUpdate)
+        .eq("id", reservationId);
+
+      if (updateError) {
+        console.error(`[Webhook] ❌ Erro ao atualizar reserva ${reservationId}:`, updateError);
+      } else {
+        console.log(`[Webhook] ✅ Pagamento aplicado na reserva ${reservationId}: R$ ${amountPerReservation.toFixed(2)}`);
+      }
+    } catch (error) {
+      console.error(`[Webhook] ❌ Erro ao processar reserva ${reservationId}:`, error);
+    }
+  }
+
+  // Enviar email de reserva criada para múltiplas reservas (apenas uma vez, após processar todas)
+  if (reservationIds.length > 1) {
+    try {
+      console.log(`[Webhook] 📧 Enviando email de reserva criada para ${reservationIds.length} reservas`);
+      await sendMultipleReservationsCreatedEmail(
+        reservationIds,
+        supabaseClient,
+        establishmentId
+      );
+    } catch (emailError) {
+      console.error(`[Webhook] ❌ Erro ao enviar email de múltiplas reservas criadas:`, emailError);
+      // Não bloquear o processamento se o email falhar
+    }
+  }
+}
+
 async function registerStripePaymentInPMS(
   supabaseClient: any,
   reservationId: string,
   establishmentId: string,
   paymentIntent: Stripe.PaymentIntent,
   stripePaymentId: string,
-  stripeClient: Stripe
+  stripeClient: Stripe,
+  customAmount?: number,
+  allReservationsInfo?: Array<{ id: string; code?: string; amount: number }>
 ): Promise<boolean> {
   try {
     console.log(`💳 Registrando pagamento Stripe no PMS para reserva: ${reservationId}`);
@@ -197,13 +402,44 @@ async function registerStripePaymentInPMS(
       return false;
     }
 
-    // Calcular valor do pagamento (em centavos para reais)
-    const amount = (paymentIntent.amount / 100).toFixed(2);
+    // Calcular valor do pagamento (usar valor customizado se fornecido, senão usar valor total)
+    // customAmount já está em reais quando fornecido
+    const amountValue = customAmount !== undefined 
+      ? customAmount
+      : (paymentIntent.amount / 100);
+    const amountAsNumber = Number(amountValue.toFixed(2)); // Garantir que é número
+    const amount = amountAsNumber.toFixed(2); // String para exibição
+    
+    console.log(`[Webhook] 💳 Registrando pagamento:`);
+    console.log(`[Webhook] 💳 Custom amount fornecido: ${customAmount !== undefined ? customAmount : 'não'}`);
+    console.log(`[Webhook] 💳 Payment Intent amount (centavos): ${paymentIntent.amount}`);
+    console.log(`[Webhook] 💳 Valor calculado (reais): ${amountValue}`);
+    console.log(`[Webhook] 💳 Valor como número: ${amountAsNumber}`);
+    console.log(`[Webhook] 💳 Valor formatado (string): ${amount}`);
 
     // Criar observações com informações do Stripe
-    const notes = `[STRIPE] Payment Intent: ${paymentIntent.id}\n[COMPONENT:base]`;
+    let notes = `[STRIPE] Payment Intent: ${paymentIntent.id}\n[COMPONENT:base]`;
+    
+    // Se houver informações sobre múltiplas reservas, adicionar detalhes na observação
+    if (allReservationsInfo && allReservationsInfo.length > 1) {
+      // Calcular valor total a partir das reservas individuais (já em reais)
+      const totalAmountFromReservations = allReservationsInfo.reduce((sum, res) => sum + res.amount, 0);
+      
+      notes += `\n\n--- PAGAMENTO MULTIPLO ---\n`;
+      notes += `Total de reservas: ${allReservationsInfo.length}\n`;
+      notes += `Valor total pago: R$ ${totalAmountFromReservations.toFixed(2)}\n`;
+      notes += `Valor desta reserva: R$ ${amount}\n\n`;
+      notes += `Detalhes de todas as reservas:\n`;
+      allReservationsInfo.forEach((res, index) => {
+        notes += `${index + 1}. Reserva ${res.code || res.id}: R$ ${res.amount.toFixed(2)}\n`;
+      });
+      notes += `\n--- FIM PAGAMENTO MULTIPLO ---`;
+    }
 
     // Inserir pagamento na tabela payments
+    // amountAsNumber já foi calculado acima como número
+    console.log(`[Webhook] 💳 Valor a ser inserido no banco: ${amountAsNumber} (tipo: ${typeof amountAsNumber})`);
+    
     const { error: insertError } = await supabaseClient
       .from("payments")
       .insert({
@@ -211,7 +447,7 @@ async function registerStripePaymentInPMS(
         establishment_id: establishmentId,
         carrier_id: carrierId,
         payment_type_id: paymentTypeId,
-        amount: amount,
+        amount: amountAsNumber, // Usar número já calculado
         payment_method: paymentMethod === "card" ? "credit_card" : paymentMethod,
         payment_date: new Date(paymentIntent.created * 1000).toISOString(),
         installments: installments,
@@ -239,13 +475,18 @@ async function registerStripePaymentInPMS(
       }
 
       // Formatar valor em reais
+      // Usar amountAsNumber que já foi calculado corretamente
+      const paymentAmountForLog = customAmount !== undefined ? customAmount : amountAsNumber;
       const formattedAmount = new Intl.NumberFormat("pt-BR", {
         style: "currency",
         currency: "BRL",
-      }).format(parseFloat(amount));
+      }).format(paymentAmountForLog);
       
       // Criar descrição do pagamento
       let paymentDescription = `Pagamento Stripe confirmado: ${formattedAmount}`;
+      if (allReservationsInfo && allReservationsInfo.length > 1) {
+        paymentDescription += ` (${allReservationsInfo.length} reservas - valor proporcional desta reserva)`;
+      }
       if (installments > 1) {
         paymentDescription += ` (${installments}x)`;
       }
@@ -254,9 +495,16 @@ async function registerStripePaymentInPMS(
       }
       paymentDescription += ` - Payment Intent: ${paymentIntent.id}`;
       
-      // Calcular novo paid_amount
+      // Calcular novo paid_amount (usar valor customizado se fornecido)
       const currentPaidAmount = parseFloat(reservationData?.paid_amount || "0");
-      const newPaidAmount = (currentPaidAmount + parseFloat(amount)).toFixed(2);
+      // Usar amountAsNumber que já foi calculado corretamente
+      const paymentAmount = customAmount !== undefined ? customAmount : amountAsNumber;
+      const newPaidAmount = (currentPaidAmount + paymentAmount).toFixed(2);
+      
+      console.log(`[Webhook] 💳 Cálculo de paid_amount:`);
+      console.log(`[Webhook] 💳 Paid amount atual: ${currentPaidAmount}`);
+      console.log(`[Webhook] 💳 Valor do pagamento: ${paymentAmount}`);
+      console.log(`[Webhook] 💳 Novo paid amount: ${newPaidAmount}`);
       
       const logParams = {
         p_establishment_id: establishmentId,
@@ -283,6 +531,8 @@ async function registerStripePaymentInPMS(
           card_brand: cardBrand,
           installments: installments,
           amount: amount,
+          custom_amount: customAmount !== undefined ? customAmount : null,
+          total_reservations: allReservationsInfo?.length || 1,
           source: "stripe_webhook",
           payment_entity_type: "payment", // Tipo de entidade do pagamento (para referência)
         },
@@ -306,7 +556,8 @@ async function registerStripePaymentInPMS(
       // Não bloquear o processamento se o log falhar
     }
 
-    console.log(`✅ Pagamento Stripe registrado no PMS com sucesso: ${amount} (${installments}x)`);
+    console.log(`✅ Pagamento Stripe registrado no PMS com sucesso: ${amountAsNumber} (${installments}x)`);
+    console.log(`✅ Valor inserido (número): ${amountAsNumber}, Valor formatado (string): ${amount}`);
     return true;
   } catch (error) {
     console.error("❌ Erro ao registrar pagamento Stripe no PMS:", error);
@@ -935,6 +1186,234 @@ async function sendReservationExtensionEmail(
     }
   } catch (error) {
     console.error("❌ Erro geral ao enviar email de extensão:", error);
+  }
+}
+
+/**
+ * Envia email de reserva criada para múltiplas reservas
+ */
+async function sendMultipleReservationsCreatedEmail(
+  reservationIds: string[],
+  supabaseClient: any,
+  establishmentId: string
+): Promise<void> {
+  try {
+    console.log(`📧 [sendMultipleReservationsCreatedEmail] Enviando email para ${reservationIds.length} reservas`);
+    
+    // Buscar todas as reservas com relacionamentos
+    const { data: reservations, error: reservationsError } = await supabaseClient
+      .from("reservations")
+      .select(`
+        *,
+        financial_responsible:clients!client_id(*),
+        guest:clients!guest_id(*),
+        rooms (id, room_number, name),
+        room_categories (id, name, description),
+        web_checkin (locator)
+      `)
+      .in("id", reservationIds);
+
+    if (reservationsError || !reservations || reservations.length === 0) {
+      console.error("❌ Erro ao buscar reservas para email:", reservationsError);
+      return;
+    }
+
+    // Usar a primeira reserva como base para dados do hóspede e estabelecimento
+    const firstReservation = reservations[0];
+    const recipientEmail = firstReservation.guest?.email || firstReservation.financial_responsible?.email;
+    const recipientName = firstReservation.guest?.full_name || firstReservation.financial_responsible?.full_name;
+
+    if (!recipientEmail) {
+      console.warn("⚠️ Email do destinatário não encontrado");
+      return;
+    }
+
+    // Buscar template de email
+    const { data: template, error: templateError } = await supabaseClient
+      .from("email_templates")
+      .select("*")
+      .eq("event_type", "reservation.created")
+      .eq("is_active", true)
+      .eq("establishment_id", establishmentId)
+      .maybeSingle();
+
+    // Se não encontrar template específico do estabelecimento, buscar template global
+    let finalTemplate = template;
+    if (!finalTemplate) {
+      const { data: globalTemplate } = await supabaseClient
+        .from("email_templates")
+        .select("*")
+        .eq("event_type", "reservation.created")
+        .eq("is_active", true)
+        .is("establishment_id", null)
+        .maybeSingle();
+      finalTemplate = globalTemplate;
+    }
+
+    if (templateError || !finalTemplate) {
+      console.warn("⚠️ Template de email 'reservation.created' não encontrado ou inativo");
+      return;
+    }
+
+    // Buscar configurações do hotel
+    const { data: hotelSettings } = await supabaseClient
+      .from("hotel_settings")
+      .select("*")
+      .eq("establishment_id", establishmentId)
+      .maybeSingle();
+
+    // Buscar site_settings
+    const { data: siteSettings } = await supabaseClient
+      .from("site_settings")
+      .select("logo_url, pms_base_url")
+      .maybeSingle();
+
+    // Preparar variáveis para múltiplas reservas
+    const baseUrl = detectBaseUrl(null, Deno.env.get("SUPABASE_URL") || null);
+    
+    // Formatar lista de reservas para o template
+    const reservationsList = reservations.map((res: any, index: number) => {
+      const checkinDate = res.checkin_date ? new Date(res.checkin_date).toLocaleDateString("pt-BR") : "";
+      const checkoutDate = res.checkout_date ? new Date(res.checkout_date).toLocaleDateString("pt-BR") : "";
+      const webCheckinLink = res.web_checkin?.locator 
+        ? `${baseUrl}/web-checkin/${res.web_checkin.locator}`
+        : "";
+
+      return {
+        number: index + 1,
+        code: res.reservation_code || "",
+        locator: res.web_checkin?.locator || res.reservation_code || "",
+        checkin_date: checkinDate,
+        checkout_date: checkoutDate,
+        total_amount: new Intl.NumberFormat("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+        }).format(Number(res.total_amount || 0)),
+        paid_amount: new Intl.NumberFormat("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+        }).format(Number(res.paid_amount || 0)),
+        room_number: res.rooms?.room_number || "",
+        room_name: res.rooms?.name || "",
+        category_name: res.room_categories?.name || "",
+        web_checkin_link: webCheckinLink,
+      };
+    });
+
+    // Criar variáveis do template
+    const variables: Record<string, any> = {
+      guest_name: recipientName || "Hóspede",
+      reservation_code: reservationsList.map((r: any) => r.code).join(", "),
+      reservation_count: reservations.length.toString(),
+      reservations_list: reservationsList,
+      // Variáveis da primeira reserva (para compatibilidade)
+      checkin_date: reservationsList[0]?.checkin_date || "",
+      checkout_date: reservationsList[reservationsList.length - 1]?.checkout_date || "",
+      total_amount: new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      }).format(
+        reservations.reduce((sum: number, r: any) => sum + Number(r.total_amount || 0), 0)
+      ),
+      hotel_name: hotelSettings?.name || "",
+      hotel_address: hotelSettings?.street || "",
+      hotel_phone: hotelSettings?.phone || "",
+      hotel_email: hotelSettings?.email || "",
+      logo_url: siteSettings?.logo_url || "",
+    };
+
+    // Processar template
+    let subject = finalTemplate.subject || "";
+    let bodyHtml = finalTemplate.body_html || "";
+
+    // Substituir variáveis simples
+    Object.keys(variables).forEach((key) => {
+      if (key !== "reservations_list") {
+        const value = variables[key] || "";
+        const regex = new RegExp(`{{${key}}}`, "g");
+        subject = subject.replace(regex, String(value));
+        bodyHtml = bodyHtml.replace(regex, String(value));
+      }
+    });
+
+    // Processar lista de reservas no template
+    // Procurar por {{#reservations_list}}...{{/reservations_list}} ou {{reservations_list}}
+    const reservationsListRegex = /{{#reservations_list}}([\s\S]*?){{\/reservations_list}}/g;
+    const reservationsListMatch = bodyHtml.match(reservationsListRegex);
+    
+    if (reservationsListMatch) {
+      // Template tem loop de reservas
+      reservationsListMatch.forEach((match) => {
+        const templateContent = match.replace(/{{#reservations_list}}|{{\/reservations_list}}/g, "");
+        let renderedReservations = "";
+        
+        reservationsList.forEach((reservation: any) => {
+          let reservationHtml = templateContent;
+          Object.keys(reservation).forEach((key) => {
+            const regex = new RegExp(`{{${key}}}`, "g");
+            reservationHtml = reservationHtml.replace(regex, String(reservation[key] || ""));
+          });
+          renderedReservations += reservationHtml;
+        });
+        
+        bodyHtml = bodyHtml.replace(match, renderedReservations);
+      });
+    } else {
+      // Template não tem loop, criar lista HTML simples
+      const reservationsHtml = reservationsList.map((res: any) => `
+        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e5e7eb; border-radius: 8px;">
+          <h3 style="margin-top: 0; color: #1f2937;">Reserva ${res.number}: ${res.code}</h3>
+          <p><strong>Localizador:</strong> ${res.locator}</p>
+          <p><strong>Check-in:</strong> ${res.checkin_date}</p>
+          <p><strong>Check-out:</strong> ${res.checkout_date}</p>
+          <p><strong>Quarto:</strong> ${res.room_number || res.room_name || "A definir"}</p>
+          <p><strong>Categoria:</strong> ${res.category_name || "N/A"}</p>
+          <p><strong>Valor Total:</strong> ${res.total_amount}</p>
+          ${res.web_checkin_link ? `<p><a href="${res.web_checkin_link}">Realizar Check-in Online</a></p>` : ""}
+        </div>
+      `).join("");
+      
+      // Substituir {{reservations_list}} pela lista HTML
+      bodyHtml = bodyHtml.replace(/{{reservations_list}}/g, reservationsHtml);
+    }
+
+    // Buscar configurações de email
+    const { data: emailSettings } = await supabaseClient
+      .from("email_settings")
+      .select("*")
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (!emailSettings) {
+      console.warn("⚠️ Configurações de email não encontradas ou inativas");
+      return;
+    }
+
+    // Adicionar à fila de emails
+    const { data: emailQueue, error: queueError } = await supabaseClient
+      .from("email_queue")
+      .insert({
+        template_id: finalTemplate.id,
+        event_type: "reservation.created",
+        recipient_email: recipientEmail,
+        recipient_name: recipientName,
+        subject: subject,
+        body_html: bodyHtml,
+        variables: variables,
+        reservation_id: firstReservation.id, // Usar primeira reserva como referência
+        status: "pending",
+      })
+      .select()
+      .single();
+
+    if (queueError) {
+      console.error("❌ Erro ao adicionar email à fila:", queueError);
+      return;
+    }
+
+    console.log(`✅ Email de múltiplas reservas criadas adicionado à fila: ${emailQueue.id}`);
+  } catch (error) {
+    console.error("❌ Erro geral ao enviar email de múltiplas reservas criadas:", error);
   }
 }
 
@@ -1833,8 +2312,16 @@ serve(async (req) => {
               }
 
               // Calcular novo paid_amount (somar o valor pago ao que já estava pago)
+              // IMPORTANTE: payment.amount na tabela stripe_payments está em centavos (conforme stripe-payment/index.ts linha 252)
+              // Mas o paid_amount na tabela reservations está em reais, então precisamos converter
               const currentPaidAmount = Number(reservation.paid_amount || 0);
-              const paymentAmount = Number(payment.amount || 0);
+              // payment.amount está em centavos, dividir por 100 para converter para reais
+              const paymentAmount = Number(payment.amount || 0) / 100;
+              
+              console.log(`[Webhook] 💰 Atualizando paid_amount:`);
+              console.log(`[Webhook] 💰 Payment amount (centavos): ${payment.amount}`);
+              console.log(`[Webhook] 💰 Payment amount (reais): ${paymentAmount}`);
+              console.log(`[Webhook] 💰 Current paid amount: ${currentPaidAmount}`);
               
               // Se for extensão, o total_amount pode ser atualizado pelo metadata
               // Caso contrário, usar o total_amount atual da reserva
@@ -2008,10 +2495,56 @@ serve(async (req) => {
                 throw quoteError || new Error("Orçamento não encontrado");
               }
 
-              // Verificar se já foi convertido
+              // Extrair IDs das reservas do campo notes (se houver múltiplas reservas criadas antes do pagamento)
+              let reservationIds: string[] = [];
+              if (quote.notes) {
+                // Tentar método novo primeiro (com marcadores HTML)
+                const newFormatMatch = quote.notes.match(/<!--RESERVATION_IDS_START-->(.+?)<!--RESERVATION_IDS_END-->/s);
+                if (newFormatMatch) {
+                  try {
+                    const jsonStr = newFormatMatch[1].trim();
+                    const parsed = JSON.parse(jsonStr);
+                    if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+                      reservationIds = parsed.reservation_ids;
+                      console.log(`[Webhook] 📋 Encontradas ${reservationIds.length} reservas pré-criadas para o orçamento ${quoteId} (formato novo)`);
+                    }
+                  } catch (e) {
+                    console.warn(`[Webhook] ⚠️ Erro ao parsear reservation_ids (formato novo) do quote ${quoteId}:`, e);
+                    console.warn(`[Webhook] ⚠️ JSON capturado:`, newFormatMatch[1]?.substring(0, 200));
+                  }
+                } else {
+                  // Tentar método antigo (compatibilidade)
+                  const oldFormatMatch = quote.notes.match(/\[RESERVATION_IDS:(\{.*?\})\]/s);
+                  if (oldFormatMatch) {
+                    try {
+                      const jsonStr = oldFormatMatch[1];
+                      const parsed = JSON.parse(jsonStr);
+                      if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+                        reservationIds = parsed.reservation_ids;
+                        console.log(`[Webhook] 📋 Encontradas ${reservationIds.length} reservas pré-criadas para o orçamento ${quoteId} (formato antigo)`);
+                      }
+                    } catch (e) {
+                      console.warn(`[Webhook] ⚠️ Erro ao parsear reservation_ids (formato antigo) do quote ${quoteId}:`, e);
+                    }
+                  }
+                }
+              }
+
+              // Verificar se já foi convertido (compatibilidade com sistema antigo)
               if (quote.status === "converted" && quote.reservation_id) {
                 console.log(`[Webhook] ℹ️ Orçamento ${quoteId} já foi convertido em reserva ${quote.reservation_id}`);
-                // Atualizar o pagamento para apontar para a reserva existente
+                // Se há reservas pré-criadas, aplicar pagamento nelas também
+                if (reservationIds.length > 0) {
+                  console.log(`[Webhook] 💰 Aplicando pagamento em ${reservationIds.length} reservas pré-criadas`);
+                  await applyPaymentToReservations(
+                    supabaseClient,
+                    reservationIds,
+                    paymentIntent,
+                    payment.id,
+                    quote.establishment_id
+                  );
+                }
+                // Atualizar o pagamento para apontar para a primeira reserva existente
                 await supabaseClient
                   .from("stripe_payments")
                   .update({ reservation_id: quote.reservation_id })
@@ -2019,6 +2552,54 @@ serve(async (req) => {
                 break;
               }
 
+              // Se há reservas pré-criadas, aplicar pagamento nelas e marcar quote como convertido
+              if (reservationIds.length > 0) {
+                console.log(`[Webhook] 💰 Aplicando pagamento em ${reservationIds.length} reservas pré-criadas do orçamento ${quoteId}`);
+                
+                await applyPaymentToReservations(
+                  supabaseClient,
+                  reservationIds,
+                  paymentIntent,
+                  payment.id,
+                  quote.establishment_id
+                );
+
+                // Atualizar orçamento como convertido (usando primeira reserva como referência)
+                const { error: updateQuoteError } = await supabaseClient
+                  .from("quotes")
+                  .update({
+                    status: "converted",
+                    reservation_id: reservationIds[0],
+                    converted_at: new Date().toISOString(),
+                  })
+                  .eq("id", quoteId);
+
+                if (updateQuoteError) {
+                  console.error(`[Webhook] ⚠️ Erro ao atualizar orçamento ${quoteId}:`, updateQuoteError);
+                }
+
+                // Atualizar pagamento para apontar para a primeira reserva
+                await supabaseClient
+                  .from("stripe_payments")
+                  .update({ reservation_id: reservationIds[0] })
+                  .eq("stripe_payment_intent_id", paymentIntent.id);
+
+                // Enviar email de pagamento confirmado (apenas uma vez para todas as reservas)
+                try {
+                  await sendPaymentConfirmedEmail(reservationIds[0], supabaseClient, req);
+                  console.log(`[Webhook] 📧 Email de pagamento confirmado enviado para reserva ${reservationIds[0]}`);
+                } catch (emailError) {
+                  console.error(`[Webhook] ❌ Erro ao enviar email:`, emailError);
+                }
+
+                console.log(`[Webhook] ✅ Pagamento aplicado em ${reservationIds.length} reservas do orçamento ${quoteId}`);
+                processed = true;
+                break;
+              }
+
+              // Se chegou aqui, não há reservas pré-criadas, então criar uma nova reserva
+              console.log(`[Webhook] ℹ️ Nenhuma reserva pré-criada encontrada para o orçamento ${quoteId}, criando nova reserva...`);
+              
               // Buscar ou criar cliente/hóspede
               let clientId = quote.client_id;
               let guestId = quote.guest_id;

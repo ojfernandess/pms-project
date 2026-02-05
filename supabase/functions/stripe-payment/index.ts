@@ -181,8 +181,32 @@ serve(async (req) => {
     }
 
     // Criar Payment Intent
+    // IMPORTANTE: Detectar se amount está em reais ou centavos
+    // Se amount < 1000, provavelmente está em reais (ex: 250.00)
+    // Se amount >= 1000, provavelmente já está em centavos (ex: 25000)
+    // Mas para segurança, vamos verificar se parece ser um valor em reais (tem casas decimais ou é menor que 1000)
+    const amountAsNumber = Number(amount);
+    let amountInCents: number;
+    
+    // Se o valor tem casas decimais ou é menor que 100, provavelmente está em reais
+    if (amountAsNumber < 100 || (amountAsNumber % 1 !== 0 && amountAsNumber < 1000)) {
+      // Está em reais, converter para centavos
+      amountInCents = Math.round(amountAsNumber * 100);
+      console.log("[stripe-payment] Valor detectado como REAIS, convertendo para centavos:", { 
+        original: amountAsNumber, 
+        converted: amountInCents 
+      });
+    } else {
+      // Já está em centavos, apenas arredondar
+      amountInCents = Math.round(amountAsNumber);
+      console.log("[stripe-payment] Valor detectado como CENTAVOS, usando diretamente:", { 
+        original: amountAsNumber, 
+        final: amountInCents 
+      });
+    }
+    
     const paymentIntentData: any = {
-      amount: Math.round(amount * 100), // Converter para centavos
+      amount: amountInCents, // Valor em centavos para o Stripe
       currency: currency.toLowerCase(),
       description: description || `Payment for ${payment_type}`,
       metadata: {
@@ -249,7 +273,7 @@ serve(async (req) => {
         stripe_payment_intent_id: paymentIntent.id,
         stripe_customer_id: customerId || null,
         stripe_payment_method_id: payment_method_id || null,
-        amount,
+        amount: amountInCents, // Salvar em centavos na tabela stripe_payments (consistente com paymentIntent.amount)
         currency,
         status: paymentIntent.status,
         payment_type,

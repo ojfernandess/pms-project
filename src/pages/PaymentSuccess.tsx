@@ -14,6 +14,7 @@ const PaymentSuccess = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [reservationData, setReservationData] = useState<any>(null);
+  const [allReservations, setAllReservations] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pmsLogoUrl, setPmsLogoUrl] = useState<string | null>(null);
@@ -36,18 +37,56 @@ const PaymentSuccess = () => {
       // Primeiro, verificar se é um pagamento de orçamento (quote)
       const { data: quote, error: quoteError } = await supabase
         .from("quotes")
-        .select("id, status, reservation_id, establishment_id")
+        .select("id, status, reservation_id, establishment_id, notes")
         .eq("payment_intent_id", paymentIntent)
         .maybeSingle();
 
       if (!quoteError && quote) {
         // É um pagamento de orçamento
+        // Verificar se há múltiplas reservas pré-criadas
+        let reservationIds: string[] = [];
+        if (quote.notes) {
+          // Tentar método novo primeiro (com marcadores HTML)
+          const newFormatMatch = quote.notes.match(/<!--RESERVATION_IDS_START-->(.+?)<!--RESERVATION_IDS_END-->/s);
+          if (newFormatMatch) {
+            try {
+              const jsonStr = newFormatMatch[1].trim();
+              const parsed = JSON.parse(jsonStr);
+              if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+                reservationIds = parsed.reservation_ids;
+              }
+            } catch (e) {
+              console.warn("Erro ao parsear reservation_ids (formato novo):", e);
+            }
+          } else {
+            // Tentar método antigo (compatibilidade)
+            const oldFormatMatch = quote.notes.match(/\[RESERVATION_IDS:(\{.*?\})\]/s);
+            if (oldFormatMatch) {
+              try {
+                const jsonStr = oldFormatMatch[1];
+                const parsed = JSON.parse(jsonStr);
+                if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+                  reservationIds = parsed.reservation_ids;
+                }
+              } catch (e) {
+                console.warn("Erro ao parsear reservation_ids (formato antigo):", e);
+              }
+            }
+          }
+        }
+
         if (quote.status === "converted" && quote.reservation_id) {
-          // Orçamento já foi convertido, buscar a reserva
-          await loadReservationById(quote.reservation_id);
+          // Orçamento já foi convertido
+          if (reservationIds.length > 0) {
+            // Se há múltiplas reservas, carregar todas
+            await loadAllReservations(reservationIds);
+          } else {
+            // Usar reserva do quote
+            await loadReservationById(quote.reservation_id);
+          }
         } else {
           // Aguardar conversão do orçamento em reserva
-          await waitForQuoteConversion(paymentIntent, quote.id);
+          await waitForQuoteConversion(paymentIntent, quote.id, reservationIds);
         }
         return;
       }
@@ -67,15 +106,52 @@ const PaymentSuccess = () => {
       if (payment?.quote_id) {
         const { data: quoteData } = await supabase
           .from("quotes")
-          .select("id, status, reservation_id")
+          .select("id, status, reservation_id, notes")
           .eq("id", payment.quote_id)
           .maybeSingle();
 
         if (quoteData) {
-          if (quoteData.status === "converted" && quoteData.reservation_id) {
-            await loadReservationById(quoteData.reservation_id);
+          // Extrair reservation_ids se houver
+          let reservationIds: string[] = [];
+          if (quoteData.notes) {
+            // Tentar método novo primeiro (com marcadores HTML)
+            const newFormatMatch = quoteData.notes.match(/<!--RESERVATION_IDS_START-->(.+?)<!--RESERVATION_IDS_END-->/s);
+            if (newFormatMatch) {
+              try {
+                const jsonStr = newFormatMatch[1].trim();
+                const parsed = JSON.parse(jsonStr);
+                if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+                  reservationIds = parsed.reservation_ids;
+                }
+              } catch (e) {
+                console.warn("Erro ao parsear reservation_ids (formato novo):", e);
+              }
+            } else {
+              // Tentar método antigo (compatibilidade)
+              const oldFormatMatch = quoteData.notes.match(/\[RESERVATION_IDS:(\{.*?\})\]/s);
+              if (oldFormatMatch) {
+                try {
+                  const jsonStr = oldFormatMatch[1];
+                  const parsed = JSON.parse(jsonStr);
+                  if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+                    reservationIds = parsed.reservation_ids;
+                  }
+                } catch (e) {
+                  console.warn("Erro ao parsear reservation_ids (formato antigo):", e);
+                }
+              }
+            }
+          }
+
+          if (quoteData.status === "converted") {
+            if (reservationIds.length > 0) {
+              // Se há múltiplas reservas, carregar todas
+              await loadAllReservations(reservationIds);
+            } else if (quoteData.reservation_id) {
+              await loadReservationById(quoteData.reservation_id);
+            }
           } else {
-            await waitForQuoteConversion(paymentIntent, quoteData.id);
+            await waitForQuoteConversion(paymentIntent, quoteData.id, reservationIds);
           }
           return;
         }
@@ -97,21 +173,58 @@ const PaymentSuccess = () => {
     }
   };
 
-  const waitForQuoteConversion = async (paymentIntent: string, quoteId: string | null) => {
+  const waitForQuoteConversion = async (paymentIntent: string, quoteId: string | null, initialReservationIds: string[] = []) => {
     let attempts = 0;
     const maxAttempts = 10; // Aguardar até 15 segundos (10 tentativas x 1.5s)
+    let reservationIds = initialReservationIds;
 
     while (attempts < maxAttempts) {
       // Tentar buscar quote primeiro
       if (quoteId) {
         const { data: quote } = await supabase
           .from("quotes")
-          .select("id, status, reservation_id")
+          .select("id, status, reservation_id, notes")
           .eq("id", quoteId)
           .maybeSingle();
 
-        if (quote?.status === "converted" && quote.reservation_id) {
-          await loadReservationById(quote.reservation_id);
+        // Extrair reservation_ids do notes se ainda não tiver
+        if (quote?.notes && reservationIds.length === 0) {
+          // Tentar método novo primeiro (com marcadores HTML)
+          const newFormatMatch = quote.notes.match(/<!--RESERVATION_IDS_START-->(.+?)<!--RESERVATION_IDS_END-->/s);
+          if (newFormatMatch) {
+            try {
+              const jsonStr = newFormatMatch[1].trim();
+              const parsed = JSON.parse(jsonStr);
+              if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+                reservationIds = parsed.reservation_ids;
+              }
+            } catch (e) {
+              console.warn("Erro ao parsear reservation_ids (formato novo):", e);
+            }
+          } else {
+            // Tentar método antigo (compatibilidade)
+            const oldFormatMatch = quote.notes.match(/\[RESERVATION_IDS:(\{.*?\})\]/s);
+            if (oldFormatMatch) {
+              try {
+                const jsonStr = oldFormatMatch[1];
+                const parsed = JSON.parse(jsonStr);
+                if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+                  reservationIds = parsed.reservation_ids;
+                }
+              } catch (e) {
+                console.warn("Erro ao parsear reservation_ids (formato antigo):", e);
+              }
+            }
+          }
+        }
+
+        if (quote?.status === "converted") {
+          // Se há múltiplas reservas, carregar todas
+          if (reservationIds.length > 0) {
+            await loadAllReservations(reservationIds);
+          } else if (quote.reservation_id) {
+            await loadReservationById(quote.reservation_id);
+          }
           return;
         }
       }
@@ -150,6 +263,61 @@ const PaymentSuccess = () => {
     // Se chegou aqui, não conseguiu encontrar a reserva após várias tentativas
     setError("Pagamento processado! A reserva está sendo criada. Você receberá um email de confirmação em instantes.");
     setIsLoading(false);
+  };
+
+  const loadAllReservations = async (reservationIds: string[]) => {
+    try {
+      const reservations: any[] = [];
+      
+      for (const reservationId of reservationIds) {
+        const reservation = await fetchReservationData(reservationId);
+        if (reservation) {
+          reservations.push(reservation);
+        }
+      }
+      
+      if (reservations.length === 0) {
+        setError("Nenhuma reserva encontrada");
+        setIsLoading(false);
+        return;
+      }
+      
+      // Usar a primeira reserva como principal (para check-in)
+      setReservationData(reservations[0]);
+      setAllReservations(reservations);
+      setIsLoading(false);
+    } catch (error: any) {
+      console.error("Erro ao carregar reservas:", error);
+      setError("Erro ao carregar informações das reservas");
+      setIsLoading(false);
+    }
+  };
+
+  const fetchReservationData = async (reservationId: string) => {
+    try {
+      const { data: reservation, error: reservationError } = await supabase
+        .from("reservations")
+        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, room_id, category_id")
+        .eq("id", reservationId)
+        .single();
+
+      if (reservationError) throw reservationError;
+
+      // Buscar web_checkin para obter o localizador
+      const { data: webCheckin } = await supabase
+        .from("web_checkin")
+        .select("locator")
+        .eq("reservation_id", reservationId)
+        .maybeSingle();
+
+      return {
+        ...reservation,
+        locator: webCheckin?.locator || reservation.reservation_code,
+      };
+    } catch (error) {
+      console.error(`Erro ao buscar reserva ${reservationId}:`, error);
+      return null;
+    }
   };
 
   const loadReservationById = async (reservationId: string) => {
@@ -225,6 +393,12 @@ const PaymentSuccess = () => {
         ...reservation,
         locator: webCheckin?.locator || reservation.reservation_code,
       });
+      
+      // Se há apenas uma reserva, também definir em allReservations
+      setAllReservations([{
+        ...reservation,
+        locator: webCheckin?.locator || reservation.reservation_code,
+      }]);
 
       setIsLoading(false);
     } catch (error: any) {
@@ -325,42 +499,99 @@ const PaymentSuccess = () => {
           </div>
 
           <div className="p-4 sm:p-5 md:p-6 lg:p-8 space-y-4 sm:space-y-5 md:space-y-6">
-            {/* Localizador da Reserva */}
-            {reservationData.reservation_code && (
-              <div className="text-center py-4 sm:py-5 md:py-6 border-b border-slate-200">
-                <p className="text-xs sm:text-sm text-slate-500 mb-2 font-medium">Localizador da Reserva</p>
-                <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900 tracking-wider break-words px-2">
-                  {reservationData.reservation_code}
+            {/* Título baseado no número de reservas */}
+            {allReservations.length > 1 ? (
+              <div className="text-center py-2 sm:py-3 border-b border-slate-200">
+                <p className="text-xs sm:text-sm text-slate-500 mb-1 font-medium">
+                  {allReservations.length} Reservas Confirmadas
                 </p>
               </div>
+            ) : (
+              reservationData.reservation_code && (
+                <div className="text-center py-4 sm:py-5 md:py-6 border-b border-slate-200">
+                  <p className="text-xs sm:text-sm text-slate-500 mb-2 font-medium">Localizador da Reserva</p>
+                  <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900 tracking-wider break-words px-2">
+                    {reservationData.reservation_code}
+                  </p>
+                </div>
+              )
             )}
 
-            {/* Informações da Reserva */}
-            <div className="space-y-3 sm:space-y-4">
-            {reservationData.checkin_date && (
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                    <span className="text-xs sm:text-sm text-slate-600 font-medium">Check-in</span>
-                  </div>
-                  <span className="text-xs sm:text-sm font-semibold text-slate-900 text-right sm:text-left">
-                  {format(parseISO(reservationData.checkin_date), "dd/MM/yyyy", { locale: ptBR })}
-                  </span>
-              </div>
-            )}
+            {/* Lista de Reservas */}
+            {allReservations.length > 1 ? (
+              <div className="space-y-4">
+                {allReservations.map((reservation, index) => (
+                  <div key={reservation.id} className="border border-slate-200 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <p className="text-xs sm:text-sm text-slate-500 font-medium">Reserva {index + 1}</p>
+                      <p className="text-lg sm:text-xl font-bold text-slate-900 tracking-wider">
+                        {reservation.reservation_code}
+                      </p>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      {reservation.checkin_date && (
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-1">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                            <span className="text-xs sm:text-sm text-slate-600 font-medium">Check-in</span>
+                          </div>
+                          <span className="text-xs sm:text-sm font-semibold text-slate-900 text-right sm:text-left">
+                            {format(parseISO(reservation.checkin_date), "dd/MM/yyyy", { locale: ptBR })}
+                          </span>
+                        </div>
+                      )}
 
-            {reservationData.checkout_date && (
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-green-600 flex-shrink-0" />
-                    <span className="text-xs sm:text-sm text-slate-600 font-medium">Check-out</span>
+                      {reservation.checkout_date && (
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-1">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-green-600 flex-shrink-0" />
+                            <span className="text-xs sm:text-sm text-slate-600 font-medium">Check-out</span>
+                          </div>
+                          <span className="text-xs sm:text-sm font-semibold text-slate-900 text-right sm:text-left">
+                            {format(parseISO(reservation.checkout_date), "dd/MM/yyyy", { locale: ptBR })}
+                          </span>
+                        </div>
+                      )}
+
+                      {reservation.locator && (
+                        <div className="pt-2 border-t border-slate-100">
+                          <p className="text-xs text-slate-500 mb-1">Localizador:</p>
+                          <p className="text-sm font-mono text-slate-700 break-all">{reservation.locator}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-xs sm:text-sm font-semibold text-slate-900 text-right sm:text-left">
-                  {format(parseISO(reservationData.checkout_date), "dd/MM/yyyy", { locale: ptBR })}
-                  </span>
+                ))}
+              </div>
+            ) : (
+              /* Informações da Reserva Única */
+              <div className="space-y-3 sm:space-y-4">
+                {reservationData.checkin_date && (
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                      <span className="text-xs sm:text-sm text-slate-600 font-medium">Check-in</span>
+                    </div>
+                    <span className="text-xs sm:text-sm font-semibold text-slate-900 text-right sm:text-left">
+                      {format(parseISO(reservationData.checkin_date), "dd/MM/yyyy", { locale: ptBR })}
+                    </span>
+                  </div>
+                )}
+
+                {reservationData.checkout_date && (
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-green-600 flex-shrink-0" />
+                      <span className="text-xs sm:text-sm text-slate-600 font-medium">Check-out</span>
+                    </div>
+                    <span className="text-xs sm:text-sm font-semibold text-slate-900 text-right sm:text-left">
+                      {format(parseISO(reservationData.checkout_date), "dd/MM/yyyy", { locale: ptBR })}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
-          </div>
 
             {/* Botões de Ação */}
             <div className="pt-3 sm:pt-4 space-y-2 sm:space-y-3">
@@ -397,11 +628,14 @@ const PaymentSuccess = () => {
           </Button>
             </div>
 
-          {/* Mensagem adicional */}
+            {/* Mensagem adicional */}
             <div className="pt-3 sm:pt-4 border-t border-slate-200">
               <p className="text-xs sm:text-sm text-slate-500 text-center">
-            Um email de confirmação foi enviado para você com todos os detalhes da reserva.
-          </p>
+                {allReservations.length > 1 
+                  ? `Um email de confirmação foi enviado para você com todos os detalhes das ${allReservations.length} reservas.`
+                  : "Um email de confirmação foi enviado para você com todos os detalhes da reserva."
+                }
+              </p>
             </div>
         </div>
       </Card>

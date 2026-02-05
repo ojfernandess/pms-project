@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, CheckCircle2, MapPin, Phone, Mail, Wifi, Car, UtensilsCrossed, Waves, Wind, Tv, Coffee, Bed, Users, Calendar, DollarSign, AlertCircle, MessageCircle, Star, ChevronRight, Sparkles, ChevronLeft, X, ImageIcon, Home, Clock } from "lucide-react";
+import { Loader2, CheckCircle2, MapPin, Phone, Mail, Wifi, Car, UtensilsCrossed, Waves, Wind, Tv, Coffee, Bed, Users, Calendar, DollarSign, AlertCircle, MessageCircle, Star, ChevronRight, Sparkles, ChevronLeft, X, ImageIcon, Home, Clock, Plus, Minus, ChevronDown, XCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -30,6 +30,13 @@ const PublicReservation = () => {
   const [hotelSettings, setHotelSettings] = useState<any>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
+  // Múltiplas categorias selecionadas (estilo Booking.com)
+  const [selectedCategories, setSelectedCategories] = useState<Array<{
+    categoryId: string;
+    rooms: number;
+    adults: number;
+    price: number;
+  }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pmsLogoUrl, setPmsLogoUrl] = useState<string | null>(null);
@@ -57,6 +64,13 @@ const PublicReservation = () => {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [selectedCategoryForGallery, setSelectedCategoryForGallery] = useState<any>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [guestsModalOpen, setGuestsModalOpen] = useState(false);
+  const [manualRooms, setManualRooms] = useState<number | null>(null); // null = automático, número = manual
+  const [availableRoomsCount, setAvailableRoomsCount] = useState<number | null>(null); // Quantidade de quartos disponíveis para categoria selecionada
+  const [checkingAvailability, setCheckingAvailability] = useState(false);
+  const [lastAvailabilityWarning, setLastAvailabilityWarning] = useState<string | null>(null); // Para evitar avisos repetidos
+  const [categoryTotalRooms, setCategoryTotalRooms] = useState<Record<string, number>>({}); // Total de quartos por categoria (geral)
+  const [categoryAvailableRooms, setCategoryAvailableRooms] = useState<Record<string, number>>({}); // Quartos disponíveis por categoria para o período selecionado
 
   useEffect(() => {
     if (establishmentSlug) {
@@ -87,6 +101,15 @@ const PublicReservation = () => {
               for (const category of categories) {
                 let categoryTotal = 0;
                 const basePrice = Number(category.base_price || 0);
+                
+                // Calcular número de quartos necessários baseado na capacidade
+                // Se há categoria selecionada e quartos manuais definidos, usar manual, senão calcular
+                let requiredRooms = 1;
+                if (selectedCategory === category.id && manualRooms !== null) {
+                  requiredRooms = manualRooms;
+                } else {
+                  requiredRooms = calculateRequiredRooms(adults, category);
+                }
 
                 for (let i = 0; i < nights; i++) {
                   const currentDate = new Date(checkin);
@@ -114,7 +137,8 @@ const PublicReservation = () => {
                   }
                 }
 
-                prices[category.id] = categoryTotal;
+                // Multiplicar pelo número de quartos necessários
+                prices[category.id] = categoryTotal * requiredRooms;
               }
             }
           } else {
@@ -123,6 +147,15 @@ const PublicReservation = () => {
             
             for (const category of categories) {
               const basePrice = Number(category.base_price || 0);
+              
+              // Calcular número de quartos necessários baseado na capacidade
+              // Se há categoria selecionada e quartos manuais definidos, usar manual, senão calcular
+              let requiredRooms = 1;
+              if (selectedCategory === category.id && manualRooms !== null) {
+                requiredRooms = manualRooms;
+              } else {
+                requiredRooms = calculateRequiredRooms(adults, category);
+              }
               
               try {
                 const { data, error } = await supabase.rpc("calculate_rate_price", {
@@ -135,13 +168,13 @@ const PublicReservation = () => {
                 });
 
                 if (error) {
-                  prices[category.id] = basePrice;
+                  prices[category.id] = basePrice * requiredRooms;
                 } else {
                   const price = Number(data || 0);
-                  prices[category.id] = price > 0 ? price : basePrice;
+                  prices[category.id] = (price > 0 ? price : basePrice) * requiredRooms;
                 }
               } catch (error) {
-                prices[category.id] = basePrice;
+                prices[category.id] = basePrice * requiredRooms;
               }
             }
           }
@@ -179,6 +212,410 @@ const PublicReservation = () => {
     formData.checkoutDate,
     formData.adults,
     formData.children,
+    manualRooms,
+  ]);
+
+  // Verificar disponibilidade de quartos quando datas, categoria, adultos ou quartos mudarem
+  useEffect(() => {
+    const checkAvailability = async () => {
+      if (!selectedCategory || !formData.checkinDate || !formData.checkoutDate || !establishment?.id) {
+        setAvailableRoomsCount(null);
+        return;
+      }
+
+      setCheckingAvailability(true);
+      try {
+        const selectedCategoryData = categories.find((c) => c.id === selectedCategory);
+        if (!selectedCategoryData) {
+          setAvailableRoomsCount(null);
+          return;
+        }
+
+        // Calcular número de quartos necessários
+        const adults = parseInt(formData.adults) || 1;
+        let currentRequiredRooms = 1;
+        if (manualRooms !== null) {
+          currentRequiredRooms = manualRooms;
+        } else {
+          currentRequiredRooms = calculateRequiredRooms(adults, selectedCategoryData);
+        }
+
+        // Buscar todos os quartos da categoria que estão disponíveis
+        const { data: rooms, error: roomsError } = await supabase
+          .from("rooms")
+          .select("id")
+          .eq("category_id", selectedCategory)
+          .eq("establishment_id", establishment.id)
+          .eq("show_in_public", true)
+          .in("status", ["available", "cleaning"])
+          .eq("is_blocked", false);
+
+        if (roomsError || !rooms || rooms.length === 0) {
+          setAvailableRoomsCount(0);
+          return;
+        }
+
+        // Buscar reservas que conflitam com o período
+        const { data: conflictingReservations, error: reservationsError } = await supabase
+          .from("reservations")
+          .select("room_id")
+          .eq("category_id", selectedCategory)
+          .eq("establishment_id", establishment.id)
+          .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"])
+          .or(`and(checkin_date.lt.${formData.checkoutDate},checkout_date.gt.${formData.checkinDate})`);
+
+        if (reservationsError) {
+          console.error("Erro ao buscar reservas:", reservationsError);
+          setAvailableRoomsCount(null);
+          return;
+        }
+
+        // IDs de quartos ocupados
+        const occupiedRoomIds = new Set(
+          conflictingReservations?.map((r) => r.room_id).filter(Boolean) || []
+        );
+
+        // Quartos disponíveis (não ocupados)
+        const availableRooms = rooms.filter((room) => !occupiedRoomIds.has(room.id));
+        const availableCount = availableRooms.length;
+        setAvailableRoomsCount(availableCount);
+
+        // Mostrar aviso se não houver quartos suficientes (apenas se mudou)
+        const warningKey = `${availableCount}-${currentRequiredRooms}`;
+        if (warningKey !== lastAvailabilityWarning) {
+          if (availableCount === 0) {
+            toast.error(t("publicReservation.noRoomsAvailable"), {
+              duration: 4000,
+            });
+            setLastAvailabilityWarning(warningKey);
+          } else if (availableCount < currentRequiredRooms) {
+            toast.warning(
+              formatInsufficientRoomsWarning(availableCount, currentRequiredRooms),
+              {
+                duration: 4000,
+              }
+            );
+            setLastAvailabilityWarning(warningKey);
+          } else {
+            // Se há quartos suficientes, limpar o último aviso
+            setLastAvailabilityWarning(null);
+          }
+        }
+      } catch (error: any) {
+        console.error("Erro ao verificar disponibilidade:", error);
+        setAvailableRoomsCount(null);
+      } finally {
+        setCheckingAvailability(false);
+      }
+    };
+
+    const timeoutId = setTimeout(checkAvailability, 500);
+    return () => clearTimeout(timeoutId);
+  }, [selectedCategory, formData.checkinDate, formData.checkoutDate, formData.adults, manualRooms, establishment?.id, categories, t]);
+
+  // Verificar disponibilidade de quartos por categoria quando datas mudarem
+  useEffect(() => {
+    const checkCategoryAvailability = async () => {
+      if (!formData.checkinDate || !formData.checkoutDate || !establishment?.id || categories.length === 0) {
+        setCategoryAvailableRooms({});
+        return;
+      }
+
+      try {
+        const availabilityByCategory: Record<string, number> = {};
+
+        // Para cada categoria, verificar disponibilidade no período
+        for (const category of categories) {
+          // Buscar todos os quartos da categoria que estão disponíveis
+          const { data: rooms, error: roomsError } = await supabase
+            .from("rooms")
+            .select("id")
+            .eq("category_id", category.id)
+            .eq("establishment_id", establishment.id)
+            .eq("show_in_public", true)
+            .in("status", ["available", "cleaning"])
+            .eq("is_blocked", false);
+
+          if (roomsError || !rooms || rooms.length === 0) {
+            availabilityByCategory[category.id] = 0;
+            continue;
+          }
+
+          // Buscar reservas que conflitam com o período
+          const { data: conflictingReservations, error: reservationsError } = await supabase
+            .from("reservations")
+            .select("room_id")
+            .eq("category_id", category.id)
+            .eq("establishment_id", establishment.id)
+            .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"])
+            .or(`and(checkin_date.lt.${formData.checkoutDate},checkout_date.gt.${formData.checkinDate})`);
+
+          if (reservationsError) {
+            console.error("Erro ao buscar reservas para categoria:", category.id, reservationsError);
+            availabilityByCategory[category.id] = 0;
+            continue;
+          }
+
+          // IDs de quartos ocupados
+          const occupiedRoomIds = new Set(
+            conflictingReservations?.map((r) => r.room_id).filter(Boolean) || []
+          );
+
+          // Quartos disponíveis (não ocupados)
+          const availableRooms = rooms.filter((room) => !occupiedRoomIds.has(room.id));
+          availabilityByCategory[category.id] = availableRooms.length;
+        }
+
+        setCategoryAvailableRooms(availabilityByCategory);
+      } catch (error: any) {
+        console.error("Erro ao verificar disponibilidade por categoria:", error);
+        setCategoryAvailableRooms({});
+      }
+    };
+
+    const timeoutId = setTimeout(checkCategoryAvailability, 500);
+    return () => clearTimeout(timeoutId);
+  }, [formData.checkinDate, formData.checkoutDate, establishment?.id, categories]);
+
+  // Distribuir adultos entre categorias quando categoria selecionada ou adultos mudarem
+  useEffect(() => {
+    const calculateCategoryDistribution = async () => {
+      if (!selectedCategory || !formData.checkinDate || !formData.checkoutDate || !establishment?.id || categories.length === 0) {
+        setSelectedCategories([]);
+        return;
+      }
+
+      const adults = parseInt(formData.adults) || 1;
+      const children = parseInt(formData.children) || 0;
+
+      // Se há quantidade manual de quartos definida, verificar se é suficiente
+      if (manualRooms !== null) {
+        const selectedCategoryData = categories.find((c) => c.id === selectedCategory);
+        if (selectedCategoryData) {
+          const categoryCapacity = selectedCategoryData.capacity_adults || 1;
+          const maxAdultsInManualRooms = manualRooms * categoryCapacity;
+          
+          // Se a quantidade manual de quartos é suficiente para todos os adultos, usar apenas essa categoria
+          if (maxAdultsInManualRooms >= adults) {
+            // Calcular preço para a categoria com a quantidade manual de quartos
+            let categoryTotal = 0;
+            const basePrice = Number(selectedCategoryData.base_price || 0);
+
+            if (formData.checkinDate && formData.checkoutDate) {
+              const checkin = new Date(formData.checkinDate);
+              const checkout = new Date(formData.checkoutDate);
+              const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+
+              if (nights > 0) {
+                for (let i = 0; i < nights; i++) {
+                  const currentDate = new Date(checkin);
+                  currentDate.setDate(currentDate.getDate() + i);
+                  const dateStr = format(currentDate, "yyyy-MM-dd");
+
+                  try {
+                    const { data, error } = await supabase.rpc("calculate_rate_price", {
+                      p_establishment_id: establishment.id,
+                      p_category_id: selectedCategory,
+                      p_pricing_plan_id: publicPricingPlanId || null,
+                      p_date: dateStr,
+                      p_adults: adults,
+                      p_children: children,
+                    });
+
+                    if (error) {
+                      categoryTotal += basePrice;
+                    } else {
+                      const price = Number(data || 0);
+                      categoryTotal += price > 0 ? price : basePrice;
+                    }
+                  } catch (error) {
+                    categoryTotal += basePrice;
+                  }
+                }
+              }
+            } else {
+              categoryTotal = basePrice;
+            }
+
+            setSelectedCategories([{
+              categoryId: selectedCategory,
+              rooms: manualRooms,
+              adults: adults,
+              price: categoryTotal * manualRooms,
+            }]);
+            return;
+          } else {
+            // Se não é suficiente, distribuir adultos considerando a quantidade manual como limite mínimo
+            // Ajustar disponibilidade da categoria primária para usar manualRooms como mínimo
+            const adjustedAvailableRooms: Record<string, number> = {
+              ...categoryAvailableRooms,
+            };
+            
+            // Garantir que a categoria primária tenha pelo menos manualRooms disponíveis
+            if (adjustedAvailableRooms[selectedCategory] < manualRooms) {
+              adjustedAvailableRooms[selectedCategory] = manualRooms;
+            }
+            
+            // Distribuir adultos entre categorias, garantindo que a categoria primária use manualRooms
+            const distribution = await distributeAdultsAcrossCategoriesWithManualRooms(
+              adults,
+              selectedCategory,
+              adjustedAvailableRooms,
+              manualRooms
+            );
+
+            // Calcular preço para cada categoria na distribuição
+            const categoriesWithPrices = await Promise.all(
+              distribution.map(async (item) => {
+                const category = categories.find((c) => c.id === item.categoryId);
+                if (!category) return null;
+
+                let categoryTotal = 0;
+                const basePrice = Number(category.base_price || 0);
+
+                if (formData.checkinDate && formData.checkoutDate) {
+                  const checkin = new Date(formData.checkinDate);
+                  const checkout = new Date(formData.checkoutDate);
+                  const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+
+                  if (nights > 0) {
+                    for (let i = 0; i < nights; i++) {
+                      const currentDate = new Date(checkin);
+                      currentDate.setDate(currentDate.getDate() + i);
+                      const dateStr = format(currentDate, "yyyy-MM-dd");
+
+                      try {
+                        const { data, error } = await supabase.rpc("calculate_rate_price", {
+                          p_establishment_id: establishment.id,
+                          p_category_id: item.categoryId,
+                          p_pricing_plan_id: publicPricingPlanId || null,
+                          p_date: dateStr,
+                          p_adults: item.adults,
+                          p_children: children,
+                        });
+
+                        if (error) {
+                          categoryTotal += basePrice;
+                        } else {
+                          const price = Number(data || 0);
+                          categoryTotal += price > 0 ? price : basePrice;
+                        }
+                      } catch (error) {
+                        categoryTotal += basePrice;
+                      }
+                    }
+                  }
+                } else {
+                  categoryTotal = basePrice;
+                }
+
+                return {
+                  categoryId: item.categoryId,
+                  rooms: item.rooms,
+                  adults: item.adults,
+                  price: categoryTotal * item.rooms,
+                };
+              })
+            );
+
+            const validCategories = categoriesWithPrices.filter((c) => c !== null) as Array<{
+              categoryId: string;
+              rooms: number;
+              adults: number;
+              price: number;
+            }>;
+
+            setSelectedCategories(validCategories);
+            return;
+          }
+        }
+      }
+
+      // Distribuir adultos entre categorias disponíveis (quando não há quantidade manual)
+      const distribution = await distributeAdultsAcrossCategories(
+        adults,
+        selectedCategory,
+        categoryAvailableRooms
+      );
+
+      // Calcular preço para cada categoria na distribuição
+      const categoriesWithPrices = await Promise.all(
+        distribution.map(async (item) => {
+          const category = categories.find((c) => c.id === item.categoryId);
+          if (!category) return null;
+
+          let categoryTotal = 0;
+          const basePrice = Number(category.base_price || 0);
+
+          if (formData.checkinDate && formData.checkoutDate) {
+            const checkin = new Date(formData.checkinDate);
+            const checkout = new Date(formData.checkoutDate);
+            const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+
+            if (nights > 0) {
+              for (let i = 0; i < nights; i++) {
+                const currentDate = new Date(checkin);
+                currentDate.setDate(currentDate.getDate() + i);
+                const dateStr = format(currentDate, "yyyy-MM-dd");
+
+                try {
+                  const { data, error } = await supabase.rpc("calculate_rate_price", {
+                    p_establishment_id: establishment.id,
+                    p_category_id: item.categoryId,
+                    p_pricing_plan_id: publicPricingPlanId || null,
+                    p_date: dateStr,
+                    p_adults: item.adults,
+                    p_children: children,
+                  });
+
+                  if (error) {
+                    categoryTotal += basePrice;
+                  } else {
+                    const price = Number(data || 0);
+                    categoryTotal += price > 0 ? price : basePrice;
+                  }
+                } catch (error) {
+                  categoryTotal += basePrice;
+                }
+              }
+            }
+          } else {
+            // Se não há datas, usar preço base
+            categoryTotal = basePrice;
+          }
+
+          return {
+            categoryId: item.categoryId,
+            rooms: item.rooms,
+            adults: item.adults,
+            price: categoryTotal * item.rooms,
+          };
+        })
+      );
+
+      const validCategories = categoriesWithPrices.filter((c) => c !== null) as Array<{
+        categoryId: string;
+        rooms: number;
+        adults: number;
+        price: number;
+      }>;
+
+      setSelectedCategories(validCategories);
+    };
+
+    const timeoutId = setTimeout(calculateCategoryDistribution, 500);
+    return () => clearTimeout(timeoutId);
+  }, [
+    selectedCategory,
+    formData.adults,
+    formData.children,
+    formData.checkinDate,
+    formData.checkoutDate,
+    categoryAvailableRooms,
+    categories,
+    establishment?.id,
+    publicPricingPlanId,
+    manualRooms, // Adicionar manualRooms às dependências
   ]);
 
   // Recarregar dados quando o plano tarifário mudar (polling ou refetch)
@@ -289,6 +726,15 @@ const PublicReservation = () => {
 
       if (!roomsError && roomsData) {
         setRooms(roomsData);
+        
+        // Calcular total de quartos por categoria (tática de vendas)
+        const totalRoomsByCategory: Record<string, number> = {};
+        roomsData.forEach((room) => {
+          if (room.category_id) {
+            totalRoomsByCategory[room.category_id] = (totalRoomsByCategory[room.category_id] || 0) + 1;
+          }
+        });
+        setCategoryTotalRooms(totalRoomsByCategory);
       }
 
       // Buscar logo do PMS
@@ -331,6 +777,34 @@ const PublicReservation = () => {
       return;
     }
 
+    // Verificar se há categorias selecionadas (distribuição automática)
+    if (selectedCategories.length === 0) {
+      toast.error(t("publicReservation.errors.selectCategory"));
+      return;
+    }
+
+    // Verificar disponibilidade para todas as categorias selecionadas
+    for (const cat of selectedCategories) {
+      const availability = await checkCategoryRoomAvailability(
+        cat.categoryId,
+        formData.checkinDate,
+        formData.checkoutDate,
+        cat.rooms
+      );
+
+      if (!availability.available) {
+        toast.error(
+          availability.reason || 
+          t("publicReservation.errors.insufficientRooms", { 
+            required: cat.rooms, 
+            available: availability.availableRooms 
+          })
+        );
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -367,7 +841,104 @@ const PublicReservation = () => {
       // Gerar token único para seleção de quartos
       const selectionToken = `quote_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 
-      // Criar orçamento
+      // Calcular preço total das categorias selecionadas
+      const totalAmount = selectedCategories.length > 0
+        ? selectedCategories.reduce((sum, cat) => sum + cat.price, 0)
+        : (calculatedPrice || 0);
+
+      // Usar a primeira categoria como categoria principal (para compatibilidade)
+      const primaryCategory = selectedCategories[0]?.categoryId || selectedCategory;
+
+      // Criar reservas para cada categoria e quarto
+      const createdReservations: string[] = [];
+      
+      for (const cat of selectedCategories) {
+        // Buscar quartos disponíveis para esta categoria
+        const availableRoomIds = await getAvailableRoomsForCategory(
+          cat.categoryId,
+          formData.checkinDate,
+          formData.checkoutDate,
+          cat.rooms
+        );
+
+        if (availableRoomIds.length < cat.rooms) {
+          throw new Error(
+            `Não há quartos suficientes disponíveis na categoria ${categories.find((c) => c.id === cat.categoryId)?.name || cat.categoryId}. Necessário: ${cat.rooms}, Disponível: ${availableRoomIds.length}`
+          );
+        }
+
+        // Calcular preço por quarto (preço total da categoria dividido pelo número de quartos)
+        const pricePerRoom = cat.price / cat.rooms;
+        // Calcular adultos por quarto (distribuir igualmente, último quarto recebe o resto)
+        const adultsPerRoom = Math.floor(cat.adults / cat.rooms);
+        const remainingAdults = cat.adults % cat.rooms;
+        const childrenPerRoom = Math.floor((parseInt(formData.children) || 0) / cat.rooms);
+        const remainingChildren = (parseInt(formData.children) || 0) % cat.rooms;
+
+        // Criar uma reserva para cada quarto
+        for (let i = 0; i < cat.rooms; i++) {
+          const roomId = availableRoomIds[i];
+          const category = categories.find((c) => c.id === cat.categoryId);
+          
+          // Último quarto recebe o resto dos adultos e crianças
+          const finalAdults = i === cat.rooms - 1 ? adultsPerRoom + remainingAdults : adultsPerRoom;
+          const finalChildren = i === cat.rooms - 1 ? childrenPerRoom + remainingChildren : childrenPerRoom;
+          
+          // Preparar dados da reserva
+          const reservationData = {
+            establishment_id: establishment.id,
+            room_id: roomId,
+            category_id: cat.categoryId,
+            client_id: clientId,
+            guest_name: `${formData.firstName} ${formData.lastName}`,
+            adults: finalAdults,
+            children: finalChildren,
+            total_amount: pricePerRoom,
+            paid_amount: 0,
+            payment_status: "pending" as const,
+            status: "pending" as const,
+            notes: cat.rooms > 1 ? `${formData.notes || ""} (Quarto ${i + 1} de ${cat.rooms} - ${category?.name || cat.categoryId})`.trim() : (formData.notes || null),
+            checkin_time: hotelSettings?.checkin_time || null,
+            checkout_time: hotelSettings?.checkout_time || null,
+            pricing_plan_id: publicPricingPlanId || null,
+            created_by: null,
+            expiration_date: null,
+            channel: "direct" as const,
+          };
+
+          // Criar reserva usando a função RPC
+          const { data: reservationResult, error: reservationError } = await supabase.rpc(
+            "create_reservation_with_lock",
+            {
+              p_reservation_data: reservationData,
+              p_checkin_date: formData.checkinDate,
+              p_checkout_date: formData.checkoutDate,
+              p_establishment_id: establishment.id,
+              p_room_id: roomId,
+              p_category_id: cat.categoryId,
+            }
+          );
+
+          if (reservationError || !reservationResult?.success) {
+            throw new Error(
+              reservationError?.message || 
+              reservationResult?.error || 
+              `Erro ao criar reserva para quarto ${i + 1} da categoria ${category?.name || cat.categoryId}`
+            );
+          }
+
+          createdReservations.push(reservationResult.reservation_id);
+        }
+      }
+
+      // Criar orçamento (quote) vinculado às reservas criadas
+      // Armazenar IDs das reservas no campo notes em formato JSON (no final para facilitar parsing)
+      const reservationIdsJson = JSON.stringify({ reservation_ids: createdReservations });
+      // Usar um marcador único no final do campo notes
+      const notesWithReservations = formData.notes 
+        ? `${formData.notes}\n\n<!--RESERVATION_IDS_START-->${reservationIdsJson}<!--RESERVATION_IDS_END-->`
+        : `<!--RESERVATION_IDS_START-->${reservationIdsJson}<!--RESERVATION_IDS_END-->`;
+
       const { data: quote, error: quoteError } = await supabase
         .from("quotes")
         .insert({
@@ -376,15 +947,15 @@ const PublicReservation = () => {
           guest_name: `${formData.firstName} ${formData.lastName}`,
           guest_email: formData.email,
           guest_phone: formData.phone || null,
-          category_id: selectedCategory,
+          category_id: primaryCategory,
           room_id: selectedRoom || null,
           checkin_date: formData.checkinDate,
           checkout_date: formData.checkoutDate,
           adults: parseInt(formData.adults) || 1,
           children: parseInt(formData.children) || 0,
-          total_amount: calculatedPrice || 0,
+          total_amount: totalAmount,
           status: "pending",
-          notes: formData.notes || null,
+          notes: notesWithReservations,
           room_selection_link: selectionToken,
           channel: "direct",
         })
@@ -399,7 +970,7 @@ const PublicReservation = () => {
       const { data: paymentData, error: paymentError } = await supabase.functions.invoke("stripe-payment", {
         body: {
           establishment_id: establishment.id,
-          amount: (calculatedPrice || 0) * 100, // Converter para centavos
+          amount: totalAmount * 100, // Converter para centavos
           currency: "brl",
           payment_type: "quote_payment",
           quote_id: quote.id,
@@ -474,6 +1045,398 @@ const PublicReservation = () => {
     return time;
   };
 
+  // Formatar texto de quartos necessários
+  const formatRoomsRequiredText = (adults: number, capacity: number, rooms: number): string => {
+    const adultText = adults === 1 
+      ? t("publicReservation.adult") 
+      : t("publicReservation.adultsPlural");
+    const guestText = capacity === 1 
+      ? t("publicReservation.guest") 
+      : t("publicReservation.guests");
+    const roomText = rooms === 1 
+      ? t("publicReservation.room") 
+      : t("publicReservation.rooms");
+    
+    // Construir texto manualmente para garantir substituição correta
+    return `Para ${adults} ${adultText} e capacidade de ${capacity} ${guestText} por quarto, serão necessários ${rooms} ${roomText}.`;
+  };
+
+  // Formatar texto de cálculo automático
+  const formatAutoCalculatedText = (adults: number, capacity: number): string => {
+    const adultText = adults === 1 
+      ? t("publicReservation.adult") 
+      : t("publicReservation.adultsPlural");
+    const guestText = capacity === 1 
+      ? t("publicReservation.guest") 
+      : t("publicReservation.guests");
+    
+    // Construir texto manualmente para garantir substituição correta
+    return `Calculado automaticamente baseado em ${adults} ${adultText} e capacidade de ${capacity} ${guestText} por quarto`;
+  };
+
+  // Formatar texto de disponibilidade
+  const formatAvailabilityText = (rooms: number, capacity: number): string => {
+    const roomText = rooms === 1 
+      ? t("publicReservation.room") 
+      : t("publicReservation.rooms");
+    const guestText = capacity === 1 
+      ? t("publicReservation.guest") 
+      : t("publicReservation.guests");
+    
+    // Construir texto manualmente para garantir substituição correta
+    return `Serão necessários ${rooms} ${roomText} baseado na capacidade de ${capacity} ${guestText} por quarto`;
+  };
+
+  // Formatar texto de aviso de quartos insuficientes
+  const formatInsufficientRoomsWarning = (available: number, required: number): string => {
+    const availableRoomText = available === 1 
+      ? t("publicReservation.roomAvailable") 
+      : t("publicReservation.roomsAvailablePlural");
+    const requiredText = required === 1 
+      ? t("publicReservation.necessary") 
+      : t("publicReservation.necessaryPlural");
+    
+    return `Atenção: Apenas ${available} ${availableRoomText} de ${required} ${requiredText}`;
+  };
+
+  // Formatar texto de quartos restantes (tática de vendas)
+  const formatRoomsLeftText = (count: number): string => {
+    if (count === 1) {
+      return t("publicReservation.onlyRoomLeft");
+    }
+    const roomText = t("publicReservation.rooms");
+    return `Apenas ${count} ${roomText} restantes!`;
+  };
+
+  // Formatar texto de quartos disponíveis para o período
+  const formatAvailableRoomsText = (available: number): string => {
+    const roomText = available === 1 
+      ? t("publicReservation.roomAvailable") 
+      : t("publicReservation.roomsAvailablePlural");
+    
+    return `${available} ${roomText} para este período`;
+  };
+
+  // Calcular número de quartos necessários baseado na capacidade
+  const calculateRequiredRooms = (adults: number, category: any): number => {
+    if (!category || !category.capacity_adults || category.capacity_adults <= 0) {
+      return 1; // Se não há capacidade definida, assumir 1 quarto
+    }
+    return Math.ceil(adults / category.capacity_adults);
+  };
+
+  // Distribuir adultos considerando quantidade manual de quartos na categoria primária
+  const distributeAdultsAcrossCategoriesWithManualRooms = async (
+    totalAdults: number,
+    primaryCategoryId: string,
+    availableRoomsByCategory: Record<string, number>,
+    manualRooms: number
+  ): Promise<Array<{ categoryId: string; rooms: number; adults: number }>> => {
+    const result: Array<{ categoryId: string; rooms: number; adults: number }> = [];
+    let remainingAdults = totalAdults;
+
+    // Buscar categoria primária
+    const primaryCategory = categories.find((c) => c.id === primaryCategoryId);
+    if (!primaryCategory) return result;
+
+    const primaryCapacity = primaryCategory.capacity_adults || 1;
+    const primaryAvailableRooms = availableRoomsByCategory[primaryCategoryId] || 0;
+    
+    // Usar manualRooms como quantidade mínima para a categoria primária
+    const roomsForPrimary = Math.min(manualRooms, primaryAvailableRooms);
+    const adultsForPrimary = Math.min(remainingAdults, roomsForPrimary * primaryCapacity);
+    
+    if (roomsForPrimary > 0 && adultsForPrimary > 0) {
+      result.push({
+        categoryId: primaryCategoryId,
+        rooms: roomsForPrimary,
+        adults: adultsForPrimary,
+      });
+      remainingAdults -= adultsForPrimary;
+    }
+
+    // Se ainda há adultos para acomodar, buscar outras categorias disponíveis
+    if (remainingAdults > 0) {
+      // Ordenar categorias por capacidade (maior primeiro) e disponibilidade
+      const otherCategories = categories
+        .filter((c) => c.id !== primaryCategoryId && availableRoomsByCategory[c.id] > 0)
+        .sort((a, b) => {
+          const aCapacity = a.capacity_adults || 1;
+          const bCapacity = b.capacity_adults || 1;
+          const aAvailable = availableRoomsByCategory[a.id] * aCapacity;
+          const bAvailable = availableRoomsByCategory[b.id] * bCapacity;
+          return bAvailable - aAvailable;
+        });
+
+      for (const category of otherCategories) {
+        if (remainingAdults <= 0) break;
+
+        const capacity = category.capacity_adults || 1;
+        const availableRooms = availableRoomsByCategory[category.id] || 0;
+        const maxAdults = availableRooms * capacity;
+
+        if (maxAdults > 0) {
+          const adultsForCategory = Math.min(remainingAdults, maxAdults);
+          const roomsForCategory = Math.ceil(adultsForCategory / capacity);
+
+          if (roomsForCategory > 0 && roomsForCategory <= availableRooms) {
+            result.push({
+              categoryId: category.id,
+              rooms: roomsForCategory,
+              adults: adultsForCategory,
+            });
+            remainingAdults -= adultsForCategory;
+          }
+        }
+      }
+    }
+
+    return result;
+  };
+
+  // Distribuir adultos entre categorias disponíveis (lógica Booking.com)
+  const distributeAdultsAcrossCategories = async (
+    totalAdults: number,
+    primaryCategoryId: string,
+    availableRoomsByCategory: Record<string, number>
+  ): Promise<Array<{ categoryId: string; rooms: number; adults: number }>> => {
+    const result: Array<{ categoryId: string; rooms: number; adults: number }> = [];
+    let remainingAdults = totalAdults;
+
+    // Buscar categoria primária
+    const primaryCategory = categories.find((c) => c.id === primaryCategoryId);
+    if (!primaryCategory) return result;
+
+    const primaryCapacity = primaryCategory.capacity_adults || 1;
+    const primaryAvailableRooms = availableRoomsByCategory[primaryCategoryId] || 0;
+    const primaryMaxAdults = primaryAvailableRooms * primaryCapacity;
+
+    // Tentar acomodar na categoria primária primeiro
+    if (primaryMaxAdults > 0) {
+      const adultsForPrimary = Math.min(remainingAdults, primaryMaxAdults);
+      const roomsForPrimary = Math.ceil(adultsForPrimary / primaryCapacity);
+      
+      if (roomsForPrimary > 0 && roomsForPrimary <= primaryAvailableRooms) {
+        result.push({
+          categoryId: primaryCategoryId,
+          rooms: roomsForPrimary,
+          adults: adultsForPrimary,
+        });
+        remainingAdults -= adultsForPrimary;
+      }
+    }
+
+    // Se ainda há adultos para acomodar, buscar outras categorias disponíveis
+    if (remainingAdults > 0) {
+      // Ordenar categorias por capacidade (maior primeiro) e disponibilidade
+      const otherCategories = categories
+        .filter((c) => c.id !== primaryCategoryId && availableRoomsByCategory[c.id] > 0)
+        .sort((a, b) => {
+          const aCapacity = a.capacity_adults || 1;
+          const bCapacity = b.capacity_adults || 1;
+          const aAvailable = availableRoomsByCategory[a.id] * aCapacity;
+          const bAvailable = availableRoomsByCategory[b.id] * bCapacity;
+          return bAvailable - aAvailable;
+        });
+
+      for (const category of otherCategories) {
+        if (remainingAdults <= 0) break;
+
+        const capacity = category.capacity_adults || 1;
+        const availableRooms = availableRoomsByCategory[category.id] || 0;
+        const maxAdults = availableRooms * capacity;
+
+        if (maxAdults > 0) {
+          const adultsForCategory = Math.min(remainingAdults, maxAdults);
+          const roomsForCategory = Math.ceil(adultsForCategory / capacity);
+
+          if (roomsForCategory > 0 && roomsForCategory <= availableRooms) {
+            result.push({
+              categoryId: category.id,
+              rooms: roomsForCategory,
+              adults: adultsForCategory,
+            });
+            remainingAdults -= adultsForCategory;
+          }
+        }
+      }
+    }
+
+    return result;
+  };
+
+  // Obter número de quartos (manual ou calculado)
+  const getRequiredRooms = (): number => {
+    if (manualRooms !== null) {
+      return manualRooms;
+    }
+    const selectedCategoryData = selectedCategory ? categories.find((c) => c.id === selectedCategory) : null;
+    if (!selectedCategoryData) return 1;
+    const adults = parseInt(formData.adults) || 1;
+    return calculateRequiredRooms(adults, selectedCategoryData);
+  };
+
+  // Verificar se há disponibilidade suficiente para todas as categorias selecionadas
+  const hasSufficientAvailability = (): boolean => {
+    if (!formData.checkinDate || !formData.checkoutDate || !selectedCategory) {
+      return false;
+    }
+
+    // Se há categorias selecionadas, verificar disponibilidade de cada uma
+    if (selectedCategories.length > 0) {
+      return selectedCategories.every((cat) => {
+        const availableRooms = categoryAvailableRooms[cat.categoryId] ?? 0;
+        return availableRooms >= cat.rooms && availableRooms > 0; // Garantir que há pelo menos 1 quarto disponível
+      });
+    }
+
+    // Se não há categorias selecionadas ainda, verificar disponibilidade da categoria selecionada
+    // Verificar tanto availableRoomsCount quanto categoryAvailableRooms para garantir consistência
+    const categoryAvailable = categoryAvailableRooms[selectedCategory] ?? null;
+    const hasCategoryAvailability = categoryAvailable !== null && categoryAvailable > 0;
+    const hasAvailableRoomsCount = availableRoomsCount !== null && availableRoomsCount > 0;
+    
+    // Se ambos estão disponíveis, verificar se há quartos suficientes
+    if (hasCategoryAvailability && hasAvailableRoomsCount) {
+      return availableRoomsCount >= requiredRooms && categoryAvailable >= requiredRooms;
+    }
+    
+    // Se algum deles indica indisponibilidade, retornar false
+    if (categoryAvailable === 0 || availableRoomsCount === 0) {
+      return false;
+    }
+
+    // Se ainda não há dados de disponibilidade, retornar false para ser seguro
+    return false;
+  };
+
+  // Buscar quartos disponíveis de uma categoria para atribuir às reservas
+  const getAvailableRoomsForCategory = async (
+    categoryId: string,
+    checkinDate: string,
+    checkoutDate: string,
+    requiredCount: number
+  ): Promise<string[]> => {
+    if (!establishment?.id || !checkinDate || !checkoutDate) {
+      return [];
+    }
+
+    try {
+      // Buscar todos os quartos da categoria que estão disponíveis
+      const { data: rooms, error: roomsError } = await supabase
+        .from("rooms")
+        .select("id")
+        .eq("category_id", categoryId)
+        .eq("establishment_id", establishment.id)
+        .eq("show_in_public", true)
+        .in("status", ["available", "cleaning"])
+        .eq("is_blocked", false)
+        .order("room_number");
+
+      if (roomsError || !rooms || rooms.length === 0) {
+        return [];
+      }
+
+      // Buscar reservas que conflitam com o período
+      const { data: conflictingReservations, error: reservationsError } = await supabase
+        .from("reservations")
+        .select("room_id")
+        .eq("category_id", categoryId)
+        .eq("establishment_id", establishment.id)
+        .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"])
+        .or(`and(checkin_date.lt.${checkoutDate},checkout_date.gt.${checkinDate})`);
+
+      if (reservationsError) {
+        console.error("Erro ao buscar reservas:", reservationsError);
+        return [];
+      }
+
+      // IDs de quartos ocupados
+      const occupiedRoomIds = new Set(
+        conflictingReservations?.map((r) => r.room_id).filter(Boolean) || []
+      );
+
+      // Quartos disponíveis (não ocupados)
+      const availableRooms = rooms
+        .filter((room) => !occupiedRoomIds.has(room.id))
+        .slice(0, requiredCount)
+        .map((room) => room.id);
+
+      return availableRooms;
+    } catch (error: any) {
+      console.error("Erro ao buscar quartos disponíveis:", error);
+      return [];
+    }
+  };
+
+  // Verificar disponibilidade de quartos na categoria
+  const checkCategoryRoomAvailability = async (
+    categoryId: string,
+    checkinDate: string,
+    checkoutDate: string,
+    requiredRooms: number
+  ): Promise<{ available: boolean; availableRooms: number; reason?: string }> => {
+    if (!establishment?.id || !checkinDate || !checkoutDate) {
+      return { available: false, availableRooms: 0, reason: "Datas não selecionadas" };
+    }
+
+    try {
+      // Buscar todos os quartos da categoria que estão disponíveis
+      const { data: rooms, error: roomsError } = await supabase
+        .from("rooms")
+        .select("id")
+        .eq("category_id", categoryId)
+        .eq("establishment_id", establishment.id)
+        .eq("show_in_public", true)
+        .in("status", ["available", "cleaning"])
+        .eq("is_blocked", false);
+
+      if (roomsError) {
+        console.error("Erro ao buscar quartos:", roomsError);
+        return { available: false, availableRooms: 0, reason: "Erro ao verificar disponibilidade" };
+      }
+
+      if (!rooms || rooms.length === 0) {
+        return { available: false, availableRooms: 0, reason: "Nenhum quarto disponível nesta categoria" };
+      }
+
+      // Buscar reservas que conflitam com o período
+      const { data: conflictingReservations, error: reservationsError } = await supabase
+        .from("reservations")
+        .select("room_id")
+        .eq("category_id", categoryId)
+        .eq("establishment_id", establishment.id)
+        .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"])
+        .or(`and(checkin_date.lt.${checkoutDate},checkout_date.gt.${checkinDate})`);
+
+      if (reservationsError) {
+        console.error("Erro ao buscar reservas:", reservationsError);
+        return { available: false, availableRooms: 0, reason: "Erro ao verificar disponibilidade" };
+      }
+
+      // IDs de quartos ocupados
+      const occupiedRoomIds = new Set(
+        conflictingReservations?.map((r) => r.room_id).filter(Boolean) || []
+      );
+
+      // Quartos disponíveis (não ocupados)
+      const availableRooms = rooms.filter((room) => !occupiedRoomIds.has(room.id));
+
+      const availableRoomsCount = availableRooms.length;
+
+      return {
+        available: availableRoomsCount >= requiredRooms,
+        availableRooms: availableRoomsCount,
+        reason: availableRoomsCount < requiredRooms
+          ? `Apenas ${availableRoomsCount} quarto(s) disponível(is) de ${requiredRooms} necessário(s)`
+          : undefined,
+      };
+    } catch (error: any) {
+      console.error("Erro ao verificar disponibilidade:", error);
+      return { available: false, availableRooms: 0, reason: error.message || "Erro ao verificar disponibilidade" };
+    }
+  };
+
   const getFeatureIcon = (feature: string) => {
     const lowerFeature = feature.toLowerCase();
     if (lowerFeature.includes("wifi") || lowerFeature.includes("wi-fi")) return <Wifi className="w-3 h-3" />;
@@ -490,13 +1453,99 @@ const PublicReservation = () => {
     ? rooms.filter((room) => room.category_id === selectedCategory)
     : rooms;
 
-  const finalPrice = calculatedPrice || 0;
+  // Componente de contador
+  const CounterButton = ({ 
+    value, 
+    onDecrease, 
+    onIncrease, 
+    min = 0, 
+    max = 99,
+    disabled = false 
+  }: { 
+    value: number; 
+    onDecrease: () => void; 
+    onIncrease: () => void; 
+    min?: number;
+    max?: number;
+    disabled?: boolean;
+  }) => (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={onDecrease}
+        disabled={value <= min || disabled}
+        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
+          value <= min || disabled
+            ? "border-slate-200 text-slate-300 cursor-not-allowed"
+            : "border-slate-300 text-slate-700 hover:border-blue-500 hover:text-blue-600"
+        }`}
+      >
+        <Minus className="w-4 h-4" />
+      </button>
+      <span className="w-8 text-center font-semibold text-slate-900">{value}</span>
+      <button
+        type="button"
+        onClick={onIncrease}
+        disabled={value >= max || disabled}
+        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
+          value >= max || disabled
+            ? "border-slate-200 text-slate-300 cursor-not-allowed"
+            : "border-slate-300 text-slate-700 hover:border-blue-500 hover:text-blue-600"
+        }`}
+      >
+        <Plus className="w-4 h-4" />
+      </button>
+    </div>
+  );
+
   const nights = formData.checkinDate && formData.checkoutDate
     ? Math.ceil(
         (new Date(formData.checkoutDate).getTime() - new Date(formData.checkinDate).getTime()) / (1000 * 60 * 60 * 24)
       )
     : 0;
-  const pricePerNight = nights > 0 ? finalPrice / nights : calculatedPrice || 0;
+  
+  // Calcular número de quartos necessários para a categoria selecionada
+  const selectedCategoryData = selectedCategory ? categories.find((c) => c.id === selectedCategory) : null;
+  const adults = parseInt(formData.adults) || 1;
+  const children = parseInt(formData.children) || 0;
+  const requiredRooms = getRequiredRooms();
+  
+  // Calcular preço total considerando múltiplas categorias
+  const finalPrice = selectedCategories.length > 0
+    ? selectedCategories.reduce((sum, cat) => sum + cat.price, 0)
+    : (calculatedPrice || 0);
+  
+  // Calcular número total de quartos de todas as categorias selecionadas
+  const totalRooms = selectedCategories.length > 0
+    ? selectedCategories.reduce((sum, cat) => sum + cat.rooms, 0)
+    : requiredRooms;
+  
+  // Calcular preço por quarto por noite corretamente
+  // Se há múltiplas categorias, calcular preço médio por quarto
+  let pricePerRoomPerNight: number;
+  if (selectedCategories.length > 0) {
+    // Calcular preço médio por quarto considerando todas as categorias
+    if (totalRooms > 0 && nights > 0) {
+      // Preço total dividido pelo número total de quartos e noites
+      pricePerRoomPerNight = finalPrice / totalRooms / nights;
+    } else if (totalRooms > 0) {
+      // Se não há noites, apenas dividir pelo número de quartos
+      pricePerRoomPerNight = finalPrice / totalRooms;
+    } else {
+      pricePerRoomPerNight = finalPrice;
+    }
+  } else {
+    // Quando não há categorias selecionadas ainda, usar lógica antiga
+    if (nights > 0 && requiredRooms > 0) {
+      pricePerRoomPerNight = finalPrice / nights / requiredRooms;
+    } else if (requiredRooms > 0) {
+      pricePerRoomPerNight = finalPrice / requiredRooms;
+    } else {
+      pricePerRoomPerNight = finalPrice;
+    }
+  }
+  
+  const pricePerNight = nights > 0 ? finalPrice / nights : finalPrice;
 
   if (isLoading) {
     return (
@@ -649,6 +1698,11 @@ const PublicReservation = () => {
                   const categoryDescription = category.display_description || "";
                   const categoryPrice = categoryPrices[category.id];
                   const isSelected = selectedCategory === category.id;
+                  const totalRoomsInCategory = categoryTotalRooms[category.id] || 0;
+                  // Quartos disponíveis para o período selecionado (só mostra quando há datas)
+                  const availableRoomsForPeriod = formData.checkinDate && formData.checkoutDate
+                    ? (categoryAvailableRooms[category.id] ?? null)
+                    : null;
 
                   return (
                     <Card
@@ -711,10 +1765,33 @@ const PublicReservation = () => {
                           <div>
                             <div className="flex items-start justify-between mb-3">
                               <div className="flex-1">
-                                <div className="flex items-center gap-3 mb-2">
+                                <div className="flex items-center gap-3 mb-2 flex-wrap">
                                   <h3 className="text-2xl font-bold text-slate-900">
                                     {category.name}
                                   </h3>
+                                  {/* Badge de Disponibilidade - Tática de Vendas */}
+                                  {/* Mostrar apenas quando há datas selecionadas */}
+                                  {formData.checkinDate && formData.checkoutDate && availableRoomsForPeriod !== null && (
+                                    <>
+                                      {availableRoomsForPeriod > 0 ? (
+                                        <Badge className={`px-4 py-2 text-sm font-bold shadow-xl border-2 border-white/50 ${
+                                          availableRoomsForPeriod <= 3
+                                            ? "bg-[#FF5A5F] text-white animate-pulse"
+                                            : availableRoomsForPeriod <= 5
+                                            ? "bg-gradient-to-r from-orange-500 to-yellow-500 text-white"
+                                            : "bg-gradient-to-r from-green-500 to-emerald-500 text-white"
+                                        }`}>
+                                          <Sparkles className="w-4 h-4 mr-2" />
+                                          {formatRoomsLeftText(availableRoomsForPeriod)}
+                                        </Badge>
+                                      ) : (
+                                        <Badge className="px-4 py-2 text-sm font-bold shadow-xl border-2 border-white/50 bg-gradient-to-r from-slate-600 to-slate-700 text-white">
+                                          <XCircle className="w-4 h-4 mr-2" />
+                                          {t("publicReservation.soldOut")}
+                                        </Badge>
+                                      )}
+                                    </>
+                                  )}
                                   {/* Capacidade de Hóspedes */}
                                   {((category.capacity_adults !== null && category.capacity_adults !== undefined) || 
                                     (category.capacity_children !== null && category.capacity_children !== undefined && category.capacity_children > 0)) && (
@@ -840,6 +1917,21 @@ const PublicReservation = () => {
                 </Alert>
               )}
 
+              {/* Aviso quando múltiplas categorias são selecionadas automaticamente */}
+              {selectedCategories.length > 1 && formData.checkinDate && formData.checkoutDate && (
+                <Alert className="mb-6 border-blue-200 bg-blue-50">
+                  <AlertCircle className="h-4 w-4 text-blue-600" />
+                  <AlertTitle className="text-sm font-semibold text-blue-900">
+                    {t("publicReservation.multipleCategoriesSelected")}
+                  </AlertTitle>
+                  <AlertDescription className="text-xs text-blue-800 mt-1">
+                    {t("publicReservation.multipleCategoriesDescription", { 
+                      count: selectedCategories.length 
+                    })}
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <form onSubmit={handleSubmit} className="space-y-6">
                 {/* Datas */}
                 <div className="space-y-4">
@@ -874,43 +1966,190 @@ const PublicReservation = () => {
                     </div>
                   </div>
 
-                  {/* Hóspedes */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="adults" className="text-sm font-semibold text-slate-700 mb-2 block">
-                        {t("publicReservation.adults")}
-                      </Label>
-                      <Select value={formData.adults} onValueChange={(value) => setFormData({ ...formData, adults: value })}>
-                        <SelectTrigger className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {[1, 2, 3, 4, 5, 6].map((num) => (
-                            <SelectItem key={num} value={num.toString()}>
-                              {num} {num === 1 ? t("publicReservation.adult") : t("publicReservation.adultsPlural")}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label htmlFor="children" className="text-sm font-semibold text-slate-700 mb-2 block">
-                        {t("publicReservation.children")}
-                      </Label>
-                      <Select value={formData.children} onValueChange={(value) => setFormData({ ...formData, children: value })}>
-                        <SelectTrigger className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {[0, 1, 2, 3, 4].map((num) => (
-                            <SelectItem key={num} value={num.toString()}>
-                              {num} {num === 1 ? t("publicReservation.child") : t("publicReservation.childrenPlural")}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  {/* Hóspedes e Quartos - Estilo Booking.com */}
+                  <div>
+                    <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                      {t("publicReservation.guestsAndRooms")}
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => setGuestsModalOpen(true)}
+                      className="w-full h-12 border-2 border-slate-200 hover:border-blue-500 focus:border-blue-500 rounded-lg px-4 flex items-center justify-between transition-colors"
+                    >
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <Users className="w-5 h-5" />
+                        <span className="text-sm">
+                          {adults} {adults === 1 ? t("publicReservation.adult") : t("publicReservation.adultsPlural")}
+                          {children > 0 && (
+                            <> · {children} {children === 1 ? t("publicReservation.child") : t("publicReservation.childrenPlural")}</>
+                          )}
+                          {requiredRooms > 0 && (
+                            <> · {requiredRooms} {requiredRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</>
+                          )}
+                        </span>
+                      </div>
+                      <ChevronDown className="w-5 h-5 text-slate-400" />
+                    </button>
                   </div>
+
+                  {/* Modal de Seleção de Hóspedes e Quartos */}
+                  <Dialog open={guestsModalOpen} onOpenChange={setGuestsModalOpen}>
+                    <DialogContent className="sm:max-w-md">
+                      <DialogTitle className="text-lg font-semibold text-slate-900 mb-4">
+                        {t("publicReservation.selectGuestsAndRooms")}
+                      </DialogTitle>
+                      
+                      <div className="space-y-6">
+                        {/* Adultos */}
+                        <div className="flex items-center justify-between py-2 border-b border-slate-200">
+                          <div>
+                            <Label className="text-base font-medium text-slate-900">
+                              {t("publicReservation.adults")}
+                            </Label>
+                          </div>
+                          <CounterButton
+                            value={adults}
+                            onDecrease={() => {
+                              if (adults > 1) {
+                                setFormData({ ...formData, adults: (adults - 1).toString() });
+                                // Resetar quartos manuais quando adultos mudarem
+                                if (manualRooms !== null) {
+                                  const newAdults = adults - 1;
+                                  const calculated = selectedCategoryData 
+                                    ? calculateRequiredRooms(newAdults, selectedCategoryData)
+                                    : 1;
+                                  setManualRooms(calculated);
+                                }
+                              }
+                            }}
+                            onIncrease={() => {
+                              if (adults < 30) {
+                                setFormData({ ...formData, adults: (adults + 1).toString() });
+                                // Resetar quartos manuais quando adultos mudarem
+                                if (manualRooms !== null) {
+                                  const newAdults = adults + 1;
+                                  const calculated = selectedCategoryData 
+                                    ? calculateRequiredRooms(newAdults, selectedCategoryData)
+                                    : 1;
+                                  setManualRooms(calculated);
+                                }
+                              }
+                            }}
+                            min={1}
+                            max={30}
+                          />
+                        </div>
+
+                        {/* Crianças */}
+                        <div className="flex items-center justify-between py-2 border-b border-slate-200">
+                          <div>
+                            <Label className="text-base font-medium text-slate-900">
+                              {t("publicReservation.children")}
+                            </Label>
+                            <p className="text-xs text-slate-500 mt-1">
+                              {t("publicReservation.childrenAgeInfo")}
+                            </p>
+                          </div>
+                          <CounterButton
+                            value={children}
+                            onDecrease={() => {
+                              if (children > 0) {
+                                setFormData({ ...formData, children: (children - 1).toString() });
+                              }
+                            }}
+                            onIncrease={() => {
+                              if (children < 10) {
+                                setFormData({ ...formData, children: (children + 1).toString() });
+                              }
+                            }}
+                            min={0}
+                            max={10}
+                          />
+                        </div>
+
+                        {/* Quartos */}
+                        <div className="flex items-center justify-between py-2">
+                          <div>
+                            <Label className="text-base font-medium text-slate-900">
+                              {t("publicReservation.rooms")}
+                            </Label>
+                            {selectedCategoryData && manualRooms === null && (
+                              <p className="text-xs text-slate-500 mt-1">
+                                {formatAutoCalculatedText(adults, selectedCategoryData.capacity_adults || 1)}
+                              </p>
+                            )}
+                            {availableRoomsCount !== null && (
+                              <p className={`text-xs mt-1 ${
+                                availableRoomsCount === 0 
+                                  ? "text-red-600 font-semibold" 
+                                  : availableRoomsCount < requiredRooms
+                                  ? "text-orange-600"
+                                  : "text-green-600"
+                              }`}>
+                                {checkingAvailability ? (
+                                  <>{t("publicReservation.checkingAvailability")}...</>
+                                ) : availableRoomsCount === 0 ? (
+                                  t("publicReservation.noRoomsAvailable")
+                                ) : availableRoomsCount < requiredRooms ? (
+                                  formatInsufficientRoomsWarning(availableRoomsCount, requiredRooms)
+                                ) : (
+                                  formatAvailableRoomsText(availableRoomsCount)
+                                )}
+                              </p>
+                            )}
+                          </div>
+                          <CounterButton
+                            value={requiredRooms}
+                            onDecrease={() => {
+                              const minRooms = selectedCategoryData 
+                                ? calculateRequiredRooms(adults, selectedCategoryData)
+                                : 1;
+                              if (requiredRooms > minRooms) {
+                                setManualRooms(requiredRooms - 1);
+                              }
+                            }}
+                            onIncrease={() => {
+                              // Limitar pela disponibilidade real ou 10 quartos, o que for menor
+                              const maxRooms = availableRoomsCount !== null 
+                                ? Math.min(availableRoomsCount, 10)
+                                : 10;
+                              if (requiredRooms < maxRooms) {
+                                setManualRooms(requiredRooms + 1);
+                              } else if (availableRoomsCount !== null && requiredRooms >= availableRoomsCount) {
+                                toast.error(
+                                  t("publicReservation.errors.maxRoomsReached", {
+                                    available: availableRoomsCount
+                                  })
+                                );
+                              }
+                            }}
+                            min={selectedCategoryData ? calculateRequiredRooms(adults, selectedCategoryData) : 1}
+                            max={availableRoomsCount !== null ? Math.min(availableRoomsCount, 10) : 10}
+                            disabled={checkingAvailability}
+                          />
+                        </div>
+
+                        {/* Informação sobre disponibilidade */}
+                        {selectedCategoryData && formData.checkinDate && formData.checkoutDate && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <p className="text-xs text-blue-800">
+                              {formatAvailabilityText(requiredRooms, selectedCategoryData.capacity_adults || 1)}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex justify-end mt-6">
+                        <Button
+                          type="button"
+                          onClick={() => setGuestsModalOpen(false)}
+                          className="bg-blue-600 hover:bg-blue-700 text-white px-6"
+                        >
+                          {t("publicReservation.ok")}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
 
                 <Separator />
@@ -1004,19 +2243,119 @@ const PublicReservation = () => {
                 </div>
 
                 {/* Resumo */}
-                {selectedCategory && calculatedPrice && formData.checkinDate && formData.checkoutDate && (
+                {selectedCategory && (selectedCategories.length > 0 || calculatedPrice) && formData.checkinDate && formData.checkoutDate && (
                   <div className="bg-slate-50 rounded-lg p-4 space-y-3 border-2 border-slate-200">
                     <h4 className="font-semibold text-slate-900 mb-3">{t("publicReservation.reservationSummary")}</h4>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-600">{t("publicReservation.pricePerNight")}</span>
-                      <span className="font-medium text-slate-900">
-                        R$ {pricePerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-600">{nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</span>
-                      <span className="font-medium text-slate-900">× {nights}</span>
-                    </div>
+                    
+                    {/* Detalhamento por categoria quando houver múltiplas */}
+                    {selectedCategories.length > 1 && (
+                      <div className="space-y-2 mb-3">
+                        {selectedCategories.map((cat, index) => {
+                          const category = categories.find((c) => c.id === cat.categoryId);
+                          return (
+                            <div key={cat.categoryId} className="bg-white rounded-lg p-3 border border-slate-200">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <Bed className="w-4 h-4 text-blue-600" />
+                                  <span className="font-semibold text-slate-900 text-sm">
+                                    {category?.name || `Categoria ${index + 1}`}
+                                  </span>
+                                </div>
+                                <span className="font-bold text-blue-600">
+                                  R$ {cat.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-600 space-y-1">
+                                <div className="flex justify-between">
+                                  <span>{cat.rooms} {cat.rooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</span>
+                                  <span>{cat.adults} {cat.adults === 1 ? t("publicReservation.adult") : t("publicReservation.adultsPlural")}</span>
+                                </div>
+                                {nights > 0 && (
+                                  <div className="flex justify-between text-slate-500">
+                                    <span>{nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</span>
+                                    <span>R$ {(cat.price / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Informação de quartos necessários quando houver apenas uma categoria */}
+                    {selectedCategories.length === 1 && selectedCategoryData && requiredRooms > 1 && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                        <div className="flex items-center gap-2 text-blue-800 text-sm">
+                          <Bed className="w-4 h-4" />
+                          <span className="font-medium">
+                            {requiredRooms} {requiredRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")} {t("publicReservation.required")}
+                          </span>
+                        </div>
+                        <p className="text-xs text-blue-700 mt-1">
+                          {formatRoomsRequiredText(
+                            adults, 
+                            selectedCategoryData.capacity_adults || 1,
+                            requiredRooms
+                          )}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Detalhamento simplificado quando houver apenas uma categoria */}
+                    {selectedCategories.length === 1 && nights > 0 && (
+                      <>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-600">
+                            {totalRooms > 1 
+                              ? `${t("publicReservation.pricePerRoomPerNight")} (${totalRooms} ${totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")})`
+                              : t("publicReservation.pricePerNight")
+                            }
+                          </span>
+                          <span className="font-medium text-slate-900">
+                            R$ {pricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-600">{nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</span>
+                          <span className="font-medium text-slate-900">× {nights}</span>
+                        </div>
+                        {totalRooms > 1 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-slate-600">{totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</span>
+                            <span className="font-medium text-slate-900">× {totalRooms}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Fallback quando não há categorias calculadas ainda */}
+                    {selectedCategories.length === 0 && nights > 0 && (
+                      <>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-600">
+                            {totalRooms > 1 
+                              ? `${t("publicReservation.pricePerRoomPerNight")} (${totalRooms} ${totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")})`
+                              : t("publicReservation.pricePerNight")
+                            }
+                          </span>
+                          <span className="font-medium text-slate-900">
+                            R$ {pricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-600">{nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</span>
+                          <span className="font-medium text-slate-900">× {nights}</span>
+                        </div>
+                        {totalRooms > 1 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-slate-600">{totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</span>
+                            <span className="font-medium text-slate-900">× {totalRooms}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+
                     <Separator />
                     <div className="flex justify-between">
                       <span className="font-bold text-lg text-slate-900">{t("publicReservation.total")}</span>
@@ -1027,11 +2366,38 @@ const PublicReservation = () => {
                   </div>
                 )}
 
+                {/* Mensagem de indisponibilidade */}
+                {selectedCategory && formData.checkinDate && formData.checkoutDate && !hasSufficientAvailability() && (
+                  <Alert className="mb-4 border-red-200 bg-red-50">
+                    <AlertCircle className="h-4 w-4 text-red-600" />
+                    <AlertTitle className="text-red-800 font-semibold">
+                      {t("publicReservation.noAvailability", "Indisponível")}
+                    </AlertTitle>
+                    <AlertDescription className="text-red-700 text-sm mt-1">
+                      {selectedCategories.length > 0
+                        ? t("publicReservation.noAvailabilityForDates", "Não há disponibilidade suficiente para as datas informadas. Algumas categorias selecionadas não possuem quartos disponíveis no período solicitado.")
+                        : availableRoomsCount === 0
+                        ? t("publicReservation.noRoomsAvailableForDates", "Não há quartos disponíveis para as datas informadas. Por favor, selecione outras datas.")
+                        : t("publicReservation.insufficientRoomsForDates", "Não há quartos suficientes disponíveis para as datas informadas. Disponível: {available}, Necessário: {required}. Por favor, selecione outras datas ou reduza a quantidade de quartos.", {
+                            available: availableRoomsCount || 0,
+                            required: requiredRooms,
+                          })
+                      }
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {/* CTA */}
                 <Button
                   type="submit"
-                  disabled={isSubmitting || !selectedCategory || !formData.checkinDate || !formData.checkoutDate}
-                  className="w-full h-14 text-lg font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-lg hover:shadow-xl transition-all"
+                  disabled={
+                    isSubmitting || 
+                    !selectedCategory || 
+                    !formData.checkinDate || 
+                    !formData.checkoutDate ||
+                    !hasSufficientAvailability()
+                  }
+                  className="w-full h-14 text-lg font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? (
                     <>

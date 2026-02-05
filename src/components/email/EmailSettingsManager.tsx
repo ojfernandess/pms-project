@@ -65,6 +65,23 @@ const TEMPLATE_VARIABLES = [
   { name: "policies_link", description: "Link para página pública de políticas (detectado automaticamente)", example: "https://seudominio.com/policies/...", category: "Links" },
   { name: "web_checkin_link", description: "Link para web check-in com localizador (detectado automaticamente)", example: "https://seudominio.com/web-checkin/RSV030458", category: "Links" },
   { name: "payment_link", description: "Link para pagamento da reserva via Stripe (detectado automaticamente, se disponível)", example: "https://seudominio.com/payment/pi_...", category: "Links" },
+  
+  // Variáveis para Múltiplas Reservas (apenas para evento reservation.created com múltiplas reservas)
+  { name: "reservation_count", description: "Número total de reservas criadas", example: "3", category: "Múltiplas Reservas" },
+  { name: "reservations_list", description: "Lista HTML automática de todas as reservas (gera cards com todas as informações)", example: "HTML gerado automaticamente", category: "Múltiplas Reservas" },
+  { name: "#reservations_list", description: "Início do loop para personalizar formato de cada reserva (use {{/reservations_list}} para fechar)", example: "{{#reservations_list}}...{{/reservations_list}}", category: "Múltiplas Reservas" },
+  { name: "/reservations_list", description: "Fim do loop de reservas (deve ser usado após {{#reservations_list}})", example: "{{/reservations_list}}", category: "Múltiplas Reservas" },
+  { name: "number", description: "Número da reserva no loop (1, 2, 3...)", example: "1", category: "Múltiplas Reservas" },
+  { name: "code", description: "Código da reserva no loop", example: "RSV030458", category: "Múltiplas Reservas" },
+  { name: "locator", description: "Localizador do check-in no loop", example: "RSV030458", category: "Múltiplas Reservas" },
+  { name: "checkin_date", description: "Data de check-in da reserva no loop (formato DD/MM/YYYY)", example: "15/12/2024", category: "Múltiplas Reservas" },
+  { name: "checkout_date", description: "Data de check-out da reserva no loop (formato DD/MM/YYYY)", example: "20/12/2024", category: "Múltiplas Reservas" },
+  { name: "room_number", description: "Número do quarto da reserva no loop", example: "101", category: "Múltiplas Reservas" },
+  { name: "room_name", description: "Nome do quarto da reserva no loop", example: "Quarto 101", category: "Múltiplas Reservas" },
+  { name: "category_name", description: "Nome da categoria da reserva no loop", example: "Suíte Master", category: "Múltiplas Reservas" },
+  { name: "total_amount", description: "Valor total da reserva no loop (formato brasileiro)", example: "R$ 1.500,00", category: "Múltiplas Reservas" },
+  { name: "paid_amount", description: "Valor pago da reserva no loop (formato brasileiro)", example: "R$ 1.500,00", category: "Múltiplas Reservas" },
+  { name: "web_checkin_link", description: "Link para web check-in da reserva no loop", example: "https://seudominio.com/web-checkin/RSV030458", category: "Múltiplas Reservas" },
 ];
 
 export function EmailSettingsManager() {
@@ -376,10 +393,16 @@ export function EmailSettingsManager() {
                 <p className="text-sm text-muted-foreground mb-4">
                   Use estas variáveis nos seus templates de e-mail. Clique no botão de copiar para usar no formato <code className="bg-muted px-1 rounded">{`{{variable_name}}`}</code>
                 </p>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                  <p className="text-sm text-blue-900">
+                    <strong>Nota sobre Múltiplas Reservas:</strong> As variáveis da categoria "Múltiplas Reservas" são usadas apenas quando há múltiplas reservas criadas em um único pagamento (página pública de reservas). 
+                    Use <code className="bg-blue-100 px-1 rounded">{`{{#reservations_list}}...{{/reservations_list}}`}</code> para criar um loop personalizado, ou <code className="bg-blue-100 px-1 rounded">{`{{reservations_list}}`}</code> para usar a lista HTML automática.
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-6">
-                {["Reserva", "Pagamento", "Quarto", "Estabelecimento", "Links"].map((category) => {
+                {["Reserva", "Pagamento", "Quarto", "Estabelecimento", "Links", "Múltiplas Reservas"].map((category) => {
                   const categoryVariables = TEMPLATE_VARIABLES.filter(
                     (v) => v.category === category
                   );
