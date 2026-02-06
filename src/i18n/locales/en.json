@@ -144,7 +144,8 @@
         "fillEmailPassword": "Fill in email and password",
         "fillRequired": "Fill in all required fields",
         "passwordsDontMatch": "Passwords do not match",
-        "passwordMinLength": "Password must be at least 6 characters"
+        "passwordMinLength": "Password must be at least 6 characters",
+        "invalidEmail": "Please enter a valid email"
       },
       "success": {
         "loginSuccess": "Login successful!",

@@ -46,6 +46,7 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
   const [registerPhone, setRegisterPhone] = useState("");
   const [locator, setLocator] = useState(initialLocator || "");
   const [showAuthForm, setShowAuthForm] = useState(!!initialLocator); // Se tem localizador inicial, mostrar formulário direto
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   // Atualizar localizador quando initialLocator mudar
   useEffect(() => {
@@ -116,10 +117,22 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
     );
   };
 
+  // Função para validar formato de email
+  const isValidEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!registerEmail || !registerPassword || !registerFullName) {
       toast.error(t("webCheckin.auth.errors.fillRequired"));
+      return;
+    }
+
+    // Validar formato de email
+    if (!isValidEmail(registerEmail)) {
+      toast.error(t("webCheckin.auth.errors.invalidEmail"));
       return;
     }
 
@@ -459,11 +472,33 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
                       type="email"
                       placeholder={t("webCheckin.auth.emailPlaceholder")}
                       value={registerEmail}
-                      onChange={(e) => setRegisterEmail(e.target.value)}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setRegisterEmail(value);
+                        // Validar em tempo real apenas se o usuário já digitou algo
+                        if (value && !isValidEmail(value)) {
+                          setEmailError(t("webCheckin.auth.errors.invalidEmail"));
+                        } else {
+                          setEmailError(null);
+                        }
+                      }}
+                      onBlur={(e) => {
+                        // Validar ao sair do campo
+                        if (e.target.value && !isValidEmail(e.target.value)) {
+                          setEmailError(t("webCheckin.auth.errors.invalidEmail"));
+                        } else {
+                          setEmailError(null);
+                        }
+                      }}
                       required
-                      className="pl-12 h-14 rounded-xl border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-base"
+                      className={`pl-12 h-14 rounded-xl border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-base ${
+                        emailError ? "border-red-500 focus:border-red-500 focus:ring-red-500/20" : ""
+                      }`}
                     />
                   </div>
+                  {emailError && (
+                    <p className="text-xs text-red-600 mt-1">{emailError}</p>
+                  )}
                 </div>
 
                 {/* Campo Telefone */}

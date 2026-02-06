@@ -144,7 +144,8 @@
         "fillEmailPassword": "Completa correo y contraseña",
         "fillRequired": "Completa todos los campos obligatorios",
         "passwordsDontMatch": "Las contraseñas no coinciden",
-        "passwordMinLength": "La contraseña debe tener al menos 6 caracteres"
+        "passwordMinLength": "La contraseña debe tener al menos 6 caracteres",
+        "invalidEmail": "Por favor, ingresa un correo válido"
       },
       "success": {
         "loginSuccess": "¡Inicio de sesión exitoso!",
