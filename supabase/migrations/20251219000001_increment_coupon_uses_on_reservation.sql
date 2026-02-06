@@ -137,6 +137,8 @@ BEGIN
     END IF;
     
     -- Verificar conflitos de reserva com lock
+    -- Excluir reservas criadas recentemente (últimos 10 segundos) pelo mesmo cliente no mesmo período
+    -- Isso evita que reservas criadas na mesma sessão sejam consideradas como conflito
     BEGIN
       PERFORM 1
       FROM public.reservations
@@ -145,6 +147,17 @@ BEGIN
         AND status IN ('pending', 'confirmed', 'checkedin', 'blocked', 'preregistration')
         AND (
           (checkin_date < p_checkout_date AND checkout_date > p_checkin_date)
+        )
+        -- Excluir reservas criadas recentemente pelo mesmo cliente no mesmo período
+        -- Isso permite criar múltiplas reservas sequencialmente para o mesmo cliente
+        -- Usar lógica OR para evitar problemas com NULL
+        AND (
+          p_reservation_data->>'client_id' IS NULL
+          OR client_id IS NULL
+          OR client_id != (p_reservation_data->>'client_id')::UUID
+          OR checkin_date != p_checkin_date
+          OR checkout_date != p_checkout_date
+          OR created_at <= NOW() - INTERVAL '30 seconds'
         )
       FOR UPDATE NOWAIT;
       
@@ -155,6 +168,14 @@ BEGIN
         AND status IN ('pending', 'confirmed', 'checkedin', 'blocked', 'preregistration')
         AND (
           (checkin_date < p_checkout_date AND checkout_date > p_checkin_date)
+        )
+        -- Excluir reservas criadas recentemente pelo mesmo cliente no mesmo período
+        AND NOT (
+          p_reservation_data->>'client_id' IS NOT NULL
+          AND client_id = (p_reservation_data->>'client_id')::UUID
+          AND checkin_date = p_checkin_date
+          AND checkout_date = p_checkout_date
+          AND created_at > NOW() - INTERVAL '10 seconds'
         );
       
       IF v_conflict_count > 0 THEN
@@ -177,6 +198,7 @@ BEGIN
     v_available_rooms := 1;
   ELSE
     -- Sem quarto específico: buscar quarto disponível automaticamente na categoria
+    -- Excluir reservas criadas recentemente pelo mesmo cliente no mesmo período
     SELECT COUNT(*) INTO v_available_rooms
     FROM public.rooms r
     WHERE r.category_id = v_category_id
@@ -191,6 +213,15 @@ BEGIN
           AND (
             (res.checkin_date < p_checkout_date AND res.checkout_date > p_checkin_date)
           )
+          -- Excluir reservas criadas recentemente pelo mesmo cliente no mesmo período
+          AND (
+            p_reservation_data->>'client_id' IS NULL
+            OR res.client_id IS NULL
+            OR res.client_id != (p_reservation_data->>'client_id')::UUID
+            OR res.checkin_date != p_checkin_date
+            OR res.checkout_date != p_checkout_date
+            OR res.created_at <= NOW() - INTERVAL '30 seconds'
+          )
       );
     
     IF v_available_rooms = 0 THEN
@@ -202,6 +233,7 @@ BEGIN
     END IF;
     
     -- Buscar um quarto disponível
+    -- Excluir reservas criadas recentemente pelo mesmo cliente no mesmo período
     SELECT id INTO v_room_id
     FROM public.rooms r
     WHERE r.category_id = v_category_id
@@ -215,6 +247,15 @@ BEGIN
           AND res.status IN ('pending', 'confirmed', 'checkedin', 'blocked', 'preregistration')
           AND (
             (res.checkin_date < p_checkout_date AND res.checkout_date > p_checkin_date)
+          )
+          -- Excluir reservas criadas recentemente pelo mesmo cliente no mesmo período
+          AND (
+            p_reservation_data->>'client_id' IS NULL
+            OR res.client_id IS NULL
+            OR res.client_id != (p_reservation_data->>'client_id')::UUID
+            OR res.checkin_date != p_checkin_date
+            OR res.checkout_date != p_checkout_date
+            OR res.created_at <= NOW() - INTERVAL '30 seconds'
           )
       )
     LIMIT 1;

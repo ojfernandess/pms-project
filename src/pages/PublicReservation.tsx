@@ -1148,12 +1148,22 @@ const PublicReservation = () => {
   };
 
   const formatCPF = (value: string) => {
+    // Remove todos os caracteres não numéricos
     const cleaned = value.replace(/\D/g, "");
-    const match = cleaned.match(/^(\d{0,3})(\d{0,3})(\d{0,3})(\d{0,2})$/);
-    if (match) {
-      return [match[1], match[2], match[3], match[4]].filter(Boolean).join(".").replace(/\.$/, "") + (match[4] ? `-${match[4]}` : "");
+    
+    // Limita a 11 dígitos
+    const limited = cleaned.slice(0, 11);
+    
+    // Formata como 000.000.000-00
+    if (limited.length <= 3) {
+      return limited;
+    } else if (limited.length <= 6) {
+      return `${limited.slice(0, 3)}.${limited.slice(3)}`;
+    } else if (limited.length <= 9) {
+      return `${limited.slice(0, 3)}.${limited.slice(3, 6)}.${limited.slice(6)}`;
+    } else {
+      return `${limited.slice(0, 3)}.${limited.slice(3, 6)}.${limited.slice(6, 9)}-${limited.slice(9, 11)}`;
     }
-    return value;
   };
 
   const formatPhone = (value: string) => {
