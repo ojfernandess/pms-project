@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, CheckCircle2, MapPin, Phone, Mail, Wifi, Car, UtensilsCrossed, Waves, Wind, Tv, Coffee, Bed, Users, Calendar, DollarSign, AlertCircle, MessageCircle, Star, ChevronRight, Sparkles, ChevronLeft, X, ImageIcon, Home, Clock, Plus, Minus, ChevronDown, XCircle } from "lucide-react";
+import { Loader2, CheckCircle2, MapPin, Phone, Mail, Wifi, Car, UtensilsCrossed, Waves, Wind, Tv, Coffee, Bed, Users, Calendar, DollarSign, AlertCircle, MessageCircle, Star, ChevronRight, Sparkles, ChevronLeft, X, ImageIcon, Home, Clock, Plus, Minus, ChevronDown, XCircle, FileText, Info } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -14,7 +14,7 @@ import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogHeader, DialogDescription } from "@/components/ui/dialog";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -71,6 +71,11 @@ const PublicReservation = () => {
   const [lastAvailabilityWarning, setLastAvailabilityWarning] = useState<string | null>(null); // Para evitar avisos repetidos
   const [categoryTotalRooms, setCategoryTotalRooms] = useState<Record<string, number>>({}); // Total de quartos por categoria (geral)
   const [categoryAvailableRooms, setCategoryAvailableRooms] = useState<Record<string, number>>({}); // Quartos disponíveis por categoria para o período selecionado
+  const [establishmentPolicies, setEstablishmentPolicies] = useState<any>(null); // Políticas do estabelecimento
+  const [buildingPolicies, setBuildingPolicies] = useState<any>(null); // Políticas do prédio
+  const [buildingName, setBuildingName] = useState<string | null>(null); // Nome do prédio
+  const [loadingPolicies, setLoadingPolicies] = useState(false);
+  const [policiesDialogOpen, setPoliciesDialogOpen] = useState(false);
 
   useEffect(() => {
     if (establishmentSlug) {
@@ -683,6 +688,10 @@ const PublicReservation = () => {
       if (hotel) {
         setHotelSettings(hotel);
         setPublicPricingPlanId(hotel.public_pricing_plan_id || null);
+        // Armazenar políticas do estabelecimento
+        if (hotel.policies) {
+          setEstablishmentPolicies(hotel.policies);
+        }
       }
 
       // Buscar serviços do estabelecimento
@@ -748,6 +757,56 @@ const PublicReservation = () => {
       setIsLoading(false);
     }
   };
+
+  // Buscar políticas do prédio quando uma categoria for selecionada
+  useEffect(() => {
+    const fetchBuildingPolicies = async () => {
+      if (!selectedCategory || !categories.length) {
+        setBuildingPolicies(null);
+        setBuildingName(null);
+        return;
+      }
+
+      setLoadingPolicies(true);
+      try {
+        // Buscar categoria para obter building_id
+        const category = categories.find(cat => cat.id === selectedCategory);
+        if (!category?.building_id) {
+          setBuildingPolicies(null);
+          setBuildingName(null);
+          setLoadingPolicies(false);
+          return;
+        }
+
+        // Buscar políticas e nome do prédio
+        const { data: building, error: buildingError } = await supabase
+          .from("buildings")
+          .select("policies, name")
+          .eq("id", category.building_id)
+          .maybeSingle();
+
+        if (buildingError) {
+          console.error("Erro ao buscar políticas do prédio:", buildingError);
+          setBuildingPolicies(null);
+          setBuildingName(null);
+        } else if (building) {
+          setBuildingPolicies(building.policies);
+          setBuildingName(building.name);
+        } else {
+          setBuildingPolicies(null);
+          setBuildingName(null);
+        }
+      } catch (error) {
+        console.error("Erro ao buscar políticas do prédio:", error);
+        setBuildingPolicies(null);
+        setBuildingName(null);
+      } finally {
+        setLoadingPolicies(false);
+      }
+    };
+
+    fetchBuildingPolicies();
+  }, [selectedCategory, categories]);
 
   const handleCategoryChange = (categoryId: string) => {
     setSelectedCategory(categoryId);
@@ -2387,6 +2446,22 @@ const PublicReservation = () => {
                   </Alert>
                 )}
 
+                {/* Ícone de Políticas - Minimalista */}
+                {(establishmentPolicies || buildingPolicies) && (
+                  <div className="flex items-center justify-center mt-4 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => setPoliciesDialogOpen(true)}
+                      className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors group"
+                    >
+                      <Info className="h-4 w-4 text-slate-500 group-hover:text-blue-600 transition-colors" />
+                      <span className="underline decoration-dotted underline-offset-2">
+                        {t("publicReservation.viewPolicies", "Ver políticas")}
+                      </span>
+                    </button>
+                  </div>
+                )}
+
                 {/* CTA */}
                 <Button
                   type="submit"
@@ -2541,6 +2616,344 @@ const PublicReservation = () => {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Políticas */}
+      <Dialog open={policiesDialogOpen} onOpenChange={setPoliciesDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-slate-900">
+              {t("publicReservation.policies", "Políticas")}
+            </DialogTitle>
+            <DialogDescription>
+              {buildingPolicies
+                ? buildingName 
+                  ? `Políticas específicas do prédio ${buildingName}`
+                  : "Políticas específicas do prédio"
+                : "Políticas do estabelecimento"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 overflow-y-auto pr-2 flex-1 mt-4">
+            {/* Políticas do Prédio (se houver) - Prioridade quando existe */}
+            {buildingPolicies && (
+              <>
+                {/* Texto Livre das Políticas */}
+                {buildingPolicies.policies_text && (
+                  <Card className="p-4 border-l-4 border-l-blue-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <FileText className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">
+                        {buildingName ? `Políticas do Prédio: ${buildingName}` : "Políticas do Prédio"}
+                      </h3>
+                    </div>
+                    <div className="text-sm text-slate-700 whitespace-pre-line">
+                      {buildingPolicies.policies_text}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Política de Cancelamento */}
+                {buildingPolicies.cancellation && (
+                  <Card className="p-4 border-l-4 border-l-blue-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <AlertCircle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Política de Cancelamento</h3>
+                    </div>
+                    {buildingPolicies.cancellation.free_cancellation_days > 0 && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Cancelamento Gratuito:</strong> Até {buildingPolicies.cancellation.free_cancellation_days} dia(s) antes do check-in.
+                      </p>
+                    )}
+                    {buildingPolicies.cancellation.cancellation_policy && (
+                      <div className="text-sm text-slate-600 mb-2">
+                        <strong>Política:</strong>
+                        <p className="mt-1 whitespace-pre-line">{buildingPolicies.cancellation.cancellation_policy}</p>
+                      </div>
+                    )}
+                    {buildingPolicies.cancellation.refund_policy && (
+                      <div className="text-sm text-slate-600">
+                        <strong>Reembolso:</strong>
+                        <p className="mt-1 whitespace-pre-line">{buildingPolicies.cancellation.refund_policy}</p>
+                      </div>
+                    )}
+                  </Card>
+                )}
+
+                {/* Política de Check-in/Check-out */}
+                {buildingPolicies.checkin_checkout && (
+                  <Card className="p-4 border-l-4 border-l-green-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Check-in e Check-out</h3>
+                    </div>
+                    {buildingPolicies.checkin_checkout.early_checkin_available && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Check-in Antecipado:</strong> Disponível
+                        {buildingPolicies.checkin_checkout.early_checkin_fee && ` - ${buildingPolicies.checkin_checkout.early_checkin_fee}`}
+                      </p>
+                    )}
+                    {buildingPolicies.checkin_checkout.late_checkout_available && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Check-out Tardio:</strong> Disponível
+                        {buildingPolicies.checkin_checkout.late_checkout_fee && ` - ${buildingPolicies.checkin_checkout.late_checkout_fee}`}
+                      </p>
+                    )}
+                    {buildingPolicies.checkin_checkout.checkin_instructions && (
+                      <div className="text-sm text-slate-600 mb-2">
+                        <strong>Instruções de Check-in:</strong>
+                        <p className="mt-1 whitespace-pre-line">{buildingPolicies.checkin_checkout.checkin_instructions}</p>
+                      </div>
+                    )}
+                    {buildingPolicies.checkin_checkout.checkout_instructions && (
+                      <div className="text-sm text-slate-600">
+                        <strong>Instruções de Check-out:</strong>
+                        <p className="mt-1 whitespace-pre-line">{buildingPolicies.checkin_checkout.checkout_instructions}</p>
+                      </div>
+                    )}
+                  </Card>
+                )}
+
+                {/* Política de Animais */}
+                {buildingPolicies.pets && buildingPolicies.pets.pets_allowed && (
+                  <Card className="p-4 border-l-4 border-l-purple-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <AlertCircle className="h-5 w-5 text-purple-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Política de Animais</h3>
+                    </div>
+                    <p className="text-sm text-slate-700 mb-2">
+                      <strong>Animais Permitidos:</strong> Sim
+                      {buildingPolicies.pets.pet_fee && ` - ${buildingPolicies.pets.pet_fee}`}
+                    </p>
+                    {buildingPolicies.pets.pet_policy && (
+                      <div className="text-sm text-slate-600">
+                        <strong>Política:</strong>
+                        <p className="mt-1 whitespace-pre-line">{buildingPolicies.pets.pet_policy}</p>
+                      </div>
+                    )}
+                  </Card>
+                )}
+
+                {/* Política de Crianças */}
+                {buildingPolicies.children && (
+                  <Card className="p-4 border-l-4 border-l-orange-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <AlertCircle className="h-5 w-5 text-orange-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Política de Crianças</h3>
+                    </div>
+                    {buildingPolicies.children.children_policy && (
+                      <div className="text-sm text-slate-600 mb-2">
+                        <strong>Política:</strong>
+                        <p className="mt-1 whitespace-pre-line">{buildingPolicies.children.children_policy}</p>
+                      </div>
+                    )}
+                    {buildingPolicies.children.extra_bed_available && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Cama Extra:</strong> Disponível
+                        {buildingPolicies.children.extra_bed_fee && ` - ${buildingPolicies.children.extra_bed_fee}`}
+                      </p>
+                    )}
+                    {buildingPolicies.children.crib_available && (
+                      <p className="text-sm text-slate-700">
+                        <strong>Berço:</strong> Disponível
+                        {buildingPolicies.children.crib_fee && ` - ${buildingPolicies.children.crib_fee}`}
+                      </p>
+                    )}
+                  </Card>
+                )}
+
+                {/* Políticas Gerais */}
+                {buildingPolicies.general && (
+                  <Card className="p-4 border-l-4 border-l-slate-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <AlertCircle className="h-5 w-5 text-slate-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Políticas Gerais</h3>
+                    </div>
+                    {buildingPolicies.general.smoking_policy && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Política de Fumantes:</strong> {buildingPolicies.general.smoking_policy}
+                      </p>
+                    )}
+                    {buildingPolicies.general.age_restriction && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Restrição de Idade:</strong> {buildingPolicies.general.age_restriction}
+                      </p>
+                    )}
+                    {buildingPolicies.general.id_required && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Documento de Identidade:</strong> Obrigatório no check-in
+                      </p>
+                    )}
+                    {buildingPolicies.general.special_requests && (
+                      <div className="text-sm text-slate-600">
+                        <strong>Solicitações Especiais:</strong>
+                        <p className="mt-1 whitespace-pre-line">{buildingPolicies.general.special_requests}</p>
+                      </div>
+                    )}
+                  </Card>
+                )}
+              </>
+            )}
+
+            {/* Políticas do Estabelecimento - Apenas se NÃO houver prédio */}
+            {establishmentPolicies && !buildingPolicies && (
+              <>
+                {/* Texto Livre das Políticas */}
+                {establishmentPolicies.policies_text && (
+                  <Card className="p-4 border-l-4 border-l-indigo-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <FileText className="h-5 w-5 text-indigo-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Políticas do Estabelecimento</h3>
+                    </div>
+                    <div className="text-sm text-slate-700 whitespace-pre-line">
+                      {establishmentPolicies.policies_text}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Política de Cancelamento */}
+                {establishmentPolicies.cancellation && (
+                  <Card className="p-4 border-l-4 border-l-blue-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <AlertCircle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Política de Cancelamento</h3>
+                    </div>
+                    {establishmentPolicies.cancellation.free_cancellation_days > 0 && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Cancelamento Gratuito:</strong> Até {establishmentPolicies.cancellation.free_cancellation_days} dia(s) antes do check-in.
+                      </p>
+                    )}
+                    {establishmentPolicies.cancellation.cancellation_policy && (
+                      <div className="text-sm text-slate-600 mb-2">
+                        <strong>Política:</strong>
+                        <p className="mt-1 whitespace-pre-line">{establishmentPolicies.cancellation.cancellation_policy}</p>
+                      </div>
+                    )}
+                    {establishmentPolicies.cancellation.refund_policy && (
+                      <div className="text-sm text-slate-600">
+                        <strong>Reembolso:</strong>
+                        <p className="mt-1 whitespace-pre-line">{establishmentPolicies.cancellation.refund_policy}</p>
+                      </div>
+                    )}
+                  </Card>
+                )}
+
+                {/* Política de Check-in/Check-out */}
+                {establishmentPolicies.checkin_checkout && (
+                  <Card className="p-4 border-l-4 border-l-green-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Check-in e Check-out</h3>
+                    </div>
+                    {establishmentPolicies.checkin_checkout.early_checkin_available && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Check-in Antecipado:</strong> Disponível
+                        {establishmentPolicies.checkin_checkout.early_checkin_fee && ` - ${establishmentPolicies.checkin_checkout.early_checkin_fee}`}
+                      </p>
+                    )}
+                    {establishmentPolicies.checkin_checkout.late_checkout_available && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Check-out Tardio:</strong> Disponível
+                        {establishmentPolicies.checkin_checkout.late_checkout_fee && ` - ${establishmentPolicies.checkin_checkout.late_checkout_fee}`}
+                      </p>
+                    )}
+                    {establishmentPolicies.checkin_checkout.checkin_instructions && (
+                      <div className="text-sm text-slate-600 mb-2">
+                        <strong>Instruções de Check-in:</strong>
+                        <p className="mt-1 whitespace-pre-line">{establishmentPolicies.checkin_checkout.checkin_instructions}</p>
+                      </div>
+                    )}
+                    {establishmentPolicies.checkin_checkout.checkout_instructions && (
+                      <div className="text-sm text-slate-600">
+                        <strong>Instruções de Check-out:</strong>
+                        <p className="mt-1 whitespace-pre-line">{establishmentPolicies.checkin_checkout.checkout_instructions}</p>
+                      </div>
+                    )}
+                  </Card>
+                )}
+
+                {/* Política de Animais */}
+                {establishmentPolicies.pets && establishmentPolicies.pets.pets_allowed && (
+                  <Card className="p-4 border-l-4 border-l-purple-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <AlertCircle className="h-5 w-5 text-purple-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Política de Animais</h3>
+                    </div>
+                    <p className="text-sm text-slate-700 mb-2">
+                      <strong>Animais Permitidos:</strong> Sim
+                      {establishmentPolicies.pets.pet_fee && ` - ${establishmentPolicies.pets.pet_fee}`}
+                    </p>
+                    {establishmentPolicies.pets.pet_policy && (
+                      <div className="text-sm text-slate-600">
+                        <strong>Política:</strong>
+                        <p className="mt-1 whitespace-pre-line">{establishmentPolicies.pets.pet_policy}</p>
+                      </div>
+                    )}
+                  </Card>
+                )}
+
+                {/* Política de Crianças */}
+                {establishmentPolicies.children && (
+                  <Card className="p-4 border-l-4 border-l-orange-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <AlertCircle className="h-5 w-5 text-orange-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Política de Crianças</h3>
+                    </div>
+                    {establishmentPolicies.children.children_policy && (
+                      <div className="text-sm text-slate-600 mb-2">
+                        <strong>Política:</strong>
+                        <p className="mt-1 whitespace-pre-line">{establishmentPolicies.children.children_policy}</p>
+                      </div>
+                    )}
+                    {establishmentPolicies.children.extra_bed_available && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Cama Extra:</strong> Disponível
+                        {establishmentPolicies.children.extra_bed_fee && ` - ${establishmentPolicies.children.extra_bed_fee}`}
+                      </p>
+                    )}
+                    {establishmentPolicies.children.crib_available && (
+                      <p className="text-sm text-slate-700">
+                        <strong>Berço:</strong> Disponível
+                        {establishmentPolicies.children.crib_fee && ` - ${establishmentPolicies.children.crib_fee}`}
+                      </p>
+                    )}
+                  </Card>
+                )}
+
+                {/* Políticas Gerais */}
+                {establishmentPolicies.general && (
+                  <Card className="p-4 border-l-4 border-l-slate-500">
+                    <div className="flex items-start gap-3 mb-3">
+                      <AlertCircle className="h-5 w-5 text-slate-600 flex-shrink-0 mt-0.5" />
+                      <h3 className="font-semibold text-slate-900">Políticas Gerais</h3>
+                    </div>
+                    {establishmentPolicies.general.smoking_policy && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Política de Fumantes:</strong> {establishmentPolicies.general.smoking_policy}
+                      </p>
+                    )}
+                    {establishmentPolicies.general.age_restriction && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Restrição de Idade:</strong> {establishmentPolicies.general.age_restriction}
+                      </p>
+                    )}
+                    {establishmentPolicies.general.id_required && (
+                      <p className="text-sm text-slate-700 mb-2">
+                        <strong>Documento de Identidade:</strong> Obrigatório no check-in
+                      </p>
+                    )}
+                    {establishmentPolicies.general.special_requests && (
+                      <div className="text-sm text-slate-600">
+                        <strong>Solicitações Especiais:</strong>
+                        <p className="mt-1 whitespace-pre-line">{establishmentPolicies.general.special_requests}</p>
+                      </div>
+                    )}
+                  </Card>
+                )}
+              </>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

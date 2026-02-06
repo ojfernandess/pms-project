@@ -51,6 +51,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
@@ -72,6 +79,8 @@ export default function Quotes() {
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | undefined>();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [quoteToDelete, setQuoteToDelete] = useState<string | null>(null);
+  const [reservationsDialogOpen, setReservationsDialogOpen] = useState(false);
+  const [multipleReservations, setMultipleReservations] = useState<Array<{ id: string; code: string; checkin_date: string; checkout_date: string; total_amount: number }>>([]);
   const [filters, setFilters] = useState({
     guest: "",
     checkin_start: "",
@@ -80,6 +89,45 @@ export default function Quotes() {
     checkout_end: "",
   });
   const navigate = useNavigate();
+
+  // Função auxiliar para verificar se um quote tem reservas (uma ou múltiplas)
+  const hasReservations = (quote: any): boolean => {
+    // Verificar se tem reservation_id
+    if (quote.reservation_id) {
+      return true;
+    }
+    
+    // Verificar se tem múltiplas reservas no campo notes
+    if (quote.notes) {
+      const newFormatMatch = quote.notes.match(/<!--RESERVATION_IDS_START-->(.+?)<!--RESERVATION_IDS_END-->/s);
+      if (newFormatMatch) {
+        try {
+          const jsonStr = newFormatMatch[1].trim();
+          const parsed = JSON.parse(jsonStr);
+          if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids) && parsed.reservation_ids.length > 0) {
+            return true;
+          }
+        } catch (e) {
+          // Ignorar erro
+        }
+      } else {
+        const oldFormatMatch = quote.notes.match(/\[RESERVATION_IDS:(\{.*?\})\]/s);
+        if (oldFormatMatch) {
+          try {
+            const jsonStr = oldFormatMatch[1];
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids) && parsed.reservation_ids.length > 0) {
+              return true;
+            }
+          } catch (e) {
+            // Ignorar erro
+          }
+        }
+      }
+    }
+    
+    return false;
+  };
 
   const handleCopyPublicReservationLink = async () => {
     if (!selectedEstablishment) {
@@ -218,13 +266,77 @@ export default function Quotes() {
   };
 
   const handleViewReservation = async (quote: any) => {
-    const reservationId = quote.reservation_id;
+    // Verificar se há múltiplas reservas no campo notes
+    let reservationIds: string[] = [];
     
-    if (!reservationId) {
+    if (quote.notes) {
+      // Tentar formato novo primeiro
+      const newFormatMatch = quote.notes.match(/<!--RESERVATION_IDS_START-->(.+?)<!--RESERVATION_IDS_END-->/s);
+      if (newFormatMatch) {
+        try {
+          const jsonStr = newFormatMatch[1].trim();
+          const parsed = JSON.parse(jsonStr);
+          if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+            reservationIds = parsed.reservation_ids;
+          }
+        } catch (e) {
+          console.warn("Erro ao parsear reservation_ids (formato novo):", e);
+        }
+      } else {
+        // Tentar formato antigo (compatibilidade)
+        const oldFormatMatch = quote.notes.match(/\[RESERVATION_IDS:(\{.*?\})\]/s);
+        if (oldFormatMatch) {
+          try {
+            const jsonStr = oldFormatMatch[1];
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+              reservationIds = parsed.reservation_ids;
+            }
+          } catch (e) {
+            console.warn("Erro ao parsear reservation_ids (formato antigo):", e);
+          }
+        }
+      }
+    }
+    
+    // Se não encontrou múltiplas reservas no notes, usar reservation_id se existir
+    if (reservationIds.length === 0 && quote.reservation_id) {
+      reservationIds = [quote.reservation_id];
+    }
+    
+    if (reservationIds.length === 0) {
       toast.error("Reserva não encontrada");
       return;
     }
     
+    // Se houver apenas uma reserva, navegar diretamente
+    if (reservationIds.length === 1) {
+      await navigateToReservation(reservationIds[0]);
+      return;
+    }
+    
+    // Se houver múltiplas reservas, buscar detalhes e mostrar diálogo
+    try {
+      const { data: reservations, error: reservationsError } = await supabase
+        .from("reservations")
+        .select("id, reservation_code, checkin_date, checkout_date, total_amount, establishment_id")
+        .in("id", reservationIds);
+      
+      if (reservationsError || !reservations || reservations.length === 0) {
+        toast.error("Erro ao buscar dados das reservas");
+        return;
+      }
+      
+      // Armazenar reservas e abrir diálogo
+      setMultipleReservations(reservations);
+      setReservationsDialogOpen(true);
+    } catch (error: any) {
+      console.error("Erro ao buscar dados das reservas:", error);
+      toast.error("Erro ao acessar as reservas");
+    }
+  };
+
+  const navigateToReservation = async (reservationId: string) => {
     try {
       // Buscar o reservation_code da reserva
       const { data: reservation, error: reservationError } = await supabase
@@ -448,13 +560,30 @@ export default function Quotes() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    {quote.reservation_id ? (
+                    {hasReservations(quote) ? (
                       <Button
                         variant="link"
                         size="sm"
                         onClick={() => handleViewReservation(quote)}
                       >
-                        Ver Reserva
+                        Ver Reserva{(() => {
+                          // Verificar se há múltiplas reservas para mostrar quantidade
+                          if (quote.notes) {
+                            const newFormatMatch = quote.notes.match(/<!--RESERVATION_IDS_START-->(.+?)<!--RESERVATION_IDS_END-->/s);
+                            if (newFormatMatch) {
+                              try {
+                                const jsonStr = newFormatMatch[1].trim();
+                                const parsed = JSON.parse(jsonStr);
+                                if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids) && parsed.reservation_ids.length > 1) {
+                                  return ` (${parsed.reservation_ids.length})`;
+                                }
+                              } catch (e) {
+                                // Ignorar erro
+                              }
+                            }
+                          }
+                          return "";
+                        })()}
                       </Button>
                     ) : (
                       "--"
@@ -546,6 +675,60 @@ export default function Quotes() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Dialog de Seleção de Reservas Múltiplas */}
+      <Dialog open={reservationsDialogOpen} onOpenChange={setReservationsDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Selecionar Reserva</DialogTitle>
+            <DialogDescription>
+              Este orçamento possui {multipleReservations.length} reserva(s). Selecione qual deseja visualizar:
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 space-y-2 max-h-[400px] overflow-y-auto">
+            {multipleReservations.map((reservation, index) => {
+              const checkinDate = reservation.checkin_date 
+                ? format(new Date(reservation.checkin_date + 'T12:00:00'), "dd/MM/yyyy", { locale: ptBR })
+                : "--";
+              const checkoutDate = reservation.checkout_date 
+                ? format(new Date(reservation.checkout_date + 'T12:00:00'), "dd/MM/yyyy", { locale: ptBR })
+                : "--";
+              
+              return (
+                <div
+                  key={reservation.id}
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent cursor-pointer transition-colors"
+                  onClick={() => {
+                    setReservationsDialogOpen(false);
+                    navigateToReservation(reservation.id);
+                  }}
+                >
+                  <div className="flex-1">
+                    <div className="font-semibold text-lg">
+                      Reserva {index + 1}: {reservation.code}
+                    </div>
+                    <div className="text-sm text-muted-foreground mt-1">
+                      <span>Check-in: {checkinDate}</span>
+                      <span className="mx-2">•</span>
+                      <span>Check-out: {checkoutDate}</span>
+                      <span className="mx-2">•</span>
+                      <span>{formatCurrency(reservation.total_amount || 0)}</span>
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm">
+                    Ver Detalhes
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button variant="outline" onClick={() => setReservationsDialogOpen(false)}>
+              Fechar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

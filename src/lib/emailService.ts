@@ -3062,7 +3062,7 @@ export async function sendQuotePaymentLinkEmail(
 }
 
 export async function triggerEmail(
-  eventType: 'reservation.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification' | 'checkout.completed' | 'preregistration.expired' | 'reservation.modified' | 'quote.payment_link',
+  eventType: 'reservation.created' | 'reservation.multiple.created' | 'reservation.imported' | 'reservation.cancelled' | 'payment.confirmed' | 'payment.pending' | 'checkin.confirmed' | 'reservation.extended' | 'reservation.overbooking' | 'guest.password_reset' | 'fiscal_document.request' | 'employee.added_to_establishment' | 'checkout.reminder' | 'checkin.reception.notification' | 'checkout.completed' | 'preregistration.expired' | 'reservation.modified' | 'quote.payment_link',
   reservation: any,
   additionalVariables?: TemplateVariables,
   customRecipientEmail?: string

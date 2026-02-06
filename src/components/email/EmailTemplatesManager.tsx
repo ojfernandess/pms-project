@@ -80,6 +80,7 @@ export function EmailTemplatesManager() {
 
   const eventTypes = [
     { value: "reservation.created", label: "Reserva Criada" },
+    { value: "reservation.multiple.created", label: "Múltiplas Reservas Criadas" },
     { value: "reservation.imported", label: "Reserva Importada" },
     { value: "reservation.cancelled", label: "Reserva Cancelada" },
     { value: "reservation.overbooking", label: "Overbooking Detectado" },
@@ -95,6 +96,7 @@ export function EmailTemplatesManager() {
     { value: "guest.password_reset", label: "Recuperação de Senha do Hóspede" },
     { value: "fiscal_document.request", label: "Solicitação de Documento Fiscal" },
     { value: "employee.added_to_establishment", label: "Funcionário Adicionado ao Estabelecimento" },
+    { value: "quote.payment_link", label: "Orçamento - Link de Pagamento" },
   ];
 
   const handleOpenDialog = (template?: any) => {

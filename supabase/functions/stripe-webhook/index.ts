@@ -1228,32 +1228,75 @@ async function sendMultipleReservationsCreatedEmail(
       return;
     }
 
-    // Buscar template de email
-    const { data: template, error: templateError } = await supabaseClient
+    // Buscar template de email para múltiplas reservas
+    // A tabela usa establishment_ids (JSONB array), não establishment_id
+    const { data: allTemplates, error: templateError } = await supabaseClient
       .from("email_templates")
       .select("*")
-      .eq("event_type", "reservation.created")
-      .eq("is_active", true)
-      .eq("establishment_id", establishmentId)
-      .maybeSingle();
+      .eq("event_type", "reservation.multiple.created")
+      .eq("is_active", true);
 
-    // Se não encontrar template específico do estabelecimento, buscar template global
-    let finalTemplate = template;
-    if (!finalTemplate) {
-      const { data: globalTemplate } = await supabaseClient
-        .from("email_templates")
-        .select("*")
-        .eq("event_type", "reservation.created")
-        .eq("is_active", true)
-        .is("establishment_id", null)
-        .maybeSingle();
-      finalTemplate = globalTemplate;
-    }
-
-    if (templateError || !finalTemplate) {
-      console.warn("⚠️ Template de email 'reservation.created' não encontrado ou inativo");
+    if (templateError) {
+      console.warn("⚠️ Erro ao buscar template de email 'reservation.multiple.created':", templateError);
       return;
     }
+
+    if (!allTemplates || allTemplates.length === 0) {
+      console.warn("⚠️ Template de email 'reservation.multiple.created' não encontrado ou inativo");
+      return;
+    }
+
+    // Filtrar templates que permitem este estabelecimento ou não têm restrição
+    let finalTemplate = null;
+    for (const template of allTemplates) {
+      const establishmentIds = template.establishment_ids;
+      
+      // Se nunca foi definido (null ou undefined), permitir todos (comportamento padrão)
+      if (establishmentIds === null || establishmentIds === undefined) {
+        finalTemplate = template;
+        break;
+      }
+      
+      // Se foi explicitamente definido como array vazio, não permitir nenhum
+      if (Array.isArray(establishmentIds) && establishmentIds.length === 0) {
+        continue;
+      }
+      
+      // Se há restrição com valores, verificar se o establishment_id está na lista
+      if (Array.isArray(establishmentIds)) {
+        if (establishmentIds.includes(establishmentId)) {
+          finalTemplate = template;
+          break;
+        }
+        continue;
+      }
+      
+      // Se for string JSON, tentar parsear
+      try {
+        const parsed = typeof establishmentIds === 'string' ? JSON.parse(establishmentIds) : establishmentIds;
+        if (Array.isArray(parsed)) {
+          if (parsed.length === 0) {
+            continue;
+          }
+          if (parsed.includes(establishmentId)) {
+            finalTemplate = template;
+            break;
+          }
+        }
+      } catch (e) {
+        // Se não conseguir parsear, assumir que não há restrição (comportamento padrão)
+        finalTemplate = template;
+        break;
+      }
+    }
+
+    if (!finalTemplate) {
+      console.warn("⚠️ Template de email 'reservation.multiple.created' não encontrado para este estabelecimento");
+      return;
+    }
+
+    // Garantir que finalTemplate tem as propriedades necessárias
+    const template = finalTemplate as any;
 
     // Buscar configurações do hotel
     const { data: hotelSettings } = await supabaseClient
@@ -1269,20 +1312,35 @@ async function sendMultipleReservationsCreatedEmail(
       .maybeSingle();
 
     // Preparar variáveis para múltiplas reservas
-    const baseUrl = detectBaseUrl(null, Deno.env.get("SUPABASE_URL") || null);
+    // Priorizar pms_base_url de site_settings
+    let baseUrl = detectBaseUrl(null, Deno.env.get("SUPABASE_URL") || null);
+    if (siteSettings?.pms_base_url) {
+      const pmsUrl = siteSettings.pms_base_url.trim();
+      if (pmsUrl) {
+        try {
+          const url = new URL(pmsUrl.startsWith('http://') || pmsUrl.startsWith('https://') ? pmsUrl : `https://${pmsUrl}`);
+          baseUrl = url.origin;
+        } catch {
+          baseUrl = pmsUrl;
+        }
+      }
+    }
     
     // Formatar lista de reservas para o template
     const reservationsList = reservations.map((res: any, index: number) => {
       const checkinDate = res.checkin_date ? new Date(res.checkin_date).toLocaleDateString("pt-BR") : "";
       const checkoutDate = res.checkout_date ? new Date(res.checkout_date).toLocaleDateString("pt-BR") : "";
-      const webCheckinLink = res.web_checkin?.locator 
-        ? `${baseUrl}/web-checkin/${res.web_checkin.locator}`
-        : "";
+      
+      // Gerar link de web check-in (sempre gerar quando houver reservation_code ou locator)
+      // Priorizar locator do web_checkin, senão usar reservation_code como fallback
+      const locator = res.web_checkin?.locator || res.reservation_code || "";
+      // Sempre gerar o link se houver locator ou reservation_code
+      const webCheckinLink = locator ? `${baseUrl}/web-checkin/${locator}` : "";
 
       return {
         number: index + 1,
         code: res.reservation_code || "",
-        locator: res.web_checkin?.locator || res.reservation_code || "",
+        locator: locator,
         checkin_date: checkinDate,
         checkout_date: checkoutDate,
         total_amount: new Intl.NumberFormat("pt-BR", {
@@ -1322,22 +1380,60 @@ async function sendMultipleReservationsCreatedEmail(
       logo_url: siteSettings?.logo_url || "",
     };
 
-    // Processar template
-    let subject = finalTemplate.subject || "";
-    let bodyHtml = finalTemplate.body_html || "";
+    // Processar template com suporte a condicionais {{#if}}
+    const processConditionals = (templateStr: string, vars: Record<string, any>): string => {
+      let processed = templateStr;
+      let changed = true;
+      let iterations = 0;
+      const maxIterations = 20;
 
-    // Substituir variáveis simples
-    Object.keys(variables).forEach((key) => {
-      if (key !== "reservations_list") {
-        const value = variables[key] || "";
-        const regex = new RegExp(`{{${key}}}`, "g");
-        subject = subject.replace(regex, String(value));
-        bodyHtml = bodyHtml.replace(regex, String(value));
+      while (changed && iterations < maxIterations) {
+        iterations++;
+        changed = false;
+        const before = processed;
+
+        // Processar {{#if variavel}} ... {{else}} ... {{/if}}
+        const ifElseRegex = /\{\{#if\s+(\w+)\}\}([\s\S]*?)(?:\{\{else\}\}([\s\S]*?))?\{\{\/if\}\}/g;
+        processed = processed.replace(ifElseRegex, (match, varName, ifContent, elseContent) => {
+          const value = vars[varName];
+          // Se a variável existe e não está vazia, retorna o conteúdo do if, senão retorna o else
+          if (value && value !== null && value !== undefined && String(value).trim() !== "") {
+            return ifContent || "";
+          }
+          return elseContent || "";
+        });
+
+        if (before !== processed) {
+          changed = true;
+        }
       }
-    });
 
-    // Processar lista de reservas no template
-    // Procurar por {{#reservations_list}}...{{/reservations_list}} ou {{reservations_list}}
+      // Remover blocos {{/if}} soltos que possam ter sobrado
+      processed = processed.replace(/\{\{\/if\}\}/g, '');
+
+      return processed;
+    };
+
+    // Processar template (primeiro condicionais, depois variáveis)
+    const processTemplate = (templateStr: string, vars: Record<string, any>): string => {
+      // Primeiro processar condicionais
+      let processed = processConditionals(templateStr, vars);
+      
+      // Depois substituir variáveis
+      Object.keys(vars).forEach((key) => {
+        const value = vars[key];
+        if (value !== null && value !== undefined) {
+          const regex = new RegExp(`\\{\\{${key}\\}\\}`, "g");
+          processed = processed.replace(regex, String(value));
+        }
+      });
+      
+      return processed;
+    };
+
+    // Processar lista de reservas no template ANTES de processar o template principal
+    // Procurar por {{#reservations_list}}...{{/reservations_list}}
+    let bodyHtml = template.body_html || "";
     const reservationsListRegex = /{{#reservations_list}}([\s\S]*?){{\/reservations_list}}/g;
     const reservationsListMatch = bodyHtml.match(reservationsListRegex);
     
@@ -1348,11 +1444,8 @@ async function sendMultipleReservationsCreatedEmail(
         let renderedReservations = "";
         
         reservationsList.forEach((reservation: any) => {
-          let reservationHtml = templateContent;
-          Object.keys(reservation).forEach((key) => {
-            const regex = new RegExp(`{{${key}}}`, "g");
-            reservationHtml = reservationHtml.replace(regex, String(reservation[key] || ""));
-          });
+          // Processar cada reserva individualmente com condicionais e variáveis
+          let reservationHtml = processTemplate(templateContent, reservation);
           renderedReservations += reservationHtml;
         });
         
@@ -1377,6 +1470,10 @@ async function sendMultipleReservationsCreatedEmail(
       bodyHtml = bodyHtml.replace(/{{reservations_list}}/g, reservationsHtml);
     }
 
+    // Processar template principal com todas as variáveis
+    const subject = processTemplate(template.subject || "", variables);
+    bodyHtml = processTemplate(bodyHtml, variables);
+
     // Buscar configurações de email
     const { data: emailSettings } = await supabaseClient
       .from("email_settings")
@@ -1393,8 +1490,8 @@ async function sendMultipleReservationsCreatedEmail(
     const { data: emailQueue, error: queueError } = await supabaseClient
       .from("email_queue")
       .insert({
-        template_id: finalTemplate.id,
-        event_type: "reservation.created",
+        template_id: template.id,
+        event_type: "reservation.multiple.created",
         recipient_email: recipientEmail,
         recipient_name: recipientName,
         subject: subject,
@@ -1412,6 +1509,182 @@ async function sendMultipleReservationsCreatedEmail(
     }
 
     console.log(`✅ Email de múltiplas reservas criadas adicionado à fila: ${emailQueue.id}`);
+    
+    // Processar email imediatamente após adicionar à fila
+    try {
+      console.log(`📧 [sendMultipleReservationsCreatedEmail] Processando email da fila imediatamente (ID: ${emailQueue.id})...`);
+      
+      // Buscar item da fila
+      const { data: queueItem, error: fetchError } = await supabaseClient
+        .from("email_queue")
+        .select("*")
+        .eq("id", emailQueue.id)
+        .maybeSingle();
+
+      if (fetchError || !queueItem) {
+        console.warn(`⚠️ [sendMultipleReservationsCreatedEmail] Erro ao buscar item da fila (ID: ${emailQueue.id}):`, fetchError);
+      } else {
+        // Atualizar status para "sending"
+        await supabaseClient
+          .from("email_queue")
+          .update({ status: "sending" })
+          .eq("id", emailQueue.id);
+
+        // Processar email baseado no provider
+        let emailProcessed = false;
+        try {
+          const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+          
+          if (emailSettings.provider === "smtp") {
+            // Chamar Edge Function send-email-smtp
+            const smtpResponse = await fetch(`${supabaseUrl}/functions/v1/send-email-smtp`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+              },
+              body: JSON.stringify({
+                to: queueItem.recipient_email,
+                to_name: queueItem.recipient_name,
+                from: emailSettings.sender_email,
+                from_name: emailSettings.sender_name,
+                reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+                subject: queueItem.subject,
+                html: queueItem.body_html,
+                text: queueItem.body_text || "",
+                smtp_config: {
+                  host: emailSettings.smtp_host,
+                  port: emailSettings.smtp_port || 587,
+                  secure: emailSettings.smtp_secure || false,
+                  auth: {
+                    user: emailSettings.smtp_username,
+                    pass: emailSettings.smtp_password,
+                  },
+                },
+              }),
+            });
+
+            if (smtpResponse.ok) {
+              emailProcessed = true;
+              await supabaseClient
+                .from("email_queue")
+                .update({
+                  status: "sent",
+                  sent_at: new Date().toISOString(),
+                })
+                .eq("id", emailQueue.id);
+              console.log(`✅ [sendMultipleReservationsCreatedEmail] Email SMTP processado e enviado com sucesso (ID: ${emailQueue.id})`);
+            } else {
+              const errorText = await smtpResponse.text();
+              console.warn(`⚠️ [sendMultipleReservationsCreatedEmail] Erro ao processar email SMTP (ID: ${emailQueue.id}):`, errorText);
+              await supabaseClient
+                .from("email_queue")
+                .update({
+                  status: "pending",
+                  error_message: errorText.substring(0, 500),
+                })
+                .eq("id", emailQueue.id);
+            }
+          } else if (emailSettings.provider === "resend") {
+            // Chamar Edge Function send-email-resend
+            const resendResponse = await fetch(`${supabaseUrl}/functions/v1/send-email-resend`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+              },
+              body: JSON.stringify({
+                to: queueItem.recipient_email,
+                to_name: queueItem.recipient_name,
+                from: emailSettings.sender_email,
+                from_name: emailSettings.sender_name,
+                reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+                subject: queueItem.subject,
+                html: queueItem.body_html,
+                text: queueItem.body_text || "",
+                api_key: emailSettings.api_key || "",
+              }),
+            });
+
+            if (resendResponse.ok) {
+              emailProcessed = true;
+              await supabaseClient
+                .from("email_queue")
+                .update({
+                  status: "sent",
+                  sent_at: new Date().toISOString(),
+                })
+                .eq("id", emailQueue.id);
+              console.log(`✅ [sendMultipleReservationsCreatedEmail] Email Resend processado e enviado com sucesso (ID: ${emailQueue.id})`);
+            } else {
+              const errorText = await resendResponse.text();
+              console.warn(`⚠️ [sendMultipleReservationsCreatedEmail] Erro ao processar email Resend (ID: ${emailQueue.id}):`, errorText);
+              await supabaseClient
+                .from("email_queue")
+                .update({
+                  status: "pending",
+                  error_message: errorText.substring(0, 500),
+                })
+                .eq("id", emailQueue.id);
+            }
+          } else if (emailSettings.provider === "sendgrid") {
+            // Chamar Edge Function send-email-sendgrid
+            const sendgridResponse = await fetch(`${supabaseUrl}/functions/v1/send-email-sendgrid`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+              },
+              body: JSON.stringify({
+                to: queueItem.recipient_email,
+                to_name: queueItem.recipient_name,
+                from: emailSettings.sender_email,
+                from_name: emailSettings.sender_name,
+                reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+                subject: queueItem.subject,
+                html: queueItem.body_html,
+                text: queueItem.body_text || "",
+                api_key: emailSettings.api_key || "",
+              }),
+            });
+
+            if (sendgridResponse.ok) {
+              emailProcessed = true;
+              await supabaseClient
+                .from("email_queue")
+                .update({
+                  status: "sent",
+                  sent_at: new Date().toISOString(),
+                })
+                .eq("id", emailQueue.id);
+              console.log(`✅ [sendMultipleReservationsCreatedEmail] Email SendGrid processado e enviado com sucesso (ID: ${emailQueue.id})`);
+            } else {
+              const errorText = await sendgridResponse.text();
+              console.warn(`⚠️ [sendMultipleReservationsCreatedEmail] Erro ao processar email SendGrid (ID: ${emailQueue.id}):`, errorText);
+              await supabaseClient
+                .from("email_queue")
+                .update({
+                  status: "pending",
+                  error_message: errorText.substring(0, 500),
+                })
+                .eq("id", emailQueue.id);
+            }
+          }
+        } catch (processError) {
+          console.error(`❌ [sendMultipleReservationsCreatedEmail] Erro ao processar email da fila (ID: ${emailQueue.id}):`, processError);
+          await supabaseClient
+            .from("email_queue")
+            .update({
+              status: "pending",
+              error_message: processError instanceof Error ? processError.message.substring(0, 500) : String(processError).substring(0, 500),
+            })
+            .eq("id", emailQueue.id);
+        }
+      }
+    } catch (processError) {
+      console.warn(`⚠️ [sendMultipleReservationsCreatedEmail] Erro ao processar email da fila (ID: ${emailQueue.id}):`, processError);
+      // Não falhar aqui, pois o email está na fila e pode ser processado depois
+    }
   } catch (error) {
     console.error("❌ Erro geral ao enviar email de múltiplas reservas criadas:", error);
   }
