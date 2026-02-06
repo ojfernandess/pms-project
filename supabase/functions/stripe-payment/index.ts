@@ -182,26 +182,27 @@ serve(async (req) => {
 
     // Criar Payment Intent
     // IMPORTANTE: Detectar se amount está em reais ou centavos
-    // Se amount < 1000, provavelmente está em reais (ex: 250.00)
-    // Se amount >= 1000, provavelmente já está em centavos (ex: 25000)
-    // Mas para segurança, vamos verificar se parece ser um valor em reais (tem casas decimais ou é menor que 1000)
+    // A lógica padrão é que valores vindos de emailTemplateEngine e generatePaymentLink estão em REAIS
+    // Valores vindos de PublicReservation (quote_payment) já estão em CENTAVOS (multiplicados por 100)
     const amountAsNumber = Number(amount);
     let amountInCents: number;
     
-    // Se o valor tem casas decimais ou é menor que 100, provavelmente está em reais
-    if (amountAsNumber < 100 || (amountAsNumber % 1 !== 0 && amountAsNumber < 1000)) {
-      // Está em reais, converter para centavos
-      amountInCents = Math.round(amountAsNumber * 100);
-      console.log("[stripe-payment] Valor detectado como REAIS, convertendo para centavos:", { 
-        original: amountAsNumber, 
-        converted: amountInCents 
-      });
-    } else {
+    // Se o payment_type é quote_payment, o valor já está em centavos (foi multiplicado por 100 no frontend)
+    // Se o payment_type é reservation_payment, o valor está em reais (precisa converter)
+    if (payment_type === "quote_payment") {
       // Já está em centavos, apenas arredondar
       amountInCents = Math.round(amountAsNumber);
-      console.log("[stripe-payment] Valor detectado como CENTAVOS, usando diretamente:", { 
+      console.log("[stripe-payment] Quote payment - Valor já em CENTAVOS:", { 
         original: amountAsNumber, 
         final: amountInCents 
+      });
+    } else {
+      // Para reservation_payment e outros tipos, assumir que está em REAIS
+      // Converter para centavos
+      amountInCents = Math.round(amountAsNumber * 100);
+      console.log("[stripe-payment] Reservation payment - Valor em REAIS, convertendo para centavos:", { 
+        original: amountAsNumber, 
+        converted: amountInCents 
       });
     }
     

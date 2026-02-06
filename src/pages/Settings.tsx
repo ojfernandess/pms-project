@@ -24,6 +24,7 @@ import { useStripe } from "@/hooks/useStripe";
 import { useCurrentEmployeeRole } from "@/hooks/useEmployees";
 import { useIsSuperAdmin } from "@/hooks/useUsers";
 import RoomDisplayConfig from "@/components/settings/RoomDisplayConfig";
+import DiscountCouponsManager from "@/components/settings/DiscountCouponsManager";
 import {
   Table,
   TableBody,
@@ -340,6 +341,7 @@ const Settings = () => {
           <TabsTrigger value="services">Serviços</TabsTrigger>
           <TabsTrigger value="policies">Políticas</TabsTrigger>
           <TabsTrigger value="room-display">Exibição de Quartos</TabsTrigger>
+          <TabsTrigger value="discounts">Descontos</TabsTrigger>
           {isApiIntegrationsEnabled && (
             <TabsTrigger value="integration">Integrações</TabsTrigger>
           )}
@@ -915,6 +917,10 @@ const Settings = () => {
 
         <TabsContent value="room-display">
           <RoomDisplayConfig />
+        </TabsContent>
+
+        <TabsContent value="discounts">
+          <DiscountCouponsManager />
         </TabsContent>
 
         {isApiIntegrationsEnabled && (

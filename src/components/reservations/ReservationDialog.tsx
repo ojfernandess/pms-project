@@ -85,6 +85,9 @@ export const ReservationDialog = ({
   const [loadingRooms, setLoadingRooms] = useState(false);
   const [calculatedTotal, setCalculatedTotal] = useState<number>(0);
   const [isManualPrice, setIsManualPrice] = useState(false); // Flag para indicar que o preço foi definido manualmente
+  const [promotionCode, setPromotionCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<any>(null); // Cupom aplicado
+  const [validatingCoupon, setValidatingCoupon] = useState(false); // Validando cupom
   
   // Estados para taxas/serviços
   const { serviceFees } = useServiceFees();
@@ -100,15 +103,21 @@ export const ReservationDialog = ({
   const [selectedServiceFee, setSelectedServiceFee] = useState<{ id: string; name: string; description?: string } | null>(null);
   const [editingServiceFee, setEditingServiceFee] = useState<{ id: string; amount: number; quantity: number; notes?: string } | null>(null);
   
-  // Calcular total incluindo taxas
+  // Calcular total incluindo taxas e desconto do cupom
+  // O desconto é aplicado apenas no valor base da reserva, não nas taxas
   const totalWithFees = useMemo(() => {
     const baseTotal = calculatedTotal || 0;
     const feesTotal = reservationServiceFees.reduce((sum: number, fee: any) => {
       return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
     }, 0);
-    return baseTotal + feesTotal;
-  }, [calculatedTotal, reservationServiceFees]);
-  const [promotionCode, setPromotionCode] = useState("");
+    
+    // Aplicar desconto do cupom apenas no valor base se houver
+    const discountedBase = appliedCoupon && appliedCoupon.valid 
+      ? appliedCoupon.final_amount 
+      : baseTotal;
+    
+    return discountedBase + feesTotal;
+  }, [calculatedTotal, reservationServiceFees, appliedCoupon]);
   const [calculatingPrice, setCalculatingPrice] = useState(false);
   const [createNewClient, setCreateNewClient] = useState(true); // Sempre criar novo cliente
   const [creatingClient, setCreatingClient] = useState(false);
@@ -483,6 +492,7 @@ export const ReservationDialog = ({
       setInitialSearchDocument("");
       setInitialSearchDocumentType("CPF");
       setPromotionCode("");
+      setAppliedCoupon(null);
       setReservationAction(null);
       setExpirationDate("");
       setExpirationTime("23:59");
@@ -594,6 +604,38 @@ export const ReservationDialog = ({
             guest_name: data.guest?.full_name || data.financial_responsible?.full_name,
             cancelled_by_user: cancelledByUser,
           });
+
+          // Carregar cupom aplicado se houver
+          if (data.coupon_id) {
+            const { data: couponData } = await supabase
+              .from("discount_coupons")
+              .select("code, name, discount_type, discount_value, apply_to")
+              .eq("id", data.coupon_id)
+              .single();
+            
+            if (couponData) {
+              // Calcular desconto aplicado
+              const checkin = new Date(data.checkin_date + 'T12:00:00');
+              const checkout = new Date(data.checkout_date + 'T12:00:00');
+              const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+              
+              // Validar cupom novamente para obter informações completas
+              const establishmentId = localStorage.getItem("selectedEstablishmentId");
+              if (establishmentId) {
+                const { data: validationData } = await supabase.rpc('validate_and_apply_discount', {
+                  p_code: couponData.code,
+                  p_establishment_id: establishmentId,
+                  p_total_amount: data.total_amount,
+                  p_nights: nights,
+                });
+                
+                if (validationData && validationData.valid) {
+                  setAppliedCoupon(validationData);
+                  setPromotionCode(couponData.code);
+                }
+              }
+            }
+          }
 
           // Carregar dados completos do cliente para exibir no formulário
           const { data: clientDataArray, error: clientError } = await supabase
@@ -808,6 +850,10 @@ export const ReservationDialog = ({
 
           if (dynamicPrice > 0) {
             setCalculatedTotal(dynamicPrice);
+            // Remover cupom aplicado quando o preço é recalculado para evitar inconsistências
+            if (appliedCoupon) {
+              setAppliedCoupon(null);
+            }
           } else {
             // Fallback para cálculo simples
             const category = categories.find((c) => c.id === formData.category_id);
@@ -818,6 +864,10 @@ export const ReservationDialog = ({
                 formData.checkout_date
               );
               setCalculatedTotal(total);
+              // Remover cupom aplicado quando o preço é recalculado para evitar inconsistências
+              if (appliedCoupon) {
+                setAppliedCoupon(null);
+              }
             }
           }
         } catch (error) {
@@ -831,6 +881,10 @@ export const ReservationDialog = ({
               formData.checkout_date
             );
             setCalculatedTotal(total);
+            // Remover cupom aplicado quando o preço é recalculado para evitar inconsistências
+            if (appliedCoupon) {
+              setAppliedCoupon(null);
+            }
           }
         } finally {
           if (!cancelled) {
@@ -1176,7 +1230,8 @@ export const ReservationDialog = ({
         channel: formData.channel || "direct",
         pricing_plan_id: pricingPlanId,
         notes: (isBlocked ? `Bloqueio: ${blockReason}` : formData.notes) || null,
-        total_amount: isBlocked ? 0 : calculatedTotal,
+        total_amount: isBlocked ? 0 : (appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : calculatedTotal),
+        coupon_id: appliedCoupon && appliedCoupon.valid ? appliedCoupon.coupon_id : null,
         status: status,
         // IMPORTANTE: Campos financeiros só devem ser incluídos para novas reservas
         // Para atualizações, esses campos serão preservados do currentReservation se não forem alterados
@@ -2054,6 +2109,7 @@ export const ReservationDialog = ({
       });
       setCreateNewClient(false);
       setPromotionCode("");
+      setAppliedCoupon(null);
       setReservationAction(null);
       setExpirationDate("");
       setExpirationTime("23:59");
@@ -2071,6 +2127,63 @@ export const ReservationDialog = ({
     } finally {
       setLoading(false);
       setCreatingClient(false);
+    }
+  };
+
+  // Função para validar e aplicar cupom
+  const handleApplyCoupon = async () => {
+    if (!promotionCode.trim()) {
+      return;
+    }
+
+    const establishmentId = localStorage.getItem("selectedEstablishmentId");
+    if (!establishmentId) {
+      toast.error("Estabelecimento não selecionado");
+      return;
+    }
+
+    if (!formData.checkin_date || !formData.checkout_date) {
+      toast.error("Selecione as datas de check-in e check-out primeiro");
+      return;
+    }
+
+    const checkin = new Date(formData.checkin_date + 'T12:00:00');
+    const checkout = new Date(formData.checkout_date + 'T12:00:00');
+    const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Usar apenas o total calculado da reserva (sem taxas)
+    // O desconto deve ser aplicado apenas no valor da reserva, não nas taxas
+    const baseTotal = calculatedTotal || 0;
+
+    if (baseTotal <= 0) {
+      toast.error("Calcule o preço primeiro antes de aplicar o cupom");
+      return;
+    }
+
+    setValidatingCoupon(true);
+    try {
+      const { data, error } = await supabase.rpc('validate_and_apply_discount', {
+        p_code: promotionCode.trim().toUpperCase(),
+        p_establishment_id: establishmentId,
+        p_total_amount: baseTotal,
+        p_nights: nights,
+      });
+
+      if (error) throw error;
+
+      if (data.valid) {
+        setAppliedCoupon(data);
+        toast.success(`Cupom "${data.coupon_name}" aplicado com sucesso!`);
+      } else {
+        setAppliedCoupon(null);
+        toast.error(data.error || "Cupom inválido");
+      }
+    } catch (error: any) {
+      console.error("Erro ao validar cupom:", error);
+      setAppliedCoupon(null);
+      toast.error(error.message || "Erro ao validar cupom");
+    } finally {
+      setValidatingCoupon(false);
     }
   };
 
@@ -3383,16 +3496,59 @@ export const ReservationDialog = ({
               </div>
             )}
 
-            {/* Código de Promoção */}
-            <div className="col-span-2">
-              <Label htmlFor="promotion_code">Código de Promoção (opcional)</Label>
-              <Input
-                id="promotion_code"
-                value={promotionCode}
-                onChange={(e) => setPromotionCode(e.target.value.toUpperCase())}
-                placeholder="Digite o código da promoção"
-              />
-            </div>
+            {/* Cupom de Desconto */}
+            {formData.checkin_date && formData.checkout_date && calculatedTotal > 0 && (
+              <div className="col-span-2">
+                <Label htmlFor="promotion_code">Cupom de Desconto (opcional)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="promotion_code"
+                    value={promotionCode}
+                    onChange={(e) => setPromotionCode(e.target.value.toUpperCase())}
+                    placeholder="Digite o código do cupom"
+                    disabled={validatingCoupon || !!appliedCoupon}
+                    className="flex-1"
+                  />
+                  {appliedCoupon ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setAppliedCoupon(null);
+                        setPromotionCode("");
+                      }}
+                      className="px-4"
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Remover
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      onClick={handleApplyCoupon}
+                      disabled={validatingCoupon || !promotionCode.trim()}
+                      className="px-4 bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      {validatingCoupon ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Aplicar"
+                      )}
+                    </Button>
+                  )}
+                </div>
+                {appliedCoupon && (
+                  <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-800">
+                    <div className="font-semibold">
+                      Cupom "{appliedCoupon.coupon_name}" aplicado! Desconto de{" "}
+                      {appliedCoupon.discount_type === "percentage"
+                        ? `${appliedCoupon.discount_value}%`
+                        : `R$ ${appliedCoupon.discount_value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Total calculado */}
             {calculatedTotal > 0 && (
@@ -3403,10 +3559,22 @@ export const ReservationDialog = ({
                     <Loader2 className="h-5 w-5 animate-spin text-primary" />
                   ) : (
                     <span className="text-2xl font-bold text-primary">
-                      {formatCurrency(calculatedTotal)}
+                      {formatCurrency(appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : calculatedTotal)}
                     </span>
                   )}
                 </div>
+                {appliedCoupon && appliedCoupon.valid && (
+                  <div className="mt-2 pt-2 border-t border-slate-300">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">Subtotal:</span>
+                      <span className="text-slate-700">{formatCurrency(calculatedTotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm text-green-600">
+                      <span>Desconto ({appliedCoupon.coupon_code}):</span>
+                      <span className="font-semibold">-{formatCurrency(appliedCoupon.discount_amount)}</span>
+                    </div>
+                  </div>
+                )}
                 {formData.checkin_date && formData.checkout_date && (
                   <p className="text-xs text-muted-foreground mt-1">
                     {Math.ceil(
@@ -3415,9 +3583,6 @@ export const ReservationDialog = ({
                         (1000 * 60 * 60 * 24)
                     )}{" "}
                     noite(s)
-                    {promotionCode && (
-                      <span className="text-success ml-2">• Promoção aplicada</span>
-                    )}
                   </p>
                 )}
               </div>

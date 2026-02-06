@@ -442,7 +442,7 @@ const PaymentPage = () => {
                   {new Intl.NumberFormat("pt-BR", {
                     style: "currency",
                     currency: paymentData.currency || "BRL",
-                  }).format(paymentData.amount)}
+                  }).format((paymentData.amount || 0) / 100)}
                 </p>
                 <div className="mt-3 sm:mt-4">
                   <Badge 
@@ -695,7 +695,7 @@ const PaymentPage = () => {
         <PaymentDialog
           open={paymentDialogOpen}
           onOpenChange={setPaymentDialogOpen}
-          amount={paymentData.amount}
+          amount={(paymentData.amount || 0) / 100}
           currency={paymentData.currency}
           paymentType={paymentData.payment_type}
           reservationId={paymentData.reservation_id}

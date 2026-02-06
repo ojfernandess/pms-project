@@ -75,6 +75,8 @@ const PublicReservation = () => {
   const [buildingPolicies, setBuildingPolicies] = useState<any>(null); // Políticas do prédio
   const [buildingName, setBuildingName] = useState<string | null>(null); // Nome do prédio
   const [loadingPolicies, setLoadingPolicies] = useState(false);
+  const [appliedCoupon, setAppliedCoupon] = useState<any>(null); // Cupom aplicado
+  const [validatingCoupon, setValidatingCoupon] = useState(false); // Validando cupom
   const [policiesDialogOpen, setPoliciesDialogOpen] = useState(false);
 
   useEffect(() => {
@@ -808,6 +810,64 @@ const PublicReservation = () => {
     fetchBuildingPolicies();
   }, [selectedCategory, categories]);
 
+  // Função para validar e aplicar cupom
+  const handleApplyCoupon = async () => {
+    if (!formData.promotionalCode.trim() || !establishment?.id) {
+      return;
+    }
+
+    if (!formData.checkinDate || !formData.checkoutDate) {
+      toast.error("Selecione as datas de check-in e check-out primeiro");
+      return;
+    }
+
+    const checkin = new Date(formData.checkinDate + 'T12:00:00');
+    const checkout = new Date(formData.checkoutDate + 'T12:00:00');
+    const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Calcular valor total atual (sem desconto ainda)
+    const currentTotal = selectedCategories.length > 0
+      ? selectedCategories.reduce((sum, cat) => sum + cat.price, 0)
+      : (calculatedPrice || 0);
+
+    if (currentTotal <= 0) {
+      toast.error("Calcule o preço primeiro antes de aplicar o cupom");
+      return;
+    }
+
+    setValidatingCoupon(true);
+    try {
+      const { data, error } = await supabase.rpc('validate_and_apply_discount', {
+        p_code: formData.promotionalCode.trim().toUpperCase(),
+        p_establishment_id: establishment.id,
+        p_total_amount: currentTotal,
+        p_nights: nights,
+      });
+
+      if (error) throw error;
+
+      if (data.valid) {
+        setAppliedCoupon(data);
+        toast.success(`Cupom "${data.coupon_name}" aplicado com sucesso!`);
+      } else {
+        setAppliedCoupon(null);
+        toast.error(data.error || "Cupom inválido");
+      }
+    } catch (error: any) {
+      console.error("Erro ao validar cupom:", error);
+      setAppliedCoupon(null);
+      toast.error(error.message || "Erro ao validar cupom");
+    } finally {
+      setValidatingCoupon(false);
+    }
+  };
+
+  // Remover cupom aplicado
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setFormData({ ...formData, promotionalCode: "" });
+  };
+
   const handleCategoryChange = (categoryId: string) => {
     setSelectedCategory(categoryId);
     setSelectedRoom(null); // Resetar quarto selecionado ao mudar categoria
@@ -900,10 +960,15 @@ const PublicReservation = () => {
       // Gerar token único para seleção de quartos
       const selectionToken = `quote_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 
-      // Calcular preço total das categorias selecionadas
-      const totalAmount = selectedCategories.length > 0
+      // Calcular preço total das categorias selecionadas (antes do desconto)
+      const baseTotalAmount = selectedCategories.length > 0
         ? selectedCategories.reduce((sum, cat) => sum + cat.price, 0)
         : (calculatedPrice || 0);
+
+      // Aplicar desconto se houver cupom válido
+      const totalAmount = appliedCoupon && appliedCoupon.valid
+        ? appliedCoupon.final_amount
+        : baseTotalAmount;
 
       // Usar a primeira categoria como categoria principal (para compatibilidade)
       const primaryCategory = selectedCategories[0]?.categoryId || selectedCategory;
@@ -927,7 +992,16 @@ const PublicReservation = () => {
         }
 
         // Calcular preço por quarto (preço total da categoria dividido pelo número de quartos)
-        const pricePerRoom = cat.price / cat.rooms;
+        // Se houver desconto aplicado, distribuir proporcionalmente
+        let pricePerRoom = cat.price / cat.rooms;
+        if (appliedCoupon && appliedCoupon.valid && baseTotalAmount > 0) {
+          // Calcular proporção desta categoria no total
+          const categoryProportion = cat.price / baseTotalAmount;
+          // Aplicar desconto proporcionalmente
+          const categoryDiscount = appliedCoupon.discount_amount * categoryProportion;
+          const categoryFinalPrice = cat.price - categoryDiscount;
+          pricePerRoom = categoryFinalPrice / cat.rooms;
+        }
         // Calcular adultos por quarto (distribuir igualmente, último quarto recebe o resto)
         const adultsPerRoom = Math.floor(cat.adults / cat.rooms);
         const remainingAdults = cat.adults % cat.rooms;
@@ -963,6 +1037,7 @@ const PublicReservation = () => {
             created_by: null,
             expiration_date: null,
             channel: "direct" as const,
+            coupon_id: appliedCoupon && appliedCoupon.valid ? appliedCoupon.coupon_id : null,
           };
 
           // Criar reserva usando a função RPC
@@ -1569,10 +1644,19 @@ const PublicReservation = () => {
   const children = parseInt(formData.children) || 0;
   const requiredRooms = getRequiredRooms();
   
-  // Calcular preço total considerando múltiplas categorias
-  const finalPrice = selectedCategories.length > 0
+  // Calcular preço total considerando múltiplas categorias (antes do desconto)
+  const basePrice = selectedCategories.length > 0
     ? selectedCategories.reduce((sum, cat) => sum + cat.price, 0)
     : (calculatedPrice || 0);
+
+  // Aplicar desconto se houver cupom válido
+  const finalPrice = appliedCoupon && appliedCoupon.valid
+    ? appliedCoupon.final_amount
+    : basePrice;
+  
+  const discountAmount = appliedCoupon && appliedCoupon.valid
+    ? appliedCoupon.discount_amount
+    : 0;
   
   // Calcular número total de quartos de todas as categorias selecionadas
   const totalRooms = selectedCategories.length > 0
@@ -2286,6 +2370,62 @@ const PublicReservation = () => {
 
                 <Separator />
 
+                {/* Cupom de Desconto */}
+                <div className="space-y-2">
+                  <Label htmlFor="promotionalCode" className="text-sm font-semibold text-slate-700 mb-2 block">
+                    {t("publicReservation.promotionalCode", "Cupom de Desconto")}
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="promotionalCode"
+                      value={formData.promotionalCode}
+                      onChange={(e) => setFormData({ ...formData, promotionalCode: e.target.value.toUpperCase() })}
+                      placeholder={t("publicReservation.enterPromotionalCode", "Digite o código do cupom")}
+                      className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg flex-1"
+                      disabled={validatingCoupon || !!appliedCoupon}
+                    />
+                    {appliedCoupon ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleRemoveCoupon}
+                        className="h-12 px-4"
+                      >
+                        <X className="h-4 w-4 mr-2" />
+                        Remover
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        onClick={handleApplyCoupon}
+                        disabled={validatingCoupon || !formData.promotionalCode.trim()}
+                        className="h-12 px-4 bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {validatingCoupon ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          t("publicReservation.apply", "Aplicar")
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                  {appliedCoupon && (
+                    <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex items-center gap-2 text-green-800">
+                        <CheckCircle2 className="h-4 w-4" />
+                        <span className="text-sm font-semibold">
+                          Cupom "{appliedCoupon.coupon_name}" aplicado! Desconto de{" "}
+                          {appliedCoupon.discount_type === "percentage"
+                            ? `${appliedCoupon.discount_value}%`
+                            : `R$ ${appliedCoupon.discount_value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
                 {/* Observações */}
                 <div>
                   <Label htmlFor="notes" className="text-sm font-semibold text-slate-700 mb-2 block">
@@ -2416,6 +2556,23 @@ const PublicReservation = () => {
                     )}
 
                     <Separator />
+                    {discountAmount > 0 && (
+                      <>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-600">Subtotal</span>
+                          <span className="text-slate-700">
+                            R$ {basePrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm text-green-600">
+                          <span>Desconto ({appliedCoupon?.coupon_code})</span>
+                          <span className="font-semibold">
+                            - R$ {discountAmount.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <Separator />
+                      </>
+                    )}
                     <div className="flex justify-between">
                       <span className="font-bold text-lg text-slate-900">{t("publicReservation.total")}</span>
                       <span className="font-bold text-2xl text-blue-600">

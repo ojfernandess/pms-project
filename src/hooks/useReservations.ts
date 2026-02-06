@@ -283,6 +283,7 @@ export const useReservations = () => {
           created_by: user?.id || null,
           expiration_date: reservation.expiration_date || null,
           channel: reservation.channel || "direct",
+          coupon_id: (reservation as any).coupon_id || null,
         };
 
         // Chamar função com lock (ordem: obrigatórios primeiro, opcionais depois)
