@@ -299,9 +299,17 @@ const PaymentSuccess = () => {
         .from("reservations")
         .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, room_id, category_id")
         .eq("id", reservationId)
-        .single();
+        .maybeSingle();
 
-      if (reservationError) throw reservationError;
+      if (reservationError) {
+        console.error(`Erro ao buscar reserva ${reservationId}:`, reservationError);
+        throw reservationError;
+      }
+
+      if (!reservation) {
+        console.warn(`Reserva ${reservationId} não encontrada ou sem acesso`);
+        return null;
+      }
 
       // Buscar web_checkin para obter o localizador
       const { data: webCheckin } = await supabase
