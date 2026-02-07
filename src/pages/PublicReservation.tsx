@@ -2440,7 +2440,7 @@ const PublicReservation = () => {
                                             ? "bg-gradient-to-r from-orange-500 to-yellow-500 text-white"
                                             : "bg-gradient-to-r from-green-500 to-emerald-500 text-white"
                                         }`}>
-                                          <Sparkles className="w-4 h-4 mr-2" />
+                                          <Bed className="w-4 h-4 mr-2" />
                                           {formatRoomsLeftText(availableRoomsForPeriod)}
                                         </Badge>
                                       ) : (
