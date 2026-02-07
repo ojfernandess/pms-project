@@ -16,6 +16,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useGuestAccount } from "@/hooks/useGuestAccount";
 
 interface SpecialRequestsDialogProps {
   open: boolean;
@@ -31,6 +32,10 @@ export function SpecialRequestsDialog({
   onSuccess,
 }: SpecialRequestsDialogProps) {
   console.log("🔔 SpecialRequestsDialog renderizado", { open, hasReservation: !!reservation, reservationId: reservation?.id });
+  
+  const { getCurrentSession } = useGuestAccount();
+  const session = getCurrentSession();
+  const guestAccountId = session?.accountId;
   
   const [selectedRequests, setSelectedRequests] = useState<string[]>([]);
   const [customRequest, setCustomRequest] = useState("");
@@ -123,16 +128,41 @@ export function SpecialRequestsDialog({
       }
       newNotes += `[Solicitações Especiais - ${timestamp}]\n${requestsText}`;
 
-      // Atualizar a reserva
-      const { error } = await supabase
-        .from("reservations")
-        .update({ notes: newNotes })
-        .eq("id", reservation.id);
+      // Atualizar a reserva usando função RPC se tiver guest_account_id, senão usar UPDATE direto
+      if (guestAccountId) {
+        // Usar função RPC para validação de propriedade
+        const { data: result, error } = await supabase.rpc(
+          "update_reservation_notes_for_guest",
+          {
+            p_reservation_id: reservation.id,
+            p_guest_account_id: guestAccountId,
+            p_notes: newNotes,
+          }
+        );
 
-      if (error) {
-        console.error("Erro ao salvar solicitações:", error);
-        toast.error("Erro ao salvar solicitações. Tente novamente.");
-        return;
+        if (error) {
+          console.error("Erro ao salvar solicitações:", error);
+          toast.error("Erro ao salvar solicitações. Tente novamente.");
+          return;
+        }
+
+        if (result && !result.success) {
+          console.error("Erro ao salvar solicitações:", result.error);
+          toast.error(result.error || "Erro ao salvar solicitações. Tente novamente.");
+          return;
+        }
+      } else {
+        // Fallback: usar UPDATE direto (pode falhar se RLS não permitir)
+        const { error } = await supabase
+          .from("reservations")
+          .update({ notes: newNotes })
+          .eq("id", reservation.id);
+
+        if (error) {
+          console.error("Erro ao salvar solicitações:", error);
+          toast.error("Erro ao salvar solicitações. Tente novamente.");
+          return;
+        }
       }
 
       toast.success("Solicitações especiais registradas com sucesso!");

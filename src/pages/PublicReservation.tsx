@@ -1095,9 +1095,11 @@ const PublicReservation = () => {
       if (hotel) {
         setHotelSettings(hotel);
         setPublicPricingPlanId(hotel.public_pricing_plan_id || null);
-        setPublicPricingPlan1Id(hotel.public_pricing_plan_1_id || null);
+        const plan1Id = hotel.public_pricing_plan_1_id || null;
+        const plan2Id = hotel.public_pricing_plan_2_id || null;
+        setPublicPricingPlan1Id(plan1Id);
         setPublicPricingPlan1Title(hotel.public_pricing_plan_1_title || null);
-        setPublicPricingPlan2Id(hotel.public_pricing_plan_2_id || null);
+        setPublicPricingPlan2Id(plan2Id);
         setPublicPricingPlan2Title(hotel.public_pricing_plan_2_title || null);
         // Armazenar políticas do estabelecimento
         if (hotel.policies) {
@@ -2517,7 +2519,7 @@ const PublicReservation = () => {
                             <div className="pt-4 border-t border-slate-200">
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {/* Plano 1 */}
-                                {publicPricingPlan1Id && categoryPricesPlan1[category.id] !== undefined && (
+                                {publicPricingPlan1Id && (
                                   <div 
                                     className={`p-4 border-2 rounded-lg bg-white cursor-pointer transition-all hover:shadow-md ${
                                       selectedPlanByCategory[category.id] === "plan1"
@@ -2538,32 +2540,48 @@ const PublicReservation = () => {
                                         <CheckCircle2 className="w-5 h-5 text-blue-600 flex-shrink-0" />
                                       )}
                                     </div>
-                                    {formData.checkinDate && formData.checkoutDate ? (
-                                      <>
-                                        <p className="text-xs text-slate-500 mb-1">
-                                          {t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}
-                                        </p>
-                                        <p className="text-2xl font-bold text-green-600">
-                                          R$ {categoryPricesPlan1[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                        </p>
-                                        <p className="text-xs text-slate-500 mt-1">
-                                          R$ {(categoryPricesPlan1[category.id] / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
-                                        </p>
-                                      </>
+                                    {categoryPricesPlan1[category.id] !== undefined ? (
+                                      formData.checkinDate && formData.checkoutDate ? (
+                                        <>
+                                          <p className="text-xs text-slate-500 mb-1">
+                                            {t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}
+                                          </p>
+                                          <p className="text-2xl font-bold text-green-600">
+                                            R$ {categoryPricesPlan1[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </p>
+                                          <p className="text-xs text-slate-500 mt-1">
+                                            R$ {(categoryPricesPlan1[category.id] / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
+                                          </p>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
+                                          <p className="text-2xl font-bold text-green-600">
+                                            R$ {categoryPricesPlan1[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </p>
+                                          <p className="text-xs text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                        </>
+                                      )
                                     ) : (
                                       <>
                                         <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
-                                        <p className="text-2xl font-bold text-green-600">
-                                          R$ {categoryPricesPlan1[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        <p className="text-2xl font-bold text-slate-400">
+                                          {calculatingPrice ? (
+                                            <Loader2 className="w-6 h-6 animate-spin inline-block" />
+                                          ) : (
+                                            `R$ ${Number(category.base_price || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                          )}
                                         </p>
-                                        <p className="text-xs text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                        <p className="text-xs text-slate-400 mt-1">
+                                          {calculatingPrice ? t("publicReservation.loading") : t("publicReservation.selectDatesToSeeTotal")}
+                                        </p>
                                       </>
                                     )}
                                   </div>
                                 )}
 
                                 {/* Plano 2 */}
-                                {publicPricingPlan2Id && categoryPricesPlan2[category.id] !== undefined && (
+                                {publicPricingPlan2Id && (
                                   <div 
                                     className={`p-4 border-2 rounded-lg bg-white cursor-pointer transition-all hover:shadow-md ${
                                       selectedPlanByCategory[category.id] === "plan2"
@@ -2584,25 +2602,41 @@ const PublicReservation = () => {
                                         <CheckCircle2 className="w-5 h-5 text-blue-600 flex-shrink-0" />
                                       )}
                                     </div>
-                                    {formData.checkinDate && formData.checkoutDate ? (
-                                      <>
-                                        <p className="text-xs text-slate-500 mb-1">
-                                          {t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}
-                                        </p>
-                                        <p className="text-2xl font-bold text-green-600">
-                                          R$ {categoryPricesPlan2[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                        </p>
-                                        <p className="text-xs text-slate-500 mt-1">
-                                          R$ {(categoryPricesPlan2[category.id] / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
-                                        </p>
-                                      </>
+                                    {categoryPricesPlan2[category.id] !== undefined ? (
+                                      formData.checkinDate && formData.checkoutDate ? (
+                                        <>
+                                          <p className="text-xs text-slate-500 mb-1">
+                                            {t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}
+                                          </p>
+                                          <p className="text-2xl font-bold text-green-600">
+                                            R$ {categoryPricesPlan2[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </p>
+                                          <p className="text-xs text-slate-500 mt-1">
+                                            R$ {(categoryPricesPlan2[category.id] / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
+                                          </p>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
+                                          <p className="text-2xl font-bold text-green-600">
+                                            R$ {categoryPricesPlan2[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </p>
+                                          <p className="text-xs text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                        </>
+                                      )
                                     ) : (
                                       <>
                                         <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
-                                        <p className="text-2xl font-bold text-green-600">
-                                          R$ {categoryPricesPlan2[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        <p className="text-2xl font-bold text-slate-400">
+                                          {calculatingPrice ? (
+                                            <Loader2 className="w-6 h-6 animate-spin inline-block" />
+                                          ) : (
+                                            `R$ ${Number(category.base_price || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                          )}
                                         </p>
-                                        <p className="text-xs text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                        <p className="text-xs text-slate-400 mt-1">
+                                          {calculatingPrice ? t("publicReservation.loading") : t("publicReservation.selectDatesToSeeTotal")}
+                                        </p>
                                       </>
                                     )}
                                   </div>

@@ -35,7 +35,7 @@ export default function WebCheckin() {
   const { locator: locatorFromUrl } = useParams<{ locator?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { settings } = useSiteSettings();
   
   // Definir STEPS dentro do componente para ter acesso às traduções
@@ -613,9 +613,15 @@ export default function WebCheckin() {
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mb-4">
               <AlertCircle className="h-8 w-8 text-red-600" />
             </div>
-            <h2 className="text-2xl font-bold text-slate-900 mb-2">{t("webCheckin.common.accessDenied")}</h2>
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">
+              {i18n.exists("webCheckin.common.accessDenied")
+                ? t("webCheckin.common.accessDenied")
+                : "Acesso Negado"}
+            </h2>
             <p className="text-slate-600 mb-6">
-              {t("webCheckin.common.reservationLinkedToOtherUser")}
+              {i18n.exists("webCheckin.common.reservationLinkedToOtherUser")
+                ? t("webCheckin.common.reservationLinkedToOtherUser")
+                : "Esta reserva já está vinculada a outra conta de usuário. Por questões de segurança, não é possível realizar o check-in ou acessar informações desta reserva."}
             </p>
             <div className="space-y-3">
               {isAuthenticated && session.accountId && (
@@ -1078,10 +1084,15 @@ export default function WebCheckin() {
                 <div className="flex items-start gap-3">
                   <AlertCircle className="h-5 w-5 text-orange-500 flex-shrink-0 mt-0.5" />
                   <div>
-                    <h3 className="font-semibold text-orange-900 mb-1">Reserva já vinculada</h3>
+                    <h3 className="font-semibold text-orange-900 mb-1">
+                      {i18n.exists("webCheckin.common.accessDenied")
+                        ? t("webCheckin.common.accessDenied")
+                        : "Acesso Negado"}
+                    </h3>
                     <p className="text-sm text-orange-700">
-                      Esta reserva já está vinculada a outra conta. Por questões de segurança, 
-                      não é possível realizar o check-in.
+                      {i18n.exists("webCheckin.common.reservationLinkedToOtherUser")
+                        ? t("webCheckin.common.reservationLinkedToOtherUser")
+                        : "Esta reserva já está vinculada a outra conta de usuário. Por questões de segurança, não é possível realizar o check-in ou acessar informações desta reserva."}
                     </p>
                   </div>
                 </div>
