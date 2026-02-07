@@ -655,6 +655,10 @@
     "room": "quarto",
     "rooms": "quartos",
     "required": "necessário",
+    "calculatedFromSelectedCategories": "Calculado automaticamente das categorias selecionadas",
+    "fromSelectedCategories": "das categorias selecionadas",
+    "roomsCalculatedFromPlans": "Quartos calculados dos planos tarifários selecionados",
+    "removeCategory": "Remover categoria",
     "roomsRequiredInfo": "Para {adults} {adults, plural, =1 {adulto} other {adultos}} e capacidade de {capacity} {capacity, plural, =1 {hóspede} other {hóspedes}} por quarto, serão necessários {rooms} {rooms, plural, =1 {quarto} other {quartos}}.",
     "selectDatesToSeeTotal": "Selecione datas para ver o total",
     "loading": "Carregando...",
@@ -710,7 +714,7 @@
     "noRoomsAvailableForDates": "Não há quartos disponíveis para as datas informadas. Por favor, selecione outras datas.",
     "insufficientRoomsForDates": "Não há quartos suficientes disponíveis para as datas informadas. Disponível: {available}, Necessário: {required}. Por favor, selecione outras datas ou reduza a quantidade de quartos.",
     "multipleCategoriesSelected": "Múltiplas categorias selecionadas",
-    "multipleCategoriesDescription": "Para acomodar todos os hóspedes, {count} categorias foram selecionadas automaticamente. O resumo da reserva mostra o detalhamento de cada categoria.",
+    "multipleCategoriesDescription": "Para acomodar todos os hóspedes, {{count}} categorias foram selecionadas automaticamente ({{totalRooms}} quartos para {{totalAdults}} adultos). O resumo da reserva mostra o detalhamento de cada categoria.",
     "priceAvailabilityNotice": {
       "title": "Importante",
       "description": "O valor da reserva pode variar conforme as datas selecionadas e a disponibilidade do quarto. O preço final será confirmado após a seleção das datas."

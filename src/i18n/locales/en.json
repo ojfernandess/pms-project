@@ -654,6 +654,10 @@
     "roomsAvailablePlural": "rooms available",
     "necessary": "required",
     "necessaryPlural": "required",
+    "calculatedFromSelectedCategories": "Automatically calculated from selected categories",
+    "fromSelectedCategories": "from selected categories",
+    "roomsCalculatedFromPlans": "Rooms calculated from selected pricing plans",
+    "removeCategory": "Remove category",
     "roomsAvailable": "{available} {available, plural, =1 {room available} other {rooms available}} for this period",
     "onlyRoomLeft": "Only 1 room left!",
     "onlyRoomsLeft": "Only {count} rooms left!",
@@ -663,7 +667,7 @@
     "noRoomsAvailableForDates": "No rooms available for the selected dates. Please select other dates.",
     "insufficientRoomsForDates": "There are not enough rooms available for the selected dates. Available: {available}, Required: {required}. Please select other dates or reduce the number of rooms.",
     "multipleCategoriesSelected": "Multiple categories selected",
-    "multipleCategoriesDescription": "To accommodate all guests, {count} categories were automatically selected. The reservation summary shows the breakdown for each category.",
+    "multipleCategoriesDescription": "To accommodate all guests, {{count}} categories were automatically selected ({{totalRooms}} rooms for {{totalAdults}} adults). The reservation summary shows the breakdown for each category.",
     "priceAvailabilityNotice": {
       "title": "Important",
       "description": "The reservation value may vary according to the selected dates and room availability. The final price will be confirmed after selecting the dates."

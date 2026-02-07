@@ -37,7 +37,8 @@ import {
   Users,
   Receipt,
   CreditCard,
-  ChevronDown
+  ChevronDown,
+  Tag
 } from "lucide-react";
 import { format, parseISO, differenceInDays, addDays, isAfter, isBefore, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -178,7 +179,15 @@ const ReservationDetails = () => {
         .from("reservations")
         .select(`
           *,
-          pricing_plans (*)
+          pricing_plans (*),
+          discount_coupons:coupon_id (
+            id,
+            code,
+            name,
+            discount_type,
+            discount_value,
+            apply_to
+          )
         `)
         .eq("reservation_code", reservationCode)
         .single();
@@ -2429,7 +2438,7 @@ const ReservationDetails = () => {
                 ) : null;
               })()}
             </div>
-            <div className="grid grid-cols-3 gap-6">
+            <div className="grid grid-cols-3 gap-6 mb-6">
               <div className="p-6 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100/50 border border-blue-200">
                 <Label className="text-sm font-medium text-slate-600 mb-2 block">Valor Total</Label>
                 <div className="text-3xl font-bold text-blue-700">
@@ -2449,6 +2458,84 @@ const ReservationDetails = () => {
                 </div>
               </div>
             </div>
+            
+            {/* Cupom de Desconto Aplicado */}
+            {reservation?.discount_coupons && typeof reservation.discount_coupons === 'object' && !Array.isArray(reservation.discount_coupons) && (() => {
+              const coupon = reservation.discount_coupons as any;
+              const baseTotal = Number(reservation?.total_amount || 0);
+              const feesTotal = reservationServiceFees.reduce((sum: number, fee: any) => {
+                return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
+              }, 0);
+              
+              // Calcular valor original antes do desconto
+              let originalAmount = baseTotal;
+              let discountAmount = 0;
+              
+              if (coupon.discount_type === 'fixed') {
+                // Desconto fixo: valor original = valor atual + desconto
+                originalAmount = baseTotal + Number(coupon.discount_value || 0);
+                discountAmount = Number(coupon.discount_value || 0);
+              } else if (coupon.discount_type === 'percentage') {
+                // Desconto percentual: valor original = valor atual / (1 - percentual/100)
+                const discountPercent = Number(coupon.discount_value || 0) / 100;
+                if (coupon.apply_to === 'total') {
+                  originalAmount = baseTotal / (1 - discountPercent);
+                  discountAmount = originalAmount - baseTotal;
+                } else {
+                  // Se aplicado nas diárias, calcular baseado nas noites
+                  const nights = reservation?.checkin_date && reservation?.checkout_date
+                    ? differenceInDays(parseISO(reservation.checkout_date), parseISO(reservation.checkin_date))
+                    : 0;
+                  if (nights > 0) {
+                    const pricePerNight = baseTotal / nights;
+                    const originalPricePerNight = pricePerNight / (1 - discountPercent);
+                    originalAmount = originalPricePerNight * nights;
+                    discountAmount = originalAmount - baseTotal;
+                  }
+                }
+              }
+              
+              const originalTotalWithFees = originalAmount + feesTotal;
+              
+              return (
+                <div className="mt-4 p-4 rounded-xl bg-gradient-to-br from-purple-50 to-purple-100/50 border border-purple-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-8 h-8 rounded-lg bg-purple-200 flex items-center justify-center">
+                      <Tag className="h-4 w-4 text-purple-700" />
+                    </div>
+                    <div className="flex-1">
+                      <Label className="text-sm font-semibold text-purple-900">
+                        Cupom de Desconto Aplicado
+                      </Label>
+                      <div className="text-xs text-purple-700 mt-0.5">
+                        {coupon.name} ({coupon.code})
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-xs font-medium text-purple-700 mb-1 block">
+                        Valor Original
+                      </Label>
+                      <div className="text-lg font-semibold text-purple-900 line-through">
+                        {formatCurrency(originalTotalWithFees)}
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs font-medium text-purple-700 mb-1 block">
+                        Desconto Aplicado
+                      </Label>
+                      <div className="text-lg font-semibold text-purple-900">
+                        - {formatCurrency(discountAmount)}
+                        {coupon.discount_type === 'percentage' && (
+                          <span className="text-sm ml-1">({coupon.discount_value}%)</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </Card>
 
           {/* Botão de Efetivar Pré-reserva - apenas se for pré-reserva */}

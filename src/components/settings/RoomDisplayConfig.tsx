@@ -28,6 +28,16 @@ const RoomDisplayConfig = () => {
   const { plans } = usePricingPlans();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [isUploadingEstablishmentPhoto, setIsUploadingEstablishmentPhoto] = useState(false);
+  const [plan1Title, setPlan1Title] = useState<string>("");
+  const [plan2Title, setPlan2Title] = useState<string>("");
+  const [isSavingPlan1Title, setIsSavingPlan1Title] = useState(false);
+  const [isSavingPlan2Title, setIsSavingPlan2Title] = useState(false);
+
+  // Sincronizar estados locais com settings quando mudarem
+  useEffect(() => {
+    setPlan1Title(settings?.public_pricing_plan_1_title || "");
+    setPlan2Title(settings?.public_pricing_plan_2_title || "");
+  }, [settings?.public_pricing_plan_1_title, settings?.public_pricing_plan_2_title]);
 
   // Buscar categorias
   const { data: categories = [], isLoading: isLoadingCategories, refetch: refetchCategories } = useQuery({
@@ -164,15 +174,6 @@ const RoomDisplayConfig = () => {
     }
   };
 
-  const handlePricingPlanChange = async (planId: string) => {
-    try {
-      await saveSettings({ public_pricing_plan_id: planId === "__none__" ? null : planId } as any);
-      toast.success("Plano tarifário atualizado com sucesso");
-      queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
-    } catch (error: any) {
-      toast.error(error.message || "Erro ao atualizar plano tarifário");
-    }
-  };
 
   if (isLoadingCategories) {
     return (
@@ -204,30 +205,176 @@ const RoomDisplayConfig = () => {
 
           <Separator />
 
-          {/* Plano Tarifário */}
-          <div className="space-y-2">
-            <Label htmlFor="public-pricing-plan" className="text-base font-medium">
-              Plano Tarifário para Exibição
-            </Label>
-            <p className="text-sm text-muted-foreground mb-3">
-              Selecione qual plano tarifário será usado para calcular e exibir preços na página pública. Se nenhum for selecionado, será usado o preço base da categoria.
-            </p>
-            <Select
-              value={settings?.public_pricing_plan_id || "__none__"}
-              onValueChange={handlePricingPlanChange}
-            >
-              <SelectTrigger id="public-pricing-plan" className="w-full max-w-md">
-                <SelectValue placeholder="Selecione um plano" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">Nenhum (usar preço base)</SelectItem>
-                {plans?.filter((plan: any) => plan.is_active).map((plan: any) => (
-                  <SelectItem key={plan.id} value={plan.id}>
-                    {plan.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Planos Tarifários para Exibição */}
+          <div className="space-y-6">
+            <div>
+              <Label className="text-base font-medium mb-2 block">
+                Planos Tarifários para Exibição
+              </Label>
+              <p className="text-sm text-muted-foreground mb-4">
+                Selecione até 2 planos tarifários que serão exibidos na página pública. Cada plano pode ter um título personalizado que aparecerá junto com o preço.
+              </p>
+            </div>
+
+            {/* Plano 1 */}
+            <div className="space-y-3 p-4 border rounded-lg bg-slate-50">
+              <Label className="text-sm font-semibold text-slate-700">
+                Plano Tarifário 1
+              </Label>
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="public-pricing-plan-1" className="text-sm font-medium text-slate-600">
+                    Plano
+                  </Label>
+                  <Select
+                    value={settings?.public_pricing_plan_1_id || "__none__"}
+                    onValueChange={async (value) => {
+                      try {
+                        await saveSettings({ 
+                          public_pricing_plan_1_id: value === "__none__" ? null : value 
+                        } as any);
+                        toast.success("Plano 1 atualizado com sucesso");
+                        queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
+                      } catch (error: any) {
+                        toast.error(error.message || "Erro ao atualizar plano 1");
+                      }
+                    }}
+                  >
+                    <SelectTrigger id="public-pricing-plan-1" className="w-full">
+                      <SelectValue placeholder="Selecione um plano" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Nenhum (não exibir)</SelectItem>
+                      {plans?.filter((plan: any) => plan.is_active).map((plan: any) => (
+                        <SelectItem key={plan.id} value={plan.id}>
+                          {plan.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {settings?.public_pricing_plan_1_id && (
+                  <div>
+                    <Label htmlFor="public-pricing-plan-1-title" className="text-sm font-medium text-slate-600">
+                      Título Personalizado
+                    </Label>
+                    <Input
+                      id="public-pricing-plan-1-title"
+                      value={plan1Title}
+                      onChange={(e) => setPlan1Title(e.target.value)}
+                      onBlur={async () => {
+                        if (plan1Title !== (settings?.public_pricing_plan_1_title || "")) {
+                          setIsSavingPlan1Title(true);
+                          try {
+                            await saveSettings({ 
+                              public_pricing_plan_1_title: plan1Title 
+                            } as any);
+                            queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
+                            toast.success("Título do plano 1 salvo");
+                          } catch (error: any) {
+                            toast.error(error.message || "Erro ao atualizar título");
+                            setPlan1Title(settings?.public_pricing_plan_1_title || "");
+                          } finally {
+                            setIsSavingPlan1Title(false);
+                          }
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      placeholder="Ex: Suíte Deluxe - Não Reembolsável"
+                      className="mt-1"
+                      disabled={isSavingPlan1Title}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Este título aparecerá na página pública junto com o preço deste plano
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Plano 2 */}
+            <div className="space-y-3 p-4 border rounded-lg bg-slate-50">
+              <Label className="text-sm font-semibold text-slate-700">
+                Plano Tarifário 2
+              </Label>
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="public-pricing-plan-2" className="text-sm font-medium text-slate-600">
+                    Plano
+                  </Label>
+                  <Select
+                    value={settings?.public_pricing_plan_2_id || "__none__"}
+                    onValueChange={async (value) => {
+                      try {
+                        await saveSettings({ 
+                          public_pricing_plan_2_id: value === "__none__" ? null : value 
+                        } as any);
+                        toast.success("Plano 2 atualizado com sucesso");
+                        queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
+                      } catch (error: any) {
+                        toast.error(error.message || "Erro ao atualizar plano 2");
+                      }
+                    }}
+                  >
+                    <SelectTrigger id="public-pricing-plan-2" className="w-full">
+                      <SelectValue placeholder="Selecione um plano" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Nenhum (não exibir)</SelectItem>
+                      {plans?.filter((plan: any) => plan.is_active).map((plan: any) => (
+                        <SelectItem key={plan.id} value={plan.id}>
+                          {plan.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {settings?.public_pricing_plan_2_id && (
+                  <div>
+                    <Label htmlFor="public-pricing-plan-2-title" className="text-sm font-medium text-slate-600">
+                      Título Personalizado
+                    </Label>
+                    <Input
+                      id="public-pricing-plan-2-title"
+                      value={plan2Title}
+                      onChange={(e) => setPlan2Title(e.target.value)}
+                      onBlur={async () => {
+                        if (plan2Title !== (settings?.public_pricing_plan_2_title || "")) {
+                          setIsSavingPlan2Title(true);
+                          try {
+                            await saveSettings({ 
+                              public_pricing_plan_2_title: plan2Title 
+                            } as any);
+                            queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
+                            toast.success("Título do plano 2 salvo");
+                          } catch (error: any) {
+                            toast.error(error.message || "Erro ao atualizar título");
+                            setPlan2Title(settings?.public_pricing_plan_2_title || "");
+                          } finally {
+                            setIsSavingPlan2Title(false);
+                          }
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      placeholder="Ex: Suíte Deluxe - Reembolsável"
+                      className="mt-1"
+                      disabled={isSavingPlan2Title}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Este título aparecerá na página pública junto com o preço deste plano
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </Card>

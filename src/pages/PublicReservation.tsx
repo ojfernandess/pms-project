@@ -61,6 +61,17 @@ const PublicReservation = () => {
   const [calculatingPrice, setCalculatingPrice] = useState(false);
   const [categoryPrices, setCategoryPrices] = useState<Record<string, number>>({});
   const [publicPricingPlanId, setPublicPricingPlanId] = useState<string | null>(null);
+  const [publicPricingPlan1Id, setPublicPricingPlan1Id] = useState<string | null>(null);
+  const [publicPricingPlan1Title, setPublicPricingPlan1Title] = useState<string | null>(null);
+  const [publicPricingPlan2Id, setPublicPricingPlan2Id] = useState<string | null>(null);
+  const [publicPricingPlan2Title, setPublicPricingPlan2Title] = useState<string | null>(null);
+  const [categoryPricesPlan1, setCategoryPricesPlan1] = useState<Record<string, number>>({});
+  const [categoryPricesPlan2, setCategoryPricesPlan2] = useState<Record<string, number>>({});
+  const [selectedPlanByCategory, setSelectedPlanByCategory] = useState<Record<string, "plan1" | "plan2" | null>>({});
+  // Preços recalculados por categoria no resumo (usando dados específicos de cada categoria)
+  const [summaryPlanPrices, setSummaryPlanPrices] = useState<Record<string, { plan1?: number; plan2?: number }>>({});
+  // Categorias que foram removidas manualmente pelo usuário (não devem ser readicionadas automaticamente)
+  const [manuallyRemovedCategories, setManuallyRemovedCategories] = useState<Set<string>>(new Set());
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [selectedCategoryForGallery, setSelectedCategoryForGallery] = useState<any>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
@@ -85,6 +96,79 @@ const PublicReservation = () => {
     }
   }, [establishmentSlug]);
 
+  // Função auxiliar para calcular preços de uma categoria para um plano específico
+  const calculateCategoryPriceForPlan = async (
+    category: any,
+    planId: string | null,
+    adults: number,
+    children: number,
+    checkinDate: string | null,
+    checkoutDate: string | null,
+    requiredRooms: number
+  ): Promise<number> => {
+    const basePrice = Number(category.base_price || 0);
+    let categoryTotal = 0;
+
+    if (checkinDate && checkoutDate && checkinDate < checkoutDate) {
+      const [checkinYear, checkinMonth, checkinDay] = checkinDate.split('-').map(Number);
+      const [checkoutYear, checkoutMonth, checkoutDay] = checkoutDate.split('-').map(Number);
+      const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+      const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
+      const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (nights > 0) {
+        for (let i = 0; i < nights; i++) {
+          const currentDate = new Date(checkin);
+          currentDate.setDate(currentDate.getDate() + i);
+          const dateStr = format(currentDate, "yyyy-MM-dd");
+
+          try {
+            const { data, error } = await supabase.rpc("calculate_rate_price", {
+              p_establishment_id: establishment!.id,
+              p_category_id: category.id,
+              p_pricing_plan_id: planId,
+              p_date: dateStr,
+              p_adults: adults,
+              p_children: children,
+            });
+
+            if (error) {
+              categoryTotal += basePrice;
+            } else {
+              const price = Number(data || 0);
+              categoryTotal += price > 0 ? price : basePrice;
+            }
+          } catch (error) {
+            categoryTotal += basePrice;
+          }
+        }
+      }
+    } else {
+      const todayStr = format(new Date(), "yyyy-MM-dd");
+      try {
+        const { data, error } = await supabase.rpc("calculate_rate_price", {
+          p_establishment_id: establishment!.id,
+          p_category_id: category.id,
+          p_pricing_plan_id: planId,
+          p_date: todayStr,
+          p_adults: adults,
+          p_children: children,
+        });
+
+        if (error) {
+          categoryTotal = basePrice;
+        } else {
+          const price = Number(data || 0);
+          categoryTotal = price > 0 ? price : basePrice;
+        }
+      } catch (error) {
+        categoryTotal = basePrice;
+      }
+    }
+
+    return categoryTotal * requiredRooms;
+  };
+
   // Calcular preços para todas as categorias quando dados mudarem
   useEffect(() => {
     if (categories.length > 0 && establishment?.id) {
@@ -94,6 +178,8 @@ const PublicReservation = () => {
           const adults = parseInt(formData.adults) || 1;
           const children = parseInt(formData.children) || 0;
           const prices: Record<string, number> = {};
+          const pricesPlan1: Record<string, number> = {};
+          const pricesPlan2: Record<string, number> = {};
 
           // Se há datas selecionadas, calcular preço total
           if (formData.checkinDate && formData.checkoutDate && formData.checkinDate < formData.checkoutDate) {
@@ -106,11 +192,7 @@ const PublicReservation = () => {
             if (nights > 0) {
               // Calcular preço para cada categoria (preço total)
               for (const category of categories) {
-                let categoryTotal = 0;
-                const basePrice = Number(category.base_price || 0);
-                
                 // Calcular número de quartos necessários baseado na capacidade
-                // Se há categoria selecionada e quartos manuais definidos, usar manual, senão calcular
                 let requiredRooms = 1;
                 if (selectedCategory === category.id && manualRooms !== null) {
                   requiredRooms = manualRooms;
@@ -118,75 +200,102 @@ const PublicReservation = () => {
                   requiredRooms = calculateRequiredRooms(adults, category);
                 }
 
-                for (let i = 0; i < nights; i++) {
-                  const currentDate = new Date(checkin);
-                  currentDate.setDate(currentDate.getDate() + i);
-                  const dateStr = format(currentDate, "yyyy-MM-dd");
+                // Calcular preço usando plano padrão (para compatibilidade)
+                const defaultPrice = await calculateCategoryPriceForPlan(
+                  category,
+                  publicPricingPlanId,
+                  adults,
+                  children,
+                  formData.checkinDate,
+                  formData.checkoutDate,
+                  requiredRooms
+                );
+                prices[category.id] = defaultPrice;
 
-                  try {
-                    const { data, error } = await supabase.rpc("calculate_rate_price", {
-                      p_establishment_id: establishment.id,
-                      p_category_id: category.id,
-                      p_pricing_plan_id: publicPricingPlanId || null,
-                      p_date: dateStr,
-                      p_adults: adults,
-                      p_children: children,
-                    });
-
-                    if (error) {
-                      categoryTotal += basePrice;
-                    } else {
-                      const price = Number(data || 0);
-                      categoryTotal += price > 0 ? price : basePrice;
-                    }
-                  } catch (error) {
-                    categoryTotal += basePrice;
-                  }
+                // Calcular preço para plano 1 se configurado
+                if (publicPricingPlan1Id) {
+                  const plan1Price = await calculateCategoryPriceForPlan(
+                    category,
+                    publicPricingPlan1Id,
+                    adults,
+                    children,
+                    formData.checkinDate,
+                    formData.checkoutDate,
+                    requiredRooms
+                  );
+                  pricesPlan1[category.id] = plan1Price;
                 }
 
-                // Multiplicar pelo número de quartos necessários
-                prices[category.id] = categoryTotal * requiredRooms;
+                // Calcular preço para plano 2 se configurado
+                if (publicPricingPlan2Id) {
+                  const plan2Price = await calculateCategoryPriceForPlan(
+                    category,
+                    publicPricingPlan2Id,
+                    adults,
+                    children,
+                    formData.checkinDate,
+                    formData.checkoutDate,
+                    requiredRooms
+                  );
+                  pricesPlan2[category.id] = plan2Price;
+                }
               }
             }
           } else {
-            // Se não há datas, calcular preço para hoje usando o plano tarifário
-            const todayStr = format(new Date(), "yyyy-MM-dd");
-            
+            // Se não há datas, calcular preço para hoje
             for (const category of categories) {
-              const basePrice = Number(category.base_price || 0);
-              
-              // Calcular número de quartos necessários baseado na capacidade
-              // Se há categoria selecionada e quartos manuais definidos, usar manual, senão calcular
               let requiredRooms = 1;
               if (selectedCategory === category.id && manualRooms !== null) {
                 requiredRooms = manualRooms;
               } else {
                 requiredRooms = calculateRequiredRooms(adults, category);
               }
-              
-              try {
-                const { data, error } = await supabase.rpc("calculate_rate_price", {
-                  p_establishment_id: establishment.id,
-                  p_category_id: category.id,
-                  p_pricing_plan_id: publicPricingPlanId || null,
-                  p_date: todayStr,
-                  p_adults: adults,
-                  p_children: children,
-                });
 
-                if (error) {
-                  prices[category.id] = basePrice * requiredRooms;
-                } else {
-                  const price = Number(data || 0);
-                  prices[category.id] = (price > 0 ? price : basePrice) * requiredRooms;
-                }
-              } catch (error) {
-                prices[category.id] = basePrice * requiredRooms;
+              // Calcular preço usando plano padrão
+              const defaultPrice = await calculateCategoryPriceForPlan(
+                category,
+                publicPricingPlanId,
+                adults,
+                children,
+                null,
+                null,
+                requiredRooms
+              );
+              prices[category.id] = defaultPrice;
+
+              // Calcular preço para plano 1 se configurado
+              if (publicPricingPlan1Id) {
+                const plan1Price = await calculateCategoryPriceForPlan(
+                  category,
+                  publicPricingPlan1Id,
+                  adults,
+                  children,
+                  null,
+                  null,
+                  requiredRooms
+                );
+                pricesPlan1[category.id] = plan1Price;
+              }
+
+              // Calcular preço para plano 2 se configurado
+              if (publicPricingPlan2Id) {
+                const plan2Price = await calculateCategoryPriceForPlan(
+                  category,
+                  publicPricingPlan2Id,
+                  adults,
+                  children,
+                  null,
+                  null,
+                  requiredRooms
+                );
+                pricesPlan2[category.id] = plan2Price;
               }
             }
           }
 
           setCategoryPrices(prices);
+          setCategoryPricesPlan1(pricesPlan1);
+          setCategoryPricesPlan2(pricesPlan2);
 
           // Se há categoria selecionada, atualizar preço calculado
           if (selectedCategory && prices[selectedCategory]) {
@@ -215,6 +324,8 @@ const PublicReservation = () => {
     selectedRoom,
     establishment?.id,
     publicPricingPlanId,
+    publicPricingPlan1Id,
+    publicPricingPlan2Id,
     formData.checkinDate,
     formData.checkoutDate,
     formData.adults,
@@ -387,13 +498,34 @@ const PublicReservation = () => {
   // Distribuir adultos entre categorias quando categoria selecionada ou adultos mudarem
   useEffect(() => {
     const calculateCategoryDistribution = async () => {
-      if (!selectedCategory || !formData.checkinDate || !formData.checkoutDate || !establishment?.id || categories.length === 0) {
+      if (!formData.checkinDate || !formData.checkoutDate || !establishment?.id || categories.length === 0) {
         setSelectedCategories([]);
         return;
       }
 
       const adults = parseInt(formData.adults) || 1;
       const children = parseInt(formData.children) || 0;
+
+      // Se há planos selecionados mas não há selectedCategory, usar a primeira categoria com plano selecionado
+      const categoriesWithPlans = Object.keys(selectedPlanByCategory).filter(
+        catId => selectedPlanByCategory[catId] !== null
+      );
+      
+      // Se há categorias com planos selecionados, usar a primeira como selectedCategory
+      if (categoriesWithPlans.length > 0 && !selectedCategory) {
+        setSelectedCategory(categoriesWithPlans[0]);
+        return; // Retornar aqui para que o useEffect seja executado novamente com selectedCategory definido
+      }
+
+      // Se não há selectedCategory e não há planos selecionados, limpar categorias
+      if (!selectedCategory && categoriesWithPlans.length === 0) {
+        setSelectedCategories([]);
+        return;
+      }
+
+      if (!selectedCategory) {
+        return;
+      }
 
       // Se há quantidade manual de quartos definida, verificar se é suficiente
       if (manualRooms !== null) {
@@ -420,10 +552,18 @@ const PublicReservation = () => {
                   const dateStr = format(currentDate, "yyyy-MM-dd");
 
                   try {
+                    // Usar plano selecionado se houver, senão usar plano padrão
+                    const selectedPlan = selectedPlanByCategory[selectedCategory];
+                    const planIdToUse = selectedPlan === "plan1" 
+                      ? publicPricingPlan1Id 
+                      : selectedPlan === "plan2" 
+                        ? publicPricingPlan2Id 
+                        : publicPricingPlanId || null;
+                    
                     const { data, error } = await supabase.rpc("calculate_rate_price", {
                       p_establishment_id: establishment.id,
                       p_category_id: selectedCategory,
-                      p_pricing_plan_id: publicPricingPlanId || null,
+                      p_pricing_plan_id: planIdToUse,
                       p_date: dateStr,
                       p_adults: adults,
                       p_children: children,
@@ -492,10 +632,18 @@ const PublicReservation = () => {
                       const dateStr = format(currentDate, "yyyy-MM-dd");
 
                       try {
+                        // Usar plano selecionado se houver, senão usar plano padrão
+                        const selectedPlan = selectedPlanByCategory[item.categoryId];
+                        const planIdToUse = selectedPlan === "plan1" 
+                          ? publicPricingPlan1Id 
+                          : selectedPlan === "plan2" 
+                            ? publicPricingPlan2Id 
+                            : publicPricingPlanId || null;
+                        
                         const { data, error } = await supabase.rpc("calculate_rate_price", {
                           p_establishment_id: establishment.id,
                           p_category_id: item.categoryId,
-                          p_pricing_plan_id: publicPricingPlanId || null,
+                          p_pricing_plan_id: planIdToUse,
                           p_date: dateStr,
                           p_adults: item.adults,
                           p_children: children,
@@ -538,12 +686,44 @@ const PublicReservation = () => {
         }
       }
 
+      // Verificar se há categorias com planos selecionados que não estão na distribuição atual
+      // (categoriesWithPlans já foi declarado acima)
+
       // Distribuir adultos entre categorias disponíveis (quando não há quantidade manual)
-      const distribution = await distributeAdultsAcrossCategories(
+      let distribution = await distributeAdultsAcrossCategories(
         adults,
         selectedCategory,
         categoryAvailableRooms
       );
+
+      // Se há categorias com planos selecionados que não estão na distribuição, adicioná-las
+      // MAS apenas se não foram removidas manualmente pelo usuário
+      const distributionCategoryIds = new Set(distribution.map(item => item.categoryId));
+      for (const categoryIdWithPlan of categoriesWithPlans) {
+        // Não readicionar categorias que foram removidas manualmente
+        if (manuallyRemovedCategories.has(categoryIdWithPlan)) {
+          continue;
+        }
+        
+        if (!distributionCategoryIds.has(categoryIdWithPlan)) {
+          const category = categories.find((c) => c.id === categoryIdWithPlan);
+          if (category && categoryAvailableRooms[categoryIdWithPlan] > 0) {
+            const capacity = category.capacity_adults || 1;
+            const availableRooms = categoryAvailableRooms[categoryIdWithPlan] || 0;
+            const requiredRooms = calculateRequiredRooms(adults, category);
+            const roomsToUse = Math.min(requiredRooms, availableRooms);
+            const adultsForCategory = Math.min(adults, roomsToUse * capacity);
+            
+            if (roomsToUse > 0 && adultsForCategory > 0) {
+              distribution.push({
+                categoryId: categoryIdWithPlan,
+                rooms: roomsToUse,
+                adults: adultsForCategory,
+              });
+            }
+          }
+        }
+      }
 
       // Calcular preço para cada categoria na distribuição
       const categoriesWithPrices = await Promise.all(
@@ -566,10 +746,18 @@ const PublicReservation = () => {
                 const dateStr = format(currentDate, "yyyy-MM-dd");
 
                 try {
+                  // Usar plano selecionado se houver, senão usar plano padrão
+                  const selectedPlan = selectedPlanByCategory[item.categoryId];
+                  const planIdToUse = selectedPlan === "plan1" 
+                    ? publicPricingPlan1Id 
+                    : selectedPlan === "plan2" 
+                      ? publicPricingPlan2Id 
+                      : publicPricingPlanId || null;
+                  
                   const { data, error } = await supabase.rpc("calculate_rate_price", {
                     p_establishment_id: establishment.id,
                     p_category_id: item.categoryId,
-                    p_pricing_plan_id: publicPricingPlanId || null,
+                    p_pricing_plan_id: planIdToUse,
                     p_date: dateStr,
                     p_adults: item.adults,
                     p_children: children,
@@ -600,12 +788,14 @@ const PublicReservation = () => {
         })
       );
 
-      const validCategories = categoriesWithPrices.filter((c) => c !== null) as Array<{
-        categoryId: string;
-        rooms: number;
-        adults: number;
-        price: number;
-      }>;
+      const validCategories = categoriesWithPrices
+        .filter((c) => c !== null)
+        .filter((c) => !manuallyRemovedCategories.has(c!.categoryId)) as Array<{
+          categoryId: string;
+          rooms: number;
+          adults: number;
+          price: number;
+        }>;
 
       setSelectedCategories(validCategories);
     };
@@ -622,8 +812,223 @@ const PublicReservation = () => {
     categories,
     establishment?.id,
     publicPricingPlanId,
+    publicPricingPlan1Id,
+    publicPricingPlan2Id,
+    selectedPlanByCategory,
     manualRooms, // Adicionar manualRooms às dependências
+    manuallyRemovedCategories, // Respeitar categorias removidas manualmente
   ]);
+
+  // Recalcular preços dos planos para cada categoria no resumo usando dados específicos de cada categoria
+  useEffect(() => {
+    const recalculateSummaryPlanPrices = async () => {
+      if (selectedCategories.length === 0 || !formData.checkinDate || !formData.checkoutDate || !establishment?.id) {
+        setSummaryPlanPrices({});
+        return;
+      }
+
+      const children = parseInt(formData.children) || 0;
+      const checkin = new Date(formData.checkinDate);
+      const checkout = new Date(formData.checkoutDate);
+      const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (nights <= 0) {
+        setSummaryPlanPrices({});
+        return;
+      }
+
+      const prices: Record<string, { plan1?: number; plan2?: number }> = {};
+
+      for (const cat of selectedCategories) {
+        const category = categories.find((c) => c.id === cat.categoryId);
+        if (!category) continue;
+
+        const basePrice = Number(category.base_price || 0);
+
+        // Calcular preço do plano 1 para esta categoria específica
+        // IMPORTANTE: calculate_rate_price retorna o preço POR QUARTO baseado no número de adultos
+        // Para calcular corretamente, precisamos usar a capacidade máxima do quarto ou adultos por quarto
+        if (publicPricingPlan1Id) {
+          // Usar capacidade máxima do quarto se disponível, senão calcular adultos por quarto
+          const categoryCapacity = category?.capacity_adults || 0;
+          const adultsPerRoom = categoryCapacity > 0 
+            ? Math.min(categoryCapacity, Math.ceil(cat.adults / cat.rooms))
+            : (cat.rooms > 0 ? Math.ceil(cat.adults / cat.rooms) : cat.adults);
+          const childrenPerRoom = cat.rooms > 0 ? Math.ceil(children / cat.rooms) : children;
+          
+          let plan1TotalForAllRooms = 0;
+          for (let i = 0; i < nights; i++) {
+            const currentDate = new Date(checkin);
+            currentDate.setDate(currentDate.getDate() + i);
+            const dateStr = format(currentDate, "yyyy-MM-dd");
+
+            try {
+              // Calcular preço por quarto usando adultos por quarto
+              const { data, error } = await supabase.rpc("calculate_rate_price", {
+                p_establishment_id: establishment.id,
+                p_category_id: cat.categoryId,
+                p_pricing_plan_id: publicPricingPlan1Id,
+                p_date: dateStr,
+                p_adults: adultsPerRoom,
+                p_children: childrenPerRoom,
+              });
+
+              if (error) {
+                plan1TotalForAllRooms += basePrice * cat.rooms;
+              } else {
+                const pricePerRoom = Number(data || 0);
+                plan1TotalForAllRooms += (pricePerRoom > 0 ? pricePerRoom : basePrice) * cat.rooms;
+              }
+            } catch (error) {
+              plan1TotalForAllRooms += basePrice * cat.rooms;
+            }
+          }
+          // Preço por quarto por noite = total para todos os quartos / número de quartos / número de noites
+          prices[cat.categoryId] = {
+            ...prices[cat.categoryId],
+            plan1: cat.rooms > 0 && nights > 0 
+              ? plan1TotalForAllRooms / cat.rooms / nights 
+              : cat.rooms > 0 
+                ? plan1TotalForAllRooms / cat.rooms 
+                : 0,
+          };
+        }
+
+        // Calcular preço do plano 2 para esta categoria específica
+        if (publicPricingPlan2Id) {
+          // Usar capacidade máxima do quarto se disponível, senão calcular adultos por quarto
+          const categoryCapacity = category?.capacity_adults || 0;
+          const adultsPerRoom = categoryCapacity > 0 
+            ? Math.min(categoryCapacity, Math.ceil(cat.adults / cat.rooms))
+            : (cat.rooms > 0 ? Math.ceil(cat.adults / cat.rooms) : cat.adults);
+          const childrenPerRoom = cat.rooms > 0 ? Math.ceil(children / cat.rooms) : children;
+          
+          let plan2TotalForAllRooms = 0;
+          for (let i = 0; i < nights; i++) {
+            const currentDate = new Date(checkin);
+            currentDate.setDate(currentDate.getDate() + i);
+            const dateStr = format(currentDate, "yyyy-MM-dd");
+
+            try {
+              // Calcular preço por quarto usando adultos por quarto
+              const { data, error } = await supabase.rpc("calculate_rate_price", {
+                p_establishment_id: establishment.id,
+                p_category_id: cat.categoryId,
+                p_pricing_plan_id: publicPricingPlan2Id,
+                p_date: dateStr,
+                p_adults: adultsPerRoom,
+                p_children: childrenPerRoom,
+              });
+
+              if (error) {
+                plan2TotalForAllRooms += basePrice * cat.rooms;
+              } else {
+                const pricePerRoom = Number(data || 0);
+                plan2TotalForAllRooms += (pricePerRoom > 0 ? pricePerRoom : basePrice) * cat.rooms;
+              }
+            } catch (error) {
+              plan2TotalForAllRooms += basePrice * cat.rooms;
+            }
+          }
+          // Preço por quarto por noite = total para todos os quartos / número de quartos / número de noites
+          prices[cat.categoryId] = {
+            ...prices[cat.categoryId],
+            plan2: cat.rooms > 0 && nights > 0 
+              ? plan2TotalForAllRooms / cat.rooms / nights 
+              : cat.rooms > 0 
+                ? plan2TotalForAllRooms / cat.rooms 
+                : 0,
+          };
+        }
+      }
+
+      setSummaryPlanPrices(prices);
+    };
+
+    const timeoutId = setTimeout(recalculateSummaryPlanPrices, 500);
+    return () => clearTimeout(timeoutId);
+  }, [selectedCategories, formData.checkinDate, formData.checkoutDate, formData.children, establishment?.id, categories, publicPricingPlan1Id, publicPricingPlan2Id]);
+
+  // Recalcular preços quando plano selecionado mudar
+  useEffect(() => {
+    if (selectedCategory && (publicPricingPlan1Id || publicPricingPlan2Id)) {
+      // Forçar recálculo da distribuição de categorias quando plano mudar
+      const calculateCategoryDistribution = async () => {
+        if (!selectedCategory || !formData.checkinDate || !formData.checkoutDate || !establishment?.id || categories.length === 0) {
+          return;
+        }
+
+        const adults = parseInt(formData.adults) || 1;
+        const children = parseInt(formData.children) || 0;
+
+        // Recalcular apenas se houver categorias selecionadas
+        if (selectedCategories.length > 0) {
+          const updatedCategories = await Promise.all(
+            selectedCategories.map(async (cat) => {
+              const category = categories.find((c) => c.id === cat.categoryId);
+              if (!category) return cat;
+
+              const selectedPlan = selectedPlanByCategory[cat.categoryId];
+              const planIdToUse = selectedPlan === "plan1" 
+                ? publicPricingPlan1Id 
+                : selectedPlan === "plan2" 
+                  ? publicPricingPlan2Id 
+                  : publicPricingPlanId || null;
+
+              let categoryTotal = 0;
+              const basePrice = Number(category.base_price || 0);
+
+              if (formData.checkinDate && formData.checkoutDate) {
+                const checkin = new Date(formData.checkinDate);
+                const checkout = new Date(formData.checkoutDate);
+                const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+
+                if (nights > 0) {
+                  for (let i = 0; i < nights; i++) {
+                    const currentDate = new Date(checkin);
+                    currentDate.setDate(currentDate.getDate() + i);
+                    const dateStr = format(currentDate, "yyyy-MM-dd");
+
+                    try {
+                      const { data, error } = await supabase.rpc("calculate_rate_price", {
+                        p_establishment_id: establishment.id,
+                        p_category_id: cat.categoryId,
+                        p_pricing_plan_id: planIdToUse,
+                        p_date: dateStr,
+                        p_adults: cat.adults,
+                        p_children: children,
+                      });
+
+                      if (error) {
+                        categoryTotal += basePrice;
+                      } else {
+                        const price = Number(data || 0);
+                        categoryTotal += price > 0 ? price : basePrice;
+                      }
+                    } catch (error) {
+                      categoryTotal += basePrice;
+                    }
+                  }
+                }
+              } else {
+                categoryTotal = basePrice;
+              }
+
+              return {
+                ...cat,
+                price: categoryTotal * cat.rooms,
+              };
+            })
+          );
+
+          setSelectedCategories(updatedCategories);
+        }
+      };
+
+      const timeoutId = setTimeout(calculateCategoryDistribution, 300);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [selectedPlanByCategory, publicPricingPlan1Id, publicPricingPlan2Id]);
 
   // Recarregar dados quando o plano tarifário mudar (polling ou refetch)
   useEffect(() => {
@@ -690,6 +1095,10 @@ const PublicReservation = () => {
       if (hotel) {
         setHotelSettings(hotel);
         setPublicPricingPlanId(hotel.public_pricing_plan_id || null);
+        setPublicPricingPlan1Id(hotel.public_pricing_plan_1_id || null);
+        setPublicPricingPlan1Title(hotel.public_pricing_plan_1_title || null);
+        setPublicPricingPlan2Id(hotel.public_pricing_plan_2_id || null);
+        setPublicPricingPlan2Title(hotel.public_pricing_plan_2_title || null);
         // Armazenar políticas do estabelecimento
         if (hotel.policies) {
           setEstablishmentPolicies(hotel.policies);
@@ -873,6 +1282,75 @@ const PublicReservation = () => {
     setSelectedRoom(null); // Resetar quarto selecionado ao mudar categoria
   };
 
+  // Função para adicionar categoria automaticamente quando um plano é selecionado
+  const handlePlanSelection = async (categoryId: string, planType: "plan1" | "plan2" | null) => {
+    // Atualizar plano selecionado primeiro
+    const newPlanState = planType;
+    setSelectedPlanByCategory(prev => ({
+      ...prev,
+      [categoryId]: prev[categoryId] === planType ? null : planType
+    }));
+
+    // Se um plano foi desmarcado, remover a categoria da lista
+    if (!newPlanState) {
+      // Adicionar à lista de categorias removidas manualmente
+      setManuallyRemovedCategories(prev => new Set(prev).add(categoryId));
+      
+      setSelectedCategories(prev => {
+        const updated = prev.filter(cat => cat.categoryId !== categoryId);
+        // Se não há mais categorias selecionadas, limpar selectedCategory
+        if (updated.length === 0) {
+          setSelectedCategory(null);
+        }
+        return updated;
+      });
+      return;
+    }
+
+    // Se um plano foi selecionado, remover da lista de categorias removidas manualmente
+    // (permitindo que seja readicionada automaticamente)
+    setManuallyRemovedCategories(prev => {
+      const updated = new Set(prev);
+      updated.delete(categoryId);
+      return updated;
+    });
+
+    // Se um plano foi selecionado, garantir que a categoria esteja selecionada
+    // O useEffect que depende de selectedPlanByCategory vai recalcular automaticamente
+    if (!formData.checkinDate || !formData.checkoutDate || !establishment?.id) {
+      return;
+    }
+
+    // Se a categoria não está selecionada como principal, definir ela
+    // Isso vai acionar o useEffect que recalcula tudo baseado nos planos selecionados
+    if (selectedCategory !== categoryId) {
+      setSelectedCategory(categoryId);
+    }
+    // Se já está selecionada, o useEffect já vai recalcular porque selectedPlanByCategory mudou
+  };
+
+  // Função para remover categoria do resumo
+  const handleRemoveCategory = (categoryId: string) => {
+    // Adicionar à lista de categorias removidas manualmente
+    setManuallyRemovedCategories(prev => new Set(prev).add(categoryId));
+
+    // Remover categoria da lista
+    setSelectedCategories(prev => {
+      const updated = prev.filter(cat => cat.categoryId !== categoryId);
+      // Se não há mais categorias selecionadas, limpar selectedCategory
+      if (updated.length === 0) {
+        setSelectedCategory(null);
+      }
+      return updated;
+    });
+
+    // Desmarcar plano tarifário desta categoria
+    setSelectedPlanByCategory(prev => ({
+      ...prev,
+      [categoryId]: null
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -900,6 +1378,19 @@ const PublicReservation = () => {
     if (selectedCategories.length === 0) {
       toast.error(t("publicReservation.errors.selectCategory"));
       return;
+    }
+
+    // Verificar se há planos configurados e se foram selecionados
+    if ((publicPricingPlan1Id || publicPricingPlan2Id) && selectedCategories.length > 0) {
+      for (const cat of selectedCategories) {
+        const selectedPlan = selectedPlanByCategory[cat.categoryId];
+        if (!selectedPlan && (publicPricingPlan1Id || publicPricingPlan2Id)) {
+          const categoryName = categories.find((c) => c.id === cat.categoryId)?.name || "categoria";
+          toast.error(`Por favor, selecione um plano tarifário para a ${categoryName}`);
+          setIsSubmitting(false);
+          return;
+        }
+      }
     }
 
     // Verificar disponibilidade para todas as categorias selecionadas
@@ -1033,7 +1524,12 @@ const PublicReservation = () => {
             notes: cat.rooms > 1 ? `${formData.notes || ""} (Quarto ${i + 1} de ${cat.rooms} - ${category?.name || cat.categoryId})`.trim() : (formData.notes || null),
             checkin_time: hotelSettings?.checkin_time || null,
             checkout_time: hotelSettings?.checkout_time || null,
-            pricing_plan_id: publicPricingPlanId || null,
+            pricing_plan_id: (() => {
+              const selectedPlan = selectedPlanByCategory[cat.categoryId];
+              if (selectedPlan === "plan1") return publicPricingPlan1Id;
+              if (selectedPlan === "plan2") return publicPricingPlan2Id;
+              return publicPricingPlanId || null;
+            })(),
             created_by: null,
             expiration_date: null,
             channel: "direct" as const,
@@ -1856,6 +2352,16 @@ const PublicReservation = () => {
                   const availableRoomsForPeriod = formData.checkinDate && formData.checkoutDate
                     ? (categoryAvailableRooms[category.id] ?? null)
                     : null;
+                  // Calcular número de noites
+                  const nights = formData.checkinDate && formData.checkoutDate
+                    ? (() => {
+                        const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
+                        const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
+                        const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+                        const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
+                        return Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+                      })()
+                    : 0;
 
                   return (
                     <Card
@@ -2006,43 +2512,146 @@ const PublicReservation = () => {
                             )}
                           </div>
 
-                          {/* Preço */}
-                          <div className="flex items-end justify-between pt-4 border-t border-slate-200">
-                            <div>
-                              {categoryPrice !== undefined ? (
-                                formData.checkinDate && formData.checkoutDate ? (
-                                  <>
-                                    <p className="text-xs text-slate-500 mb-1">{t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</p>
-                                    <p className="text-3xl font-bold text-blue-600">
-                                      R$ {categoryPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </p>
-                                    <p className="text-sm text-slate-500 mt-1">
-                                      R$ {(categoryPrice / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
-                                    </p>
-                                  </>
+                          {/* Preço - Exibir 2 planos se configurados */}
+                          {publicPricingPlan1Id || publicPricingPlan2Id ? (
+                            <div className="pt-4 border-t border-slate-200">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {/* Plano 1 */}
+                                {publicPricingPlan1Id && categoryPricesPlan1[category.id] !== undefined && (
+                                  <div 
+                                    className={`p-4 border-2 rounded-lg bg-white cursor-pointer transition-all hover:shadow-md ${
+                                      selectedPlanByCategory[category.id] === "plan1"
+                                        ? "border-blue-500 bg-blue-50 shadow-lg ring-2 ring-blue-500/20"
+                                        : "border-slate-200 hover:border-slate-300"
+                                    }`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const newPlan = selectedPlanByCategory[category.id] === "plan1" ? null : "plan1";
+                                      handlePlanSelection(category.id, newPlan);
+                                    }}
+                                  >
+                                    <div className="flex items-start justify-between mb-2">
+                                      <h4 className="text-sm font-semibold text-slate-700">
+                                        {publicPricingPlan1Title || "Plano 1"}
+                                      </h4>
+                                      {selectedPlanByCategory[category.id] === "plan1" && (
+                                        <CheckCircle2 className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                                      )}
+                                    </div>
+                                    {formData.checkinDate && formData.checkoutDate ? (
+                                      <>
+                                        <p className="text-xs text-slate-500 mb-1">
+                                          {t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}
+                                        </p>
+                                        <p className="text-2xl font-bold text-green-600">
+                                          R$ {categoryPricesPlan1[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </p>
+                                        <p className="text-xs text-slate-500 mt-1">
+                                          R$ {(categoryPricesPlan1[category.id] / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
+                                        </p>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
+                                        <p className="text-2xl font-bold text-green-600">
+                                          R$ {categoryPricesPlan1[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </p>
+                                        <p className="text-xs text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Plano 2 */}
+                                {publicPricingPlan2Id && categoryPricesPlan2[category.id] !== undefined && (
+                                  <div 
+                                    className={`p-4 border-2 rounded-lg bg-white cursor-pointer transition-all hover:shadow-md ${
+                                      selectedPlanByCategory[category.id] === "plan2"
+                                        ? "border-blue-500 bg-blue-50 shadow-lg ring-2 ring-blue-500/20"
+                                        : "border-slate-200 hover:border-slate-300"
+                                    }`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const newPlan = selectedPlanByCategory[category.id] === "plan2" ? null : "plan2";
+                                      handlePlanSelection(category.id, newPlan);
+                                    }}
+                                  >
+                                    <div className="flex items-start justify-between mb-2">
+                                      <h4 className="text-sm font-semibold text-slate-700">
+                                        {publicPricingPlan2Title || "Plano 2"}
+                                      </h4>
+                                      {selectedPlanByCategory[category.id] === "plan2" && (
+                                        <CheckCircle2 className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                                      )}
+                                    </div>
+                                    {formData.checkinDate && formData.checkoutDate ? (
+                                      <>
+                                        <p className="text-xs text-slate-500 mb-1">
+                                          {t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}
+                                        </p>
+                                        <p className="text-2xl font-bold text-green-600">
+                                          R$ {categoryPricesPlan2[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </p>
+                                        <p className="text-xs text-slate-500 mt-1">
+                                          R$ {(categoryPricesPlan2[category.id] / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
+                                        </p>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
+                                        <p className="text-2xl font-bold text-green-600">
+                                          R$ {categoryPricesPlan2[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </p>
+                                        <p className="text-xs text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              {calculatingPrice && (
+                                <div className="flex justify-center mt-2">
+                                  <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex items-end justify-between pt-4 border-t border-slate-200">
+                              <div>
+                                {categoryPrice !== undefined ? (
+                                  formData.checkinDate && formData.checkoutDate ? (
+                                    <>
+                                      <p className="text-xs text-slate-500 mb-1">{t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</p>
+                                      <p className="text-3xl font-bold text-blue-600">
+                                        R$ {categoryPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </p>
+                                      <p className="text-sm text-slate-500 mt-1">
+                                        R$ {(categoryPrice / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
+                                      </p>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
+                                      <p className="text-3xl font-bold text-blue-600">
+                                        R$ {categoryPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </p>
+                                      <p className="text-sm text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                    </>
+                                  )
                                 ) : (
                                   <>
                                     <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
                                     <p className="text-3xl font-bold text-blue-600">
-                                      R$ {categoryPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      R$ {Number(category.base_price || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </p>
-                                    <p className="text-sm text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                    <p className="text-sm text-slate-400 mt-1">{t("publicReservation.loading")}</p>
                                   </>
-                                )
-                              ) : (
-                                <>
-                                  <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
-                                  <p className="text-3xl font-bold text-blue-600">
-                                    R$ {Number(category.base_price || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </p>
-                                  <p className="text-sm text-slate-400 mt-1">{t("publicReservation.loading")}</p>
-                                </>
+                                )}
+                              </div>
+                              {calculatingPrice && (
+                                <Loader2 className="w-5 h-5 animate-spin text-blue-500 mb-2" />
                               )}
                             </div>
-                            {calculatingPrice && (
-                              <Loader2 className="w-5 h-5 animate-spin text-blue-500 mb-2" />
-                            )}
-                          </div>
+                          )}
                         </div>
                       </div>
                     </Card>
@@ -2079,7 +2688,9 @@ const PublicReservation = () => {
                   </AlertTitle>
                   <AlertDescription className="text-xs text-blue-800 mt-1">
                     {t("publicReservation.multipleCategoriesDescription", { 
-                      count: selectedCategories.length 
+                      count: selectedCategories.length,
+                      totalRooms: selectedCategories.reduce((sum, cat) => sum + cat.rooms, 0),
+                      totalAdults: selectedCategories.reduce((sum, cat) => sum + cat.adults, 0)
                     })}
                   </AlertDescription>
                 </Alert>
@@ -2136,8 +2747,8 @@ const PublicReservation = () => {
                           {children > 0 && (
                             <> · {children} {children === 1 ? t("publicReservation.child") : t("publicReservation.childrenPlural")}</>
                           )}
-                          {requiredRooms > 0 && (
-                            <> · {requiredRooms} {requiredRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</>
+                          {totalRooms > 0 && (
+                            <> · {totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</>
                           )}
                         </span>
                       </div>
@@ -2226,12 +2837,16 @@ const PublicReservation = () => {
                             <Label className="text-base font-medium text-slate-900">
                               {t("publicReservation.rooms")}
                             </Label>
-                            {selectedCategoryData && manualRooms === null && (
+                            {selectedCategories.length > 0 ? (
+                              <p className="text-xs text-slate-500 mt-1">
+                                {t("publicReservation.calculatedFromSelectedCategories")}
+                              </p>
+                            ) : selectedCategoryData && manualRooms === null ? (
                               <p className="text-xs text-slate-500 mt-1">
                                 {formatAutoCalculatedText(adults, selectedCategoryData.capacity_adults || 1)}
                               </p>
-                            )}
-                            {availableRoomsCount !== null && (
+                            ) : null}
+                            {selectedCategories.length === 0 && availableRoomsCount !== null && (
                               <p className={`text-xs mt-1 ${
                                 availableRoomsCount === 0 
                                   ? "text-red-600 font-semibold" 
@@ -2250,43 +2865,64 @@ const PublicReservation = () => {
                                 )}
                               </p>
                             )}
+                            {selectedCategories.length > 0 && (
+                              <p className="text-xs text-green-600 mt-1 font-semibold">
+                                {totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")} {t("publicReservation.fromSelectedCategories")}
+                              </p>
+                            )}
                           </div>
-                          <CounterButton
-                            value={requiredRooms}
-                            onDecrease={() => {
-                              const minRooms = selectedCategoryData 
-                                ? calculateRequiredRooms(adults, selectedCategoryData)
-                                : 1;
-                              if (requiredRooms > minRooms) {
-                                setManualRooms(requiredRooms - 1);
-                              }
-                            }}
-                            onIncrease={() => {
-                              // Limitar pela disponibilidade real ou 10 quartos, o que for menor
-                              const maxRooms = availableRoomsCount !== null 
-                                ? Math.min(availableRoomsCount, 10)
-                                : 10;
-                              if (requiredRooms < maxRooms) {
-                                setManualRooms(requiredRooms + 1);
-                              } else if (availableRoomsCount !== null && requiredRooms >= availableRoomsCount) {
-                                toast.error(
-                                  t("publicReservation.errors.maxRoomsReached", {
-                                    available: availableRoomsCount
-                                  })
-                                );
-                              }
-                            }}
-                            min={selectedCategoryData ? calculateRequiredRooms(adults, selectedCategoryData) : 1}
-                            max={availableRoomsCount !== null ? Math.min(availableRoomsCount, 10) : 10}
-                            disabled={checkingAvailability}
-                          />
+                          {selectedCategories.length === 0 ? (
+                            <CounterButton
+                              value={requiredRooms}
+                              onDecrease={() => {
+                                const minRooms = selectedCategoryData 
+                                  ? calculateRequiredRooms(adults, selectedCategoryData)
+                                  : 1;
+                                if (requiredRooms > minRooms) {
+                                  setManualRooms(requiredRooms - 1);
+                                }
+                              }}
+                              onIncrease={() => {
+                                // Limitar pela disponibilidade real ou 10 quartos, o que for menor
+                                const maxRooms = availableRoomsCount !== null 
+                                  ? Math.min(availableRoomsCount, 10)
+                                  : 10;
+                                if (requiredRooms < maxRooms) {
+                                  setManualRooms(requiredRooms + 1);
+                                } else if (availableRoomsCount !== null && requiredRooms >= availableRoomsCount) {
+                                  toast.error(
+                                    t("publicReservation.errors.maxRoomsReached", {
+                                      available: availableRoomsCount
+                                    })
+                                  );
+                                }
+                              }}
+                              min={selectedCategoryData ? calculateRequiredRooms(adults, selectedCategoryData) : 1}
+                              max={availableRoomsCount !== null ? Math.min(availableRoomsCount, 10) : 10}
+                              disabled={checkingAvailability}
+                            />
+                          ) : (
+                            <div className="text-lg font-bold text-blue-600">
+                              {totalRooms}
+                            </div>
+                          )}
                         </div>
 
                         {/* Informação sobre disponibilidade */}
-                        {selectedCategoryData && formData.checkinDate && formData.checkoutDate && (
+                        {selectedCategories.length === 0 && selectedCategoryData && formData.checkinDate && formData.checkoutDate && (
                           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                             <p className="text-xs text-blue-800">
                               {formatAvailabilityText(requiredRooms, selectedCategoryData.capacity_adults || 1)}
+                            </p>
+                          </div>
+                        )}
+                        {selectedCategories.length > 0 && (
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                            <p className="text-xs text-green-800">
+                              {t("publicReservation.roomsCalculatedFromPlans")}: {selectedCategories.map((cat, idx) => {
+                                const catName = categories.find(c => c.id === cat.categoryId)?.name || "";
+                                return `${cat.rooms} ${cat.rooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")} ${catName}`;
+                              }).join(", ")}
                             </p>
                           </div>
                         )}
@@ -2456,14 +3092,30 @@ const PublicReservation = () => {
                   <div className="bg-slate-50 rounded-lg p-4 space-y-3 border-2 border-slate-200">
                     <h4 className="font-semibold text-slate-900 mb-3">{t("publicReservation.reservationSummary")}</h4>
                     
-                    {/* Detalhamento por categoria quando houver múltiplas */}
-                    {selectedCategories.length > 1 && (
-                      <div className="space-y-2 mb-3">
+                    {/* Detalhamento por categoria */}
+                    {selectedCategories.length > 0 && (
+                      <div className="space-y-3 mb-3">
                         {selectedCategories.map((cat, index) => {
                           const category = categories.find((c) => c.id === cat.categoryId);
+                          const selectedPlan = selectedPlanByCategory[cat.categoryId];
+                          
+                          // Usar preços recalculados especificamente para esta categoria no resumo
+                          const plan1PricePerRoomPerNight = summaryPlanPrices[cat.categoryId]?.plan1;
+                          const plan2PricePerRoomPerNight = summaryPlanPrices[cat.categoryId]?.plan2;
+                          
                           return (
-                            <div key={cat.categoryId} className="bg-white rounded-lg p-3 border border-slate-200">
-                              <div className="flex items-center justify-between mb-2">
+                            <div key={cat.categoryId} className="bg-white rounded-lg p-4 border-2 border-slate-200 relative">
+                              {/* Botão de remover */}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCategory(cat.categoryId)}
+                                className="absolute top-2 right-2 p-1.5 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                                title={t("publicReservation.removeCategory", "Remover categoria")}
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                              
+                              <div className="flex items-center justify-between mb-3 pr-8">
                                 <div className="flex items-center gap-2">
                                   <Bed className="w-4 h-4 text-blue-600" />
                                   <span className="font-semibold text-slate-900 text-sm">
@@ -2474,7 +3126,7 @@ const PublicReservation = () => {
                                   R$ {cat.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </div>
-                              <div className="text-xs text-slate-600 space-y-1">
+                              <div className="text-xs text-slate-600 space-y-1 mb-3">
                                 <div className="flex justify-between">
                                   <span>{cat.rooms} {cat.rooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</span>
                                   <span>{cat.adults} {cat.adults === 1 ? t("publicReservation.adult") : t("publicReservation.adultsPlural")}</span>
@@ -2486,6 +3138,92 @@ const PublicReservation = () => {
                                   </div>
                                 )}
                               </div>
+
+                              {/* Seleção de Plano Tarifário para esta categoria */}
+                              {(publicPricingPlan1Id || publicPricingPlan2Id) && (plan1PricePerRoomPerNight !== undefined || plan2PricePerRoomPerNight !== undefined) && (
+                                <div className="mt-3 pt-3 border-t border-slate-200">
+                                  <Label className="text-xs font-semibold text-slate-700 mb-2 block">
+                                    Selecionar Plano Tarifário:
+                                  </Label>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {/* Plano 1 */}
+                                    {publicPricingPlan1Id && plan1PricePerRoomPerNight !== undefined && (
+                                      <div 
+                                        className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                                          selectedPlan === "plan1"
+                                            ? "border-blue-500 bg-blue-50 shadow-md"
+                                            : "border-slate-200 hover:border-slate-300 bg-white"
+                                        }`}
+                                        onClick={() => {
+                                          const newPlan = selectedPlan === "plan1" ? null : "plan1";
+                                          handlePlanSelection(cat.categoryId, newPlan);
+                                        }}
+                                      >
+                                        <div className="flex items-start justify-between mb-1">
+                                          <h5 className="text-xs font-semibold text-slate-700">
+                                            {publicPricingPlan1Title || "Plano 1"}
+                                          </h5>
+                                          {selectedPlan === "plan1" && (
+                                            <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                          )}
+                                        </div>
+                                        {nights > 0 ? (
+                                          <>
+                                            <p className="text-lg font-bold text-green-600">
+                                              R$ {plan1PricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                            <p className="text-xs text-slate-500">
+                                              por quarto / por noite
+                                            </p>
+                                          </>
+                                        ) : (
+                                          <p className="text-lg font-bold text-green-600">
+                                            R$ {plan1PricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Plano 2 */}
+                                    {publicPricingPlan2Id && plan2PricePerRoomPerNight !== undefined && (
+                                      <div 
+                                        className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                                          selectedPlan === "plan2"
+                                            ? "border-blue-500 bg-blue-50 shadow-md"
+                                            : "border-slate-200 hover:border-slate-300 bg-white"
+                                        }`}
+                                        onClick={() => {
+                                          const newPlan = selectedPlan === "plan2" ? null : "plan2";
+                                          handlePlanSelection(cat.categoryId, newPlan);
+                                        }}
+                                      >
+                                        <div className="flex items-start justify-between mb-1">
+                                          <h5 className="text-xs font-semibold text-slate-700">
+                                            {publicPricingPlan2Title || "Plano 2"}
+                                          </h5>
+                                          {selectedPlan === "plan2" && (
+                                            <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                          )}
+                                        </div>
+                                        {nights > 0 ? (
+                                          <>
+                                            <p className="text-lg font-bold text-green-600">
+                                              R$ {plan2PricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                            <p className="text-xs text-slate-500">
+                                              por quarto / por noite
+                                            </p>
+                                          </>
+                                        ) : (
+                                          <p className="text-lg font-bold text-green-600">
+                                            R$ {plan2PricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -2493,19 +3231,19 @@ const PublicReservation = () => {
                     )}
 
                     {/* Informação de quartos necessários quando houver apenas uma categoria */}
-                    {selectedCategories.length === 1 && selectedCategoryData && requiredRooms > 1 && (
+                    {selectedCategories.length === 1 && selectedCategoryData && totalRooms > 1 && (
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
                         <div className="flex items-center gap-2 text-blue-800 text-sm">
                           <Bed className="w-4 h-4" />
                           <span className="font-medium">
-                            {requiredRooms} {requiredRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")} {t("publicReservation.required")}
+                            {totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")} {t("publicReservation.required")}
                           </span>
                         </div>
                         <p className="text-xs text-blue-700 mt-1">
                           {formatRoomsRequiredText(
                             adults, 
                             selectedCategoryData.capacity_adults || 1,
-                            requiredRooms
+                            totalRooms
                           )}
                         </p>
                       </div>
