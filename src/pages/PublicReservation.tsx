@@ -96,6 +96,21 @@ const PublicReservation = () => {
     }
   }, [establishmentSlug]);
 
+  // Função auxiliar para formatar data sem problemas de timezone
+  const formatDateLocal = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Função auxiliar para adicionar dias a uma data sem problemas de timezone
+  const addDays = (date: Date, days: number): Date => {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
+  };
+
   // Função auxiliar para calcular preços de uma categoria para um plano específico
   const calculateCategoryPriceForPlan = async (
     category: any,
@@ -118,9 +133,8 @@ const PublicReservation = () => {
 
       if (nights > 0) {
         for (let i = 0; i < nights; i++) {
-          const currentDate = new Date(checkin);
-          currentDate.setDate(currentDate.getDate() + i);
-          const dateStr = format(currentDate, "yyyy-MM-dd");
+          const currentDate = addDays(checkin, i);
+          const dateStr = formatDateLocal(currentDate);
 
           try {
             const { data, error } = await supabase.rpc("calculate_rate_price", {
@@ -144,7 +158,7 @@ const PublicReservation = () => {
         }
       }
     } else {
-      const todayStr = format(new Date(), "yyyy-MM-dd");
+      const todayStr = formatDateLocal(new Date());
       try {
         const { data, error } = await supabase.rpc("calculate_rate_price", {
           p_establishment_id: establishment!.id,
@@ -541,15 +555,17 @@ const PublicReservation = () => {
             const basePrice = Number(selectedCategoryData.base_price || 0);
 
             if (formData.checkinDate && formData.checkoutDate) {
-              const checkin = new Date(formData.checkinDate);
-              const checkout = new Date(formData.checkoutDate);
+              // Criar datas no timezone local para evitar problemas de conversão
+              const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
+              const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
+              const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+              const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
               const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
 
               if (nights > 0) {
                 for (let i = 0; i < nights; i++) {
-                  const currentDate = new Date(checkin);
-                  currentDate.setDate(currentDate.getDate() + i);
-                  const dateStr = format(currentDate, "yyyy-MM-dd");
+                  const currentDate = addDays(checkin, i);
+                  const dateStr = formatDateLocal(currentDate);
 
                   try {
                     // Usar plano selecionado se houver, senão usar plano padrão
@@ -621,15 +637,17 @@ const PublicReservation = () => {
                 const basePrice = Number(category.base_price || 0);
 
                 if (formData.checkinDate && formData.checkoutDate) {
-                  const checkin = new Date(formData.checkinDate);
-                  const checkout = new Date(formData.checkoutDate);
+                  // Criar datas no timezone local para evitar problemas de conversão
+                  const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
+                  const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
+                  const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+                  const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
                   const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
 
                   if (nights > 0) {
                     for (let i = 0; i < nights; i++) {
-                      const currentDate = new Date(checkin);
-                      currentDate.setDate(currentDate.getDate() + i);
-                      const dateStr = format(currentDate, "yyyy-MM-dd");
+                      const currentDate = addDays(checkin, i);
+                      const dateStr = formatDateLocal(currentDate);
 
                       try {
                         // Usar plano selecionado se houver, senão usar plano padrão
@@ -735,15 +753,17 @@ const PublicReservation = () => {
           const basePrice = Number(category.base_price || 0);
 
           if (formData.checkinDate && formData.checkoutDate) {
-            const checkin = new Date(formData.checkinDate);
-            const checkout = new Date(formData.checkoutDate);
+            // Criar datas no timezone local para evitar problemas de conversão
+            const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
+            const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
+            const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+            const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
             const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
 
             if (nights > 0) {
               for (let i = 0; i < nights; i++) {
-                const currentDate = new Date(checkin);
-                currentDate.setDate(currentDate.getDate() + i);
-                const dateStr = format(currentDate, "yyyy-MM-dd");
+                const currentDate = addDays(checkin, i);
+                const dateStr = formatDateLocal(currentDate);
 
                 try {
                   // Usar plano selecionado se houver, senão usar plano padrão
@@ -754,13 +774,20 @@ const PublicReservation = () => {
                       ? publicPricingPlan2Id 
                       : publicPricingPlanId || null;
                   
+                  // Calcular adultos por quarto (calculate_rate_price retorna preço por quarto)
+                  const categoryCapacity = category?.capacity_adults || 1;
+                  const adultsPerRoom = categoryCapacity > 0 
+                    ? Math.min(categoryCapacity, Math.ceil(item.adults / item.rooms))
+                    : (item.rooms > 0 ? Math.ceil(item.adults / item.rooms) : item.adults);
+                  const childrenPerRoom = item.rooms > 0 ? Math.ceil(children / item.rooms) : children;
+                  
                   const { data, error } = await supabase.rpc("calculate_rate_price", {
                     p_establishment_id: establishment.id,
                     p_category_id: item.categoryId,
                     p_pricing_plan_id: planIdToUse,
                     p_date: dateStr,
-                    p_adults: item.adults,
-                    p_children: children,
+                    p_adults: adultsPerRoom,
+                    p_children: childrenPerRoom,
                   });
 
                   if (error) {
@@ -828,8 +855,11 @@ const PublicReservation = () => {
       }
 
       const children = parseInt(formData.children) || 0;
-      const checkin = new Date(formData.checkinDate);
-      const checkout = new Date(formData.checkoutDate);
+      // Criar datas no timezone local para evitar problemas de conversão
+      const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
+      const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
+      const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+      const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
       const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
 
       if (nights <= 0) {
@@ -858,9 +888,8 @@ const PublicReservation = () => {
           
           let plan1TotalForAllRooms = 0;
           for (let i = 0; i < nights; i++) {
-            const currentDate = new Date(checkin);
-            currentDate.setDate(currentDate.getDate() + i);
-            const dateStr = format(currentDate, "yyyy-MM-dd");
+            const currentDate = addDays(checkin, i);
+            const dateStr = formatDateLocal(currentDate);
 
             try {
               // Calcular preço por quarto usando adultos por quarto
@@ -905,9 +934,8 @@ const PublicReservation = () => {
           
           let plan2TotalForAllRooms = 0;
           for (let i = 0; i < nights; i++) {
-            const currentDate = new Date(checkin);
-            currentDate.setDate(currentDate.getDate() + i);
-            const dateStr = format(currentDate, "yyyy-MM-dd");
+            const currentDate = addDays(checkin, i);
+            const dateStr = formatDateLocal(currentDate);
 
             try {
               // Calcular preço por quarto usando adultos por quarto
@@ -979,15 +1007,17 @@ const PublicReservation = () => {
               const basePrice = Number(category.base_price || 0);
 
               if (formData.checkinDate && formData.checkoutDate) {
-                const checkin = new Date(formData.checkinDate);
-                const checkout = new Date(formData.checkoutDate);
+                // Criar datas no timezone local para evitar problemas de conversão
+                const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
+                const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
+                const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+                const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
                 const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
 
                 if (nights > 0) {
                   for (let i = 0; i < nights; i++) {
-                    const currentDate = new Date(checkin);
-                    currentDate.setDate(currentDate.getDate() + i);
-                    const dateStr = format(currentDate, "yyyy-MM-dd");
+                    const currentDate = addDays(checkin, i);
+                    const dateStr = formatDateLocal(currentDate);
 
                     try {
                       const { data, error } = await supabase.rpc("calculate_rate_price", {
@@ -1366,7 +1396,13 @@ const PublicReservation = () => {
       return;
     }
 
-    if (new Date(formData.checkinDate) >= new Date(formData.checkoutDate)) {
+    // Criar datas no timezone local para evitar problemas de conversão
+    const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
+    const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
+    const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+    const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
+    
+    if (checkin >= checkout) {
       toast.error(t("publicReservation.errors.invalidDates"));
       return;
     }
@@ -2141,9 +2177,14 @@ const PublicReservation = () => {
   );
 
   const nights = formData.checkinDate && formData.checkoutDate
-    ? Math.ceil(
-        (new Date(formData.checkoutDate).getTime() - new Date(formData.checkinDate).getTime()) / (1000 * 60 * 60 * 24)
-      )
+    ? (() => {
+        // Criar datas no timezone local para evitar problemas de conversão
+        const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
+        const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
+        const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+        const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
+        return Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+      })()
     : 0;
   
   // Calcular número de quartos necessários para a categoria selecionada
@@ -2744,7 +2785,7 @@ const PublicReservation = () => {
                         value={formData.checkinDate}
                         onChange={(e) => setFormData({ ...formData, checkinDate: e.target.value })}
                         required
-                        min={format(new Date(), "yyyy-MM-dd")}
+                        min={formatDateLocal(new Date())}
                         className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
                       />
                     </div>
@@ -2758,7 +2799,7 @@ const PublicReservation = () => {
                         value={formData.checkoutDate}
                         onChange={(e) => setFormData({ ...formData, checkoutDate: e.target.value })}
                         required
-                        min={formData.checkinDate || format(new Date(), "yyyy-MM-dd")}
+                        min={formData.checkinDate || formatDateLocal(new Date())}
                         className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
                       />
                     </div>

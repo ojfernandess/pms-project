@@ -768,7 +768,7 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings, hotelNam
       cc_count: ccEmails.length,
       bcc_count: bccEmails.length
     });
-
+    
     // Garantir que sender_name não esteja vazio - usar nome do hotel como fallback
     const senderName = settings.sender_name?.trim() || hotelName || 'PMS System';
 
@@ -825,7 +825,7 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings, hotelNam
     if (result.data && typeof result.data === 'object') {
       const data = result.data as any;
       if (data.success === true || data.message) {
-        console.log('✅ SendGrid - Email enviado com sucesso (incluindo CC/BCC se configurado)');
+    console.log('✅ SendGrid - Email enviado com sucesso (incluindo CC/BCC se configurado)');
         return true;
       }
     }
@@ -2008,8 +2008,8 @@ export async function sendCheckoutReminderEmail(
     let baseUrl = siteSettings?.pms_base_url || null;
     if (!baseUrl) {
       baseUrl = typeof window !== 'undefined' 
-        ? window.location.origin 
-        : (process.env.VITE_APP_URL || 'http://localhost:8080');
+      ? window.location.origin 
+      : (process.env.VITE_APP_URL || 'http://localhost:8080');
     }
     
     // Garantir que o link do web-checkin está correto (usar o número sem #)
