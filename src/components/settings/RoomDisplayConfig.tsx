@@ -376,6 +376,52 @@ const RoomDisplayConfig = () => {
               </div>
             </div>
           </div>
+
+          <Separator />
+
+          {/* Timer de Pagamento do Orçamento */}
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="quote-payment-timer" className="text-base font-medium mb-2 block">
+                Timer de Pagamento do Orçamento
+              </Label>
+              <p className="text-sm text-muted-foreground mb-4">
+                Defina o tempo em minutos que o hóspede terá para realizar o pagamento do orçamento. Após esse tempo, o orçamento será cancelado automaticamente.
+              </p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <Input
+                  id="quote-payment-timer"
+                  type="number"
+                  min="1"
+                  max="1440"
+                  value={settings?.quote_payment_timer_minutes || 30}
+                  onChange={async (e) => {
+                    const value = parseInt(e.target.value) || 30;
+                    if (value >= 1 && value <= 1440) {
+                      try {
+                        await saveSettings({ 
+                          quote_payment_timer_minutes: value 
+                        } as any);
+                        toast.success("Timer de pagamento atualizado");
+                        queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
+                      } catch (error: any) {
+                        toast.error(error.message || "Erro ao atualizar timer");
+                      }
+                    }
+                  }}
+                  className="w-full"
+                />
+              </div>
+              <div className="text-sm text-muted-foreground">
+                minutos
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Valor mínimo: 1 minuto | Valor máximo: 1440 minutos (24 horas)
+            </p>
+          </div>
         </div>
       </Card>
 
