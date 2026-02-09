@@ -75,6 +75,26 @@ const PaymentSuccess = () => {
           }
         }
 
+        // Se encontrou reservation_ids, tentar carregar todas as reservas imediatamente
+        if (reservationIds.length > 0) {
+          console.log(`[PaymentSuccess] Encontrados ${reservationIds.length} reservation_ids, tentando carregar todas as reservas...`);
+          const loadedReservations = await Promise.all(
+            reservationIds.map(id => fetchReservationData(id))
+          );
+          
+          const validReservations = loadedReservations.filter(r => r !== null);
+          
+          if (validReservations.length > 0) {
+            console.log(`[PaymentSuccess] Carregadas ${validReservations.length} reservas com sucesso`);
+            setReservationData(validReservations[0]);
+            setAllReservations(validReservations);
+            setIsLoading(false);
+            return;
+          } else {
+            console.log(`[PaymentSuccess] Reservas ainda não foram criadas, aguardando conversão...`);
+          }
+        }
+
         if (quote.status === "converted" && quote.reservation_id) {
           // Orçamento já foi convertido
           if (reservationIds.length > 0) {
@@ -143,6 +163,26 @@ const PaymentSuccess = () => {
             }
           }
 
+          // Se encontrou reservation_ids, tentar carregar todas as reservas imediatamente
+          if (reservationIds.length > 0) {
+            console.log(`[PaymentSuccess] Encontrados ${reservationIds.length} reservation_ids no payment.quote_id, tentando carregar todas as reservas...`);
+            const loadedReservations = await Promise.all(
+              reservationIds.map(id => fetchReservationData(id))
+            );
+            
+            const validReservations = loadedReservations.filter(r => r !== null);
+            
+            if (validReservations.length > 0) {
+              console.log(`[PaymentSuccess] Carregadas ${validReservations.length} reservas com sucesso`);
+              setReservationData(validReservations[0]);
+              setAllReservations(validReservations);
+              setIsLoading(false);
+              return;
+            } else {
+              console.log(`[PaymentSuccess] Reservas ainda não foram criadas, aguardando conversão...`);
+            }
+          }
+
           if (quoteData.status === "converted") {
             if (reservationIds.length > 0) {
               // Se há múltiplas reservas, carregar todas
@@ -187,8 +227,8 @@ const PaymentSuccess = () => {
           .eq("id", quoteId)
           .maybeSingle();
 
-        // Extrair reservation_ids do notes se ainda não tiver
-        if (quote?.notes && reservationIds.length === 0) {
+        // Extrair reservation_ids do notes (sempre tentar, não apenas se estiver vazio)
+        if (quote?.notes) {
           // Tentar método novo primeiro (com marcadores HTML)
           const newFormatMatch = quote.notes.match(/<!--RESERVATION_IDS_START-->(.+?)<!--RESERVATION_IDS_END-->/s);
           if (newFormatMatch) {
@@ -197,6 +237,7 @@ const PaymentSuccess = () => {
               const parsed = JSON.parse(jsonStr);
               if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
                 reservationIds = parsed.reservation_ids;
+                console.log(`[PaymentSuccess] Encontrados ${reservationIds.length} reservation_ids no quote:`, reservationIds);
               }
             } catch (e) {
               console.warn("Erro ao parsear reservation_ids (formato novo):", e);
@@ -210,11 +251,32 @@ const PaymentSuccess = () => {
                 const parsed = JSON.parse(jsonStr);
                 if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
                   reservationIds = parsed.reservation_ids;
+                  console.log(`[PaymentSuccess] Encontrados ${reservationIds.length} reservation_ids no quote (formato antigo):`, reservationIds);
                 }
               } catch (e) {
                 console.warn("Erro ao parsear reservation_ids (formato antigo):", e);
               }
             }
+          }
+        }
+
+        // Se encontrou reservation_ids, tentar carregar todas as reservas imediatamente
+        if (reservationIds.length > 0) {
+          console.log(`[PaymentSuccess] Tentando carregar ${reservationIds.length} reservas pré-criadas...`);
+          const loadedReservations = await Promise.all(
+            reservationIds.map(id => fetchReservationData(id))
+          );
+          
+          const validReservations = loadedReservations.filter(r => r !== null);
+          
+          if (validReservations.length > 0) {
+            console.log(`[PaymentSuccess] Carregadas ${validReservations.length} reservas com sucesso`);
+            setReservationData(validReservations[0]);
+            setAllReservations(validReservations);
+            setIsLoading(false);
+            return;
+          } else {
+            console.log(`[PaymentSuccess] Reservas ainda não foram criadas, aguardando...`);
           }
         }
 
@@ -232,12 +294,47 @@ const PaymentSuccess = () => {
       // Tentar buscar pelo payment_intent_id
       const { data: quoteByIntent } = await supabase
         .from("quotes")
-        .select("id, status, reservation_id")
+        .select("id, status, reservation_id, notes")
         .eq("payment_intent_id", paymentIntent)
         .maybeSingle();
 
-      if (quoteByIntent?.status === "converted" && quoteByIntent.reservation_id) {
-        await loadReservationById(quoteByIntent.reservation_id);
+      // Extrair reservation_ids do quoteByIntent também
+      if (quoteByIntent?.notes && reservationIds.length === 0) {
+        const newFormatMatch = quoteByIntent.notes.match(/<!--RESERVATION_IDS_START-->(.+?)<!--RESERVATION_IDS_END-->/s);
+        if (newFormatMatch) {
+          try {
+            const jsonStr = newFormatMatch[1].trim();
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids)) {
+              reservationIds = parsed.reservation_ids;
+              console.log(`[PaymentSuccess] Encontrados ${reservationIds.length} reservation_ids no quoteByIntent:`, reservationIds);
+              
+              // Tentar carregar imediatamente
+              const loadedReservations = await Promise.all(
+                reservationIds.map(id => fetchReservationData(id))
+              );
+              
+              const validReservations = loadedReservations.filter(r => r !== null);
+              
+              if (validReservations.length > 0) {
+                setReservationData(validReservations[0]);
+                setAllReservations(validReservations);
+                setIsLoading(false);
+                return;
+              }
+            }
+          } catch (e) {
+            console.warn("Erro ao parsear reservation_ids:", e);
+          }
+        }
+      }
+
+      if (quoteByIntent?.status === "converted") {
+        if (reservationIds.length > 0) {
+          await loadAllReservations(reservationIds);
+        } else if (quoteByIntent.reservation_id) {
+          await loadReservationById(quoteByIntent.reservation_id);
+        }
         return;
       }
 
@@ -261,30 +358,50 @@ const PaymentSuccess = () => {
     }
 
     // Se chegou aqui, não conseguiu encontrar a reserva após várias tentativas
+    // Mas se temos reservationIds, tentar carregar uma última vez
+    if (reservationIds.length > 0) {
+      console.log(`[PaymentSuccess] Última tentativa de carregar ${reservationIds.length} reservas...`);
+      const loadedReservations = await Promise.all(
+        reservationIds.map(id => fetchReservationData(id))
+      );
+      
+      const validReservations = loadedReservations.filter(r => r !== null);
+      
+      if (validReservations.length > 0) {
+        setReservationData(validReservations[0]);
+        setAllReservations(validReservations);
+        setIsLoading(false);
+        return;
+      }
+    }
+
     setError("Pagamento processado! A reserva está sendo criada. Você receberá um email de confirmação em instantes.");
     setIsLoading(false);
   };
 
   const loadAllReservations = async (reservationIds: string[]) => {
     try {
+      console.log(`[PaymentSuccess] Carregando ${reservationIds.length} reservas...`);
       const reservations: any[] = [];
       
-      for (const reservationId of reservationIds) {
-        const reservation = await fetchReservationData(reservationId);
-        if (reservation) {
-          reservations.push(reservation);
-        }
-      }
+      // Carregar todas as reservas em paralelo para melhor performance
+      const loadedReservations = await Promise.all(
+        reservationIds.map(id => fetchReservationData(id))
+      );
       
-      if (reservations.length === 0) {
+      const validReservations = loadedReservations.filter(r => r !== null);
+      
+      if (validReservations.length === 0) {
         setError("Nenhuma reserva encontrada");
         setIsLoading(false);
         return;
       }
       
+      console.log(`[PaymentSuccess] Carregadas ${validReservations.length} reservas com sucesso`);
+      
       // Usar a primeira reserva como principal (para check-in)
-      setReservationData(reservations[0]);
-      setAllReservations(reservations);
+      setReservationData(validReservations[0]);
+      setAllReservations(validReservations);
       setIsLoading(false);
     } catch (error: any) {
       console.error("Erro ao carregar reservas:", error);
@@ -293,21 +410,33 @@ const PaymentSuccess = () => {
     }
   };
 
-  const fetchReservationData = async (reservationId: string) => {
+  const fetchReservationData = async (reservationId: string, retryCount: number = 0): Promise<any> => {
     try {
       const { data: reservation, error: reservationError } = await supabase
         .from("reservations")
-        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, room_id, category_id")
+        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, room_id, category_id, guest_name")
         .eq("id", reservationId)
         .maybeSingle();
 
       if (reservationError) {
+        // Se for erro de RLS ou não encontrado, tentar novamente se ainda não tentou muitas vezes
+        if (retryCount < 3 && (reservationError.code === "PGRST116" || reservationError.code === "42501")) {
+          console.log(`[PaymentSuccess] Reserva ${reservationId} ainda não disponível (tentativa ${retryCount + 1}/3), aguardando...`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return fetchReservationData(reservationId, retryCount + 1);
+        }
         console.error(`Erro ao buscar reserva ${reservationId}:`, reservationError);
-        throw reservationError;
+        return null;
       }
 
       if (!reservation) {
-        console.warn(`Reserva ${reservationId} não encontrada ou sem acesso`);
+        // Se não encontrou, tentar novamente se ainda não tentou muitas vezes
+        if (retryCount < 3) {
+          console.log(`[PaymentSuccess] Reserva ${reservationId} não encontrada (tentativa ${retryCount + 1}/3), aguardando...`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return fetchReservationData(reservationId, retryCount + 1);
+        }
+        console.warn(`Reserva ${reservationId} não encontrada ou sem acesso após ${retryCount + 1} tentativas`);
         return null;
       }
 
