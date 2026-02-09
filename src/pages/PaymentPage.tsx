@@ -39,6 +39,7 @@ const PaymentPage = () => {
   const [stripeConfig, setStripeConfig] = useState<any>(null);
   const [hotelSettings, setHotelSettings] = useState<any>(null);
   const [pmsLogoUrl, setPmsLogoUrl] = useState<string | null>(null);
+  const [allReservations, setAllReservations] = useState<any[]>([]);
   const { settings: siteSettings } = useSiteSettings();
 
   useEffect(() => {
@@ -124,7 +125,7 @@ const PaymentPage = () => {
       // Se a verificação retornou um status, usar esse status temporariamente
       const { data: payment, error: paymentError } = await supabase
         .from("stripe_payments" as any)
-        .select("*")
+        .select("*, quote_id")
         .eq("stripe_payment_intent_id", paymentIntentId)
         .single();
 
@@ -288,6 +289,85 @@ const PaymentPage = () => {
         }
       }
 
+      // Verificar se o pagamento está vinculado a um quote e buscar todas as reservas relacionadas
+      let allReservationsData: any[] = [];
+      let quote: any = null;
+      
+      // Tentar buscar quote pelo quote_id do pagamento
+      if (paymentAny.quote_id) {
+        const { data: quoteData, error: quoteError } = await supabase
+          .from("quotes")
+          .select("id, notes")
+          .eq("id", paymentAny.quote_id)
+          .maybeSingle();
+        
+        if (!quoteError && quoteData) {
+          quote = quoteData;
+        }
+      }
+      
+      // Se não encontrou pelo quote_id, tentar buscar diretamente pelo payment_intent_id
+      if (!quote) {
+        const { data: quoteData, error: quoteError } = await supabase
+          .from("quotes")
+          .select("id, notes")
+          .eq("payment_intent_id", paymentIntentId)
+          .maybeSingle();
+        
+        if (!quoteError && quoteData) {
+          quote = quoteData;
+        }
+      }
+
+      // Se encontrou um quote, extrair reservation_ids e buscar todas as reservas
+      if (quote?.notes) {
+        // Extrair reservation_ids do campo notes
+        const newFormatMatch = quote.notes.match(/<!--RESERVATION_IDS_START-->(.+?)<!--RESERVATION_IDS_END-->/s);
+        if (newFormatMatch) {
+          try {
+            const jsonStr = newFormatMatch[1].trim();
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.reservation_ids && Array.isArray(parsed.reservation_ids) && parsed.reservation_ids.length > 0) {
+              // Buscar todas as reservas relacionadas
+              const { data: reservations, error: reservationsError } = await supabase
+                .from("reservations")
+                .select(`
+                  id,
+                  reservation_code,
+                  guest_name,
+                  checkin_date,
+                  checkout_date
+                `)
+                .in("id", parsed.reservation_ids);
+
+              if (!reservationsError && reservations && reservations.length > 0) {
+                // Buscar localizadores para cada reserva
+                allReservationsData = await Promise.all(
+                  reservations.map(async (r: any) => {
+                    const { data: webCheckin } = await supabase
+                      .from("web_checkin")
+                      .select("locator")
+                      .eq("reservation_id", r.id)
+                      .maybeSingle();
+                    
+                    return {
+                      id: r.id,
+                      code: r.reservation_code,
+                      guest_name: r.guest_name,
+                      checkin_date: r.checkin_date,
+                      checkout_date: r.checkout_date,
+                      locator: webCheckin?.locator || null,
+                    };
+                  })
+                );
+              }
+            }
+          } catch (e) {
+            console.warn("Erro ao parsear reservation_ids:", e);
+          }
+        }
+      }
+
       // Se a verificação retornou um status diferente, usar esse status
       // Isso garante que mesmo se o banco ainda não foi atualizado, mostramos o status correto
       const finalStatus = statusCheck?.status || (payment as any).status;
@@ -298,6 +378,9 @@ const PaymentPage = () => {
         status: finalStatus, // Usar o status verificado se disponível
         reservation: reservationData,
       } as any;
+
+      // Armazenar todas as reservas relacionadas
+      setAllReservations(allReservationsData);
 
       console.log("[PaymentPage] Dados do pagamento:", {
         paymentIntentId: paymentIntentId,
@@ -480,6 +563,46 @@ const PaymentPage = () => {
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
                     <span className="text-xs sm:text-sm text-slate-600 font-medium">Categoria</span>
                     <span className="text-xs sm:text-sm font-semibold text-slate-900 break-words text-right sm:text-left">{categoryName}</span>
+                  </div>
+                )}
+
+                {/* Localizadores das Reservas (quando há múltiplas reservas) */}
+                {allReservations.length > 0 && (
+                  <div className="pt-2 sm:pt-3 border-t border-slate-200">
+                    <p className="text-xs sm:text-sm text-slate-600 font-medium mb-2 sm:mb-3">
+                      {allReservations.length > 1 ? "Localizadores das Reservas" : "Localizador da Reserva"}
+                    </p>
+                    <div className="space-y-2">
+                      {allReservations.map((res, index) => (
+                        <div key={res.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 border-b border-slate-100 last:border-b-0">
+                          <div className="flex-1">
+                            {allReservations.length > 1 && (
+                              <p className="text-xs text-slate-500 mb-1">
+                                Reserva {index + 1} - {res.guest_name || "Hóspede"}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2">
+                              {res.locator ? (
+                                <>
+                                  <span className="text-xs sm:text-sm font-mono font-semibold text-slate-900 break-all">
+                                    {res.locator}
+                                  </span>
+                                  {res.code && (
+                                    <span className="text-xs text-slate-500">
+                                      ({res.code})
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-xs sm:text-sm font-mono font-semibold text-slate-900 break-all">
+                                  {res.code || "Aguardando localizador"}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
             </div>

@@ -15,6 +15,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { Dialog, DialogContent, DialogTitle, DialogHeader, DialogDescription } from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Switch } from "@/components/ui/switch";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -55,7 +57,12 @@ const PublicReservation = () => {
     children: "0",
     notes: "",
     promotionalCode: "",
+    document_type: "CPF",
+    document_number: "",
   });
+  
+  // Estado para controlar se é estrangeiro
+  const [isForeigner, setIsForeigner] = useState(false);
 
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
   const [calculatingPrice, setCalculatingPrice] = useState(false);
@@ -89,6 +96,19 @@ const PublicReservation = () => {
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null); // Cupom aplicado
   const [validatingCoupon, setValidatingCoupon] = useState(false); // Validando cupom
   const [policiesDialogOpen, setPoliciesDialogOpen] = useState(false);
+  // Opção para preencher dados de outros hóspedes
+  const [allReservationsInMyName, setAllReservationsInMyName] = useState(true); // true = tudo em meu nome, false = preencher dados de outros
+  // Dados de hóspedes para cada quarto adicional (índice 0 = primeiro quarto adicional, 1 = segundo, etc.)
+  const [additionalGuestsData, setAdditionalGuestsData] = useState<Array<{
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    cpf: string;
+    isForeigner: boolean;
+    document_type: string;
+    document_number: string;
+  }>>([]);
 
   useEffect(() => {
     if (establishmentSlug) {
@@ -1412,6 +1432,31 @@ const PublicReservation = () => {
       return;
     }
 
+    // Validar documento se for estrangeiro
+    if (isForeigner && (!formData.document_type || !formData.document_number)) {
+      toast.error("Por favor, preencha o tipo e número do documento");
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Validar dados de hóspedes adicionais se necessário
+    if (!allReservationsInMyName && totalRooms > 1) {
+      for (let i = 0; i < additionalGuestsData.length; i++) {
+        const guest = additionalGuestsData[i];
+        if (!guest.firstName || !guest.lastName || !guest.email) {
+          toast.error(`Por favor, preencha todos os campos obrigatórios do hóspede do quarto ${i + 2}`);
+          setIsSubmitting(false);
+          return;
+        }
+        // Validar documento se for estrangeiro
+        if (guest.isForeigner && (!guest.document_type || !guest.document_number)) {
+          toast.error(`Por favor, preencha o tipo e número do documento do hóspede do quarto ${i + 2}`);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+    }
+
     // Verificar se há categorias selecionadas (distribuição automática)
     if (selectedCategories.length === 0) {
       toast.error(t("publicReservation.errors.selectCategory"));
@@ -1456,34 +1501,88 @@ const PublicReservation = () => {
     setIsSubmitting(true);
 
     try {
-      // Buscar ou criar cliente
-      let clientId = null;
-      if (formData.email) {
+      // Função auxiliar para buscar ou criar cliente
+      const getOrCreateClient = async (
+        firstName: string, 
+        lastName: string, 
+        email: string, 
+        phone: string | null,
+        documentType?: string,
+        documentNumber?: string
+      ) => {
         const { data: existingClient } = await supabase
           .from("clients")
           .select("id")
-          .eq("email", formData.email)
+          .eq("email", email)
           .maybeSingle();
 
         if (existingClient) {
-          clientId = existingClient.id;
+          return existingClient.id;
         } else {
+          const clientData: any = {
+            full_name: `${firstName} ${lastName}`,
+            email: email,
+            phone: phone || null,
+            establishment_id: establishment.id,
+          };
+
+          // Adicionar dados do documento se for estrangeiro ou se tiver CPF
+          if (documentType && documentNumber) {
+            clientData.document_type = documentType;
+            clientData.document_number = documentNumber;
+          } else if (!isForeigner && formData.cpf) {
+            // Se não for estrangeiro e tiver CPF, usar CPF
+            clientData.document_type = "CPF";
+            clientData.document_number = formData.cpf.replace(/\D/g, ""); // Remover formatação
+          }
+
           const { data: newClient, error: clientError } = await supabase
             .from("clients")
-            .insert({
-              full_name: `${formData.firstName} ${formData.lastName}`,
-              email: formData.email,
-              phone: formData.phone || null,
-              establishment_id: establishment.id,
-            })
+            .insert(clientData)
             .select()
             .single();
 
           if (clientError) {
             throw clientError;
           }
-          clientId = newClient.id;
+          return newClient.id;
         }
+      };
+
+      // Buscar ou criar cliente principal
+      let mainClientId = null;
+      if (formData.email) {
+        mainClientId = await getOrCreateClient(
+          formData.firstName,
+          formData.lastName,
+          formData.email,
+          formData.phone || null,
+          isForeigner ? formData.document_type : undefined,
+          isForeigner ? formData.document_number : undefined
+        );
+      }
+
+      // Criar clientes adicionais se necessário
+      const additionalClientIds: string[] = [];
+      if (!allReservationsInMyName && totalRooms > 1 && additionalGuestsData.length > 0) {
+        console.log(`[Reservation] Criando ${additionalGuestsData.length} clientes adicionais para ${totalRooms} quartos`);
+        for (let i = 0; i < additionalGuestsData.length; i++) {
+          const guest = additionalGuestsData[i];
+          console.log(`[Reservation] Criando cliente adicional ${i + 1}/${additionalGuestsData.length}: ${guest.firstName} ${guest.lastName} (${guest.email})`);
+          const clientId = await getOrCreateClient(
+            guest.firstName,
+            guest.lastName,
+            guest.email,
+            guest.phone || null,
+            guest.isForeigner ? guest.document_type : undefined,
+            guest.isForeigner ? guest.document_number : undefined
+          );
+          additionalClientIds.push(clientId);
+          console.log(`[Reservation] Cliente adicional ${i + 1} criado com ID: ${clientId}`);
+        }
+        console.log(`[Reservation] Total de clientes adicionais criados: ${additionalClientIds.length}`);
+      } else {
+        console.log(`[Reservation] Não criando clientes adicionais. allReservationsInMyName: ${allReservationsInMyName}, totalRooms: ${totalRooms}, additionalGuestsData.length: ${additionalGuestsData.length}`);
       }
 
       // Gerar token único para seleção de quartos
@@ -1504,6 +1603,9 @@ const PublicReservation = () => {
 
       // Criar reservas para cada categoria e quarto
       const createdReservations: string[] = [];
+      let roomIndex = 0; // Índice global do quarto (para rastrear qual cliente usar)
+      
+      console.log(`[Reservation] Iniciando criação de reservas. allReservationsInMyName: ${allReservationsInMyName}, totalRooms: ${totalRooms}, additionalClientIds.length: ${additionalClientIds.length}, additionalGuestsData.length: ${additionalGuestsData.length}`);
       
       for (const cat of selectedCategories) {
         // Buscar quartos disponíveis para esta categoria
@@ -1546,13 +1648,46 @@ const PublicReservation = () => {
           const finalAdults = i === cat.rooms - 1 ? adultsPerRoom + remainingAdults : adultsPerRoom;
           const finalChildren = i === cat.rooms - 1 ? childrenPerRoom + remainingChildren : childrenPerRoom;
           
+          // Determinar qual cliente usar para este quarto
+          let roomClientId: string | null;
+          let roomGuestName: string;
+          
+          if (allReservationsInMyName) {
+            // Se todas as reservas são em um nome só, sempre usar o cliente principal
+            roomClientId = mainClientId;
+            roomGuestName = `${formData.firstName} ${formData.lastName}`;
+          } else if (roomIndex === 0) {
+            // Primeiro quarto sempre usa o cliente principal
+            roomClientId = mainClientId;
+            roomGuestName = `${formData.firstName} ${formData.lastName}`;
+          } else {
+            // Quartos adicionais usam clientes separados quando a opção está ativada
+            const guestIndex = roomIndex - 1; // -1 porque o primeiro quarto não está em additionalGuestsData
+            console.log(`[Reservation] Quarto ${roomIndex + 1}: guestIndex=${guestIndex}, additionalClientIds.length=${additionalClientIds.length}, additionalGuestsData.length=${additionalGuestsData.length}`);
+            
+            if (guestIndex >= 0 && guestIndex < additionalClientIds.length && guestIndex < additionalGuestsData.length) {
+              roomClientId = additionalClientIds[guestIndex];
+              const guest = additionalGuestsData[guestIndex];
+              roomGuestName = `${guest.firstName} ${guest.lastName}`;
+              console.log(`[Reservation] ✅ Quarto ${roomIndex + 1} usando cliente adicional: ${roomClientId} para ${roomGuestName}`);
+            } else {
+              // Fallback: usar cliente principal se não houver dados suficientes
+              // Isso não deveria acontecer se o usuário preencheu os dados corretamente
+              console.warn(`[Reservation] ⚠️ Quarto ${roomIndex + 1} não tem cliente adicional disponível, usando cliente principal. guestIndex=${guestIndex}, additionalClientIds.length=${additionalClientIds.length}`);
+              roomClientId = mainClientId;
+              roomGuestName = `${formData.firstName} ${formData.lastName}`;
+            }
+          }
+          
+          console.log(`[Reservation] Criando reserva - Quarto ${roomIndex + 1}, Cliente: ${roomClientId}, Nome: ${roomGuestName}, allReservationsInMyName: ${allReservationsInMyName}`);
+          
           // Preparar dados da reserva
           const reservationData = {
             establishment_id: establishment.id,
             room_id: roomId,
             category_id: cat.categoryId,
-            client_id: clientId,
-            guest_name: `${formData.firstName} ${formData.lastName}`,
+            client_id: roomClientId,
+            guest_name: roomGuestName,
             adults: finalAdults,
             children: finalChildren,
             total_amount: pricePerRoom,
@@ -1596,8 +1731,12 @@ const PublicReservation = () => {
           }
 
           createdReservations.push(reservationResult.reservation_id);
+          console.log(`[Reservation] ✅ Reserva criada - ID: ${reservationResult.reservation_id}, Cliente: ${roomClientId}, Nome: ${roomGuestName}, roomIndex: ${roomIndex}`);
+          roomIndex++; // Incrementar índice global do quarto
         }
       }
+      
+      console.log(`[Reservation] Total de reservas criadas: ${createdReservations.length}, roomIndex final: ${roomIndex}, additionalClientIds: ${additionalClientIds.length}`);
 
       // Criar orçamento (quote) vinculado às reservas criadas
       // Armazenar IDs das reservas no campo notes em formato JSON (no final para facilitar parsing)
@@ -1611,7 +1750,7 @@ const PublicReservation = () => {
         .from("quotes")
         .insert({
           establishment_id: establishment.id,
-          client_id: clientId,
+          client_id: mainClientId,
           guest_name: `${formData.firstName} ${formData.lastName}`,
           guest_email: formData.email,
           guest_phone: formData.phone || null,
@@ -3060,33 +3199,358 @@ const PublicReservation = () => {
                       className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="cpf" className="text-sm font-semibold text-slate-700 mb-2 block">
-                        {t("publicReservation.cpf")}
-                      </Label>
-                      <Input
-                        id="cpf"
-                        value={formData.cpf}
-                        onChange={(e) => setFormData({ ...formData, cpf: formatCPF(e.target.value) })}
-                        placeholder="000.000.000-00"
-                        maxLength={14}
-                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="phone" className="text-sm font-semibold text-slate-700 mb-2 block">
-                        {t("publicReservation.phone")}
-                      </Label>
-                      <Input
-                        id="phone"
-                        value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
-                        placeholder="(00) 00000-0000"
-                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
-                      />
-                    </div>
+                  {/* Opção Sou Estrangeiro */}
+                  <div className="flex items-center space-x-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <Switch
+                      id="isForeigner"
+                      checked={isForeigner}
+                      onCheckedChange={(checked) => {
+                        setIsForeigner(checked);
+                        if (checked) {
+                          // Limpar CPF e definir tipo de documento padrão para estrangeiro
+                          setFormData({ ...formData, cpf: "", document_type: "Passaporte", document_number: "" });
+                        } else {
+                          // Voltar para CPF
+                          setFormData({ ...formData, document_type: "CPF", document_number: "" });
+                        }
+                      }}
+                    />
+                    <Label htmlFor="isForeigner" className="text-sm font-semibold text-slate-700 cursor-pointer">
+                      Sou Estrangeiro
+                    </Label>
                   </div>
+
+                  {!isForeigner ? (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="cpf" className="text-sm font-semibold text-slate-700 mb-2 block">
+                          {t("publicReservation.cpf")}
+                        </Label>
+                        <Input
+                          id="cpf"
+                          value={formData.cpf}
+                          onChange={(e) => setFormData({ ...formData, cpf: formatCPF(e.target.value) })}
+                          placeholder="000.000.000-00"
+                          maxLength={14}
+                          className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="phone" className="text-sm font-semibold text-slate-700 mb-2 block">
+                          {t("publicReservation.phone")}
+                        </Label>
+                        <Input
+                          id="phone"
+                          value={formData.phone}
+                          onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
+                          placeholder="(00) 00000-0000"
+                          className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="document_type" className="text-sm font-semibold text-slate-700 mb-2 block">
+                            Tipo de Documento *
+                          </Label>
+                          <Select
+                            value={formData.document_type}
+                            onValueChange={(value) => setFormData({ ...formData, document_type: value, document_number: "" })}
+                          >
+                            <SelectTrigger className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Passaporte">Passaporte</SelectItem>
+                              <SelectItem value="RG">RG</SelectItem>
+                              <SelectItem value="CNH">CNH</SelectItem>
+                              <SelectItem value="Outro">Outro</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label htmlFor="phone" className="text-sm font-semibold text-slate-700 mb-2 block">
+                            {t("publicReservation.phone")}
+                          </Label>
+                          <Input
+                            id="phone"
+                            value={formData.phone}
+                            onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
+                            placeholder="(00) 00000-0000"
+                            className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <Label htmlFor="document_number" className="text-sm font-semibold text-slate-700 mb-2 block">
+                          Número do Documento *
+                        </Label>
+                        <Input
+                          id="document_number"
+                          value={formData.document_number}
+                          onChange={(e) => setFormData({ ...formData, document_number: e.target.value })}
+                          placeholder="Número do documento"
+                          required={isForeigner}
+                          className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Opção para múltiplas reservas - apenas mostrar se houver mais de 1 quarto */}
+                  {selectedCategories.length > 0 && totalRooms > 1 && (
+                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                        Opções para múltiplas reservas:
+                      </Label>
+                      <p className="text-xs text-slate-600 mb-3">
+                        Escolha como deseja receber as informações de check-in e confirmação das reservas.
+                      </p>
+                      <RadioGroup
+                        value={allReservationsInMyName ? "myName" : "otherGuests"}
+                        onValueChange={(value) => {
+                          setAllReservationsInMyName(value === "myName");
+                          // Limpar dados de hóspedes adicionais quando mudar para "meu nome"
+                          if (value === "myName") {
+                            setAdditionalGuestsData([]);
+                          } else {
+                            // Inicializar dados de hóspedes adicionais (totalRooms - 1, pois o primeiro usa os dados principais)
+                            const additionalRoomsCount = totalRooms - 1;
+                            setAdditionalGuestsData(
+                              Array(additionalRoomsCount).fill(null).map(() => ({
+                                firstName: "",
+                                lastName: "",
+                                email: "",
+                                phone: "",
+                                cpf: "",
+                                isForeigner: false,
+                                document_type: "CPF",
+                                document_number: "",
+                              }))
+                            );
+                          }
+                        }}
+                        className="space-y-3"
+                      >
+                        <div className="flex items-start space-x-2">
+                          <RadioGroupItem value="myName" id="myName" className="mt-1" />
+                          <div className="flex-1">
+                            <Label htmlFor="myName" className="text-sm text-slate-700 cursor-pointer font-medium">
+                              Fazer todas as reservas em meu nome
+                            </Label>
+                            <p className="text-xs text-slate-600 mt-1">
+                              Você receberá um único email com todas as instruções de check-in e informações de todas as reservas.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-start space-x-2">
+                          <RadioGroupItem value="otherGuests" id="otherGuests" className="mt-1" />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <Label htmlFor="otherGuests" className="text-sm text-slate-700 cursor-pointer font-medium">
+                                Preencher dados de outros hóspedes
+                              </Label>
+                              <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">
+                                Recomendado
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-slate-600 mt-1">
+                              Cada hóspede receberá um email individual com suas próprias instruções de check-in e informações da sua reserva. Esta opção é mais recomendada para garantir que todos os hóspedes recebam as informações corretas.
+                            </p>
+                          </div>
+                        </div>
+                      </RadioGroup>
+
+                      {/* Campos para hóspedes adicionais */}
+                      {!allReservationsInMyName && additionalGuestsData.length > 0 && (
+                        <div className="mt-4 space-y-4">
+                          {additionalGuestsData.map((guest, index) => {
+                            const roomNumber = index + 2; // +2 porque o primeiro quarto usa os dados principais
+                            return (
+                              <div key={index} className="p-4 bg-white border border-slate-200 rounded-lg">
+                                <h5 className="font-semibold text-slate-900 mb-3">
+                                  Dados do Hóspede - Quarto {roomNumber}
+                                </h5>
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                      Nome *
+                                    </Label>
+                                    <Input
+                                      value={guest.firstName}
+                                      onChange={(e) => {
+                                        const updated = [...additionalGuestsData];
+                                        updated[index].firstName = e.target.value;
+                                        setAdditionalGuestsData(updated);
+                                      }}
+                                      required
+                                      className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                      placeholder="Nome"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                      Sobrenome *
+                                    </Label>
+                                    <Input
+                                      value={guest.lastName}
+                                      onChange={(e) => {
+                                        const updated = [...additionalGuestsData];
+                                        updated[index].lastName = e.target.value;
+                                        setAdditionalGuestsData(updated);
+                                      }}
+                                      required
+                                      className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                      placeholder="Sobrenome"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="mt-4">
+                                  <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                    Email *
+                                  </Label>
+                                  <Input
+                                    type="email"
+                                    value={guest.email}
+                                    onChange={(e) => {
+                                      const updated = [...additionalGuestsData];
+                                      updated[index].email = e.target.value;
+                                      setAdditionalGuestsData(updated);
+                                    }}
+                                    required
+                                    className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                    placeholder="email@exemplo.com"
+                                  />
+                                </div>
+
+                                {/* Opção Sou Estrangeiro para hóspede adicional */}
+                                <div className="flex items-center space-x-2 p-3 bg-slate-50 rounded-lg border border-slate-200 mt-4">
+                                  <Switch
+                                    id={`isForeigner-${index}`}
+                                    checked={guest.isForeigner}
+                                    onCheckedChange={(checked) => {
+                                      const updated = [...additionalGuestsData];
+                                      updated[index].isForeigner = checked;
+                                      if (checked) {
+                                        updated[index].cpf = "";
+                                        updated[index].document_type = "Passaporte";
+                                        updated[index].document_number = "";
+                                      } else {
+                                        updated[index].document_type = "CPF";
+                                        updated[index].document_number = "";
+                                      }
+                                      setAdditionalGuestsData(updated);
+                                    }}
+                                  />
+                                  <Label htmlFor={`isForeigner-${index}`} className="text-sm font-semibold text-slate-700 cursor-pointer">
+                                    Sou Estrangeiro
+                                  </Label>
+                                </div>
+
+                                {!guest.isForeigner ? (
+                                  <div className="grid grid-cols-2 gap-4 mt-4">
+                                    <div>
+                                      <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                        CPF
+                                      </Label>
+                                      <Input
+                                        value={guest.cpf}
+                                        onChange={(e) => {
+                                          const updated = [...additionalGuestsData];
+                                          updated[index].cpf = formatCPF(e.target.value);
+                                          setAdditionalGuestsData(updated);
+                                        }}
+                                        placeholder="000.000.000-00"
+                                        maxLength={14}
+                                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                        Telefone
+                                      </Label>
+                                      <Input
+                                        value={guest.phone}
+                                        onChange={(e) => {
+                                          const updated = [...additionalGuestsData];
+                                          updated[index].phone = formatPhone(e.target.value);
+                                          setAdditionalGuestsData(updated);
+                                        }}
+                                        placeholder="(00) 00000-0000"
+                                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                      />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-4 mt-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div>
+                                        <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                          Tipo de Documento *
+                                        </Label>
+                                        <Select
+                                          value={guest.document_type}
+                                          onValueChange={(value) => {
+                                            const updated = [...additionalGuestsData];
+                                            updated[index].document_type = value;
+                                            updated[index].document_number = "";
+                                            setAdditionalGuestsData(updated);
+                                          }}
+                                        >
+                                          <SelectTrigger className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg">
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="Passaporte">Passaporte</SelectItem>
+                                            <SelectItem value="RG">RG</SelectItem>
+                                            <SelectItem value="CNH">CNH</SelectItem>
+                                            <SelectItem value="Outro">Outro</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div>
+                                        <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                          Telefone
+                                        </Label>
+                                        <Input
+                                          value={guest.phone}
+                                          onChange={(e) => {
+                                            const updated = [...additionalGuestsData];
+                                            updated[index].phone = formatPhone(e.target.value);
+                                            setAdditionalGuestsData(updated);
+                                          }}
+                                          placeholder="(00) 00000-0000"
+                                          className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                        Número do Documento *
+                                      </Label>
+                                      <Input
+                                        value={guest.document_number}
+                                        onChange={(e) => {
+                                          const updated = [...additionalGuestsData];
+                                          updated[index].document_number = e.target.value;
+                                          setAdditionalGuestsData(updated);
+                                        }}
+                                        placeholder="Número do documento"
+                                        required={guest.isForeigner}
+                                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <Separator />

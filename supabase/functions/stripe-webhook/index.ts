@@ -307,18 +307,118 @@ async function applyPaymentToReservations(
     }
   }
 
-  // Enviar email de reserva criada para múltiplas reservas (apenas uma vez, após processar todas)
+  // Verificar se todas as reservas têm o mesmo cliente
+  // Se tiverem o mesmo cliente: enviar email de "Múltiplas Reservas Criadas"
+  // Se tiverem clientes diferentes: enviar email de "Pagamento Confirmado" para cada cliente individual
   if (reservationIds.length > 1) {
     try {
-      console.log(`[Webhook] 📧 Enviando email de reserva criada para ${reservationIds.length} reservas`);
-      await sendMultipleReservationsCreatedEmail(
-        reservationIds,
-        supabaseClient,
-        establishmentId
-      );
+      // Aguardar um pouco para garantir que as atualizações das reservas foram commitadas
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Buscar client_id de todas as reservas (buscar novamente após atualizações)
+      const { data: reservationsData, error: reservationsError } = await supabaseClient
+        .from("reservations")
+        .select("id, client_id, reservation_code")
+        .in("id", reservationIds);
+
+      if (reservationsError || !reservationsData) {
+        console.error(`[Webhook] ❌ Erro ao buscar clientes das reservas:`, reservationsError);
+        // Fallback: enviar email de múltiplas reservas
+        await sendMultipleReservationsCreatedEmail(
+          reservationIds,
+          supabaseClient,
+          establishmentId
+        );
+        return;
+      }
+
+      // Verificar se todas as reservas têm o mesmo client_id
+      const clientIds = reservationsData.map(r => r.client_id).filter(Boolean);
+      const uniqueClientIds = new Set(clientIds);
+      
+      // Log detalhado de cada reserva e seu cliente
+      console.log(`[Webhook] 📧 Verificando clientes das reservas:`, {
+        totalReservations: reservationIds.length,
+        uniqueClients: uniqueClientIds.size,
+        clientIds: Array.from(uniqueClientIds),
+        allClientIds: clientIds,
+        reservationsDetail: reservationsData.map(r => ({
+          id: r.id,
+          code: r.reservation_code,
+          client_id: r.client_id
+        }))
+      });
+      
+      if (uniqueClientIds.size === 1) {
+        // Todas as reservas têm o mesmo cliente: enviar email de múltiplas reservas criadas
+        console.log(`[Webhook] 📧 Todas as reservas têm o mesmo cliente. Enviando email de múltiplas reservas criadas`);
+        await sendMultipleReservationsCreatedEmail(
+          reservationIds,
+          supabaseClient,
+          establishmentId
+        );
+      } else {
+        // Reservas têm clientes diferentes: enviar email de pagamento confirmado para cada cliente
+        console.log(`[Webhook] 📧 Reservas têm ${uniqueClientIds.size} clientes diferentes. Enviando emails individuais de pagamento confirmado`);
+        
+        // Agrupar reservas por client_id
+        const reservationsByClient = new Map<string, string[]>();
+        for (const reservation of reservationsData) {
+          const clientId = reservation.client_id;
+          if (clientId) {
+            if (!reservationsByClient.has(clientId)) {
+              reservationsByClient.set(clientId, []);
+            }
+            reservationsByClient.get(clientId)!.push(reservation.id);
+          }
+        }
+
+        // Enviar email de pagamento confirmado para cada cliente
+        for (const [clientId, clientReservationIds] of reservationsByClient.entries()) {
+          // Buscar dados completos da primeira reserva deste cliente para enviar o email
+          const { data: firstReservation, error: firstReservationError } = await supabaseClient
+            .from("reservations")
+            .select(`
+              *,
+              financial_responsible:clients!client_id(*),
+              guest:clients!guest_id(*),
+              rooms (id, room_number, name),
+              room_categories (id, name, description)
+            `)
+            .eq("id", clientReservationIds[0])
+            .single();
+
+          if (firstReservationError || !firstReservation) {
+            console.error(`[Webhook] ❌ Erro ao buscar reserva para cliente ${clientId}:`, firstReservationError);
+            continue;
+          }
+
+          // Enviar email de pagamento confirmado para cada reserva deste cliente
+          for (const reservationId of clientReservationIds) {
+            try {
+              await sendPaymentConfirmedEmail(
+                reservationId,
+                supabaseClient
+              );
+              console.log(`[Webhook] ✅ Email de pagamento confirmado enviado para reserva ${reservationId} (cliente ${clientId})`);
+            } catch (emailError) {
+              console.error(`[Webhook] ❌ Erro ao enviar email de pagamento confirmado para reserva ${reservationId}:`, emailError);
+            }
+          }
+        }
+      }
     } catch (emailError) {
-      console.error(`[Webhook] ❌ Erro ao enviar email de múltiplas reservas criadas:`, emailError);
-      // Não bloquear o processamento se o email falhar
+      console.error(`[Webhook] ❌ Erro ao processar emails:`, emailError);
+      // Fallback: tentar enviar email de múltiplas reservas
+      try {
+        await sendMultipleReservationsCreatedEmail(
+          reservationIds,
+          supabaseClient,
+          establishmentId
+        );
+      } catch (fallbackError) {
+        console.error(`[Webhook] ❌ Erro ao enviar email de fallback:`, fallbackError);
+      }
     }
   }
 }
@@ -1750,8 +1850,10 @@ async function sendPaymentConfirmedEmail(
     console.log(`📧 [sendPaymentConfirmedEmail] Configurações de email encontradas, provider: ${emailSettings.provider}`);
 
     // Determinar destinatário
-    const recipientEmail = reservation.guest?.email || reservation.financial_responsible?.email;
-    const recipientName = reservation.guest?.full_name || reservation.financial_responsible?.full_name;
+    // Priorizar: 1) guest_name da reserva, 2) cliente do client_id, 3) guest_id, 4) financial_responsible
+    const recipientEmail = reservation.financial_responsible?.email || reservation.guest?.email;
+    // Usar guest_name da reserva (que contém o nome correto do hóspede) ou o nome do cliente do client_id
+    const recipientName = reservation.guest_name || reservation.financial_responsible?.full_name || reservation.guest?.full_name || "Hóspede";
 
     if (!recipientEmail) {
       console.warn(`⚠️ [sendPaymentConfirmedEmail] Nenhum email encontrado para hóspede ou responsável financeiro na reserva ${reservationId}`);
@@ -1759,7 +1861,7 @@ async function sendPaymentConfirmedEmail(
       return;
     }
 
-    console.log(`📧 [sendPaymentConfirmedEmail] Destinatário: ${recipientEmail} (${recipientName || 'N/A'})`);
+    console.log(`📧 [sendPaymentConfirmedEmail] Destinatário: ${recipientEmail} (${recipientName})`);
 
     // Buscar configurações do hotel
     let hotelSettings: any = null;
