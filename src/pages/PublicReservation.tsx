@@ -2410,6 +2410,8 @@ const PublicReservation = () => {
     (hotelSettings?.whatsapp_ddi && hotelSettings?.whatsapp_number 
       ? `${hotelSettings.whatsapp_ddi}${hotelSettings.whatsapp_number}`.trim()
       : hotelSettings?.whatsapp_number || '');
+  
+  const email = hotelSettings?.email || '';
 
   // Foto principal do estabelecimento para o hero
   const heroImage = hotelSettings?.establishment_photos && hotelSettings.establishment_photos.length > 0
@@ -2470,12 +2472,27 @@ const PublicReservation = () => {
                 {hotelSettings?.name || establishment.name || t("publicReservation.establishmentNotFound")}
               </h1>
               {hotelSettings?.street && (
-                <p className="text-white/90 text-lg flex items-center gap-2 mb-6">
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                    [
+                      hotelSettings.street,
+                      hotelSettings.number,
+                      hotelSettings.neighborhood,
+                      hotelSettings.city,
+                      hotelSettings.state,
+                      hotelSettings.zip_code,
+                      hotelSettings.country || 'Brasil'
+                    ].filter(Boolean).join(', ')
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-white/90 text-lg flex items-center gap-2 mb-6 hover:text-white transition-colors cursor-pointer"
+                >
                   <MapPin className="w-5 h-5" />
                   {hotelSettings.street}
                   {hotelSettings.number && `, ${hotelSettings.number}`}
                   {hotelSettings.city && ` - ${hotelSettings.city}`}
-                </p>
+                </a>
               )}
               <div className="flex flex-wrap items-center gap-4 text-white/90">
                 {phone && (
@@ -2496,6 +2513,15 @@ const PublicReservation = () => {
                   >
                     <MessageCircle className="w-5 h-5" />
                     <span>WhatsApp</span>
+                  </a>
+                )}
+                {email && (
+                  <a 
+                    href={`mailto:${email}`}
+                    className="flex items-center gap-2 hover:text-white transition-colors"
+                  >
+                    <Mail className="w-5 h-5" />
+                    <span>{email}</span>
                   </a>
                 )}
               </div>
