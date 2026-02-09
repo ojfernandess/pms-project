@@ -2584,17 +2584,52 @@ serve(async (req) => {
       );
     }
 
-    // Salvar webhook no banco
-    const { data: webhook } = await supabaseClient
+    // Salvar webhook no banco (ou buscar existente se já foi processado)
+    let webhook: any = null;
+    const { data: existingWebhook } = await supabaseClient
       .from("stripe_webhooks")
-      .insert({
-        stripe_event_id: event.id,
-        event_type: event.type,
-        payload: event as any,
-        processed: false,
-      })
-      .select()
-      .single();
+      .select("*")
+      .eq("stripe_event_id", event.id)
+      .maybeSingle();
+
+    if (existingWebhook) {
+      webhook = existingWebhook;
+      // Se já foi processado, retornar sucesso sem reprocessar
+      if (existingWebhook.processed) {
+        console.log(`[Webhook] ℹ️ Evento ${event.id} já foi processado anteriormente, ignorando...`);
+        return new Response(
+          JSON.stringify({
+            received: true,
+            processed: true,
+            event_type: event.type,
+            message: "Already processed",
+          }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+    } else {
+      // Criar novo webhook
+      const { data: newWebhook, error: webhookError } = await supabaseClient
+        .from("stripe_webhooks")
+        .insert({
+          stripe_event_id: event.id,
+          event_type: event.type,
+          payload: event as any,
+          processed: false,
+        })
+        .select()
+        .single();
+
+      if (webhookError || !newWebhook) {
+        console.error("Error saving webhook:", webhookError);
+        // Continuar mesmo se falhar ao salvar webhook
+      } else {
+        webhook = newWebhook;
+      }
+    }
 
     // Processar eventos
     let processed = false;
@@ -2906,8 +2941,16 @@ serve(async (req) => {
               }
 
               // Verificar se já foi convertido (compatibilidade com sistema antigo)
-              if (quote.status === "converted" && quote.reservation_id) {
-                console.log(`[Webhook] ℹ️ Orçamento ${quoteId} já foi convertido em reserva ${quote.reservation_id}`);
+              if (quote.status === "converted") {
+                console.log(`[Webhook] ℹ️ Orçamento ${quoteId} já foi convertido (status: converted)`);
+                
+                // Verificar se já existe uma reserva vinculada ao pagamento
+                if (payment?.reservation_id) {
+                  console.log(`[Webhook] ℹ️ Pagamento já está vinculado à reserva ${payment.reservation_id}, pulando processamento`);
+                  processed = true;
+                  break;
+                }
+                
                 // Se há reservas pré-criadas, aplicar pagamento nelas também
                 if (reservationIds.length > 0) {
                   console.log(`[Webhook] 💰 Aplicando pagamento em ${reservationIds.length} reservas pré-criadas`);
@@ -2919,11 +2962,15 @@ serve(async (req) => {
                     quote.establishment_id
                   );
                 }
-                // Atualizar o pagamento para apontar para a primeira reserva existente
-                await supabaseClient
-                  .from("stripe_payments")
-                  .update({ reservation_id: quote.reservation_id })
-                  .eq("stripe_payment_intent_id", paymentIntent.id);
+                
+                // Atualizar o pagamento para apontar para a primeira reserva existente (se houver)
+                if (quote.reservation_id) {
+                  await supabaseClient
+                    .from("stripe_payments")
+                    .update({ reservation_id: quote.reservation_id })
+                    .eq("stripe_payment_intent_id", paymentIntent.id);
+                }
+                processed = true;
                 break;
               }
 
@@ -2972,7 +3019,34 @@ serve(async (req) => {
                 break;
               }
 
-              // Se chegou aqui, não há reservas pré-criadas, então criar uma nova reserva
+              // Se chegou aqui, não há reservas pré-criadas
+              // IMPORTANTE: Verificar novamente se o quote já foi convertido antes de criar nova reserva
+              // (pode ter sido convertido entre a primeira verificação e agora)
+              const { data: recheckQuote } = await supabaseClient
+                .from("quotes")
+                .select("status, reservation_id")
+                .eq("id", quoteId)
+                .single();
+              
+              if (recheckQuote?.status === "converted") {
+                console.log(`[Webhook] ℹ️ Orçamento ${quoteId} foi convertido durante o processamento, pulando criação de nova reserva`);
+                if (recheckQuote.reservation_id) {
+                  await supabaseClient
+                    .from("stripe_payments")
+                    .update({ reservation_id: recheckQuote.reservation_id })
+                    .eq("stripe_payment_intent_id", paymentIntent.id);
+                }
+                processed = true;
+                break;
+              }
+              
+              // Verificar se já existe uma reserva vinculada ao pagamento
+              if (payment?.reservation_id) {
+                console.log(`[Webhook] ℹ️ Pagamento já está vinculado à reserva ${payment.reservation_id}, não criando nova reserva`);
+                processed = true;
+                break;
+              }
+              
               console.log(`[Webhook] ℹ️ Nenhuma reserva pré-criada encontrada para o orçamento ${quoteId}, criando nova reserva...`);
               
               // Buscar ou criar cliente/hóspede
@@ -3268,26 +3342,30 @@ serve(async (req) => {
           processed = true;
       }
 
-      // Marcar webhook como processado
-      await supabaseClient
-        .from("stripe_webhooks")
-        .update({
-          processed: true,
-          processed_at: new Date().toISOString(),
-        })
-        .eq("id", webhook.id);
+      // Marcar webhook como processado (se existe)
+      if (webhook?.id) {
+        await supabaseClient
+          .from("stripe_webhooks")
+          .update({
+            processed: true,
+            processed_at: new Date().toISOString(),
+          })
+          .eq("id", webhook.id);
+      }
     } catch (error) {
       errorMessage = error.message;
       console.error("Error processing webhook:", error);
 
-      // Marcar webhook com erro
-      await supabaseClient
-        .from("stripe_webhooks")
-        .update({
-          processed: false,
-          error_message: errorMessage,
-        })
-        .eq("id", webhook.id);
+      // Marcar webhook com erro (se existe)
+      if (webhook?.id) {
+        await supabaseClient
+          .from("stripe_webhooks")
+          .update({
+            processed: false,
+            error_message: errorMessage,
+          })
+          .eq("id", webhook.id);
+      }
     }
 
     return new Response(
