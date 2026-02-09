@@ -360,6 +360,20 @@ const QuotePaymentPage = () => {
   const category = quoteData.category;
   const locationName = establishment?.name || hotelSettings?.name || "";
   const categoryName = category?.name || "";
+  
+  // Função para obter a URL da página pública de reservas
+  const getPublicReservationUrl = () => {
+    if (!establishment) return "/";
+    
+    // Tentar usar slug primeiro, depois numeric_id
+    const establishmentSlug = establishment.slug || establishment.numeric_id?.toString() || "";
+    
+    if (!establishmentSlug) {
+      return "/";
+    }
+    
+    return `/reservar/${establishmentSlug}`;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-8 px-4">
@@ -553,10 +567,10 @@ const QuotePaymentPage = () => {
                   O tempo para realizar o pagamento expirou. O orçamento foi cancelado automaticamente.
                 </p>
                 <Button
-                  onClick={() => navigate("/")}
+                  onClick={() => navigate(getPublicReservationUrl())}
                   variant="outline"
                 >
-                  Voltar para a Página Inicial
+                  Voltar para a Página de Reservas
                 </Button>
               </div>
             </div>
