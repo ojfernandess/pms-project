@@ -1126,21 +1126,78 @@ const PublicReservation = () => {
       // Tentar buscar por numeric_id primeiro (se for número)
       if (establishmentSlug && !isNaN(Number(establishmentSlug))) {
         establishmentQuery = establishmentQuery.eq("numeric_id", parseInt(establishmentSlug));
+      } else if (establishmentSlug) {
+        // Buscar por slug (mais específico e comum)
+        establishmentQuery = establishmentQuery.eq("slug", establishmentSlug);
       } else {
-        // Buscar por slug ou nome
-        establishmentQuery = establishmentQuery.or(`name.ilike.%${establishmentSlug}%,slug.eq.${establishmentSlug}`);
-      }
-
-      const { data: establishments, error: estError } = await establishmentQuery.limit(1);
-
-      if (estError || !establishments || establishments.length === 0) {
+        console.error("[PublicReservation] establishmentSlug está vazio ou undefined");
         toast.error(t("publicReservation.errors.establishmentNotFound"));
         setIsLoading(false);
         return;
       }
 
-      const foundEstablishment = establishments[0];
+      const { data: establishments, error: estError } = await establishmentQuery.limit(1);
+
+      // Log para debug
+      console.log(`[PublicReservation] Buscando estabelecimento com slug: "${establishmentSlug}"`, {
+        isNumeric: establishmentSlug && !isNaN(Number(establishmentSlug)),
+        error: estError,
+        found: establishments?.length || 0,
+      });
+
+      if (estError) {
+        console.error(`[PublicReservation] Erro ao buscar estabelecimento:`, estError);
+        // Se houver erro de RLS (401/403), tentar buscar por ID direto como fallback
+        if (estError.code === '42501' || estError.code === 'PGRST301' || estError.message?.includes('row-level security')) {
+          console.warn(`[PublicReservation] Erro de RLS detectado. Verificando se a política RLS está correta.`);
+        }
+        toast.error(t("publicReservation.errors.establishmentNotFound"));
+        setIsLoading(false);
+        return;
+      }
+
+      let foundEstablishment = null;
+
+      if (!establishments || establishments.length === 0) {
+        console.warn(`[PublicReservation] Estabelecimento não encontrado para slug: "${establishmentSlug}"`);
+        // Tentar buscar por nome como fallback se slug não funcionou
+        if (establishmentSlug && isNaN(Number(establishmentSlug))) {
+          console.log(`[PublicReservation] Tentando buscar por nome como fallback...`);
+          const { data: fallbackEstablishments, error: fallbackError } = await supabase
+            .from("establishments")
+            .select("*")
+            .ilike("name", `%${establishmentSlug}%`)
+            .limit(1);
+          
+          if (!fallbackError && fallbackEstablishments && fallbackEstablishments.length > 0) {
+            console.log(`[PublicReservation] Estabelecimento encontrado por nome:`, fallbackEstablishments[0].name);
+            foundEstablishment = fallbackEstablishments[0];
+          } else {
+            console.error(`[PublicReservation] Estabelecimento não encontrado nem por slug nem por nome`);
+            toast.error(t("publicReservation.errors.establishmentNotFound"));
+            setIsLoading(false);
+            return;
+          }
+        } else {
+          console.error(`[PublicReservation] Estabelecimento não encontrado para numeric_id: "${establishmentSlug}"`);
+          toast.error(t("publicReservation.errors.establishmentNotFound"));
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        foundEstablishment = establishments[0];
+      }
+
+      if (!foundEstablishment) {
+        console.error(`[PublicReservation] Estabelecimento não foi encontrado após todas as tentativas`);
+        toast.error(t("publicReservation.errors.establishmentNotFound"));
+        setIsLoading(false);
+        return;
+      }
+
+      // Setar o estabelecimento encontrado
       setEstablishment(foundEstablishment);
+      console.log(`[PublicReservation] Estabelecimento encontrado: ${foundEstablishment.name} (ID: ${foundEstablishment.id}, Slug: ${foundEstablishment.slug})`);
 
       // Buscar configurações do hotel
       const { data: hotel } = await supabase
