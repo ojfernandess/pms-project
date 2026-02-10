@@ -1204,6 +1204,29 @@ const PublicReservation = () => {
         return;
       }
 
+      // Verificar se o estabelecimento tem página pública ativa
+      if (foundEstablishment.company_id) {
+        const { data: publicReservationCheck, error: publicCheckError } = await supabase
+          .from("company_public_reservation_establishments")
+          .select("id, is_active")
+          .eq("company_id", foundEstablishment.company_id)
+          .eq("establishment_id", foundEstablishment.id)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (publicCheckError && publicCheckError.code !== "PGRST116") {
+          console.error(`[PublicReservation] Erro ao verificar página pública:`, publicCheckError);
+        }
+
+        // Se não estiver na tabela ou não estiver ativo, mostrar erro
+        if (!publicReservationCheck || !publicReservationCheck.is_active) {
+          console.warn(`[PublicReservation] Estabelecimento ${foundEstablishment.id} não tem página pública ativa`);
+          toast.error("Estabelecimento não encontrado ou página pública não está ativa");
+          setIsLoading(false);
+          return;
+        }
+      }
+
       // Setar o estabelecimento encontrado
       setEstablishment(foundEstablishment);
       console.log(`[PublicReservation] Estabelecimento encontrado: ${foundEstablishment.name} (ID: ${foundEstablishment.id}, Slug: ${foundEstablishment.slug})`);

@@ -59,16 +59,18 @@ export const checkEstablishmentFeatureAccess = async (
 };
 
 /**
- * Verifica se uma funcionalidade está habilitada para um estabelecimento específico
- * @param featureConfig - Configuração da funcionalidade (pode ser boolean ou objeto com enabled e establishment_ids)
- * @param establishmentId - ID do estabelecimento
- * @returns true se a funcionalidade está habilitada para o estabelecimento, false caso contrário
+ * Verifica se uma funcionalidade está habilitada para um estabelecimento ou empresa específica
+ * @param featureConfig - Configuração da funcionalidade (pode ser boolean ou objeto com enabled e establishment_ids/company_ids)
+ * @param id - ID do estabelecimento ou empresa
+ * @param isCompany - Se true, trata o id como company_id; se false, trata como establishment_id
+ * @returns true se a funcionalidade está habilitada, false caso contrário
  */
 export const isFeatureEnabledForEstablishment = (
   featureConfig: any,
-  establishmentId: string | null | undefined
+  id: string | null | undefined,
+  isCompany: boolean = false
 ): boolean => {
-  if (!establishmentId) {
+  if (!id) {
     return false;
   }
 
@@ -77,11 +79,21 @@ export const isFeatureEnabledForEstablishment = (
     return featureConfig;
   }
 
-  // Se for objeto, verificar enabled e establishment_ids
+  // Se for objeto, verificar enabled e ids
   if (typeof featureConfig === 'object' && featureConfig !== null) {
     // Verificar se está habilitado globalmente
     if (featureConfig.enabled !== true) {
       return false;
+    }
+
+    // Se é empresa, verificar company_ids
+    if (isCompany) {
+      // Se não há company_ids, significa que está habilitado para todas
+      if (!featureConfig.company_ids || !Array.isArray(featureConfig.company_ids)) {
+        return true;
+      }
+      // Verificar se a empresa está na lista
+      return featureConfig.company_ids.includes(id);
     }
 
     // Se não há establishment_ids, significa que está habilitado para todos
@@ -90,7 +102,7 @@ export const isFeatureEnabledForEstablishment = (
     }
 
     // Verificar se o estabelecimento está na lista
-    return featureConfig.establishment_ids.includes(establishmentId);
+    return featureConfig.establishment_ids.includes(id);
   }
 
   return false;

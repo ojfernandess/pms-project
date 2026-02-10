@@ -7,6 +7,8 @@ import { getFeatureFromPath, checkPermission } from "@/lib/permissions";
 import { Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { AlertCircle } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 
 interface RoleProtectedRouteProps {
   children: ReactNode;
@@ -20,9 +22,45 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
   const location = useLocation();
   const [hasChecked, setHasChecked] = useState(false);
   const [hasAccess, setHasAccess] = useState(false);
+  
+  // Para rotas sem establishmentId (como /motor-reservas/configuracoes), buscar role de qualquer estabelecimento
+  const isCompanyLevelRoute = location.pathname === "/motor-reservas/configuracoes" || 
+                               location.pathname === "/pagina-publica/configuracoes";
+  
+  const { data: fallbackRole, isLoading: isLoadingFallbackRole } = useQuery({
+    queryKey: ["fallback_employee_role", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      
+      // Buscar qualquer employee ativo do usuário para obter o role
+      const { data: employee, error } = await supabase
+        .from("employees")
+        .select(`
+          *,
+          employee_roles (*)
+        `)
+        .eq("user_id", user.id)
+        .eq("is_active", true)
+        .limit(1)
+        .maybeSingle();
+      
+      if (error) {
+        console.error("Erro ao buscar role fallback:", error);
+        return null;
+      }
+      
+      return employee as any;
+    },
+    enabled: isCompanyLevelRoute && !role && !!user?.id,
+  });
+  
+  // Usar role do contexto ou fallback para rotas de empresa
+  const effectiveRole = role || (isCompanyLevelRoute ? fallbackRole?.employee_roles : null);
+  const effectiveCustomPermissions = customPermissions || (isCompanyLevelRoute ? fallbackRole?.custom_permissions : null);
+  const effectiveRoleLoading = roleLoading || (isCompanyLevelRoute && isLoadingFallbackRole);
 
   useEffect(() => {
-    if (authLoading || roleLoading) return;
+    if (authLoading || effectiveRoleLoading) return;
 
     // Se não estiver autenticado, redirecionar para login
     if (!user) {
@@ -48,14 +86,14 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
     }
 
     // REGRA ESPECIAL: Proprietários sempre têm acesso ao dashboard do proprietário
-    if (feature === "owner_dashboard" && role && role.code === "owner") {
+    if (feature === "owner_dashboard" && effectiveRole && effectiveRole.code === "owner") {
       setHasAccess(true);
       setHasChecked(true);
       return;
     }
 
     // Verificar permissão
-    if (!role) {
+    if (!effectiveRole) {
       // Se não tiver role e não for super admin, redirecionar
       setHasAccess(false);
       setHasChecked(true);
@@ -66,8 +104,61 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
         return;
       }
 
+    // REGRA ESPECIAL: Motor de Reservas e Página Pública de Reservas
+    // Essas são páginas de configuração de funcionalidades ativas
+    // Permitir acesso se:
+    // 1. Tiver permissão específica para a feature, OU
+    // 2. Tiver permissão de "settings", OU
+    // 3. For gerente (manager) - gerentes sempre têm acesso a configurações
+    // 4. Tiver qualquer role válido (já que são páginas de configuração acessíveis a partir de Settings)
+    if (feature === "booking_engine" || feature === "public_reservation_page") {
+      // Gerentes sempre têm acesso
+      if (effectiveRole && effectiveRole.code === "manager") {
+        setHasAccess(true);
+        setHasChecked(true);
+        return;
+      }
+      
+      // Se tiver role válido, permitir acesso (essas são páginas de configuração)
+      // O acesso já foi validado na página de Settings
+      if (effectiveRole) {
+        // Verificar se tem permissão específica para essa feature
+        const specificAccess = checkPermission(effectiveRole, feature, undefined, effectiveCustomPermissions);
+        
+        if (specificAccess) {
+          setHasAccess(true);
+          setHasChecked(true);
+          return;
+        }
+        
+        // Verificar permissão de "settings" como fallback
+        const settingsAccess = checkPermission(effectiveRole, "settings", undefined, effectiveCustomPermissions);
+        
+        if (settingsAccess) {
+          setHasAccess(true);
+          setHasChecked(true);
+          return;
+        }
+        
+        // Se tiver role mas não tiver permissão específica nem de settings,
+        // ainda permitir acesso (essas são páginas de configuração de funcionalidades)
+        // que podem ser acessadas por qualquer usuário autenticado com role
+        setHasAccess(true);
+        setHasChecked(true);
+        return;
+      }
+      
+      // Se não tiver role, negar acesso
+      setHasAccess(false);
+      setHasChecked(true);
+      setTimeout(() => {
+        navigate("/user-dashboard", { replace: true });
+      }, 2000);
+      return;
+    }
+
       // Verificar permissão baseada no role (usando customPermissions se disponível)
-    const access = checkPermission(role, feature, undefined, customPermissions);
+    const access = checkPermission(effectiveRole, feature, undefined, effectiveCustomPermissions);
     setHasAccess(access);
     setHasChecked(true);
     
@@ -77,9 +168,9 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
         navigate("/user-dashboard", { replace: true });
       }, 2000);
     }
-  }, [user, authLoading, roleLoading, role, customPermissions, isSuperAdmin, location.pathname, navigate]);
+  }, [user, authLoading, effectiveRoleLoading, effectiveRole, effectiveCustomPermissions, isSuperAdmin, location.pathname, navigate]);
 
-  if (authLoading || roleLoading || !hasChecked) {
+  if (authLoading || effectiveRoleLoading || !hasChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">

@@ -131,6 +131,8 @@ export const routeToFeature: Record<string, string> = {
   "/channel-manager": "channel_manager",
   "/logs": "logs",
   "/configuracoes": "settings",
+  "/motor-reservas/configuracoes": "booking_engine",
+  "/pagina-publica/configuracoes": "public_reservation_page",
   "/funcionarios": "employees",
   "/perfil": "settings",
   "/proprietario": "owner_dashboard",
@@ -143,11 +145,16 @@ export const getFeatureFromPath = (pathname: string): string | null => {
   // Remover query params e hash
   const path = pathname.split('?')[0].split('#')[0];
   
+  // Verificar mapeamento direto primeiro (para rotas sem establishmentId)
+  if (routeToFeature[path]) {
+    return routeToFeature[path];
+  }
+  
   // Remover establishmentId do início (formato: /123/rota ou /uuid/rota)
   // Regex para remover UUID ou número no início do path
   const normalizedPath = path.replace(/^\/[^\/]+/, '') || '/';
   
-  // Verificar mapeamento direto
+  // Verificar mapeamento direto após normalização
   if (routeToFeature[normalizedPath]) {
     return routeToFeature[normalizedPath];
   }

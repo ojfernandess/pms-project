@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { Card } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Upload, X, Plus, Save, Eye, EyeOff, Building2, Image as ImageIcon, Settings2 } from "lucide-react";
+import { Loader2, Upload, X, Plus, Save, Eye, EyeOff, Building2, Image as ImageIcon, Settings2, HelpCircle, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -17,9 +17,13 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { useHotelSettings } from "@/hooks/useHotelSettings";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import { usePricingPlans } from "@/hooks/usePricingPlans";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 
 // Lista padrão de comodidades de hotelaria para facilitar o cadastro
 const PREDEFINED_AMENITIES: string[] = [
@@ -75,6 +79,7 @@ const RoomDisplayConfig = () => {
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
   const { uploadImage, settings, saveSettings } = useHotelSettings(selectedEstablishment?.id);
+  const { settings: siteSettings } = useSiteSettings();
   const { plans } = usePricingPlans();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [isUploadingEstablishmentPhoto, setIsUploadingEstablishmentPhoto] = useState(false);
@@ -82,6 +87,28 @@ const RoomDisplayConfig = () => {
   const [plan2Title, setPlan2Title] = useState<string>("");
   const [isSavingPlan1Title, setIsSavingPlan1Title] = useState(false);
   const [isSavingPlan2Title, setIsSavingPlan2Title] = useState(false);
+  const [showDnsHelp, setShowDnsHelp] = useState(false);
+
+  // Detectar domínio base do SaaS para orientar configuração de DNS (CNAME)
+  const systemBaseDomain = (() => {
+    if (typeof window !== "undefined") {
+      return window.location.host;
+    }
+    const appUrl =
+      (import.meta as any).env?.VITE_APP_URL ||
+      (import.meta as any).env?.VITE_SUPABASE_URL ||
+      "";
+    try {
+      if (appUrl) {
+        const url = new URL(appUrl);
+        return url.host;
+      }
+    } catch {
+      // ignorar erro de URL inválida e usar string bruta
+      return appUrl;
+    }
+    return "";
+  })();
 
   // Ao trocar de estabelecimento, garantir que estados locais sejam resetados
   useEffect(() => {
@@ -94,6 +121,34 @@ const RoomDisplayConfig = () => {
     setPlan1Title(settings?.public_pricing_plan_1_title || "");
     setPlan2Title(settings?.public_pricing_plan_2_title || "");
   }, [settings?.public_pricing_plan_1_title, settings?.public_pricing_plan_2_title]);
+
+  // Feature flags do Motor de Reservas para o estabelecimento atual
+  const canUseBookingEngine =
+    isFeatureEnabledForEstablishment(
+      siteSettings?.features_enabled?.booking_engine_enabled,
+      selectedEstablishment?.id
+    );
+
+  const canUseThemes =
+    canUseBookingEngine &&
+    isFeatureEnabledForEstablishment(
+      siteSettings?.features_enabled?.booking_engine_themes_enabled,
+      selectedEstablishment?.id
+    );
+
+  const canUseCustomDomain =
+    canUseBookingEngine &&
+    isFeatureEnabledForEstablishment(
+      siteSettings?.features_enabled?.booking_engine_custom_domain_enabled,
+      selectedEstablishment?.id
+    );
+
+  const canUseAdvancedCustomization =
+    canUseBookingEngine &&
+    isFeatureEnabledForEstablishment(
+      siteSettings?.features_enabled?.booking_engine_advanced_customization_enabled,
+      selectedEstablishment?.id
+    );
 
   // Buscar categorias
   const { data: categories = [], isLoading: isLoadingCategories, refetch: refetchCategories } = useQuery({
@@ -273,16 +328,76 @@ const RoomDisplayConfig = () => {
 
           <Separator />
 
-          {/* Planos Tarifários para Exibição */}
+          {/* Links para configurações de empresa */}
+          <div className="space-y-4">
+            {/* Link para configuração do Motor de Reservas */}
+            {canUseBookingEngine && (
+              <Card className="p-4 border-blue-200 bg-blue-50">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-blue-900 mb-1">Motor de Reservas</h4>
+                    <p className="text-sm text-blue-800">
+                      O Motor de Reservas é configurado no nível da empresa. Acesse a página dedicada para configurar temas, hero section, domínio personalizado e selecionar quais estabelecimentos aparecerão no motor.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="ml-4"
+                    onClick={() => {
+                      window.location.href = "/motor-reservas/configuracoes";
+                    }}
+                  >
+                    Configurar Motor
+                  </Button>
+                </div>
+              </Card>
+            )}
+
+            {/* Link para configuração da Página Pública */}
+            <Card className="p-4 border-green-200 bg-green-50">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <h4 className="font-semibold text-green-900 mb-1">Página Pública de Reservas</h4>
+                  <p className="text-sm text-green-800">
+                    Selecione quais estabelecimentos da empresa terão página pública de reservas ativa. As configurações específicas de cada estabelecimento (planos tarifários, fotos, etc.) são gerenciadas nesta página.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="ml-4"
+                  onClick={() => {
+                    window.location.href = "/pagina-publica/configuracoes";
+                  }}
+                >
+                  Gerenciar Páginas Públicas
+                </Button>
+              </div>
+            </Card>
+          </div>
+
+          {/* Configurações específicas do estabelecimento */}
           <div className="space-y-6">
             <div>
               <Label className="text-base font-medium mb-2 block">
-                Planos Tarifários para Exibição
+                Configurações do Estabelecimento
               </Label>
               <p className="text-sm text-muted-foreground mb-4">
-                Selecione até 2 planos tarifários que serão exibidos na página pública. Cada plano pode ter um título personalizado que aparecerá junto com o preço.
+                Configure as informações específicas deste estabelecimento que serão exibidas na página pública de reservas.
               </p>
             </div>
+
+            {/* Planos Tarifários para Exibição */}
+            <div className="space-y-6">
+              <div>
+                <Label className="text-base font-medium mb-2 block">
+                  Planos Tarifários para Exibição
+                </Label>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Selecione até 2 planos tarifários que serão exibidos na página pública. Cada plano pode ter um título personalizado que aparecerá junto com o preço.
+                </p>
+              </div>
 
             {/* Plano 1 */}
             <div className="space-y-3 p-4 border rounded-lg bg-slate-50">
@@ -443,12 +558,12 @@ const RoomDisplayConfig = () => {
                 )}
               </div>
             </div>
-          </div>
+            </div>
 
-          <Separator />
+            <Separator />
 
-          {/* Timer de Pagamento do Orçamento */}
-          <div className="space-y-3">
+            {/* Timer de Pagamento do Orçamento */}
+            <div className="space-y-3">
             <div>
               <Label htmlFor="quote-payment-timer" className="text-base font-medium mb-2 block">
                 Timer de Pagamento do Orçamento
@@ -486,9 +601,10 @@ const RoomDisplayConfig = () => {
                 minutos
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Valor mínimo: 1 minuto | Valor máximo: 1440 minutos (24 horas)
-            </p>
+              <p className="text-xs text-muted-foreground">
+                Valor mínimo: 1 minuto | Valor máximo: 1440 minutos (24 horas)
+              </p>
+            </div>
           </div>
         </div>
       </Card>
@@ -550,6 +666,108 @@ const RoomDisplayConfig = () => {
           </div>
         </div>
       </Card>
+
+      {/* Ajuda de DNS para Domínio Personalizado do Motor */}
+      <Dialog open={showDnsHelp} onOpenChange={setShowDnsHelp}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Como configurar o Domínio Personalizado do Motor</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 text-sm text-slate-700">
+            <p>
+              Você pode usar um domínio como{" "}
+              <code className="bg-slate-100 px-1 py-0.5 rounded text-xs">
+                reservas.seuhotel.com.br
+              </code>{" "}
+              apontando para o ambiente SaaS.
+            </p>
+
+            <div className="space-y-2">
+              <h4 className="font-semibold">1. Passos gerais em qualquer provedor de DNS</h4>
+              <ol className="list-decimal list-inside space-y-1">
+                <li>
+                  Acesse o painel de DNS do seu domínio (Registro.br, GoDaddy, Cloudflare,
+                  etc.).
+                </li>
+                <li>
+                  Crie um registro{" "}
+                  <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
+                    CNAME
+                  </code>{" "}
+                  com o nome{" "}
+                  <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
+                    reservas
+                  </code>{" "}
+                  (ou outro subdomínio que desejar).
+                </li>
+                {systemBaseDomain && (
+                  <li>
+                    No campo <strong>Destino / Target</strong>, informe{" "}
+                    <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
+                      {systemBaseDomain}
+                    </code>
+                    .
+                  </li>
+                )}
+                <li>Salve o registro e aguarde a propagação (pode levar alguns minutos).</li>
+                <li>
+                  No PMS, preencha o campo{" "}
+                  <strong>Domínio Personalizado do Motor</strong> exatamente como o domínio
+                  completo, por exemplo:{" "}
+                  <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
+                    reservas.seuhotel.com.br
+                  </code>
+                  .
+                </li>
+              </ol>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="font-semibold">2. Configuração específica em Cloudflare</h4>
+              <ol className="list-decimal list-inside space-y-1">
+                <li>
+                  No painel Cloudflare, acesse a aba{" "}
+                  <strong>DNS &gt; Records</strong>.
+                </li>
+                <li>
+                  Clique em <strong>Add record</strong> e selecione o tipo{" "}
+                  <strong>CNAME</strong>.
+                </li>
+                <li>
+                  Em <strong>Name</strong>, informe{" "}
+                  <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
+                    reservas
+                  </code>{" "}
+                  (ou o subdomínio que escolheu).
+                </li>
+                {systemBaseDomain && (
+                  <li>
+                    Em <strong>Target</strong>, informe{" "}
+                    <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
+                      {systemBaseDomain}
+                    </code>
+                    .
+                  </li>
+                )}
+                <li>
+                  Mantenha o proxy (<strong>Proxied</strong>) ativado ou desativado conforme
+                  sua política de segurança; o motor funciona em ambos os casos, desde que o
+                  CNAME aponte corretamente.
+                </li>
+                <li>Clique em <strong>Save</strong> e aguarde a propagação do DNS.</li>
+              </ol>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Assim que o DNS estiver propagado, acessar{" "}
+              <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
+                https://reservas.seuhotel.com.br/motor
+              </code>{" "}
+              abrirá diretamente o motor de reservas vinculado a este estabelecimento.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Categorias de Quartos */}
       <Card className="p-6">
@@ -628,11 +846,13 @@ const CategoryDisplayCard = ({
   const [localShowInPublic, setLocalShowInPublic] = useState(category.show_in_public ?? true);
   const [newFeature, setNewFeature] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [localHighlightBadge, setLocalHighlightBadge] = useState(category.highlight_badge || "");
 
   useEffect(() => {
     setLocalDescription(category.display_description || "");
     setLocalDisplayOrder(category.display_order || 0);
     setLocalShowInPublic(category.show_in_public ?? true);
+    setLocalHighlightBadge(category.highlight_badge || "");
   }, [category]);
 
   const handleSave = async () => {
@@ -642,6 +862,7 @@ const CategoryDisplayCard = ({
         display_description: localDescription,
         display_order: localDisplayOrder,
         show_in_public: localShowInPublic,
+        highlight_badge: localHighlightBadge || null,
       });
     } finally {
       setIsSaving(false);
@@ -786,6 +1007,8 @@ const CategoryDisplayCard = ({
             </div>
 
             {/* Lista de comodidades pré-definidas para facilitar o cadastro */}
+
+            {/* Lista de comodidades pré-definidas para facilitar o cadastro */}
             <div className="mt-4 space-y-2">
               <p className="text-xs text-muted-foreground">
                 Ou selecione comodidades comuns de hotelaria abaixo (os ícones serão exibidos automaticamente na página pública):
@@ -809,6 +1032,38 @@ const CategoryDisplayCard = ({
                   );
                 })}
               </div>
+            </div>
+          </div>
+
+          {/* Badge de destaque no Motor de Reservas */}
+          <div>
+            <Label className="text-base font-medium mb-2 block">
+              Badge de Destaque no Motor de Reservas
+            </Label>
+            <p className="text-sm text-muted-foreground mb-3">
+              Texto curto que aparece como destaque no card desta categoria no motor de reservas.
+              Ex.:{" "}
+              <code className="bg-slate-100 px-1 py-0.5 rounded text-xs">
+                Mais reservado
+              </code>{" "}
+              ou{" "}
+              <code className="bg-slate-100 px-1 py-0.5 rounded text-xs">
+                Mais recomendado
+              </code>
+              . Deixe em branco para não exibir.
+            </p>
+            <div className="flex items-center gap-3">
+              <Input
+                value={localHighlightBadge}
+                onChange={(e) => setLocalHighlightBadge(e.target.value)}
+                placeholder="Ex: Mais reservado, Mais recomendado..."
+                className="max-w-md"
+              />
+              {localHighlightBadge && (
+                <Badge variant="outline" className="flex items-center gap-1">
+                  {localHighlightBadge}
+                </Badge>
+              )}
             </div>
           </div>
 
@@ -863,6 +1118,264 @@ const CategoryDisplayCard = ({
         </CollapsibleContent>
       </Collapsible>
     </Card>
+  );
+};
+
+// Componente para gerenciar estabelecimentos no motor de reservas
+const CompanyBookingEngineEstablishmentsManager = ({ companyId }: { companyId: string }) => {
+  const queryClient = useQueryClient();
+
+  // Buscar todos os estabelecimentos que o usuário administra (todas as empresas onde ele é proprietário/ligado)
+  const { data: allEstablishments = [], isLoading: isLoadingEsts } = useQuery({
+    queryKey: ["company_establishments_manager_scope", companyId],
+    queryFn: async () => {
+      // Buscar usuário logado
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return [];
+
+      // Buscar empresas vinculadas ao usuário
+      const { data: userCompanies, error: userCompaniesError } = await supabase
+        .from("user_companies" as any)
+        .select("company_id, role, is_active")
+        .eq("user_id", user.id)
+        .eq("is_active", true);
+
+      if (userCompaniesError || !userCompanies || userCompanies.length === 0) {
+        return [];
+      }
+
+      // Empresas onde o usuário está vinculado
+      const companyIds = [
+        ...new Set(userCompanies.map((uc: any) => uc.company_id).filter(Boolean)),
+      ];
+
+      if (companyIds.length === 0) return [];
+
+      // Buscar todos os estabelecimentos destas empresas
+      const { data: establishments, error: estError } = await supabase
+        .from("establishments" as any)
+        .select("*")
+        .in("company_id", companyIds)
+        .eq("is_active", true)
+        .order("name");
+
+      if (estError || !establishments) {
+        return [];
+      }
+
+      return establishments;
+    },
+  });
+
+  // Buscar estabelecimentos já no motor
+  const { data: engineEstablishments = [], isLoading: isLoadingEngine } = useQuery({
+    queryKey: ["company_booking_engine_establishments", companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("company_booking_engine_establishments" as any)
+        .select("*, establishments(*)")
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .order("display_order")
+        .order("created_at");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const addEstablishmentMutation = useMutation({
+    mutationFn: async (establishmentId: string) => {
+      // Verificar se já existe
+      const existing = engineEstablishments.find(
+        (e: any) => e.establishment_id === establishmentId
+      );
+      if (existing) {
+        // Ativar se estiver inativo
+        const { error } = await supabase
+          .from("company_booking_engine_establishments" as any)
+          .update({ is_active: true })
+          .eq("id", existing.id);
+        if (error) throw error;
+      } else {
+        // Criar novo
+        const maxOrder = engineEstablishments.length > 0
+          ? Math.max(...engineEstablishments.map((e: any) => e.display_order || 0))
+          : -1;
+        const { error } = await supabase
+          .from("company_booking_engine_establishments" as any)
+          .insert({
+            company_id: companyId,
+            establishment_id: establishmentId,
+            display_order: maxOrder + 1,
+            is_active: true,
+          });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["company_booking_engine_establishments", companyId] });
+      toast.success("Estabelecimento adicionado ao motor");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao adicionar estabelecimento");
+    },
+  });
+
+  const removeEstablishmentMutation = useMutation({
+    mutationFn: async (establishmentId: string) => {
+      const existing = engineEstablishments.find(
+        (e: any) => e.establishment_id === establishmentId
+      );
+      if (existing) {
+        const { error } = await supabase
+          .from("company_booking_engine_establishments" as any)
+          .update({ is_active: false })
+          .eq("id", existing.id);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["company_booking_engine_establishments", companyId] });
+      toast.success("Estabelecimento removido do motor");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao remover estabelecimento");
+    },
+  });
+
+  const updateOrderMutation = useMutation({
+    mutationFn: async ({ id, newOrder }: { id: string; newOrder: number }) => {
+      const { error } = await supabase
+        .from("company_booking_engine_establishments" as any)
+        .update({ display_order: newOrder })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["company_booking_engine_establishments", companyId] });
+    },
+  });
+
+  const activeEstablishmentIds = new Set(
+    engineEstablishments.map((e: any) => e.establishment_id)
+  );
+
+  const handleToggle = (establishmentId: string) => {
+    if (activeEstablishmentIds.has(establishmentId)) {
+      removeEstablishmentMutation.mutate(establishmentId);
+    } else {
+      addEstablishmentMutation.mutate(establishmentId);
+    }
+  };
+
+  const handleMove = (index: number, direction: "up" | "down") => {
+    const sorted = [...engineEstablishments].sort(
+      (a: any, b: any) => (a.display_order || 0) - (b.display_order || 0)
+    );
+    if (
+      (direction === "up" && index === 0) ||
+      (direction === "down" && index === sorted.length - 1)
+    ) {
+      return;
+    }
+    const newIndex = direction === "up" ? index - 1 : index + 1;
+    const item = sorted[index];
+    const target = sorted[newIndex];
+    updateOrderMutation.mutate({ id: item.id, newOrder: target.display_order || 0 });
+    updateOrderMutation.mutate({ id: target.id, newOrder: item.display_order || 0 });
+  };
+
+  if (isLoadingEsts || isLoadingEngine) {
+    return <Loader2 className="h-4 w-4 animate-spin" />;
+  }
+
+  const sortedEngineEsts = [...engineEstablishments].sort(
+    (a: any, b: any) => (a.display_order || 0) - (b.display_order || 0)
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Estabelecimentos ativos no motor */}
+      {sortedEngineEsts.length > 0 && (
+        <div className="space-y-2">
+          <Label className="text-xs font-medium text-slate-600">
+            Estabelecimentos no motor (ordem de exibição)
+          </Label>
+          {sortedEngineEsts.map((engineEst: any, index: number) => {
+            const est = engineEst.establishments;
+            if (!est) return null;
+            return (
+              <div
+                key={engineEst.id}
+                className="flex items-center gap-2 p-2 border rounded bg-white"
+              >
+                <Checkbox
+                  checked={true}
+                  onCheckedChange={() => handleToggle(est.id)}
+                  disabled={removeEstablishmentMutation.isPending}
+                />
+                <span className="flex-1 text-sm">{est.name}</span>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => handleMove(index, "up")}
+                    disabled={index === 0 || updateOrderMutation.isPending}
+                  >
+                    <ArrowUp className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => handleMove(index, "down")}
+                    disabled={index === sortedEngineEsts.length - 1 || updateOrderMutation.isPending}
+                  >
+                    <ArrowDown className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Estabelecimentos disponíveis para adicionar */}
+      {allEstablishments.filter((est: any) => !activeEstablishmentIds.has(est.id)).length > 0 && (
+        <div className="space-y-2">
+          <Label className="text-xs font-medium text-slate-600">
+            Adicionar estabelecimentos ao motor
+          </Label>
+          {allEstablishments
+            .filter((est: any) => !activeEstablishmentIds.has(est.id))
+            .map((est: any) => (
+              <div
+                key={est.id}
+                className="flex items-center gap-2 p-2 border rounded bg-white"
+              >
+                <Checkbox
+                  checked={false}
+                  onCheckedChange={() => handleToggle(est.id)}
+                  disabled={addEstablishmentMutation.isPending}
+                />
+                <span className="flex-1 text-sm">{est.name}</span>
+              </div>
+            ))}
+        </div>
+      )}
+
+      {allEstablishments.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          Nenhum estabelecimento encontrado para esta empresa.
+        </p>
+      )}
+    </div>
   );
 };
 

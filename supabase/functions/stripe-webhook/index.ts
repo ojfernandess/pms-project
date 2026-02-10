@@ -719,7 +719,7 @@ function detectBaseUrl(req: Request | null = null, supabaseUrl: string | null = 
         // Verificar se não é localhost
         if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
           console.log(`🌐 [detectBaseUrl] Usando Origin header: ${url.origin}`);
-          return url.origin;
+        return url.origin;
         }
       } catch {
         // Ignorar erro
@@ -732,7 +732,7 @@ function detectBaseUrl(req: Request | null = null, supabaseUrl: string | null = 
         // Verificar se não é localhost
         if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
           console.log(`🌐 [detectBaseUrl] Usando Referer header: ${url.origin}`);
-          return url.origin;
+        return url.origin;
         }
       } catch {
         // Ignorar erro
@@ -986,15 +986,15 @@ async function sendReservationExtensionEmail(
         try {
           // Garantir que tenha protocolo
           const url = new URL(pmsUrl.startsWith('http://') || pmsUrl.startsWith('https://') ? pmsUrl : `https://${pmsUrl}`);
-          baseUrl = url.origin;
+            baseUrl = url.origin;
           console.log(`🌐 [sendReservationExtensionEmail] Usando URL base do PMS (site_settings): ${baseUrl}`);
-        } catch {
+          } catch {
           // Se falhar, usar como está
           baseUrl = pmsUrl;
           console.log(`🌐 [sendReservationExtensionEmail] Usando URL base do PMS (site_settings) como está: ${baseUrl}`);
         }
-      }
-    } else {
+          }
+        } else {
       console.log(`🌐 [sendReservationExtensionEmail] URL base do PMS não configurada, usando detecção automática: ${baseUrl}`);
     }
 
@@ -1107,8 +1107,8 @@ async function sendReservationExtensionEmail(
         }, 0);
         const totalWithFees = baseTotalAmount + serviceFeesTotal;
         return new Intl.NumberFormat("pt-BR", {
-          style: "currency",
-          currency: "BRL",
+        style: "currency",
+        currency: "BRL",
         }).format(totalWithFees);
       })(),
       paid_amount: new Intl.NumberFormat("pt-BR", {
@@ -1195,13 +1195,13 @@ async function sendReservationExtensionEmail(
     
     // Apenas tentar envio direto se for Resend ou SendGrid (não SMTP)
     if (emailSettings.provider === "resend" || emailSettings.provider === "sendgrid") {
-      try {
-        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-        const emailFunctionName = emailSettings.provider === "resend" 
-          ? "send-email-resend" 
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+      const emailFunctionName = emailSettings.provider === "resend" 
+        ? "send-email-resend" 
           : "send-email-sendgrid";
 
-        console.log(`📧 Tentando enviar email de extensão via ${emailFunctionName} para: ${recipientEmail}`);
+      console.log(`📧 Tentando enviar email de extensão via ${emailFunctionName} para: ${recipientEmail}`);
 
         const requestBody: any = {
           to: recipientEmail,
@@ -1220,17 +1220,17 @@ async function sendReservationExtensionEmail(
             "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
           },
           body: JSON.stringify(requestBody),
-        });
+      });
 
-        if (response.ok) {
-          emailSent = true;
-          console.log(`✅ Email de extensão enviado com sucesso para: ${recipientEmail}`);
-        } else {
-          const errorText = await response.text();
-          console.warn(`⚠️ Erro ao enviar email de extensão (${response.status}):`, errorText);
-        }
-      } catch (fetchError) {
-        console.warn("⚠️ Erro ao chamar Edge Function de email:", fetchError);
+      if (response.ok) {
+        emailSent = true;
+        console.log(`✅ Email de extensão enviado com sucesso para: ${recipientEmail}`);
+      } else {
+        const errorText = await response.text();
+        console.warn(`⚠️ Erro ao enviar email de extensão (${response.status}):`, errorText);
+      }
+    } catch (fetchError) {
+      console.warn("⚠️ Erro ao chamar Edge Function de email:", fetchError);
       }
     } else {
       // Para SMTP, não tentar envio direto - ir direto para a fila
@@ -1971,10 +1971,10 @@ async function sendPaymentConfirmedEmail(
         try {
           // Garantir que tenha protocolo
           const url = new URL(pmsUrl.startsWith('http://') || pmsUrl.startsWith('https://') ? pmsUrl : `https://${pmsUrl}`);
-          baseUrl = url.origin;
+            baseUrl = url.origin;
           console.log(`🌐 Usando URL base do PMS (site_settings): ${baseUrl}`);
-        } catch {
-          // Se falhar, usar como está
+          } catch {
+            // Se falhar, usar como está
           baseUrl = pmsUrl;
           console.log(`🌐 Usando URL base do PMS (site_settings) como está: ${baseUrl}`);
         }
@@ -2206,21 +2206,21 @@ async function sendPaymentConfirmedEmail(
     
     // Apenas tentar envio direto se for Resend ou SendGrid (não SMTP)
     if (emailSettings.provider === "resend" || emailSettings.provider === "sendgrid") {
-      try {
-        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-        const emailFunctionName = emailSettings.provider === "resend" 
-          ? "send-email-resend" 
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+      const emailFunctionName = emailSettings.provider === "resend" 
+        ? "send-email-resend" 
           : "send-email-sendgrid";
 
-        console.log(`📧 Tentando enviar email via ${emailFunctionName} para: ${recipientEmail}`);
+      console.log(`📧 Tentando enviar email via ${emailFunctionName} para: ${recipientEmail}`);
 
         const requestBody: any = {
-          to: recipientEmail,
-          to_name: recipientName,
-          subject: subject,
-          html: bodyHtml,
-          from: emailSettings.sender_email,
-          from_name: emailSettings.sender_name,
+            to: recipientEmail,
+            to_name: recipientName,
+            subject: subject,
+            html: bodyHtml,
+            from: emailSettings.sender_email,
+            from_name: emailSettings.sender_name,
           api_key: emailSettings.api_key || "",
         };
 
@@ -2231,17 +2231,17 @@ async function sendPaymentConfirmedEmail(
             "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
           },
           body: JSON.stringify(requestBody),
-        });
+      });
 
-        if (response.ok) {
-          emailSent = true;
-          console.log(`✅ Email de pagamento confirmado enviado com sucesso para: ${recipientEmail}`);
-        } else {
-          const errorText = await response.text();
-          console.warn(`⚠️ Erro ao enviar email (${response.status}):`, errorText);
-        }
-      } catch (fetchError) {
-        console.warn("⚠️ Erro ao chamar Edge Function de email:", fetchError);
+      if (response.ok) {
+        emailSent = true;
+        console.log(`✅ Email de pagamento confirmado enviado com sucesso para: ${recipientEmail}`);
+      } else {
+        const errorText = await response.text();
+        console.warn(`⚠️ Erro ao enviar email (${response.status}):`, errorText);
+      }
+    } catch (fetchError) {
+      console.warn("⚠️ Erro ao chamar Edge Function de email:", fetchError);
       }
     } else {
       // Para SMTP, não tentar envio direto - ir direto para a fila
@@ -2613,15 +2613,15 @@ serve(async (req) => {
     } else {
       // Criar novo webhook
       const { data: newWebhook, error: webhookError } = await supabaseClient
-        .from("stripe_webhooks")
-        .insert({
-          stripe_event_id: event.id,
-          event_type: event.type,
-          payload: event as any,
-          processed: false,
-        })
-        .select()
-        .single();
+      .from("stripe_webhooks")
+      .insert({
+        stripe_event_id: event.id,
+        event_type: event.type,
+        payload: event as any,
+        processed: false,
+      })
+      .select()
+      .single();
 
       if (webhookError || !newWebhook) {
         console.error("Error saving webhook:", webhookError);
@@ -2821,7 +2821,7 @@ serve(async (req) => {
                 if (isPreregistration) {
                   console.log(`[Webhook] ✅ Pré-reserva efetivada automaticamente para "confirmed" (paid_amount: ${newPaidAmount} >= total_amount: ${totalAmount})`);
                 } else {
-                  console.log(`[Webhook] ✅ Status atualizado para "confirmed" (paid_amount: ${newPaidAmount} >= total_amount: ${totalAmount})`);
+                console.log(`[Webhook] ✅ Status atualizado para "confirmed" (paid_amount: ${newPaidAmount} >= total_amount: ${totalAmount})`);
                 }
               } else if (newPaidAmount > 0) {
                 // Se pagou parcialmente, status pode ser "pending" ou manter o atual
@@ -3344,13 +3344,13 @@ serve(async (req) => {
 
       // Marcar webhook como processado (se existe)
       if (webhook?.id) {
-        await supabaseClient
-          .from("stripe_webhooks")
-          .update({
-            processed: true,
-            processed_at: new Date().toISOString(),
-          })
-          .eq("id", webhook.id);
+      await supabaseClient
+        .from("stripe_webhooks")
+        .update({
+          processed: true,
+          processed_at: new Date().toISOString(),
+        })
+        .eq("id", webhook.id);
       }
     } catch (error) {
       errorMessage = error.message;
@@ -3358,13 +3358,13 @@ serve(async (req) => {
 
       // Marcar webhook com erro (se existe)
       if (webhook?.id) {
-        await supabaseClient
-          .from("stripe_webhooks")
-          .update({
-            processed: false,
-            error_message: errorMessage,
-          })
-          .eq("id", webhook.id);
+      await supabaseClient
+        .from("stripe_webhooks")
+        .update({
+          processed: false,
+          error_message: errorMessage,
+        })
+        .eq("id", webhook.id);
       }
     }
 

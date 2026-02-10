@@ -47,6 +47,8 @@ const MODULES = [
   { key: "channel_manager", label: "Channel Manager" },
   { key: "logs", label: "Logs" },
   { key: "settings", label: "Configurações" },
+  { key: "booking_engine", label: "Motor de Reservas" },
+  { key: "public_reservation_page", label: "Página Pública de Reservas" },
   { key: "employees", label: "Usuários" },
 ];
 

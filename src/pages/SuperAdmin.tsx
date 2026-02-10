@@ -84,7 +84,7 @@ import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { Textarea } from "@/components/ui/textarea";
 import { StripeGlobalConfigDialog } from "@/components/stripe/StripeGlobalConfigDialog";
 import { useStripe } from "@/hooks/useStripe";
-import { CreditCard, Settings, Zap, Key, Star, Map as MapIcon } from "lucide-react";
+import { CreditCard, Settings, Zap, Key, Star, Map as MapIcon, LayoutTemplate } from "lucide-react";
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
@@ -3150,7 +3150,7 @@ const FeatureFlagsManager = () => {
 
   useEffect(() => {
     if (settings?.features_enabled) {
-      const fe = settings.features_enabled;
+      const fe = settings.features_enabled as any;
       setFeatures({
         api_integrations: typeof fe.api_integrations === 'boolean' ? fe.api_integrations : (fe.api_integrations?.enabled ?? true),
         stripe: typeof fe.stripe === 'boolean' ? fe.stripe : (fe.stripe?.enabled ?? true),
@@ -3174,6 +3174,18 @@ const FeatureFlagsManager = () => {
         availability_map: typeof fe.availability_map === 'boolean' 
           ? { enabled: fe.availability_map, establishment_ids: [] }
           : (fe.availability_map || { enabled: false, establishment_ids: [] }),
+        booking_engine_enabled: typeof fe.booking_engine_enabled === 'boolean'
+          ? { enabled: fe.booking_engine_enabled, establishment_ids: [] }
+          : (fe.booking_engine_enabled || { enabled: false, establishment_ids: [] }),
+        booking_engine_themes_enabled: typeof fe.booking_engine_themes_enabled === 'boolean'
+          ? { enabled: fe.booking_engine_themes_enabled, establishment_ids: [] }
+          : (fe.booking_engine_themes_enabled || { enabled: false, establishment_ids: [] }),
+        booking_engine_custom_domain_enabled: typeof fe.booking_engine_custom_domain_enabled === 'boolean'
+          ? { enabled: fe.booking_engine_custom_domain_enabled, establishment_ids: [] }
+          : (fe.booking_engine_custom_domain_enabled || { enabled: false, establishment_ids: [] }),
+        booking_engine_advanced_customization_enabled: typeof fe.booking_engine_advanced_customization_enabled === 'boolean'
+          ? { enabled: fe.booking_engine_advanced_customization_enabled, establishment_ids: [] }
+          : (fe.booking_engine_advanced_customization_enabled || { enabled: false, establishment_ids: [] }),
       });
     }
   }, [settings]);
@@ -3182,8 +3194,20 @@ const FeatureFlagsManager = () => {
     const currentFeatures = settings?.features_enabled || {};
     const newFeatures = { ...currentFeatures };
     
-    // Se for dynamic_pricing_automation, stay_reviews, client_deduplication, email, rate_recommendations ou availability_map, manter estrutura de objeto
-    if (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email' || feature === 'rate_recommendations' || feature === 'availability_map') {
+    // Features que usam estrutura de objeto (enabled + ids)
+    const isStructured =
+      feature === 'dynamic_pricing_automation' ||
+      feature === 'stay_reviews' ||
+      feature === 'client_deduplication' ||
+      feature === 'email' ||
+      feature === 'rate_recommendations' ||
+      feature === 'availability_map' ||
+      feature === 'booking_engine_enabled' ||
+      feature === 'booking_engine_themes_enabled' ||
+      feature === 'booking_engine_custom_domain_enabled' ||
+      feature === 'booking_engine_advanced_customization_enabled';
+
+    if (isStructured) {
       const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
         ? newFeatures[feature]
         : { enabled: false, [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: [] };
@@ -3195,7 +3219,7 @@ const FeatureFlagsManager = () => {
     
     setFeatures((prev: any) => ({
       ...prev,
-      [feature]: (feature === 'dynamic_pricing_automation' || feature === 'stay_reviews' || feature === 'client_deduplication' || feature === 'email' || feature === 'rate_recommendations' || feature === 'availability_map')
+      [feature]: isStructured
         ? { 
             enabled: value, 
             [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: prev[feature]?.[feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids'] || [] 
@@ -3439,6 +3463,38 @@ const FeatureFlagsManager = () => {
       icon: MapIcon,
       supportsCompanies: false,
       supportsEstablishments: true,
+    },
+    {
+      key: "booking_engine_enabled" as const,
+      label: "Motor de Reservas",
+      description: "Habilita o novo motor de reservas como página inicial de busca para cada empresa",
+      icon: Globe,
+      supportsCompanies: true,
+      supportsEstablishments: false,
+    },
+    {
+      key: "booking_engine_themes_enabled" as const,
+      label: "Temas do Motor de Reservas",
+      description: "Permite que empresas escolham entre temas pré-definidos do motor de reservas",
+      icon: LayoutTemplate,
+      supportsCompanies: true,
+      supportsEstablishments: false,
+    },
+    {
+      key: "booking_engine_custom_domain_enabled" as const,
+      label: "Domínio Personalizado do Motor",
+      description: "Permite configurar domínios personalizados para o motor de reservas (ex.: reservas.empresa.com.br)",
+      icon: Link2,
+      supportsCompanies: true,
+      supportsEstablishments: false,
+    },
+    {
+      key: "booking_engine_advanced_customization_enabled" as const,
+      label: "Customização Avançada do Motor",
+      description: "Libera configurações avançadas de cores, fontes e elementos visuais do motor de reservas",
+      icon: Settings,
+      supportsCompanies: true,
+      supportsEstablishments: false,
     },
   ];
 

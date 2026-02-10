@@ -1,0 +1,1583 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2 } from "lucide-react";
+
+// Animações CSS inline via style tag
+const animationStyles = `
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+      transform: translateX(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  
+  .animate-fade-in {
+    animation: fadeIn 0.6s ease-out forwards;
+  }
+  
+  .animate-fade-in-up {
+    animation: fadeInUp 0.8s ease-out forwards;
+  }
+  
+  .animate-fade-in-delay {
+    animation: fadeIn 0.8s ease-out 0.2s forwards;
+    opacity: 0;
+  }
+  
+  .animate-fade-in-up-delay {
+    animation: fadeInUp 0.8s ease-out 0.3s forwards;
+    opacity: 0;
+  }
+  
+  .animate-slide-in-right {
+    animation: slideInRight 0.6s ease-out forwards;
+  }
+`;
+
+type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark";
+
+interface BookingThemeConfig {
+  // Page & Layout
+  pageBg: string;
+  heroBg: string;
+  heroOverlay: string;
+  heroImageOverlay: string;
+  
+  // Header
+  headerBg: string;
+  headerText: string;
+  headerButton: string;
+  headerBorder?: string;
+  
+  // Hero Section
+  heroTitle: string;
+  heroSubtitle: string;
+  heroTitleSize: string;
+  heroSubtitleSize: string;
+  
+  // Search Card
+  searchCard: string;
+  searchCardShadow: string;
+  searchCardBorder: string;
+  searchInputBg: string;
+  searchInputBorder: string;
+  searchInputText: string;
+  searchInputFocus: string;
+  
+  // Buttons
+  primaryButton: string;
+  primaryButtonHover: string;
+  secondaryButton: string;
+  secondaryButtonHover: string;
+  
+  // Typography
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  textInverse: string;
+  
+  // Cards
+  cardBg: string;
+  cardBorder: string;
+  cardShadow: string;
+  cardHover: string;
+  cardHoverShadow: string;
+  
+  // Room Cards
+  roomCardBg: string;
+  roomCardBorder: string;
+  roomCardShadow: string;
+  roomImageOverlay?: string;
+  
+  // Pricing
+  priceColor: string;
+  priceLabel: string;
+  priceHighlight: string;
+  
+  // Badges
+  badgePrimary: string;
+  badgeSecondary: string;
+  badgeSuccess: string;
+  badgeWarning: string;
+  
+  // Summary Sidebar
+  summaryBg: string;
+  summaryBorder: string;
+  summaryShadow: string;
+  
+  // Accents
+  accentColor: string;
+  accentBg: string;
+  accentBorder: string;
+  
+  // Plan Cards
+  planCardBg: string;
+  planCardBorder: string;
+  planCardSelected: string;
+  planCardHover: string;
+  
+  // Footer
+  footerBg: string;
+  footerBorder: string;
+  footerText: string;
+}
+
+const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
+  default: {
+    // Clean Blue & White Theme
+    pageBg: "bg-slate-50",
+    heroBg: "bg-gradient-to-br from-blue-600 via-blue-500 to-blue-700",
+    heroOverlay: "bg-black/20",
+    heroImageOverlay: "bg-gradient-to-t from-black/60 via-black/20 to-transparent",
+    
+    headerBg: "bg-white",
+    headerText: "text-slate-900",
+    headerButton: "bg-blue-600 hover:bg-blue-700 text-white",
+    headerBorder: "border-b border-slate-200",
+    
+    heroTitle: "text-white",
+    heroSubtitle: "text-blue-50",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+    
+    searchCard: "bg-white",
+    searchCardShadow: "shadow-2xl",
+    searchCardBorder: "border-0",
+    searchInputBg: "bg-slate-50",
+    searchInputBorder: "border-slate-200",
+    searchInputText: "text-slate-900",
+    searchInputFocus: "focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20",
+    
+    primaryButton: "bg-blue-600 text-white",
+    primaryButtonHover: "hover:bg-blue-700 hover:shadow-lg",
+    secondaryButton: "bg-white text-blue-600 border border-blue-600",
+    secondaryButtonHover: "hover:bg-blue-50",
+    
+    textPrimary: "text-slate-900",
+    textSecondary: "text-slate-700",
+    textMuted: "text-slate-500",
+    textInverse: "text-white",
+    
+    cardBg: "bg-white",
+    cardBorder: "border border-slate-200",
+    cardShadow: "shadow-sm",
+    cardHover: "hover:border-blue-300",
+    cardHoverShadow: "hover:shadow-lg",
+    
+    roomCardBg: "bg-white",
+    roomCardBorder: "border border-slate-200",
+    roomCardShadow: "shadow-md",
+    roomImageOverlay: "bg-gradient-to-t from-black/40 to-transparent",
+    
+    priceColor: "text-blue-600",
+    priceLabel: "text-slate-500",
+    priceHighlight: "text-blue-700 font-bold",
+    
+    badgePrimary: "bg-blue-100 text-blue-700 border-blue-200",
+    badgeSecondary: "bg-slate-100 text-slate-700 border-slate-200",
+    badgeSuccess: "bg-green-100 text-green-700 border-green-200",
+    badgeWarning: "bg-amber-100 text-amber-700 border-amber-200",
+    
+    summaryBg: "bg-white",
+    summaryBorder: "border border-slate-200",
+    summaryShadow: "shadow-lg",
+    
+    accentColor: "text-blue-600",
+    accentBg: "bg-blue-50",
+    accentBorder: "border-blue-200",
+    
+    planCardBg: "bg-white",
+    planCardBorder: "border border-slate-200",
+    planCardSelected: "border-2 border-blue-500 bg-blue-50",
+    planCardHover: "hover:border-blue-300 hover:shadow-md",
+    
+    footerBg: "bg-white",
+    footerBorder: "border-t border-slate-200",
+    footerText: "text-slate-600",
+  },
+  modern: {
+    // Modern Gradient & Glassmorphism
+    pageBg: "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950",
+    heroBg: "bg-gradient-to-br from-amber-500/20 via-orange-500/20 to-red-500/20",
+    heroOverlay: "bg-black/50",
+    heroImageOverlay: "bg-gradient-to-t from-black/80 via-black/40 to-transparent",
+    
+    headerBg: "bg-slate-900/80 backdrop-blur-md",
+    headerText: "text-white",
+    headerButton: "bg-amber-500 hover:bg-amber-600 text-slate-900 font-semibold",
+    headerBorder: "border-b border-slate-700/50",
+    
+    heroTitle: "text-white",
+    heroSubtitle: "text-slate-200",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+    
+    searchCard: "bg-slate-800/90 backdrop-blur-xl",
+    searchCardShadow: "shadow-2xl shadow-black/50",
+    searchCardBorder: "border border-slate-700/50",
+    searchInputBg: "bg-slate-700/50",
+    searchInputBorder: "border-slate-600",
+    searchInputText: "text-white",
+    searchInputFocus: "focus:border-amber-500 focus:ring-2 focus:ring-amber-500/30",
+    
+    primaryButton: "bg-amber-500 text-slate-900",
+    primaryButtonHover: "hover:bg-amber-600 hover:shadow-xl hover:shadow-amber-500/30",
+    secondaryButton: "bg-slate-800 text-amber-400 border border-amber-500",
+    secondaryButtonHover: "hover:bg-slate-700",
+    
+    textPrimary: "text-white",
+    textSecondary: "text-slate-200",
+    textMuted: "text-slate-400",
+    textInverse: "text-slate-900",
+    
+    cardBg: "bg-slate-800/90 backdrop-blur",
+    cardBorder: "border border-slate-700",
+    cardShadow: "shadow-xl shadow-black/30",
+    cardHover: "hover:border-amber-500/50",
+    cardHoverShadow: "hover:shadow-2xl hover:shadow-amber-500/20",
+    
+    roomCardBg: "bg-slate-800/90 backdrop-blur",
+    roomCardBorder: "border border-slate-700",
+    roomCardShadow: "shadow-xl",
+    roomImageOverlay: "bg-gradient-to-t from-black/70 via-black/30 to-transparent",
+    
+    priceColor: "text-amber-400",
+    priceLabel: "text-slate-400",
+    priceHighlight: "text-amber-300 font-bold",
+    
+    badgePrimary: "bg-amber-500/20 text-amber-300 border-amber-500/50",
+    badgeSecondary: "bg-slate-700/50 text-slate-300 border-slate-600",
+    badgeSuccess: "bg-green-500/20 text-green-300 border-green-500/50",
+    badgeWarning: "bg-orange-500/20 text-orange-300 border-orange-500/50",
+    
+    summaryBg: "bg-slate-800/95 backdrop-blur-xl",
+    summaryBorder: "border border-slate-700",
+    summaryShadow: "shadow-2xl shadow-black/50",
+    
+    accentColor: "text-amber-400",
+    accentBg: "bg-amber-500/10",
+    accentBorder: "border-amber-500/30",
+    
+    planCardBg: "bg-slate-800/80",
+    planCardBorder: "border border-slate-700",
+    planCardSelected: "border-2 border-amber-500 bg-amber-500/10",
+    planCardHover: "hover:border-amber-500/50 hover:shadow-lg",
+    
+    footerBg: "bg-slate-900/80 backdrop-blur-md",
+    footerBorder: "border-t border-slate-700",
+    footerText: "text-slate-300",
+  },
+  luxury: {
+    // Luxury Purple & Gold
+    pageBg: "bg-gradient-to-br from-slate-950 via-purple-950/30 to-slate-950",
+    heroBg: "bg-gradient-to-br from-purple-900/40 via-slate-900/60 to-slate-950",
+    heroOverlay: "bg-black/60",
+    heroImageOverlay: "bg-gradient-to-t from-black/90 via-purple-900/40 to-transparent",
+    
+    headerBg: "bg-slate-950/95 backdrop-blur-md",
+    headerText: "text-white",
+    headerButton: "bg-purple-600 hover:bg-purple-700 text-white font-semibold",
+    headerBorder: "border-b border-purple-900/50",
+    
+    heroTitle: "text-white font-serif",
+    heroSubtitle: "text-purple-200",
+    heroTitleSize: "text-5xl md:text-6xl lg:text-7xl",
+    heroSubtitleSize: "text-lg md:text-xl",
+    
+    searchCard: "bg-slate-900/95 backdrop-blur-xl",
+    searchCardShadow: "shadow-2xl shadow-purple-900/30",
+    searchCardBorder: "border border-purple-500/30",
+    searchInputBg: "bg-slate-800/80",
+    searchInputBorder: "border-purple-700/50",
+    searchInputText: "text-white",
+    searchInputFocus: "focus:border-purple-400 focus:ring-2 focus:ring-purple-400/30",
+    
+    primaryButton: "bg-gradient-to-r from-purple-600 to-purple-700 text-white",
+    primaryButtonHover: "hover:from-purple-700 hover:to-purple-800 hover:shadow-xl hover:shadow-purple-500/30",
+    secondaryButton: "bg-slate-800 text-purple-300 border border-purple-500",
+    secondaryButtonHover: "hover:bg-slate-700",
+    
+    textPrimary: "text-white",
+    textSecondary: "text-purple-200",
+    textMuted: "text-purple-300/70",
+    textInverse: "text-slate-900",
+    
+    cardBg: "bg-slate-900/90 backdrop-blur",
+    cardBorder: "border border-purple-800/30",
+    cardShadow: "shadow-2xl shadow-purple-900/20",
+    cardHover: "hover:border-purple-500/50",
+    cardHoverShadow: "hover:shadow-2xl hover:shadow-purple-500/30",
+    
+    roomCardBg: "bg-slate-900/90 backdrop-blur",
+    roomCardBorder: "border border-purple-800/30",
+    roomCardShadow: "shadow-2xl",
+    roomImageOverlay: "bg-gradient-to-t from-black/80 via-purple-900/30 to-transparent",
+    
+    priceColor: "text-purple-300",
+    priceLabel: "text-purple-400/70",
+    priceHighlight: "text-purple-200 font-bold",
+    
+    badgePrimary: "bg-purple-500/20 text-purple-300 border-purple-500/50",
+    badgeSecondary: "bg-slate-800/50 text-slate-300 border-slate-700",
+    badgeSuccess: "bg-emerald-500/20 text-emerald-300 border-emerald-500/50",
+    badgeWarning: "bg-amber-500/20 text-amber-300 border-amber-500/50",
+    
+    summaryBg: "bg-slate-900/95 backdrop-blur-xl",
+    summaryBorder: "border border-purple-800/30",
+    summaryShadow: "shadow-2xl shadow-purple-900/30",
+    
+    accentColor: "text-purple-300",
+    accentBg: "bg-purple-500/10",
+    accentBorder: "border-purple-500/30",
+    
+    planCardBg: "bg-slate-900/80",
+    planCardBorder: "border border-purple-800/30",
+    planCardSelected: "border-2 border-purple-400 bg-purple-500/10",
+    planCardHover: "hover:border-purple-500/50 hover:shadow-xl",
+    
+    footerBg: "bg-slate-950/95 backdrop-blur-md",
+    footerBorder: "border-t border-purple-900/50",
+    footerText: "text-purple-200",
+  },
+  minimal: {
+    // Minimal Clean White
+    pageBg: "bg-white",
+    heroBg: "bg-gradient-to-br from-slate-50 to-white",
+    heroOverlay: "",
+    heroImageOverlay: "bg-gradient-to-t from-white/90 via-white/50 to-transparent",
+    
+    headerBg: "bg-white",
+    headerText: "text-slate-900",
+    headerButton: "bg-slate-900 hover:bg-slate-800 text-white",
+    headerBorder: "border-b border-slate-100",
+    
+    heroTitle: "text-slate-900",
+    heroSubtitle: "text-slate-600",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+    
+    searchCard: "bg-white",
+    searchCardShadow: "shadow-lg",
+    searchCardBorder: "border border-slate-200",
+    searchInputBg: "bg-white",
+    searchInputBorder: "border-slate-200",
+    searchInputText: "text-slate-900",
+    searchInputFocus: "focus:border-slate-400 focus:ring-1 focus:ring-slate-400/20",
+    
+    primaryButton: "bg-slate-900 text-white",
+    primaryButtonHover: "hover:bg-slate-800 hover:shadow-md",
+    secondaryButton: "bg-white text-slate-900 border border-slate-300",
+    secondaryButtonHover: "hover:bg-slate-50",
+    
+    textPrimary: "text-slate-900",
+    textSecondary: "text-slate-700",
+    textMuted: "text-slate-500",
+    textInverse: "text-white",
+    
+    cardBg: "bg-white",
+    cardBorder: "border border-slate-100",
+    cardShadow: "shadow-sm",
+    cardHover: "hover:border-slate-300",
+    cardHoverShadow: "hover:shadow-md",
+    
+    roomCardBg: "bg-white",
+    roomCardBorder: "border border-slate-100",
+    roomCardShadow: "shadow-sm",
+    roomImageOverlay: "bg-gradient-to-t from-white/80 to-transparent",
+    
+    priceColor: "text-slate-900",
+    priceLabel: "text-slate-500",
+    priceHighlight: "text-slate-900 font-bold",
+    
+    badgePrimary: "bg-slate-100 text-slate-700 border-slate-200",
+    badgeSecondary: "bg-slate-50 text-slate-600 border-slate-200",
+    badgeSuccess: "bg-green-50 text-green-700 border-green-200",
+    badgeWarning: "bg-amber-50 text-amber-700 border-amber-200",
+    
+    summaryBg: "bg-white",
+    summaryBorder: "border border-slate-200",
+    summaryShadow: "shadow-lg",
+    
+    accentColor: "text-slate-900",
+    accentBg: "bg-slate-50",
+    accentBorder: "border-slate-200",
+    
+    planCardBg: "bg-white",
+    planCardBorder: "border border-slate-200",
+    planCardSelected: "border-2 border-slate-900 bg-slate-50",
+    planCardHover: "hover:border-slate-400 hover:shadow-sm",
+    
+    footerBg: "bg-white",
+    footerBorder: "border-t border-slate-100",
+    footerText: "text-slate-600",
+  },
+  dark: {
+    // Dark Mode with Blue Accents
+    pageBg: "bg-slate-950",
+    heroBg: "bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950",
+    heroOverlay: "bg-black/50",
+    heroImageOverlay: "bg-gradient-to-t from-black/90 via-slate-900/40 to-transparent",
+    
+    headerBg: "bg-slate-900/95 backdrop-blur-md",
+    headerText: "text-white",
+    headerButton: "bg-blue-600 hover:bg-blue-700 text-white",
+    headerBorder: "border-b border-slate-800",
+    
+    heroTitle: "text-white",
+    heroSubtitle: "text-slate-300",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+    
+    searchCard: "bg-slate-900/95 backdrop-blur-xl",
+    searchCardShadow: "shadow-2xl shadow-black/60",
+    searchCardBorder: "border border-slate-700",
+    searchInputBg: "bg-slate-800",
+    searchInputBorder: "border-slate-600",
+    searchInputText: "text-white",
+    searchInputFocus: "focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30",
+    
+    primaryButton: "bg-blue-600 text-white",
+    primaryButtonHover: "hover:bg-blue-700 hover:shadow-xl hover:shadow-blue-500/30",
+    secondaryButton: "bg-slate-800 text-blue-400 border border-blue-500",
+    secondaryButtonHover: "hover:bg-slate-700",
+    
+    textPrimary: "text-white",
+    textSecondary: "text-slate-200",
+    textMuted: "text-slate-400",
+    textInverse: "text-slate-900",
+    
+    cardBg: "bg-slate-900/90 backdrop-blur",
+    cardBorder: "border border-slate-700",
+    cardShadow: "shadow-xl shadow-black/40",
+    cardHover: "hover:border-blue-500/50",
+    cardHoverShadow: "hover:shadow-2xl hover:shadow-blue-500/20",
+    
+    roomCardBg: "bg-slate-900/90 backdrop-blur",
+    roomCardBorder: "border border-slate-700",
+    roomCardShadow: "shadow-xl",
+    roomImageOverlay: "bg-gradient-to-t from-black/80 via-slate-900/30 to-transparent",
+    
+    priceColor: "text-blue-400",
+    priceLabel: "text-slate-400",
+    priceHighlight: "text-blue-300 font-bold",
+    
+    badgePrimary: "bg-blue-500/20 text-blue-300 border-blue-500/50",
+    badgeSecondary: "bg-slate-800/50 text-slate-300 border-slate-700",
+    badgeSuccess: "bg-green-500/20 text-green-300 border-green-500/50",
+    badgeWarning: "bg-amber-500/20 text-amber-300 border-amber-500/50",
+    
+    summaryBg: "bg-slate-900/95 backdrop-blur-xl",
+    summaryBorder: "border border-slate-700",
+    summaryShadow: "shadow-2xl shadow-black/60",
+    
+    accentColor: "text-blue-400",
+    accentBg: "bg-blue-500/10",
+    accentBorder: "border-blue-500/30",
+    
+    planCardBg: "bg-slate-900/80",
+    planCardBorder: "border border-slate-700",
+    planCardSelected: "border-2 border-blue-500 bg-blue-500/10",
+    planCardHover: "hover:border-blue-500/50 hover:shadow-lg",
+    
+    footerBg: "bg-slate-900/95 backdrop-blur-md",
+    footerBorder: "border-t border-slate-800",
+    footerText: "text-slate-300",
+  },
+};
+
+const BookingEnginePage = () => {
+  const { establishmentSlug } = useParams<{ establishmentSlug?: string }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { settings: siteSettings, isLoading: isLoadingSiteSettings } = useSiteSettings();
+
+  const [loading, setLoading] = useState(true);
+  const [company, setCompany] = useState<any>(null);
+  const [establishment, setEstablishment] = useState<any>(null);
+  const [companyEstablishments, setCompanyEstablishments] = useState<any[]>([]);
+  const [selectedEstablishmentId, setSelectedEstablishmentId] = useState<string | null>(null);
+  const [hotelSettings, setHotelSettings] = useState<any>(null);
+  const [engineEnabled, setEngineEnabled] = useState(false);
+
+  const [checkin, setCheckin] = useState(searchParams.get("checkin") || "");
+  const [checkout, setCheckout] = useState(searchParams.get("checkout") || "");
+  const [adults, setAdults] = useState(searchParams.get("adults") || "2");
+  const [children, setChildren] = useState(searchParams.get("children") || "0");
+  const [coupon, setCoupon] = useState(searchParams.get("coupon") || "");
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [roomCategories, setRoomCategories] = useState<any[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
+  const [categoryPrices, setCategoryPrices] = useState<Record<string, number | null>>({});
+  const [categoryPricesPlan1, setCategoryPricesPlan1] = useState<Record<string, number | null>>({});
+  const [calculatingPrices, setCalculatingPrices] = useState(false);
+  const [publicPricingPlan1Id, setPublicPricingPlan1Id] = useState<string | null>(null);
+  const [publicPricingPlan1Title, setPublicPricingPlan1Title] = useState<string | null>(null);
+  const [publicPricingPlan2Id, setPublicPricingPlan2Id] = useState<string | null>(null);
+  const [publicPricingPlan2Title, setPublicPricingPlan2Title] = useState<string | null>(null);
+
+  // Hero image from booking engine config only (não usar establishment_photos)
+  const heroImage = useMemo(() => {
+    // Priorizar: booking_engine_hero_image configurado > imagem padrão
+    // NÃO usar establishment_photos da página pública
+    if (company?.booking_engine_hero_image) {
+      return company.booking_engine_hero_image;
+    }
+    if (hotelSettings?.booking_engine_hero_image) {
+      return hotelSettings.booking_engine_hero_image;
+    }
+    // Se não houver imagem configurada, usar imagem padrão genérica
+    return "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=1920&q=80";
+  }, [company, hotelSettings]);
+
+  // Título do motor (header)
+  const motorTitle = useMemo(() => {
+    return company?.booking_engine_title || 
+           hotelSettings?.booking_engine_title || 
+           establishment?.name || 
+           company?.name || 
+           "Motor de Reservas";
+  }, [company, hotelSettings, establishment]);
+
+  // Hero title and subtitle from config
+  const heroTitle = useMemo(() => {
+    return company?.booking_engine_hero_title || 
+           hotelSettings?.booking_engine_hero_title || 
+           "Reserve sua estadia";
+  }, [company, hotelSettings]);
+
+  const heroSubtitle = useMemo(() => {
+    return company?.booking_engine_hero_subtitle || 
+           hotelSettings?.booking_engine_hero_subtitle || 
+           "Encontre o quarto ideal para sua próxima estadia. Compare categorias, planos tarifários e disponibilidade em tempo real.";
+  }, [company, hotelSettings]);
+
+  useEffect(() => {
+    if (isLoadingSiteSettings || !siteSettings) {
+      return;
+    }
+
+    const load = async () => {
+      const host = typeof window !== "undefined" ? window.location.host : undefined;
+
+      let initialEstablishment: any = null;
+      let foundCompany: any = null;
+
+      if (establishmentSlug) {
+        let establishmentQuery = supabase.from("establishments" as any).select("*");
+        
+        if (!isNaN(Number(establishmentSlug))) {
+          establishmentQuery = establishmentQuery.eq("numeric_id", parseInt(establishmentSlug));
+        } else {
+          establishmentQuery = establishmentQuery.eq("slug", establishmentSlug);
+        }
+
+        const { data: establishments } = await establishmentQuery.limit(1);
+        if (establishments && establishments.length > 0) {
+          initialEstablishment = establishments[0];
+        }
+      } else if (host) {
+        const { data: companyByDomain } = await supabase
+          .from("companies" as any)
+          .select("*")
+          .eq("booking_engine_custom_domain", host)
+          .maybeSingle();
+
+        if (companyByDomain) {
+          foundCompany = companyByDomain;
+        } else {
+          const { data: byDomain } = await supabase
+            .from("hotel_settings" as any)
+            .select("establishment_id, booking_engine_custom_domain")
+            .eq("booking_engine_custom_domain", host)
+            .maybeSingle();
+
+          if (byDomain && (byDomain as any).establishment_id) {
+            const { data: est } = await supabase
+              .from("establishments" as any)
+              .select("*")
+              .eq("id", (byDomain as any).establishment_id)
+              .maybeSingle();
+            if (est) initialEstablishment = est;
+          } else {
+            const parts = host.split(".");
+            if (parts.length > 2) {
+              const potentialSlug = parts[0];
+              const { data: est } = await supabase
+                .from("establishments" as any)
+                .select("*")
+                .eq("slug", potentialSlug)
+                .maybeSingle();
+              if (est) initialEstablishment = est;
+            }
+          }
+        }
+      }
+
+      if (!initialEstablishment && !foundCompany) {
+        navigate("/", { replace: true });
+        return;
+      }
+
+      if (initialEstablishment && !foundCompany) {
+        const { data: companyData } = await supabase
+          .from("companies" as any)
+          .select("*")
+          .eq("id", initialEstablishment.company_id)
+          .maybeSingle();
+        if (companyData) {
+          foundCompany = companyData;
+        }
+      }
+
+      if (!foundCompany) {
+        navigate("/", { replace: true });
+        return;
+      }
+
+      setCompany(foundCompany);
+
+      const enabled = isFeatureEnabledForEstablishment(
+        (siteSettings?.features_enabled as any)?.booking_engine_enabled,
+        foundCompany.id,
+        true
+      );
+
+      if (!enabled && !foundCompany.booking_engine_enabled) {
+        if (initialEstablishment) {
+          const estAny = initialEstablishment as any;
+          const slug = estAny.slug || estAny.numeric_id?.toString() || estAny.id;
+          const params = new URLSearchParams(searchParams);
+          navigate(`/reservar/${slug}?${params.toString()}`, { replace: true });
+        } else {
+          navigate("/", { replace: true });
+        }
+        return;
+      }
+
+      setEngineEnabled(true);
+
+      const { data: engineEstablishments } = await supabase
+        .from("company_booking_engine_establishments" as any)
+        .select("*, establishments(*)")
+        .eq("company_id", foundCompany.id)
+        .eq("is_active", true)
+        .order("display_order")
+        .order("created_at");
+
+      if (engineEstablishments && engineEstablishments.length > 0) {
+        const establishmentsList = engineEstablishments
+          .map((e: any) => e.establishments)
+          .filter(Boolean);
+        setCompanyEstablishments(establishmentsList);
+
+        const toSelect = initialEstablishment && 
+          establishmentsList.find((e: any) => e.id === initialEstablishment.id)
+          ? initialEstablishment
+          : establishmentsList[0];
+        
+        if (toSelect) {
+          setSelectedEstablishmentId(toSelect.id);
+          setEstablishment(toSelect);
+        }
+      } else {
+        const { data: allEsts } = await supabase
+          .from("establishments" as any)
+          .select("*")
+          .eq("company_id", foundCompany.id)
+          .eq("is_active", true)
+          .order("name");
+        
+        if (allEsts && allEsts.length > 0) {
+          setCompanyEstablishments(allEsts);
+          const toSelect = initialEstablishment && 
+            allEsts.find((e: any) => e.id === initialEstablishment.id)
+            ? initialEstablishment
+            : allEsts[0];
+          
+          if (toSelect) {
+            setSelectedEstablishmentId(toSelect.id);
+            setEstablishment(toSelect);
+          }
+        }
+      }
+
+      setLoading(false);
+    };
+
+    load();
+  }, [establishmentSlug, isLoadingSiteSettings, siteSettings, navigate, searchParams]);
+
+  useEffect(() => {
+    if (!selectedEstablishmentId || !engineEnabled) {
+      setRoomCategories([]);
+      setHotelSettings(null);
+      return;
+    }
+
+    const loadEstablishmentData = async () => {
+      const { data: est } = await supabase
+        .from("establishments" as any)
+        .select("*")
+        .eq("id", selectedEstablishmentId)
+        .maybeSingle();
+
+      if (est) {
+        setEstablishment(est);
+      }
+
+      const { data: settingsData } = await supabase
+        .from("hotel_settings" as any)
+        .select("*")
+        .eq("establishment_id", selectedEstablishmentId)
+        .maybeSingle();
+
+      setHotelSettings(settingsData);
+
+      if (settingsData) {
+        const plan1Id = (settingsData as any).public_pricing_plan_1_id || null;
+        const plan2Id = (settingsData as any).public_pricing_plan_2_id || null;
+        setPublicPricingPlan1Id(plan1Id);
+        setPublicPricingPlan1Title((settingsData as any).public_pricing_plan_1_title || null);
+        setPublicPricingPlan2Id(plan2Id);
+        setPublicPricingPlan2Title((settingsData as any).public_pricing_plan_2_title || null);
+      }
+
+      setRoomsLoading(true);
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from("room_categories" as any)
+        .select("*")
+        .eq("establishment_id", selectedEstablishmentId)
+        .eq("show_in_public", true)
+        .order("display_order")
+        .order("name");
+
+      if (!categoriesError && categoriesData) {
+        setRoomCategories(categoriesData);
+      }
+      setRoomsLoading(false);
+    };
+
+    loadEstablishmentData();
+  }, [selectedEstablishmentId, engineEnabled]);
+
+  const themeKey: BookingThemeKey = useMemo(() => {
+    // Priorizar tema da empresa, depois do estabelecimento
+    const key =
+      (company?.booking_engine_theme as BookingThemeKey) ||
+      (hotelSettings?.booking_engine_theme as BookingThemeKey) ||
+      "default";
+    const validKey = (["default", "modern", "luxury", "minimal", "dark"] as BookingThemeKey[]).includes(key)
+      ? key
+      : "default";
+    return validKey;
+  }, [company, hotelSettings]);
+
+  // Garantir que o tema seja aplicado corretamente
+  const theme = useMemo(() => {
+    return THEME_CONFIGS[themeKey];
+  }, [themeKey]);
+
+  const isDarkTheme = themeKey === "modern" || themeKey === "luxury" || themeKey === "dark";
+
+  const formatDateDisplay = (value: string | null): string => {
+    if (!value) return "";
+    const [year, month, day] = value.split("-");
+    if (!year || !month || !day) return value;
+    return `${day}/${month}/${year}`;
+  };
+
+  const formatDateLocal = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const addDays = (date: Date, days: number): Date => {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
+  };
+
+  const rooms = useMemo(() => {
+    if (!roomCategories || roomCategories.length === 0) return [];
+
+    return roomCategories.map((cat) => {
+      const image =
+        (cat.display_photos && cat.display_photos[0]) ||
+        "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=800&q=80";
+
+      const amenities: string[] = Array.isArray(cat.display_features)
+        ? cat.display_features
+        : [];
+
+      const capacityAdults = cat.capacity_adults ?? cat.max_adults ?? null;
+      const capacityChildren = cat.capacity_children ?? cat.max_children ?? null;
+      const size =
+        cat.size_m2 || cat.room_size || cat.area
+          ? `${cat.size_m2 || cat.room_size || cat.area} m²`
+          : null;
+
+      const capacityLabel = [
+        capacityAdults ? `${capacityAdults} adulto(s)` : null,
+        capacityChildren && capacityChildren > 0 ? `${capacityChildren} criança(s)` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+      const basePrice = cat.base_price || cat.min_price || null;
+      const dynamicPricePlan1 = categoryPricesPlan1[cat.id as string];
+
+      const plans: any[] = [];
+
+      if (publicPricingPlan1Id) {
+        plans.push({
+          id: `${cat.id}-plan1`,
+          name: publicPricingPlan1Title || "Plano Tarifário 1",
+          description: "Tarifa estimada para as datas e hóspedes selecionados. O valor final será calculado nas próximas etapas.",
+          benefits: ["Cálculo em tempo real", "Melhor tarifa disponível"],
+          tag: dynamicPricePlan1 ? "A partir de" : basePrice ? "Base" : undefined,
+          pricePerNight:
+            dynamicPricePlan1 !== null && dynamicPricePlan1 !== undefined
+              ? dynamicPricePlan1
+              : basePrice || 0,
+          planId: publicPricingPlan1Id,
+        });
+      } else {
+        plans.push({
+          id: `${cat.id}-default`,
+          name: "Tarifa Padrão",
+          description: "Tarifa base da categoria. Selecione datas e hóspedes para ver valores personalizados.",
+          benefits: ["Cálculo em tempo real na página de reserva"],
+          tag: basePrice ? "Base" : undefined,
+          pricePerNight: basePrice || 0,
+          planId: null,
+        });
+      }
+
+      return {
+        id: cat.id as string,
+        name: cat.name as string,
+        size: size || "",
+        capacity: capacityLabel || "",
+        image,
+        amenities,
+        highlight: cat.highlight_badge || "",
+        plans,
+      };
+    });
+  }, [roomCategories, categoryPricesPlan1, publicPricingPlan1Id, publicPricingPlan1Title]);
+
+  const nights = useMemo(() => {
+    if (!checkin || !checkout) return 0;
+    const ci = new Date(checkin);
+    const co = new Date(checkout);
+    const diff = co.getTime() - ci.getTime();
+    return diff > 0 ? Math.ceil(diff / (1000 * 60 * 60 * 24)) : 0;
+  }, [checkin, checkout]);
+
+  const selectedRoom = useMemo(
+    () => rooms.find((r) => r.id === selectedRoomId) || null,
+    [rooms, selectedRoomId]
+  );
+
+  const selectedPlan = useMemo(
+    () => selectedRoom?.plans.find((p) => p.id === selectedPlanId) || null,
+    [selectedRoom, selectedPlanId]
+  );
+
+  const totalAmount = useMemo(() => {
+    if (!selectedPlan || nights <= 0) return null;
+    return selectedPlan.pricePerNight * nights;
+  }, [selectedPlan, nights]);
+
+  useEffect(() => {
+    const run = async () => {
+      if (!establishment?.id || !hotelSettings || !roomCategories.length) {
+        return;
+      }
+
+      if (!publicPricingPlan1Id) {
+        return;
+      }
+
+      setCalculatingPrices(true);
+      try {
+        const adultsNum = parseInt(adults, 10) || 1;
+        const childrenNum = parseInt(children, 10) || 0;
+        const pricesPlan1: Record<string, number | null> = {};
+
+        let startDate: Date;
+        let nightsCount: number;
+
+        if (checkin && checkout && checkin < checkout) {
+          const [checkinYear, checkinMonth, checkinDay] = checkin.split("-").map(Number);
+          const [checkoutYear, checkoutMonth, checkoutDay] = checkout.split("-").map(Number);
+          const checkinDate = new Date(checkinYear, checkinMonth - 1, checkinDay);
+          const checkoutDate = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
+          const diffMs = checkoutDate.getTime() - checkinDate.getTime();
+          nightsCount = diffMs > 0 ? Math.ceil(diffMs / (1000 * 60 * 60 * 24)) : 0;
+          startDate = checkinDate;
+        } else {
+          startDate = new Date();
+          nightsCount = 1;
+        }
+
+        if (nightsCount <= 0) return;
+
+        for (const cat of roomCategories) {
+          const basePrice = Number(cat.base_price || 0);
+          let total1 = 0;
+          for (let i = 0; i < nightsCount; i++) {
+            const currentDate = addDays(startDate, i);
+            const dateStr = formatDateLocal(currentDate);
+
+            const { data, error } = await (supabase as any).rpc("calculate_rate_price", {
+              p_establishment_id: establishment.id,
+              p_category_id: cat.id,
+              p_pricing_plan_id: publicPricingPlan1Id,
+              p_date: dateStr,
+              p_adults: adultsNum,
+              p_children: childrenNum,
+            });
+
+            if (error) {
+              total1 += basePrice;
+            } else {
+              const price = Number(data || 0);
+              total1 += price > 0 ? price : basePrice;
+            }
+          }
+          pricesPlan1[cat.id as string] =
+            total1 > 0 && nightsCount > 0 ? total1 / nightsCount : null;
+        }
+
+        setCategoryPricesPlan1(pricesPlan1);
+        setCategoryPrices(pricesPlan1);
+      } finally {
+        setCalculatingPrices(false);
+      }
+    };
+
+    run();
+  }, [establishment?.id, hotelSettings, roomCategories, checkin, checkout, adults, children, publicPricingPlan1Id]);
+
+  const handleSubmit = () => {
+    if (!establishment) return;
+
+    const estAny = establishment as any;
+    const slug = estAny.slug || estAny.numeric_id?.toString() || estAny.id;
+
+    const params = new URLSearchParams();
+    if (checkin) params.set("checkin", checkin);
+    if (checkout) params.set("checkout", checkout);
+    if (adults) params.set("adults", adults);
+    if (children) params.set("children", children);
+    if (coupon) params.set("coupon", coupon);
+    if (selectedRoomId) params.set("category", selectedRoomId);
+    if (selectedPlanId && selectedPlan) {
+      params.set("plan", selectedPlan.planId || "");
+    }
+
+    navigate(`/reservar/${slug}?${params.toString()}`);
+  };
+
+  if (loading) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center ${theme.pageBg}`}>
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-current border-t-transparent mx-auto" style={{ color: theme.accentColor.replace('text-', '') }}></div>
+          <p className={`${theme.textSecondary} text-sm`}>
+            Carregando motor de reservas...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const establishmentName = (establishment as any)?.name || (hotelSettings as any)?.name || "";
+  const establishmentCnpj = (hotelSettings as any)?.establishment_cnpj || "";
+  const establishmentPhone = (hotelSettings as any)?.phone || "";
+  const establishmentWhatsappDdi = (hotelSettings as any)?.whatsapp_ddi || "";
+  const establishmentWhatsappNumber = (hotelSettings as any)?.whatsapp_number || "";
+  const establishmentEmail = (hotelSettings as any)?.email || "";
+
+  return (
+    <>
+      <style>{animationStyles}</style>
+      <div className={`min-h-screen ${theme.pageBg}`}>
+        {/* Header */}
+        <header className={`${theme.headerBg} ${theme.headerText} sticky top-0 z-50 ${theme.headerBorder || ""} transition-colors duration-300`}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`text-xl md:text-2xl font-bold ${theme.textPrimary}`}>
+                {motorTitle}
+              </div>
+            </div>
+            <Button 
+              className={`${theme.headerButton} px-6 py-2 rounded-lg transition-all duration-200`}
+              onClick={handleSubmit}
+            >
+              <Search className="w-4 h-4 mr-2" />
+              Buscar Quartos
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Hero Section with Background Image */}
+      <section className={`relative min-h-[500px] md:min-h-[600px] lg:min-h-[700px] flex items-center justify-center overflow-hidden`}>
+        {/* Background Image */}
+        <div 
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-700 hover:scale-105"
+          style={{ backgroundImage: `url(${heroImage})` }}
+        >
+          <div className={`absolute inset-0 ${theme.heroImageOverlay} transition-opacity duration-300`} />
+          <div className={`absolute inset-0 ${theme.heroOverlay} transition-opacity duration-300`} />
+        </div>
+
+        {/* Hero Content */}
+        <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">
+          <div className="max-w-4xl mx-auto text-center mb-8 md:mb-12 animate-fade-in-up">
+            <h1 className={`${theme.heroTitle} ${theme.heroTitleSize} font-bold mb-4 md:mb-6 leading-tight animate-fade-in`}>
+              {heroTitle}
+            </h1>
+            <p className={`${theme.heroSubtitle} ${theme.heroSubtitleSize} max-w-2xl mx-auto animate-fade-in-delay`}>
+              {heroSubtitle}
+            </p>
+          </div>
+
+          {/* Search Card - Centered */}
+          <div className="max-w-5xl mx-auto animate-fade-in-up-delay">
+            <Card className={`${theme.searchCard} ${theme.searchCardShadow} ${theme.searchCardBorder} p-6 md:p-8 rounded-2xl transition-all duration-300 hover:scale-[1.01]`}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                {/* Check-in */}
+                <div className="space-y-2">
+                  <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2`}>
+                    <CalendarDays className="w-4 h-4" />
+                    Check-in
+                  </Label>
+                  <Input
+                    type="date"
+                    value={checkin}
+                    onChange={(e) => setCheckin(e.target.value)}
+                    className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
+                  />
+                </div>
+
+                {/* Check-out */}
+                <div className="space-y-2">
+                  <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2`}>
+                    <CalendarDays className="w-4 h-4" />
+                    Check-out
+                  </Label>
+                  <Input
+                    type="date"
+                    value={checkout}
+                    onChange={(e) => setCheckout(e.target.value)}
+                    className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
+                  />
+                </div>
+
+                {/* Adultos */}
+                <div className="space-y-2">
+                  <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2`}>
+                    <Users className="w-4 h-4" />
+                    Adultos
+                  </Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={adults}
+                    onChange={(e) => setAdults(e.target.value)}
+                    className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
+                  />
+                </div>
+
+                {/* Crianças */}
+                <div className="space-y-2">
+                  <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2`}>
+                    <Users className="w-4 h-4" />
+                    Crianças
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={children}
+                    onChange={(e) => setChildren(e.target.value)}
+                    className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
+                  />
+                </div>
+
+                {/* CTA Button */}
+                <div className="flex items-end">
+                  <Button
+                    className={`w-full h-12 ${theme.primaryButton} ${theme.primaryButtonHover} rounded-lg font-semibold text-base flex items-center justify-center gap-2`}
+                    onClick={handleSubmit}
+                  >
+                    <Search className="w-5 h-5" />
+                    <span className="hidden sm:inline">Ver disponibilidade</span>
+                    <span className="sm:hidden">Buscar</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Cupom de desconto */}
+              <div className="mt-4 pt-4 border-t border-slate-200/50">
+                <div className="flex items-center gap-3">
+                  <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2 whitespace-nowrap`}>
+                    <Percent className="w-4 h-4" />
+                    Cupom
+                  </Label>
+                  <Input
+                    placeholder="Código promocional (opcional)"
+                    value={coupon}
+                    onChange={(e) => setCoupon(e.target.value.toUpperCase())}
+                    className={`flex-1 h-10 ${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg uppercase tracking-wide`}
+                  />
+                </div>
+              </div>
+            </Card>
+          </div>
+        </div>
+      </section>
+
+      {/* Main Content */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">
+        {/* Estabelecimentos da empresa */}
+        {companyEstablishments.length > 1 && (
+          <div className="mb-12">
+            <h2 className={`text-2xl font-bold mb-6 ${theme.textPrimary}`}>
+              Estabelecimentos disponíveis
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {companyEstablishments.map((est: any) => {
+                const isSelected = selectedEstablishmentId === est.id;
+                return (
+                  <Card
+                    key={est.id}
+                    className={`p-5 cursor-pointer transition-all ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow} ${theme.cardHover} ${theme.cardHoverShadow} ${
+                      isSelected ? `${theme.accentBorder} border-2 ${theme.accentBg}` : ""
+                    }`}
+                    onClick={() => {
+                      setSelectedEstablishmentId(est.id);
+                      setSelectedRoomId(null);
+                      setSelectedPlanId(null);
+                    }}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className={`font-semibold text-lg ${theme.textPrimary}`}>
+                          {est.name}
+                        </h3>
+                        {isSelected && (
+                          <Badge className={theme.badgePrimary}>
+                            Selecionado
+                          </Badge>
+                        )}
+                      </div>
+                      {est.type && (
+                        <p className={`text-sm ${theme.textMuted}`}>
+                          {est.type === 'hotel' ? 'Hotel' : est.type === 'apartment' ? 'Apartamento' : 'Outro'}
+                        </p>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] gap-8 lg:gap-12">
+          {/* Room Cards List */}
+          <div className="space-y-8">
+            {!selectedEstablishmentId && companyEstablishments.length > 0 && (
+              <Card className={`p-8 text-center ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow}`}>
+                <p className={`${theme.textSecondary} text-lg`}>
+                  Selecione um estabelecimento acima para ver os quartos disponíveis.
+                </p>
+              </Card>
+            )}
+
+            {roomsLoading && (
+              <div className="space-y-6">
+                {[1, 2, 3].map((i) => (
+                  <Card key={i} className={`${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow} overflow-hidden`}>
+                    <div className="animate-pulse">
+                      <div className="h-64 bg-slate-200 dark:bg-slate-700" />
+                      <div className="p-6 space-y-4">
+                        <div className="h-6 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/2" />
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            {!roomsLoading && rooms.map((room, index) => (
+              <Card
+                key={room.id}
+                className={`overflow-hidden ${theme.roomCardBg} ${theme.roomCardBorder} ${theme.roomCardShadow} ${theme.cardHover} ${theme.cardHoverShadow} transition-all duration-300 animate-fade-in-up`}
+                style={{ animationDelay: `${index * 100}ms` }}
+              >
+                {/* Room Image - 16:9 Aspect Ratio */}
+                <div className="relative w-full h-64 md:h-80 lg:h-96 overflow-hidden">
+                  <img
+                    src={room.image}
+                    alt={room.name}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className={`absolute inset-0 ${theme.roomImageOverlay || ""}`} />
+                  
+                  {/* Badge de destaque */}
+                  {room.highlight && (
+                    <div className="absolute top-4 left-4 z-10">
+                      <Badge className={`${theme.badgePrimary} px-3 py-1.5 text-sm font-semibold`}>
+                        <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                        {room.highlight}
+                      </Badge>
+                    </div>
+                  )}
+
+                  {/* Price Badge */}
+                  {room.plans[0] && (
+                    <div className="absolute bottom-4 right-4 z-10">
+                      <div className={`${theme.cardBg} ${theme.cardBorder} border rounded-lg px-4 py-2 shadow-lg`}>
+                        <div className={`text-xs ${theme.textMuted} mb-0.5`}>A partir de</div>
+                        <div className={`${theme.priceColor} text-xl font-bold`}>
+                          R$ {room.plans[0].pricePerNight.toFixed(2)}
+                        </div>
+                        <div className={`text-xs ${theme.priceLabel}`}>por noite</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Room Info */}
+                <div className="p-6 md:p-8">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1">
+                      <h3 className={`text-2xl md:text-3xl font-bold mb-2 ${theme.textPrimary}`}>
+                        {room.name}
+                      </h3>
+                      <div className={`flex flex-wrap items-center gap-4 text-sm ${theme.textSecondary}`}>
+                        {room.size && (
+                          <div className="flex items-center gap-1.5">
+                            <MapPin className="w-4 h-4" />
+                            <span>{room.size}</span>
+                          </div>
+                        )}
+                        {room.capacity && (
+                          <div className="flex items-center gap-1.5">
+                            <Users className="w-4 h-4" />
+                            <span>{room.capacity}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {themeKey === "luxury" && (
+                      <Crown className="w-6 h-6 text-purple-400 flex-shrink-0 ml-4" />
+                    )}
+                  </div>
+
+                  {/* Amenities */}
+                  {room.amenities.length > 0 && (
+                    <div className="mb-6">
+                      <div className="flex flex-wrap gap-2">
+                        {room.amenities.slice(0, 8).map((amenity) => (
+                          <Badge
+                            key={amenity}
+                            variant="outline"
+                            className={`text-xs px-3 py-1 ${theme.badgeSecondary}`}
+                          >
+                            {amenity}
+                          </Badge>
+                        ))}
+                        {room.amenities.length > 8 && (
+                          <Badge
+                            variant="outline"
+                            className={`text-xs px-3 py-1 ${theme.badgeSecondary}`}
+                          >
+                            +{room.amenities.length - 8} mais
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pricing Plans Accordion */}
+                  <div>
+                    <Accordion type="single" collapsible className="w-full">
+                      <AccordionItem value="plans" className="border-0">
+                        <AccordionTrigger className={`${theme.textPrimary} hover:no-underline py-4`}>
+                          <span className="text-base font-semibold">Ver planos tarifários e preços</span>
+                        </AccordionTrigger>
+                        <AccordionContent className="pt-4">
+                          <div className="space-y-4">
+                            {room.plans.map((plan) => {
+                              const isSelected = selectedPlanId === plan.id && selectedRoomId === room.id;
+                              return (
+                                <button
+                                  key={plan.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedRoomId(room.id);
+                                    setSelectedPlanId(plan.id);
+                                  }}
+                                  className={`w-full text-left p-5 rounded-xl transition-all duration-200 ${
+                                    isSelected
+                                      ? `${theme.planCardSelected}`
+                                      : `${theme.planCardBg} ${theme.planCardBorder} border ${theme.planCardHover}`
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="flex-1 space-y-3">
+                                      <div className="flex items-center gap-3">
+                                        <span className={`text-lg font-bold ${theme.textPrimary}`}>
+                                          {plan.name}
+                                        </span>
+                                        {plan.tag && (
+                                          <Badge className={`${theme.badgePrimary} text-xs px-2 py-0.5`}>
+                                            <Star className="w-3 h-3 mr-1" />
+                                            {plan.tag}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <p className={`text-sm ${theme.textSecondary}`}>
+                                        {plan.description}
+                                      </p>
+                                      <div className="flex flex-wrap gap-2">
+                                        {plan.benefits.map((benefit, idx) => (
+                                          <div
+                                            key={idx}
+                                            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full ${theme.badgeSecondary}`}
+                                          >
+                                            <CheckCircle2 className="w-3 h-3" />
+                                            {benefit}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    <div className="text-right min-w-[140px]">
+                                      <div className={`${theme.priceColor} text-2xl font-bold mb-1`}>
+                                        R$ {plan.pricePerNight.toFixed(2)}
+                                      </div>
+                                      <div className={`text-xs ${theme.priceLabel}`}>
+                                        por noite
+                                      </div>
+                                      {nights > 0 && (
+                                        <div className={`text-sm ${theme.textMuted} mt-2`}>
+                                          {nights} noite{nights > 1 ? 's' : ''}: R$ {(plan.pricePerNight * nights).toFixed(2)}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          {/* Summary Sidebar - Sticky */}
+          <div className="lg:sticky lg:top-24 h-fit">
+            <Card className={`${theme.summaryBg} ${theme.summaryBorder} ${theme.summaryShadow} p-6 rounded-2xl`}>
+              <h3 className={`text-xl font-bold mb-6 ${theme.textPrimary}`}>
+                Resumo da busca
+              </h3>
+              
+              <div className="space-y-4 mb-6">
+                <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
+                  <span className={`text-sm ${theme.textSecondary}`}>Check-in</span>
+                  <span className={`font-semibold ${theme.textPrimary}`}>
+                    {checkin ? formatDateDisplay(checkin) : "—"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
+                  <span className={`text-sm ${theme.textSecondary}`}>Check-out</span>
+                  <span className={`font-semibold ${theme.textPrimary}`}>
+                    {checkout ? formatDateDisplay(checkout) : "—"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
+                  <span className={`text-sm ${theme.textSecondary}`}>Noites</span>
+                  <span className={`font-semibold ${theme.textPrimary}`}>
+                    {nights > 0 ? `${nights} noite${nights > 1 ? 's' : ''}` : "—"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
+                  <span className={`text-sm ${theme.textSecondary}`}>Hóspedes</span>
+                  <span className={`font-semibold ${theme.textPrimary}`}>
+                    {adults} adulto{Number(adults) > 1 ? 's' : ''}
+                    {Number(children) > 0 && ` · ${children} criança${Number(children) > 1 ? 's' : ''}`}
+                  </span>
+                </div>
+              </div>
+
+              {selectedRoom && (
+                <div className={`p-4 rounded-xl mb-6 ${theme.accentBg} ${theme.accentBorder} border`}>
+                  <div className={`text-xs font-semibold uppercase tracking-wide mb-2 ${theme.textMuted}`}>
+                    Seleção atual
+                  </div>
+                  <div className={`font-semibold mb-1 ${theme.textPrimary}`}>
+                    {selectedRoom.name}
+                  </div>
+                  {selectedPlan && (
+                    <div className={`text-sm ${theme.textSecondary}`}>
+                      {selectedPlan.name}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {totalAmount !== null && (
+                <div className={`p-4 rounded-xl mb-6 ${theme.accentBg} ${theme.accentBorder} border`}>
+                  <div className="flex justify-between items-baseline mb-2">
+                    <span className={`text-sm ${theme.textSecondary}`}>Total estimado</span>
+                    <span className={`${theme.priceHighlight} text-2xl`}>
+                      R$ {totalAmount.toFixed(2)}
+                    </span>
+                  </div>
+                  <p className={`text-xs ${theme.textMuted}`}>
+                    Para {nights} noite{nights > 1 ? 's' : ''}. Valor final calculado na próxima etapa.
+                  </p>
+                </div>
+              )}
+
+              <Button
+                className={`w-full h-14 ${theme.primaryButton} ${theme.primaryButtonHover} rounded-xl font-semibold text-base flex items-center justify-center gap-2 mb-4`}
+                onClick={handleSubmit}
+                disabled={!checkin || !checkout || nights <= 0}
+              >
+                <Search className="w-5 h-5" />
+                Continuar para reserva
+              </Button>
+
+              <p className={`text-xs text-center ${theme.textMuted}`}>
+                Na próxima página você verá disponibilidade em tempo real, tarifas detalhadas e poderá finalizar a reserva com segurança.
+              </p>
+            </Card>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className={`${theme.footerBg} ${theme.footerBorder} mt-16`}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div>
+              <h4 className={`text-lg font-bold mb-3 ${theme.textPrimary}`}>
+                {establishmentName || "Seu Estabelecimento"}
+              </h4>
+              {establishmentCnpj && (
+                <p className={`text-sm ${theme.footerText}`}>CNPJ: {establishmentCnpj}</p>
+              )}
+            </div>
+            <div>
+              <h5 className={`text-sm font-semibold uppercase tracking-wide mb-3 ${theme.textSecondary}`}>
+                Contato
+              </h5>
+              <div className="space-y-2 text-sm">
+                {establishmentPhone && (
+                  <p className={theme.footerText}>
+                    <span className="font-medium">Telefone:</span>{" "}
+                    <a href={`tel:${establishmentPhone}`} className="hover:underline">
+                      {establishmentPhone}
+                    </a>
+                  </p>
+                )}
+                {establishmentWhatsappNumber && (
+                  <p className={theme.footerText}>
+                    <span className="font-medium">WhatsApp:</span>{" "}
+                    <a
+                      href={`https://wa.me/${encodeURIComponent(`${establishmentWhatsappDdi || ""}${establishmentWhatsappNumber}`)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover:underline"
+                    >
+                      {`${establishmentWhatsappDdi || ""} ${establishmentWhatsappNumber}`.trim()}
+                    </a>
+                  </p>
+                )}
+                {establishmentEmail && (
+                  <p className={theme.footerText}>
+                    <span className="font-medium">E-mail:</span>{" "}
+                    <a href={`mailto:${establishmentEmail}`} className="hover:underline">
+                      {establishmentEmail}
+                    </a>
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="md:text-right">
+              <p className={`text-sm ${theme.footerText}`}>
+                Motor de reservas hospedado em plataforma SaaS.
+              </p>
+            </div>
+          </div>
+        </div>
+      </footer>
+
+      {/* Sticky CTA Mobile */}
+      <div className={`lg:hidden fixed inset-x-0 bottom-0 z-50 ${theme.summaryBg} ${theme.summaryBorder} border-t px-4 py-4 backdrop-blur-md shadow-2xl`}>
+        <Button
+          className={`w-full h-14 ${theme.primaryButton} ${theme.primaryButtonHover} rounded-xl font-semibold text-base flex items-center justify-center gap-2`}
+          onClick={handleSubmit}
+          disabled={!checkin || !checkout || nights <= 0}
+        >
+          <Search className="w-5 h-5" />
+          Ver disponibilidade
+        </Button>
+      </div>
+      </div>
+    </>
+  );
+};
+
+export default BookingEnginePage;

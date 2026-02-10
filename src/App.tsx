@@ -44,9 +44,12 @@ import PaymentPage from "./pages/PaymentPage";
 import QuotePaymentPage from "./pages/QuotePaymentPage";
 import QuoteRoomSelection from "./pages/QuoteRoomSelection";
 import PublicReservation from "./pages/PublicReservation";
+import BookingEnginePage from "./booking-engine";
 import Quotes from "./pages/Quotes";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import Documentation from "./pages/Documentation";
+import BookingEngineSettings from "./pages/BookingEngineSettings";
+import PublicReservationSettings from "./pages/PublicReservationSettings";
 import { EstablishmentProvider } from "./contexts/EstablishmentContext";
 import { StripeProvider } from "./components/stripe/StripeProvider";
 import { useSiteMeta } from "./hooks/useSiteMeta";
@@ -140,6 +143,8 @@ const AppContent = () => {
             <Route path="/payment/return" element={<PaymentSuccess />} />
             <Route path="/quote-payment/:paymentIntentId" element={<QuotePaymentPage />} />
             <Route path="/quote-room-selection/:selectionToken" element={<QuoteRoomSelection />} />
+            <Route path="/motor" element={<BookingEnginePage />} />
+            <Route path="/motor/:establishmentSlug" element={<BookingEnginePage />} />
             <Route path="/reservar/:establishmentSlug" element={<PublicReservation />} />
             <Route path="/policies/:slug/:token" element={<PublicPolicies />} />
             <Route path="/policies/:token" element={<PublicPolicies />} />
@@ -154,6 +159,8 @@ const AppContent = () => {
             <Route path="/:establishmentId/manutencao" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Maintenance /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/avaliacoes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><StayReviews /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/channel-manager" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ChannelManager /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/motor-reservas/configuracoes" element={<ProtectedRoute><RoleProtectedRoute><AppLayout><BookingEngineSettings /></AppLayout></RoleProtectedRoute></ProtectedRoute>} />
+            <Route path="/pagina-publica/configuracoes" element={<ProtectedRoute><RoleProtectedRoute><AppLayout><PublicReservationSettings /></AppLayout></RoleProtectedRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/configuracoes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Settings /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/perfil" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Profile /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/funcionarios" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Employees /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
