@@ -167,12 +167,19 @@ const PublicReservation = () => {
             });
 
             if (error) {
+              console.warn(`[calculateCategoryPriceForPlan] Erro ao calcular preço para plano ${planId} na data ${dateStr}:`, error);
               categoryTotal += basePrice;
             } else {
               const price = Number(data || 0);
-              categoryTotal += price > 0 ? price : basePrice;
+              if (price > 0) {
+                categoryTotal += price;
+              } else {
+                console.warn(`[calculateCategoryPriceForPlan] Preço retornado foi 0 ou inválido para plano ${planId} na data ${dateStr}. Usando basePrice: ${basePrice}`);
+                categoryTotal += basePrice;
+              }
             }
           } catch (error) {
+            console.error(`[calculateCategoryPriceForPlan] Exceção ao calcular preço para plano ${planId} na data ${dateStr}:`, error);
             categoryTotal += basePrice;
           }
         }
@@ -1151,10 +1158,22 @@ const PublicReservation = () => {
         setPublicPricingPlan1Title(hotel.public_pricing_plan_1_title || null);
         setPublicPricingPlan2Id(plan2Id);
         setPublicPricingPlan2Title(hotel.public_pricing_plan_2_title || null);
+        
+        // Log para debug: verificar se os planos estão sendo carregados corretamente
+        console.log(`[PublicReservation] Estabelecimento ${foundEstablishment.id} (${foundEstablishment.name}):`, {
+          establishment_id: hotel.establishment_id,
+          public_pricing_plan_1_id: plan1Id,
+          public_pricing_plan_1_title: hotel.public_pricing_plan_1_title,
+          public_pricing_plan_2_id: plan2Id,
+          public_pricing_plan_2_title: hotel.public_pricing_plan_2_title,
+        });
+        
         // Armazenar políticas do estabelecimento
         if (hotel.policies) {
           setEstablishmentPolicies(hotel.policies);
         }
+      } else {
+        console.warn(`[PublicReservation] Nenhuma configuração encontrada para estabelecimento ${foundEstablishment.id}`);
       }
 
       // Buscar serviços do estabelecimento

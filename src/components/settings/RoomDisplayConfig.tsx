@@ -24,7 +24,7 @@ import { Separator } from "@/components/ui/separator";
 const RoomDisplayConfig = () => {
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
-  const { uploadImage, settings, saveSettings } = useHotelSettings();
+  const { uploadImage, settings, saveSettings } = useHotelSettings(selectedEstablishment?.id);
   const { plans } = usePricingPlans();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [isUploadingEstablishmentPhoto, setIsUploadingEstablishmentPhoto] = useState(false);
@@ -140,6 +140,11 @@ const RoomDisplayConfig = () => {
   };
 
   const handleEstablishmentPhotoUpload = async (file: File) => {
+    if (!selectedEstablishment?.id) {
+      toast.error("Selecione um estabelecimento primeiro");
+      return;
+    }
+
     setIsUploadingEstablishmentPhoto(true);
     try {
       const uploadedUrl = await uploadImage(file, "photo");
@@ -153,6 +158,7 @@ const RoomDisplayConfig = () => {
 
       await saveSettings({ establishment_photos: newPhotos } as any);
       toast.success("Foto do estabelecimento adicionada com sucesso");
+      queryClient.invalidateQueries({ queryKey: ["hotel_settings", selectedEstablishment.id] });
       queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
     } catch (error: any) {
       toast.error(error.message || "Erro ao fazer upload da foto");
@@ -162,12 +168,18 @@ const RoomDisplayConfig = () => {
   };
 
   const handleRemoveEstablishmentPhoto = async (photoIndex: number) => {
+    if (!selectedEstablishment?.id) {
+      toast.error("Selecione um estabelecimento primeiro");
+      return;
+    }
+
     try {
       const existingPhotos = settings?.establishment_photos || [];
       const newPhotos = existingPhotos.filter((_: any, index: number) => index !== photoIndex);
 
       await saveSettings({ establishment_photos: newPhotos } as any);
       toast.success("Foto removida com sucesso");
+      queryClient.invalidateQueries({ queryKey: ["hotel_settings", selectedEstablishment.id] });
       queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
     } catch (error: any) {
       toast.error(error.message || "Erro ao remover foto");

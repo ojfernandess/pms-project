@@ -19,24 +19,33 @@ export const useCheckoutCleaning = () => {
       if (!selectedEstablishment?.id) return null;
       
       try {
+        // Usar select("*") para evitar problemas com políticas RLS e sintaxe de select
         const { data, error } = await supabase
           .from("hotel_settings")
-          .select("enable_cleaning_notifications, checkout_time, timezone")
+          .select("*")
           .eq("establishment_id", selectedEstablishment.id)
-          .single();
-
+          .maybeSingle();
+        
         if (error) {
+          // Se não encontrar configurações, retornar null (usar padrão: true)
+          if (error.code === "PGRST116") return null;
           // Se a coluna não existe (erro 42703), retornar null (usar padrão: true)
           if (error.code === "42703" || error.message?.includes("does not exist")) {
             console.warn("Coluna enable_cleaning_notifications não existe ainda. Execute a migration 20251210000004_add_enable_cleaning_notifications_to_hotel_settings.sql");
             return null;
           }
-          // Se não encontrar configurações, retornar null (usar padrão: true)
-          if (error.code === "PGRST116") return null;
           console.error("Erro ao buscar configurações de limpeza:", error);
           return null;
         }
-        return data;
+        
+        // Retornar apenas os campos necessários
+        if (!data) return null;
+        
+        return {
+          enable_cleaning_notifications: data.enable_cleaning_notifications,
+          checkout_time: data.checkout_time,
+          timezone: data.timezone,
+        };
       } catch (err: any) {
         // Se a coluna não existe, retornar null (usar padrão: true)
         if (err?.code === "42703" || err?.message?.includes("does not exist")) {

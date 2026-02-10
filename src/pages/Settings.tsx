@@ -35,8 +35,8 @@ import {
 } from "@/components/ui/table";
 
 const Settings = () => {
-  const { settings, isLoading, saveSettings, uploadImage, isSaving, settingsQuery } = useHotelSettings();
   const { selectedEstablishment } = useEstablishment();
+  const { settings, isLoading, saveSettings, uploadImage, isSaving, settingsQuery } = useHotelSettings(selectedEstablishment?.id);
   const { apiSettings, saveApiSetting, deleteApiSetting, isLoading: isLoadingApi } = useApiSettings();
   const { carriers } = usePaymentCarriers();
   const { role } = useCurrentEmployeeRole();
@@ -1171,7 +1171,8 @@ const ServicesManager = () => {
 
 // Componente de Gerenciamento de Políticas
 const PoliciesManager = () => {
-  const { settings, saveSettings, isSaving } = useHotelSettings();
+  const { selectedEstablishment } = useEstablishment();
+  const { settings, saveSettings, isSaving } = useHotelSettings(selectedEstablishment?.id);
   const [policies, setPolicies] = useState({
     policies_text: "", // Campo de texto livre para políticas
     cancellation: {

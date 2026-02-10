@@ -2,18 +2,20 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
-export const useHotelSettings = () => {
+export const useHotelSettings = (establishmentId?: string) => {
   const queryClient = useQueryClient();
+
+  // Usar establishmentId passado como parâmetro ou do localStorage
+  const finalEstablishmentId = establishmentId || localStorage.getItem("selectedEstablishmentId") || undefined;
 
   // Buscar configurações do hotel (sempre retorna uma única configuração)
   const settingsQuery = useQuery({
-    queryKey: ["hotel_settings"],
+    queryKey: ["hotel_settings", finalEstablishmentId],
     queryFn: async () => {
       try {
-        const establishmentId = localStorage.getItem("selectedEstablishmentId");
         let query = supabase.from("hotel_settings").select("*");
-        if (establishmentId) {
-          query = query.eq("establishment_id", establishmentId);
+        if (finalEstablishmentId) {
+          query = query.eq("establishment_id", finalEstablishmentId);
         }
         const { data, error } = await query.limit(1).maybeSingle();
 
@@ -41,7 +43,7 @@ export const useHotelSettings = () => {
   // Criar ou atualizar configurações do hotel
   const saveSettings = useMutation({
     mutationFn: async (settings: {
-      name: string;
+      name?: string;
       website?: string;
       email?: string;
       hotel_type?: string;
@@ -77,143 +79,141 @@ export const useHotelSettings = () => {
       public_pricing_plan_id?: string | null;
       establishment_photos?: string[];
     }) => {
-      // Buscar establishment_id do localStorage
-      const establishmentId = localStorage.getItem("selectedEstablishmentId");
+      // Usar establishmentId passado como parâmetro ou do localStorage
+      const currentEstablishmentId = establishmentId || localStorage.getItem("selectedEstablishmentId") || undefined;
       
-      // Buscar configuração existente - sempre buscar primeiro para evitar constraint violations
-      let query = supabase.from("hotel_settings").select("*");
-      if (establishmentId) {
-        query = query.eq("establishment_id", establishmentId);
-      } else {
-        // Se não há establishment_id, buscar qualquer configuração (fallback)
-        query = query.limit(1);
-      }
-      const { data: existing, error: queryError } = await query.maybeSingle();
-      
-      // Se houver erro na query (exceto "não encontrado"), lançar
-      if (queryError && queryError.code !== "PGRST116") {
-        throw queryError;
+      if (!currentEstablishmentId) {
+        throw new Error("É necessário selecionar um estabelecimento para salvar as configurações");
       }
       
       // Preparar dados para atualização/inserção
-      const updateData = establishmentId 
-        ? { ...settings, establishment_id: establishmentId }
-        : settings;
+      // IMPORTANTE: Mesclar apenas os campos fornecidos, preservando os existentes
+      const newData: any = { ...settings };
       
-      // Sempre tentar UPDATE primeiro se existe registro
-      if (existing) {
-        // Atualizar configuração existente
+      // Buscar nome do estabelecimento caso precise criar novo registro
+      let establishmentName = newData.name;
+      if (!establishmentName) {
+        const { data: establishment } = await supabase
+          .from("establishments")
+          .select("name")
+          .eq("id", currentEstablishmentId)
+          .maybeSingle();
+        establishmentName = establishment?.name || "Estabelecimento";
+      }
+      
+      // Função auxiliar para buscar registro existente APENAS do estabelecimento atual
+      const findExisting = async () => {
         const { data, error } = await supabase
           .from("hotel_settings")
-          .update(updateData)
-          .eq("id", existing.id)
+          .select("*")
+          .eq("establishment_id", currentEstablishmentId)
+          .maybeSingle();
+        
+        if (error && error.code !== "PGRST116") {
+          throw error;
+        }
+        return data;
+      };
+      
+      // Função auxiliar para fazer UPDATE mesclando dados existentes com novos
+      const performUpdate = async (existingRecord: any, newFields: any) => {
+        // Mesclar dados existentes com novos campos
+        // Preservar TODOS os campos existentes e apenas atualizar os fornecidos
+        const mergedData: any = {
+          ...existingRecord, // Preservar todos os campos existentes
+          ...newFields,      // Sobrescrever apenas os campos fornecidos
+          establishment_id: currentEstablishmentId, // Sempre garantir o establishment_id correto
+        };
+        
+        // Se name não foi fornecido, preservar o existente
+        if (!mergedData.name && existingRecord.name) {
+          mergedData.name = existingRecord.name;
+        }
+        
+        const { data, error } = await supabase
+          .from("hotel_settings")
+          .update(mergedData)
+          .eq("id", existingRecord.id)
           .select()
           .single();
-
-        if (error) {
-          // Se erro de constraint, pode ser que o establishment_id mudou
-          // Tentar buscar novamente e atualizar
-          if (error.code === "23505" && establishmentId) {
-            const { data: retryExisting } = await supabase
-              .from("hotel_settings")
-              .select("*")
-              .eq("establishment_id", establishmentId)
-              .maybeSingle();
-            
-            if (retryExisting && retryExisting.id !== existing.id) {
-              // Se encontrou outro registro com o mesmo establishment_id, atualizar esse
-              const { data: updatedData, error: updateError } = await supabase
-                .from("hotel_settings")
-                .update(updateData)
-                .eq("id", retryExisting.id)
-                .select()
-                .single();
-              if (updateError) throw updateError;
-              return updatedData;
+        
+        if (error) throw error;
+        return data;
+      };
+      
+      // Buscar registro existente do estabelecimento atual
+      let existing = await findExisting();
+      
+      // Se encontrou registro do estabelecimento atual, fazer UPDATE mesclado
+      if (existing) {
+        try {
+          return await performUpdate(existing, newData);
+        } catch (error: any) {
+          // Se erro de constraint, buscar novamente e tentar atualizar
+          if (error.code === "23505" || error.message?.includes("duplicate key") || error.message?.includes("unique constraint")) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            existing = await findExisting();
+            if (existing) {
+              return await performUpdate(existing, newData);
             }
           }
           throw error;
         }
-        return data;
-      } else {
-        // Não existe registro, tentar criar
-        // Mas primeiro verificar se há algum registro (pode ser que a constraint única não permita múltiplos)
-        const { data: anyExisting } = await supabase
+      }
+      
+      // Não encontrou registro, verificar novamente antes de INSERT
+      await new Promise(resolve => setTimeout(resolve, 50));
+      existing = await findExisting();
+      
+      if (existing) {
+        // Registro foi criado entre as verificações, fazer UPDATE mesclado
+        return await performUpdate(existing, newData);
+      }
+      
+      // Realmente não existe, criar novo registro
+      // Incluir todos os campos necessários para um novo registro
+      const insertData: any = {
+        ...newData,
+        name: establishmentName,
+        establishment_id: currentEstablishmentId,
+      };
+      
+      try {
+        const { data, error } = await supabase
           .from("hotel_settings")
-          .select("*")
-          .limit(1)
-          .maybeSingle();
+          .insert([insertData])
+          .select()
+          .single();
         
-        if (anyExisting) {
-          // Se existe qualquer registro, atualizar esse ao invés de criar novo
-          const { data, error } = await supabase
-            .from("hotel_settings")
-            .update(updateData)
-            .eq("id", anyExisting.id)
-            .select()
-            .single();
-
-          if (error) throw error;
-          return data;
-        } else {
-          // Não existe nenhum registro, criar novo
-          const { data, error } = await supabase
-            .from("hotel_settings")
-            .insert([updateData])
-            .select()
-            .single();
-
-          if (error) {
-            // Se erro de constraint, pode ser que foi criado entre a verificação e o insert
-            // Tentar buscar e atualizar
-            if (error.code === "23505") {
-              const { data: retryExisting } = await supabase
-                .from("hotel_settings")
-                .select("*");
-              
-              if (establishmentId) {
-                const { data: byEstablishment } = await retryExisting.eq("establishment_id", establishmentId).maybeSingle();
-                if (byEstablishment) {
-                  const { data: updatedData, error: updateError } = await supabase
-                    .from("hotel_settings")
-                    .update(updateData)
-                    .eq("id", byEstablishment.id)
-                    .select()
-                    .single();
-                  if (updateError) throw updateError;
-                  return updatedData;
-                }
-              }
-              
-              const { data: anyRecord } = await retryExisting.limit(1).maybeSingle();
-              if (anyRecord) {
-                const { data: updatedData, error: updateError } = await supabase
-                  .from("hotel_settings")
-                  .update(updateData)
-                  .eq("id", anyRecord.id)
-                  .select()
-                  .single();
-                if (updateError) throw updateError;
-                return updatedData;
-              }
-            }
-            throw error;
+        if (error) throw error;
+        return data;
+      } catch (error: any) {
+        // Se erro de constraint, buscar registro existente e fazer UPDATE mesclado
+        if (error.code === "23505" || error.message?.includes("duplicate key") || error.message?.includes("unique constraint")) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
+          existing = await findExisting();
+          if (existing) {
+            // IMPORTANTE: Mesclar dados, não substituir tudo
+            return await performUpdate(existing, newData);
           }
-          return data;
         }
+        throw error;
       }
     },
     onSuccess: async (data) => {
+      // Invalidar queries específicas do establishment_id
+      const currentEstablishmentId = establishmentId || localStorage.getItem("selectedEstablishmentId") || undefined;
+      queryClient.invalidateQueries({ queryKey: ["hotel_settings", currentEstablishmentId] });
       queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
       
       // Se o nome foi alterado e há establishment_id, atualizar também na tabela establishments
-      const establishmentId = localStorage.getItem("selectedEstablishmentId");
-      if (establishmentId && data?.name) {
+      if (currentEstablishmentId && data?.name) {
         try {
           await supabase
             .from("establishments")
             .update({ name: data.name })
-            .eq("id", establishmentId);
+            .eq("id", currentEstablishmentId);
           
           // Invalidar cache de establishments para atualizar a página "Minhas Empresas"
           queryClient.invalidateQueries({ queryKey: ["establishments"] });
