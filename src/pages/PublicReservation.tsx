@@ -110,6 +110,15 @@ const PublicReservation = () => {
     document_number: string;
   }>>([]);
 
+  // Ao trocar o slug/estabelecimento, tratar esta página como um mini engine de pricing:
+  // limpar estados derivados para evitar resíduos de outro hotel.
+  useEffect(() => {
+    setSelectedCategories([]);
+    setSelectedPlanByCategory({});
+    setManuallyRemovedCategories(new Set());
+    setAppliedCoupon(null);
+  }, [establishmentSlug]);
+
   useEffect(() => {
     if (establishmentSlug) {
       loadData();
@@ -2788,9 +2797,23 @@ const PublicReservation = () => {
                                   </Badge>
                                 ))}
                                 {categoryFeatures.length > 5 && (
-                                  <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-700 px-3 py-1 text-xs font-medium">
-                                    +{categoryFeatures.length - 5} {t("publicReservation.more")}
-                                  </Badge>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedCategoryForGallery(category);
+                                      setCurrentImageIndex(0);
+                                      setGalleryOpen(true);
+                                    }}
+                                    className="focus:outline-none"
+                                  >
+                                    <Badge 
+                                      variant="outline" 
+                                      className="bg-slate-50 border-slate-200 text-slate-700 px-3 py-1 text-xs font-medium hover:bg-slate-100"
+                                    >
+                                      +{categoryFeatures.length - 5} {t("publicReservation.more")}
+                                    </Badge>
+                                  </button>
                                 )}
                               </div>
                             )}
@@ -4051,7 +4074,7 @@ const PublicReservation = () => {
 
       {/* Galeria de Imagens */}
       <Dialog open={galleryOpen} onOpenChange={setGalleryOpen}>
-        <DialogContent className="max-w-6xl max-h-[90vh] p-0 overflow-hidden [&>button]:hidden">
+        <DialogContent className="max-w-6xl p-0 overflow-visible [&>button]:hidden">
           {selectedCategoryForGallery && (
             <div className="relative">
               {/* Header */}
@@ -4088,78 +4111,118 @@ const PublicReservation = () => {
               </div>
 
               {/* Imagem Principal */}
-              {selectedCategoryForGallery.display_photos && selectedCategoryForGallery.display_photos.length > 0 && (
-                <div className="relative bg-slate-900">
-                  <div className="relative h-[60vh] min-h-[400px] flex items-center justify-center">
-                    <img
-                      src={selectedCategoryForGallery.display_photos[currentImageIndex]}
-                      alt={`${selectedCategoryForGallery.name} - Foto ${currentImageIndex + 1}`}
-                      className="max-w-full max-h-full object-contain"
-                    />
-                    
-                    {/* Navegação */}
+              {selectedCategoryForGallery.display_photos &&
+                selectedCategoryForGallery.display_photos.length > 0 && (
+                  <div className="relative bg-slate-900">
+                    <div className="relative h-[60vh] min-h-[400px] flex items-center justify-center">
+                      <img
+                        src={
+                          selectedCategoryForGallery.display_photos[
+                            currentImageIndex
+                          ]
+                        }
+                        alt={`${selectedCategoryForGallery.name} - Foto ${
+                          currentImageIndex + 1
+                        }`}
+                        className="max-w-full max-h-full object-contain"
+                      />
+
+                      {/* Navegação */}
+                      {selectedCategoryForGallery.display_photos.length > 1 && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white rounded-full shadow-lg h-12 w-12"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCurrentImageIndex((prev) =>
+                                prev === 0
+                                  ? selectedCategoryForGallery.display_photos
+                                      .length - 1
+                                  : prev - 1
+                              );
+                            }}
+                          >
+                            <ChevronLeft className="w-6 h-6 text-slate-900" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white rounded-full shadow-lg h-12 w-12"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCurrentImageIndex((prev) =>
+                                prev ===
+                                selectedCategoryForGallery.display_photos
+                                  .length -
+                                  1
+                                  ? 0
+                                  : prev + 1
+                              );
+                            }}
+                          >
+                            <ChevronRight className="w-6 h-6 text-slate-900" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Thumbnails */}
                     {selectedCategoryForGallery.display_photos.length > 1 && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white rounded-full shadow-lg h-12 w-12"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCurrentImageIndex((prev) => 
-                              prev === 0 
-                                ? selectedCategoryForGallery.display_photos.length - 1 
-                                : prev - 1
-                            );
-                          }}
-                        >
-                          <ChevronLeft className="w-6 h-6 text-slate-900" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white rounded-full shadow-lg h-12 w-12"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCurrentImageIndex((prev) => 
-                              prev === selectedCategoryForGallery.display_photos.length - 1 
-                                ? 0 
-                                : prev + 1
-                            );
-                          }}
-                        >
-                          <ChevronRight className="w-6 h-6 text-slate-900" />
-                        </Button>
-                      </>
+                      <div className="p-4 bg-white border-t border-slate-200">
+                        <div className="flex gap-2 overflow-x-auto pb-2">
+                          {selectedCategoryForGallery.display_photos.map(
+                            (photo: string, index: number) => (
+                              <button
+                                key={index}
+                                onClick={() => setCurrentImageIndex(index)}
+                                className={`flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 transition-all ${
+                                  currentImageIndex === index
+                                    ? "border-blue-500 ring-2 ring-blue-500/20"
+                                    : "border-slate-200 hover:border-slate-300 opacity-70 hover:opacity-100"
+                                }`}
+                              >
+                                <img
+                                  src={photo}
+                                  alt={`Thumbnail ${index + 1}`}
+                                  className="w-full h-full object-cover"
+                                />
+                              </button>
+                            )
+                          )}
+                        </div>
+                      </div>
                     )}
                   </div>
+                )}
 
-                  {/* Thumbnails */}
-                  {selectedCategoryForGallery.display_photos.length > 1 && (
-                    <div className="p-4 bg-white border-t border-slate-200">
-                      <div className="flex gap-2 overflow-x-auto pb-2">
-                        {selectedCategoryForGallery.display_photos.map((photo: string, index: number) => (
-                          <button
+              {/* Lista completa de comodidades da categoria */}
+              {selectedCategoryForGallery.display_features &&
+                selectedCategoryForGallery.display_features.length > 0 && (
+                  <div className="p-6 bg-white border-t border-slate-200">
+                    <h3 className="text-sm font-semibold text-slate-900 mb-3">
+                      {t(
+                        "publicReservation.allAmenities",
+                        "Todas as comodidades deste quarto"
+                      )}
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedCategoryForGallery.display_features.map(
+                        (feature: string, index: number) => (
+                          <Badge
                             key={index}
-                            onClick={() => setCurrentImageIndex(index)}
-                            className={`flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 transition-all ${
-                              currentImageIndex === index
-                                ? "border-blue-500 ring-2 ring-blue-500/20"
-                                : "border-slate-200 hover:border-slate-300 opacity-70 hover:opacity-100"
-                            }`}
+                            variant="outline"
+                            className="bg-slate-50 border-slate-200 text-slate-700 px-3 py-1 text-xs font-medium"
                           >
-                            <img
-                              src={photo}
-                              alt={`Thumbnail ${index + 1}`}
-                              className="w-full h-full object-cover"
-                            />
-                          </button>
-                        ))}
-                      </div>
+                            {getFeatureIcon(feature)}
+                            <span className="ml-1">{feature}</span>
+                          </Badge>
+                        )
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
             </div>
           )}
         </DialogContent>

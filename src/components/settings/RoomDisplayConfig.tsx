@@ -21,6 +21,56 @@ import { usePricingPlans } from "@/hooks/usePricingPlans";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 
+// Lista padrão de comodidades de hotelaria para facilitar o cadastro
+const PREDEFINED_AMENITIES: string[] = [
+  "Wi-Fi",
+  "Wi-Fi Gratuito",
+  "Wi-Fi nos quartos",
+  "Ar-condicionado",
+  "Aquecimento",
+  "TV",
+  "TV a cabo",
+  "Smart TV",
+  "Frigobar",
+  "Cofre",
+  "Secador de cabelo",
+  "Mesa de trabalho",
+  "Roupas de cama incluídas",
+  "Toalhas incluídas",
+  "Amenidades de banho",
+  "Chuveiro",
+  "Banheira",
+  "Banheira de hidromassagem",
+  "Varanda",
+  "Vista para o mar",
+  "Vista para a cidade",
+  "Vista para a montanha",
+  "Piscina",
+  "Piscina aquecida",
+  "Piscina coberta",
+  "Piscina infantil",
+  "Estacionamento",
+  "Estacionamento gratuito",
+  "Estacionamento pago",
+  "Garagem",
+  "Recepção 24 horas",
+  "Serviço de quarto",
+  "Café da manhã incluído",
+  "Restaurante",
+  "Bar",
+  "Bar na piscina",
+  "Academia",
+  "Spa",
+  "Sauna",
+  "Sala de reuniões",
+  "Business center",
+  "Acessibilidade para cadeirantes",
+  "Elevador",
+  "Pet friendly",
+  "Não fumante",
+  "Área para fumantes",
+];
+
 const RoomDisplayConfig = () => {
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
@@ -32,6 +82,12 @@ const RoomDisplayConfig = () => {
   const [plan2Title, setPlan2Title] = useState<string>("");
   const [isSavingPlan1Title, setIsSavingPlan1Title] = useState(false);
   const [isSavingPlan2Title, setIsSavingPlan2Title] = useState(false);
+
+  // Ao trocar de estabelecimento, garantir que estados locais sejam resetados
+  useEffect(() => {
+    setExpandedCategories(new Set());
+    setIsUploadingEstablishmentPhoto(false);
+  }, [selectedEstablishment?.id]);
 
   // Sincronizar estados locais com settings quando mudarem
   useEffect(() => {
@@ -727,6 +783,32 @@ const CategoryDisplayCard = ({
               >
                 <Plus className="w-4 h-4" />
               </Button>
+            </div>
+
+            {/* Lista de comodidades pré-definidas para facilitar o cadastro */}
+            <div className="mt-4 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Ou selecione comodidades comuns de hotelaria abaixo (os ícones serão exibidos automaticamente na página pública):
+              </p>
+              <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto border rounded-md p-2 bg-slate-50">
+                {PREDEFINED_AMENITIES.map((amenity) => {
+                  const isSelected = features.includes(amenity);
+                  return (
+                    <button
+                      key={amenity}
+                      type="button"
+                      onClick={() => onAddFeature(amenity)}
+                      className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                        isSelected
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "bg-white text-slate-700 border-slate-200 hover:border-blue-400 hover:text-blue-600"
+                      }`}
+                    >
+                      {amenity}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 

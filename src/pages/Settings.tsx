@@ -36,6 +36,7 @@ import {
 
 const Settings = () => {
   const { selectedEstablishment } = useEstablishment();
+  const queryClient = useQueryClient();
   const { settings, isLoading, saveSettings, uploadImage, isSaving, settingsQuery } = useHotelSettings(selectedEstablishment?.id);
   const { apiSettings, saveApiSetting, deleteApiSetting, isLoading: isLoadingApi } = useApiSettings();
   const { carriers } = usePaymentCarriers();
@@ -84,6 +85,62 @@ const Settings = () => {
   const [logoPreview, setLogoPreview] = useState<string>("");
   const [photoPreview, setPhotoPreview] = useState<string>("");
   const [signaturePreview, setSignaturePreview] = useState<string>("");
+
+  // Quando trocar de estabelecimento, garantir que estados locais sejam resetados
+  // e que queries relacionadas ao estabelecimento sejam invalidadas.
+  useEffect(() => {
+    if (!selectedEstablishment?.id) {
+      return;
+    }
+
+    // Resetar estados locais de upload/preview para evitar "vazamento" visual entre hotéis
+    setLogoFile(null);
+    setPhotoFile(null);
+    setSignatureFile(null);
+    setLogoPreview("");
+    setPhotoPreview("");
+    setSignaturePreview("");
+
+    // Se ainda não temos settings carregados para este estabelecimento,
+    // garantir que o formData volte para os valores padrão enquanto carrega.
+    if (!settings) {
+      setFormData({
+        name: "",
+        website: "",
+        email: "",
+        hotel_type: "hotel",
+        phone: "",
+        whatsapp: "",
+        description: "",
+        street: "",
+        number: "",
+        neighborhood: "",
+        city: "",
+        state: "",
+        country: "Brasil",
+        zip_code: "",
+        logo_url: "",
+        photo_url: "",
+        signature_url: "",
+        checkin_time: "14:00",
+        checkout_time: "12:00",
+        auto_payment_ota: false,
+        auto_payment_carrier_id: "",
+        enable_cleaning_notifications: true,
+        fiscal_document_type: "both",
+        invoice_email: "",
+        establishment_cnpj: "",
+        show_establishment_cnpj: true,
+        reception_email: "",
+        timezone: "America/Sao_Paulo",
+      });
+    }
+
+    // Invalidation explícita das queries sensíveis ao estabelecimento
+    queryClient.invalidateQueries({ queryKey: ["hotel_settings", selectedEstablishment.id] });
+    queryClient.invalidateQueries({ queryKey: ["establishment_services", selectedEstablishment.id] });
+    queryClient.invalidateQueries({ queryKey: ["stripe_establishment_config", selectedEstablishment.id] });
+  }, [selectedEstablishment?.id]);
 
   useEffect(() => {
     // Se não tem settings mas tem estabelecimento, usar nome do estabelecimento
