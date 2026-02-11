@@ -82,52 +82,170 @@ const PublicReservationSettings = () => {
     enabled: true, // Sempre habilitado, busca de forma inteligente
   });
 
-  // Buscar estabelecimentos com página pública
+  // Buscar estabelecimentos com página pública em todas as empresas que o usuário administra
   const { data: publicEstablishments, isLoading: isLoadingPublic } = useQuery({
-    queryKey: ["company_public_reservation_establishments", company?.id],
+    queryKey: ["company_public_reservation_establishments_manager_scope"],
     queryFn: async () => {
-      if (!company?.id) return [];
+      // Buscar usuário logado
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return [];
+
+      // Buscar empresas vinculadas ao usuário (como proprietário)
+      const { data: userCompanies, error: userCompaniesError } = await supabase
+        .from("user_companies")
+        .select("company_id, role, is_active")
+        .eq("user_id", user.id)
+        .eq("is_active", true);
+
+      // Buscar estabelecimentos onde o usuário é funcionário (como gerente)
+      const { data: employees, error: employeesError } = await supabase
+        .from("employees")
+        .select("establishment_id")
+        .eq("user_id", user.id)
+        .eq("is_active", true);
+
+      const companyIds = new Set<string>();
+
+      // Adicionar empresas do usuário (proprietário)
+      if (!userCompaniesError && userCompanies && userCompanies.length > 0) {
+        userCompanies.forEach((uc: any) => {
+          if (uc.company_id) companyIds.add(uc.company_id);
+        });
+      }
+
+      // Adicionar empresas dos estabelecimentos onde o usuário é funcionário
+      if (!employeesError && employees && employees.length > 0) {
+        const establishmentIds = employees
+          .map((emp: any) => emp.establishment_id)
+          .filter(Boolean);
+
+        if (establishmentIds.length > 0) {
+          const { data: empEstablishments, error: empEstError } = await supabase
+            .from("establishments")
+            .select("company_id")
+            .in("id", establishmentIds)
+            .eq("is_active", true);
+
+          if (!empEstError && empEstablishments) {
+            empEstablishments.forEach((est: any) => {
+              if (est.company_id) companyIds.add(est.company_id);
+            });
+          }
+        }
+      }
+
+      if (companyIds.size === 0) return [];
+
       const { data, error } = await supabase
         .from("company_public_reservation_establishments")
         .select("*, establishments(*)")
-        .eq("company_id", company.id)
+        .in("company_id", Array.from(companyIds))
         .order("display_order")
         .order("created_at");
+
       if (error) throw error;
       return data || [];
     },
-    enabled: !!company?.id,
+    enabled: true,
   });
 
-  // Buscar todos os estabelecimentos da empresa
+  // Buscar todos os estabelecimentos que o usuário administra (todas as empresas onde ele é proprietário/ligado)
+  // Isso garante que gerentes que atuam em múltiplas empresas vejam todos os estabelecimentos que administram
   const { data: allEstablishments, isLoading: isLoadingAll } = useQuery({
-    queryKey: ["company_establishments", company?.id],
+    queryKey: ["company_establishments_manager_scope", company?.id],
     queryFn: async () => {
-      if (!company?.id) return [];
-      const { data, error } = await supabase
+      // Buscar usuário logado
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return [];
+
+      // Buscar empresas vinculadas ao usuário (como proprietário)
+      const { data: userCompanies, error: userCompaniesError } = await supabase
+        .from("user_companies")
+        .select("company_id, role, is_active")
+        .eq("user_id", user.id)
+        .eq("is_active", true);
+
+      // Buscar estabelecimentos onde o usuário é funcionário (como gerente)
+      const { data: employees, error: employeesError } = await supabase
+        .from("employees")
+        .select("establishment_id")
+        .eq("user_id", user.id)
+        .eq("is_active", true);
+
+      const companyIds = new Set<string>();
+
+      // Adicionar empresas do usuário (proprietário)
+      if (!userCompaniesError && userCompanies && userCompanies.length > 0) {
+        userCompanies.forEach((uc: any) => {
+          if (uc.company_id) companyIds.add(uc.company_id);
+        });
+      }
+
+      // Adicionar empresas dos estabelecimentos onde o usuário é funcionário (gerente, recepcionista, etc.)
+      if (!employeesError && employees && employees.length > 0) {
+        const establishmentIds = employees
+          .map((emp: any) => emp.establishment_id)
+          .filter(Boolean);
+
+        if (establishmentIds.length > 0) {
+          const { data: empEstablishments, error: empEstError } = await supabase
+            .from("establishments")
+            .select("company_id")
+            .in("id", establishmentIds)
+            .eq("is_active", true);
+
+          if (!empEstError && empEstablishments) {
+            empEstablishments.forEach((est: any) => {
+              if (est.company_id) companyIds.add(est.company_id);
+            });
+          }
+        }
+      }
+
+      if (companyIds.size === 0) return [];
+
+      // Buscar todos os estabelecimentos de todas as empresas identificadas
+      const { data: establishments, error: estError } = await supabase
         .from("establishments")
         .select("*")
-        .eq("company_id", company.id)
+        .in("company_id", Array.from(companyIds))
         .eq("is_active", true)
         .order("name");
-      if (error) throw error;
-      return data || [];
+
+      if (estError) throw estError;
+      return establishments || [];
     },
-    enabled: !!company?.id,
+    enabled: true, // Sempre habilitado para buscar estabelecimentos que o usuário administra
   });
 
   // Mutation para adicionar/remover estabelecimento da página pública
   const toggleEstablishmentMutation = useMutation({
     mutationFn: async ({ establishmentId, isActive }: { establishmentId: string; isActive: boolean }) => {
-      if (!company?.id) throw new Error("Empresa não encontrada");
-      
+      // Encontrar o estabelecimento para obter a empresa correta
+      const establishment = allEstablishments?.find((est: any) => est.id === establishmentId);
+      if (!establishment || !establishment.company_id) {
+        throw new Error("Estabelecimento ou empresa não encontrados");
+      }
+
       if (isActive) {
-        // Adicionar à página pública
+        // Ativar página pública para o estabelecimento
+        // Primeiro limpar quaisquer registros antigos (empresa incorreta, etc.)
+        await supabase
+          .from("company_public_reservation_establishments")
+          .delete()
+          .eq("establishment_id", establishmentId);
+
         const currentMaxOrder = publicEstablishments?.length || 0;
         const { error } = await supabase
           .from("company_public_reservation_establishments")
-          .upsert({
-            company_id: company.id,
+          .insert({
+            company_id: establishment.company_id,
             establishment_id: establishmentId,
             display_order: currentMaxOrder,
             is_active: true,
@@ -138,13 +256,12 @@ const PublicReservationSettings = () => {
         const { error } = await supabase
           .from("company_public_reservation_establishments")
           .delete()
-          .eq("company_id", company.id)
           .eq("establishment_id", establishmentId);
         if (error) throw error;
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["company_public_reservation_establishments", company?.id] });
+      queryClient.invalidateQueries({ queryKey: ["company_public_reservation_establishments_manager_scope"] });
       toast.success("Estabelecimento atualizado");
     },
     onError: (error: any) => {
@@ -155,7 +272,7 @@ const PublicReservationSettings = () => {
   // Mutation para reordenar estabelecimentos
   const reorderEstablishmentMutation = useMutation({
     mutationFn: async ({ establishmentId, direction }: { establishmentId: string; direction: "up" | "down" }) => {
-      if (!company?.id || !publicEstablishments) throw new Error("Dados não encontrados");
+      if (!publicEstablishments) throw new Error("Dados não encontrados");
       
       const currentIndex = publicEstablishments.findIndex(
         (e: any) => e.establishment_id === establishmentId
@@ -180,7 +297,7 @@ const PublicReservationSettings = () => {
         .eq("id", target.id);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["company_public_reservation_establishments", company?.id] });
+      queryClient.invalidateQueries({ queryKey: ["company_public_reservation_establishments_manager_scope"] });
       toast.success("Ordem atualizada");
     },
     onError: (error: any) => {

@@ -1205,26 +1205,61 @@ const PublicReservation = () => {
       }
 
       // Verificar se o estabelecimento tem página pública ativa
+      // Verificar primeiro pelo company_id do estabelecimento, depois sem filtro de company_id
+      // Isso garante que funcione mesmo se o estabelecimento foi ativado com company_id diferente
+      let publicReservationCheck = null;
+      let publicCheckError = null;
+
       if (foundEstablishment.company_id) {
-        const { data: publicReservationCheck, error: publicCheckError } = await supabase
+        // Tentar primeiro com o company_id do estabelecimento
+        const { data, error } = await supabase
           .from("company_public_reservation_establishments")
-          .select("id, is_active")
+          .select("id, is_active, company_id")
           .eq("company_id", foundEstablishment.company_id)
           .eq("establishment_id", foundEstablishment.id)
           .eq("is_active", true)
           .maybeSingle();
+        
+        publicReservationCheck = data;
+        publicCheckError = error;
 
-        if (publicCheckError && publicCheckError.code !== "PGRST116") {
-          console.error(`[PublicReservation] Erro ao verificar página pública:`, publicCheckError);
+        // Se não encontrou com o company_id específico, tentar sem filtro de company_id
+        // (pode ter sido ativado com outro company_id)
+        if (!publicReservationCheck && (!publicCheckError || publicCheckError.code === "PGRST116")) {
+          console.log(`[PublicReservation] Não encontrado com company_id ${foundEstablishment.company_id}, tentando sem filtro de company_id...`);
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from("company_public_reservation_establishments")
+            .select("id, is_active, company_id")
+            .eq("establishment_id", foundEstablishment.id)
+            .eq("is_active", true)
+            .maybeSingle();
+          
+          publicReservationCheck = fallbackData;
+          publicCheckError = fallbackError;
         }
+      } else {
+        // Se não tem company_id, verificar sem filtro de company_id
+        const { data, error } = await supabase
+          .from("company_public_reservation_establishments")
+          .select("id, is_active, company_id")
+          .eq("establishment_id", foundEstablishment.id)
+          .eq("is_active", true)
+          .maybeSingle();
+        
+        publicReservationCheck = data;
+        publicCheckError = error;
+      }
 
-        // Se não estiver na tabela ou não estiver ativo, mostrar erro
-        if (!publicReservationCheck || !publicReservationCheck.is_active) {
-          console.warn(`[PublicReservation] Estabelecimento ${foundEstablishment.id} não tem página pública ativa`);
-          toast.error("Estabelecimento não encontrado ou página pública não está ativa");
-          setIsLoading(false);
-          return;
-        }
+      if (publicCheckError && publicCheckError.code !== "PGRST116") {
+        console.error(`[PublicReservation] Erro ao verificar página pública:`, publicCheckError);
+      }
+
+      // Se não estiver na tabela ou não estiver ativo, mostrar erro
+      if (!publicReservationCheck || !publicReservationCheck.is_active) {
+        console.warn(`[PublicReservation] Estabelecimento ${foundEstablishment.id} (numeric_id: ${foundEstablishment.numeric_id}) não tem página pública ativa`);
+        toast.error("Estabelecimento não encontrado ou página pública não está ativa");
+        setIsLoading(false);
+        return;
       }
 
       // Setar o estabelecimento encontrado

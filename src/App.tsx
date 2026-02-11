@@ -50,6 +50,7 @@ import PaymentSuccess from "./pages/PaymentSuccess";
 import Documentation from "./pages/Documentation";
 import BookingEngineSettings from "./pages/BookingEngineSettings";
 import PublicReservationSettings from "./pages/PublicReservationSettings";
+import CustomDomainDetector from "./components/booking-engine/CustomDomainDetector";
 import { EstablishmentProvider } from "./contexts/EstablishmentContext";
 import { StripeProvider } from "./components/stripe/StripeProvider";
 import { useSiteMeta } from "./hooks/useSiteMeta";
@@ -166,8 +167,10 @@ const AppContent = () => {
             <Route path="/:establishmentId/perfil" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Profile /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/funcionarios" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Employees /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/orcamentos" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Quotes /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            {/* Rota raiz - verificar se é domínio personalizado do booking engine */}
+            <Route path="/" element={<CustomDomainDetector />} />
             {/* Rotas legadas (redirecionar para user-dashboard se não tiver establishmentId) */}
-            <Route path="/" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
+            <Route path="/legacy-redirect" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
             <Route path="/ocupacao" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
             <Route path="/occupancy-map" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
             <Route path="/reservas" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
