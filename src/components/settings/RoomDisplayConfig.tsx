@@ -123,31 +123,36 @@ const RoomDisplayConfig = () => {
   }, [settings?.public_pricing_plan_1_title, settings?.public_pricing_plan_2_title]);
 
   // Feature flags do Motor de Reservas para o estabelecimento atual
+  // Nota: booking_engine_enabled usa company_ids, não establishment_ids
   const canUseBookingEngine =
     isFeatureEnabledForEstablishment(
       siteSettings?.features_enabled?.booking_engine_enabled,
-      selectedEstablishment?.id
+      selectedEstablishment?.company_id,
+      true // Indica que é company_id, não establishment_id
     );
 
   const canUseThemes =
     canUseBookingEngine &&
     isFeatureEnabledForEstablishment(
       siteSettings?.features_enabled?.booking_engine_themes_enabled,
-      selectedEstablishment?.id
+      selectedEstablishment?.company_id,
+      true // Indica que é company_id, não establishment_id
     );
 
   const canUseCustomDomain =
     canUseBookingEngine &&
     isFeatureEnabledForEstablishment(
       siteSettings?.features_enabled?.booking_engine_custom_domain_enabled,
-      selectedEstablishment?.id
+      selectedEstablishment?.company_id,
+      true // Indica que é company_id, não establishment_id
     );
 
   const canUseAdvancedCustomization =
     canUseBookingEngine &&
     isFeatureEnabledForEstablishment(
       siteSettings?.features_enabled?.booking_engine_advanced_customization_enabled,
-      selectedEstablishment?.id
+      selectedEstablishment?.company_id,
+      true // Indica que é company_id, não establishment_id
     );
 
   // Buscar categorias

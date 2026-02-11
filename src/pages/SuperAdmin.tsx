@@ -3175,17 +3175,17 @@ const FeatureFlagsManager = () => {
           ? { enabled: fe.availability_map, establishment_ids: [] }
           : (fe.availability_map || { enabled: false, establishment_ids: [] }),
         booking_engine_enabled: typeof fe.booking_engine_enabled === 'boolean'
-          ? { enabled: fe.booking_engine_enabled, establishment_ids: [] }
-          : (fe.booking_engine_enabled || { enabled: false, establishment_ids: [] }),
+          ? { enabled: fe.booking_engine_enabled, company_ids: [] }
+          : (fe.booking_engine_enabled || { enabled: false, company_ids: [] }),
         booking_engine_themes_enabled: typeof fe.booking_engine_themes_enabled === 'boolean'
-          ? { enabled: fe.booking_engine_themes_enabled, establishment_ids: [] }
-          : (fe.booking_engine_themes_enabled || { enabled: false, establishment_ids: [] }),
+          ? { enabled: fe.booking_engine_themes_enabled, company_ids: [] }
+          : (fe.booking_engine_themes_enabled || { enabled: false, company_ids: [] }),
         booking_engine_custom_domain_enabled: typeof fe.booking_engine_custom_domain_enabled === 'boolean'
-          ? { enabled: fe.booking_engine_custom_domain_enabled, establishment_ids: [] }
-          : (fe.booking_engine_custom_domain_enabled || { enabled: false, establishment_ids: [] }),
+          ? { enabled: fe.booking_engine_custom_domain_enabled, company_ids: [] }
+          : (fe.booking_engine_custom_domain_enabled || { enabled: false, company_ids: [] }),
         booking_engine_advanced_customization_enabled: typeof fe.booking_engine_advanced_customization_enabled === 'boolean'
-          ? { enabled: fe.booking_engine_advanced_customization_enabled, establishment_ids: [] }
-          : (fe.booking_engine_advanced_customization_enabled || { enabled: false, establishment_ids: [] }),
+          ? { enabled: fe.booking_engine_advanced_customization_enabled, company_ids: [] }
+          : (fe.booking_engine_advanced_customization_enabled || { enabled: false, company_ids: [] }),
       });
     }
   }, [settings]);
@@ -3208,24 +3208,46 @@ const FeatureFlagsManager = () => {
       feature === 'booking_engine_advanced_customization_enabled';
 
     if (isStructured) {
+      // Determinar qual tipo de ID usar baseado na feature
+      const usesCompanyIds = feature === 'dynamic_pricing_automation' || 
+                            feature === 'booking_engine_enabled' ||
+                            feature === 'booking_engine_themes_enabled' ||
+                            feature === 'booking_engine_custom_domain_enabled' ||
+                            feature === 'booking_engine_advanced_customization_enabled';
+      const idKey = usesCompanyIds ? 'company_ids' : 'establishment_ids';
+      
       const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
         ? newFeatures[feature]
-        : { enabled: false, [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: [] };
+        : { enabled: false, [idKey]: [] };
       newFeatures[feature] = { ...currentConfig, enabled: value };
     } else {
       // Para outras funcionalidades, manter como boolean
       newFeatures[feature] = value;
     }
     
-    setFeatures((prev: any) => ({
-      ...prev,
-      [feature]: isStructured
-        ? { 
+    setFeatures((prev: any) => {
+      if (isStructured) {
+        // Determinar qual tipo de ID usar baseado na feature
+        const usesCompanyIds = feature === 'dynamic_pricing_automation' || 
+                              feature === 'booking_engine_enabled' ||
+                              feature === 'booking_engine_themes_enabled' ||
+                              feature === 'booking_engine_custom_domain_enabled' ||
+                              feature === 'booking_engine_advanced_customization_enabled';
+        const idKey = usesCompanyIds ? 'company_ids' : 'establishment_ids';
+        
+        return {
+          ...prev,
+          [feature]: { 
             enabled: value, 
-            [feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids']: prev[feature]?.[feature === 'dynamic_pricing_automation' ? 'company_ids' : 'establishment_ids'] || [] 
+            [idKey]: prev[feature]?.[idKey] || [] 
           }
-        : value
-    }));
+        };
+      }
+      return {
+        ...prev,
+        [feature]: value
+      };
+    });
     
     try {
       await updateSettings({

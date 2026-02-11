@@ -106,6 +106,13 @@ const BookingEngineSettings = () => {
     }
   }, [company?.booking_engine_custom_domain]);
 
+  // Sincronizar localChatEnabled com company quando carregar
+  useEffect(() => {
+    if (company?.booking_engine_chat_enabled !== undefined) {
+      setLocalChatEnabled(company.booking_engine_chat_enabled || false);
+    }
+  }, [company?.booking_engine_chat_enabled]);
+
   // Sincronizar previews com company quando carregar
   useEffect(() => {
     if (company?.booking_engine_logo) {
@@ -200,7 +207,11 @@ const BookingEngineSettings = () => {
   });
 
   // Verificar feature flags
-  const canUseBookingEngine = siteSettings?.features_enabled?.booking_engine_enabled !== false;
+  const canUseBookingEngine = isFeatureEnabledForEstablishment(
+    siteSettings?.features_enabled?.booking_engine_enabled,
+    company?.id,
+    true // booking_engine_enabled usa company_ids, não establishment_ids
+  );
   const canUseThemes = isFeatureEnabledForEstablishment(
     siteSettings?.features_enabled?.booking_engine_themes_enabled,
     company?.id,
@@ -316,7 +327,8 @@ const BookingEngineSettings = () => {
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["company", company?.id] });
+      // Invalidar todas as queries relacionadas à empresa para garantir que os dados sejam atualizados
+      queryClient.invalidateQueries({ queryKey: ["company"] });
       toast.success("Configurações do motor atualizadas");
     },
     onError: (error: any) => {
