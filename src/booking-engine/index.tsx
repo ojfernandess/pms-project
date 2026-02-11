@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, ArrowRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
@@ -547,6 +548,10 @@ const BookingEnginePage = () => {
   const [selectedCity, setSelectedCity] = useState<string>("all");
   const [hotelSettings, setHotelSettings] = useState<any>(null);
   const [engineEnabled, setEngineEnabled] = useState(false);
+  const [showEstablishmentDialog, setShowEstablishmentDialog] = useState(false);
+  const [pendingCategoryId, setPendingCategoryId] = useState<string | null>(null);
+  const [showSearchEstablishmentDialog, setShowSearchEstablishmentDialog] = useState(false);
+  const [searchDialogCity, setSearchDialogCity] = useState<string>("all");
 
   const [checkin, setCheckin] = useState(searchParams.get("checkin") || "");
   const [checkout, setCheckout] = useState(searchParams.get("checkout") || "");
@@ -556,6 +561,8 @@ const BookingEnginePage = () => {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [roomCategories, setRoomCategories] = useState<any[]>([]);
+  const [categoriesByEstablishment, setCategoriesByEstablishment] = useState<Record<string, { establishment: any; categories: any[] }>>({});
+  const [allHotelSettings, setAllHotelSettings] = useState<Record<string, any>>({});
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [categoryPrices, setCategoryPrices] = useState<Record<string, number | null>>({});
   const [categoryPricesPlan1, setCategoryPricesPlan1] = useState<Record<string, number | null>>({});
@@ -928,18 +935,25 @@ const BookingEnginePage = () => {
           .map((e: any) => e.establishments)
           .filter(Boolean);
         
-        // Buscar cidades dos estabelecimentos
+        // Buscar cidades e fotos dos estabelecimentos
         const establishmentsWithCityData = await Promise.all(
           establishmentsList.map(async (est: any) => {
             const { data: hotelSettingsData } = await supabase
               .from("hotel_settings")
-              .select("city")
+              .select("city, establishment_photos, photo_url")
               .eq("establishment_id", est.id)
               .maybeSingle();
+            
+            // Obter primeira foto do array ou photo_url
+            const photos = hotelSettingsData?.establishment_photos || [];
+            const photo = photos.length > 0 
+              ? photos[0] 
+              : hotelSettingsData?.photo_url || null;
             
             return {
               ...est,
               city: hotelSettingsData?.city || null,
+              photo: photo,
             };
           })
         );
@@ -947,14 +961,15 @@ const BookingEnginePage = () => {
         setEstablishmentsWithCities(establishmentsWithCityData);
         setCompanyEstablishments(establishmentsList);
 
-        const toSelect = initialEstablishment && 
-          establishmentsList.find((e: any) => e.id === initialEstablishment.id)
-          ? initialEstablishment
-          : establishmentsList[0];
-        
-        if (toSelect) {
-          setSelectedEstablishmentId(toSelect.id);
-          setEstablishment(toSelect);
+        // Apenas selecionar se houver um estabelecimento inicial (vindo de URL ou parâmetro)
+        if (initialEstablishment && 
+          establishmentsList.find((e: any) => e.id === initialEstablishment.id)) {
+          setSelectedEstablishmentId(initialEstablishment.id);
+          setEstablishment(initialEstablishment);
+        } else {
+          // Não selecionar nenhum estabelecimento por padrão
+          setSelectedEstablishmentId(null);
+          setEstablishment(null);
         }
       } else {
         // Se não houver estabelecimentos configurados no motor, usar todos os estabelecimentos ativos da empresa
@@ -974,18 +989,25 @@ const BookingEnginePage = () => {
         }
         
         if (allEsts && allEsts.length > 0) {
-          // Buscar cidades dos estabelecimentos
+          // Buscar cidades e fotos dos estabelecimentos
           const establishmentsWithCityData = await Promise.all(
             allEsts.map(async (est: any) => {
               const { data: hotelSettingsData } = await supabase
                 .from("hotel_settings")
-                .select("city")
+                .select("city, establishment_photos, photo_url")
                 .eq("establishment_id", est.id)
                 .maybeSingle();
+              
+              // Obter primeira foto do array ou photo_url
+              const photos = hotelSettingsData?.establishment_photos || [];
+              const photo = photos.length > 0 
+                ? photos[0] 
+                : hotelSettingsData?.photo_url || null;
               
               return {
                 ...est,
                 city: hotelSettingsData?.city || null,
+                photo: photo,
               };
             })
           );
@@ -993,14 +1015,15 @@ const BookingEnginePage = () => {
           setEstablishmentsWithCities(establishmentsWithCityData);
           setCompanyEstablishments(allEsts);
           
-          const toSelect = initialEstablishment && 
-            allEsts.find((e: any) => e.id === initialEstablishment.id)
-            ? initialEstablishment
-            : allEsts[0];
-          
-          if (toSelect) {
-            setSelectedEstablishmentId(toSelect.id);
-            setEstablishment(toSelect);
+          // Apenas selecionar se houver um estabelecimento inicial (vindo de URL ou parâmetro)
+          if (initialEstablishment && 
+            allEsts.find((e: any) => e.id === initialEstablishment.id)) {
+            setSelectedEstablishmentId(initialEstablishment.id);
+            setEstablishment(initialEstablishment);
+          } else {
+            // Não selecionar nenhum estabelecimento por padrão
+            setSelectedEstablishmentId(null);
+            setEstablishment(null);
           }
         } else {
           setError("Nenhum estabelecimento encontrado para esta empresa.");
@@ -1015,33 +1038,110 @@ const BookingEnginePage = () => {
     load();
   }, [companySlug, isLoadingSiteSettings, siteSettings, navigate, searchParams]);
 
+  // Filtrar estabelecimentos por cidade selecionada
+  const filteredEstablishments = useMemo(() => {
+    if (selectedCity === "all") {
+      return companyEstablishments;
+    }
+    const filteredIds = establishmentsWithCities
+      .filter((est: any) => est.city === selectedCity)
+      .map((est: any) => est.id);
+    return companyEstablishments.filter((est: any) => filteredIds.includes(est.id));
+  }, [companyEstablishments, establishmentsWithCities, selectedCity]);
+
+  // Carregar categorias de todos os estabelecimentos ativos (ou apenas do selecionado)
   useEffect(() => {
-    if (!selectedEstablishmentId || !engineEnabled) {
+    if (!engineEnabled || companyEstablishments.length === 0) {
       setRoomCategories([]);
-      setHotelSettings(null);
+      setCategoriesByEstablishment({});
       return;
     }
 
-    const loadEstablishmentData = async () => {
-      const { data: est } = await supabase
-        .from("establishments" as any)
-        .select("*")
-        .eq("id", selectedEstablishmentId)
-        .maybeSingle();
-
-      if (est) {
-        setEstablishment(est);
+    const loadAllCategories = async () => {
+      setRoomsLoading(true);
+      
+      // Se houver estabelecimento selecionado, mostrar apenas suas categorias
+      // Caso contrário, mostrar todas as categorias de todos os estabelecimentos filtrados
+      let establishmentIds: string[];
+      if (selectedEstablishmentId) {
+        // Filtrar apenas o estabelecimento selecionado
+        establishmentIds = [selectedEstablishmentId];
+      } else {
+        // Mostrar todos os estabelecimentos filtrados
+        establishmentIds = filteredEstablishments.map((est: any) => est.id);
+      }
+      
+      if (establishmentIds.length === 0) {
+        setRoomCategories([]);
+        setCategoriesByEstablishment({});
+        setRoomsLoading(false);
+        return;
       }
 
-      const { data: settingsData } = await supabase
-        .from("hotel_settings" as any)
+      // Buscar todas as categorias dos estabelecimentos filtrados
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from("room_categories" as any)
         .select("*")
-        .eq("establishment_id", selectedEstablishmentId)
-        .maybeSingle();
+        .in("establishment_id", establishmentIds)
+        .eq("show_in_public", true)
+        .order("display_order")
+        .order("name");
 
-      setHotelSettings(settingsData);
+      if (categoriesError) {
+        console.error("[BookingEngine] Erro ao buscar categorias:", categoriesError);
+        setRoomCategories([]);
+        setCategoriesByEstablishment({});
+        setRoomsLoading(false);
+        return;
+      }
 
-      if (settingsData) {
+      if (!categoriesData || categoriesData.length === 0) {
+        setRoomCategories([]);
+        setCategoriesByEstablishment({});
+        setRoomsLoading(false);
+        return;
+      }
+
+      // Agrupar categorias por estabelecimento
+      const grouped: Record<string, { establishment: any; categories: any[] }> = {};
+      
+      for (const category of categoriesData) {
+        const estId = category.establishment_id;
+        const establishment = filteredEstablishments.find((est: any) => est.id === estId);
+        
+        if (establishment) {
+          if (!grouped[estId]) {
+            grouped[estId] = {
+              establishment: establishment,
+              categories: []
+            };
+          }
+          grouped[estId].categories.push(category);
+        }
+      }
+
+      setCategoriesByEstablishment(grouped);
+      setRoomCategories(categoriesData);
+      
+      // Buscar hotel_settings de todos os estabelecimentos
+      const settingsMap: Record<string, any> = {};
+      for (const estId of establishmentIds) {
+        const { data: settingsData } = await supabase
+          .from("hotel_settings" as any)
+          .select("*")
+          .eq("establishment_id", estId)
+          .maybeSingle();
+        if (settingsData) {
+          settingsMap[estId] = settingsData;
+        }
+      }
+      setAllHotelSettings(settingsMap);
+      
+      // Se houver um estabelecimento selecionado, carregar suas configurações
+      if (selectedEstablishmentId && settingsMap[selectedEstablishmentId]) {
+        const settingsData = settingsMap[selectedEstablishmentId];
+        setHotelSettings(settingsData);
+
         const plan1Id = (settingsData as any).public_pricing_plan_1_id || null;
         const plan2Id = (settingsData as any).public_pricing_plan_2_id || null;
         setPublicPricingPlan1Id(plan1Id);
@@ -1049,24 +1149,12 @@ const BookingEnginePage = () => {
         setPublicPricingPlan2Id(plan2Id);
         setPublicPricingPlan2Title((settingsData as any).public_pricing_plan_2_title || null);
       }
-
-      setRoomsLoading(true);
-      const { data: categoriesData, error: categoriesError } = await supabase
-        .from("room_categories" as any)
-        .select("*")
-        .eq("establishment_id", selectedEstablishmentId)
-        .eq("show_in_public", true)
-        .order("display_order")
-        .order("name");
-
-      if (!categoriesError && categoriesData) {
-        setRoomCategories(categoriesData);
-      }
+      
       setRoomsLoading(false);
     };
 
-    loadEstablishmentData();
-  }, [selectedEstablishmentId, engineEnabled]);
+    loadAllCategories();
+  }, [engineEnabled, companyEstablishments, filteredEstablishments, selectedEstablishmentId, selectedCity]);
 
   const themeKey: BookingThemeKey = useMemo(() => {
     // Priorizar tema da empresa, depois do estabelecimento
@@ -1136,14 +1224,20 @@ const BookingEnginePage = () => {
       const basePrice = cat.base_price || cat.min_price || null;
       const dynamicPricePlan1 = categoryPricesPlan1[cat.id as string];
 
+      // Buscar hotel_settings do estabelecimento desta categoria
+      const establishmentId = cat.establishment_id;
+      const settings = allHotelSettings[establishmentId];
+      const plan1Id = settings?.public_pricing_plan_1_id || null;
+      const plan1Title = settings?.public_pricing_plan_1_title || null;
+
       const plans: any[] = [];
 
       const hasDynamicPrice = dynamicPricePlan1 !== null && dynamicPricePlan1 !== undefined;
 
-      if (publicPricingPlan1Id) {
+      if (plan1Id) {
         plans.push({
           id: `${cat.id}-plan1`,
-          name: publicPricingPlan1Title || "Plano Tarifário 1",
+          name: plan1Title || "Plano Tarifário 1",
           description: hasDynamicPrice
             ? "Tarifa calculada em tempo real para as datas e hóspedes selecionados."
             : "Selecione datas e hóspedes para ver o valor desta categoria.",
@@ -1155,7 +1249,7 @@ const BookingEnginePage = () => {
             hasDynamicPrice
               ? dynamicPricePlan1
               : 0,
-          planId: publicPricingPlan1Id,
+          planId: plan1Id,
         });
       } else {
         plans.push({
@@ -1181,7 +1275,7 @@ const BookingEnginePage = () => {
         plans,
       };
     });
-  }, [roomCategories, categoryPricesPlan1, publicPricingPlan1Id, publicPricingPlan1Title]);
+  }, [roomCategories, categoryPricesPlan1, allHotelSettings]);
 
   const nights = useMemo(() => {
     if (!checkin || !checkout) return 0;
@@ -1211,17 +1305,6 @@ const BookingEnginePage = () => {
     return cities;
   }, [establishmentsWithCities]);
 
-  // Filtrar estabelecimentos por cidade selecionada
-  const filteredEstablishments = useMemo(() => {
-    if (selectedCity === "all") {
-      return companyEstablishments;
-    }
-    const filteredIds = establishmentsWithCities
-      .filter((est: any) => est.city === selectedCity)
-      .map((est: any) => est.id);
-    return companyEstablishments.filter((est: any) => filteredIds.includes(est.id));
-  }, [companyEstablishments, establishmentsWithCities, selectedCity]);
-
   // Desmarcar estabelecimento selecionado se não estiver na cidade filtrada
   useEffect(() => {
     if (selectedCity !== "all" && selectedEstablishmentId) {
@@ -1242,11 +1325,7 @@ const BookingEnginePage = () => {
 
   useEffect(() => {
     const run = async () => {
-      if (!establishment?.id || !hotelSettings || !roomCategories.length) {
-        return;
-      }
-
-      if (!publicPricingPlan1Id) {
+      if (!roomCategories.length) {
         return;
       }
 
@@ -1274,7 +1353,30 @@ const BookingEnginePage = () => {
 
         if (nightsCount <= 0) return;
 
+        // Buscar hotel_settings para cada estabelecimento único
+        const establishmentIds = [...new Set(roomCategories.map((cat: any) => cat.establishment_id))];
+        const hotelSettingsMap: Record<string, any> = {};
+        
+        for (const estId of establishmentIds) {
+          const { data: settingsData } = await supabase
+            .from("hotel_settings" as any)
+            .select("*")
+            .eq("establishment_id", estId)
+            .maybeSingle();
+          if (settingsData) {
+            hotelSettingsMap[estId] = settingsData;
+          }
+        }
+
         for (const cat of roomCategories) {
+          const establishmentId = cat.establishment_id;
+          const settings = hotelSettingsMap[establishmentId];
+          const plan1Id = settings?.public_pricing_plan_1_id || null;
+          
+          if (!plan1Id) {
+            pricesPlan1[cat.id] = null;
+            continue;
+          }
           const basePrice = Number(cat.base_price || 0);
           let total1 = 0;
           for (let i = 0; i < nightsCount; i++) {
@@ -1282,9 +1384,9 @@ const BookingEnginePage = () => {
             const dateStr = formatDateLocal(currentDate);
 
             const { data, error } = await (supabase as any).rpc("calculate_rate_price", {
-              p_establishment_id: establishment.id,
+              p_establishment_id: establishmentId,
               p_category_id: cat.id,
-              p_pricing_plan_id: publicPricingPlan1Id,
+              p_pricing_plan_id: plan1Id,
               p_date: dateStr,
               p_adults: adultsNum,
               p_children: childrenNum,
@@ -1309,12 +1411,73 @@ const BookingEnginePage = () => {
     };
 
     run();
-  }, [establishment?.id, hotelSettings, roomCategories, checkin, checkout, adults, children, publicPricingPlan1Id]);
+  }, [roomCategories, checkin, checkout, adults, children]);
 
-  const handleSubmit = () => {
-    if (!establishment) return;
+  const handleSubmit = (categoryId?: string) => {
+    // Usar categoryId passado como parâmetro ou selectedRoomId
+    const targetCategoryId = categoryId || selectedRoomId;
+    if (!targetCategoryId) {
+      // Se não há categoria selecionada, não fazer nada
+      return;
+    }
 
-    const estAny = establishment as any;
+    // Obter categoria selecionada
+    const selectedCategory = roomCategories.find((cat: any) => cat.id === targetCategoryId);
+    if (!selectedCategory) return;
+    
+    const categoryEstablishmentId = selectedCategory.establishment_id;
+    
+    // Verificar se há um estabelecimento selecionado e se corresponde à categoria
+    let targetEstablishmentId = selectedEstablishmentId;
+    
+    // Se não há estabelecimento selecionado OU o estabelecimento selecionado não corresponde à categoria
+    if (!targetEstablishmentId || targetEstablishmentId !== categoryEstablishmentId) {
+      // Verificar se há múltiplos estabelecimentos com essa categoria (mesmo nome)
+      const categoriesWithSameName = roomCategories.filter(
+        (cat: any) => cat.name === selectedCategory.name
+      );
+      const uniqueEstablishments = [...new Set(categoriesWithSameName.map((cat: any) => cat.establishment_id))];
+      
+      // Se há apenas um estabelecimento para essa categoria, usar diretamente
+      if (uniqueEstablishments.length === 1) {
+        targetEstablishmentId = uniqueEstablishments[0];
+      } else if (uniqueEstablishments.length > 1) {
+        // Se há múltiplos estabelecimentos, mostrar diálogo para escolher
+        setPendingCategoryId(targetCategoryId);
+        setShowEstablishmentDialog(true);
+        return;
+      } else {
+        // Se não encontrou estabelecimentos, usar o da categoria
+        targetEstablishmentId = categoryEstablishmentId;
+      }
+    }
+
+    // Buscar dados do estabelecimento
+    const establishmentData = filteredEstablishments.find((est: any) => est.id === targetEstablishmentId);
+    if (!establishmentData) {
+      // Se não encontrou nos filtrados, buscar em todos
+      const allEstData = companyEstablishments.find((est: any) => est.id === targetEstablishmentId);
+      if (!allEstData) return;
+      
+      const estAny = allEstData as any;
+      const slug = estAny.slug || estAny.numeric_id?.toString() || estAny.id;
+
+      const params = new URLSearchParams();
+      if (checkin) params.set("checkin", checkin);
+      if (checkout) params.set("checkout", checkout);
+      if (adults) params.set("adults", adults);
+      if (children) params.set("children", children);
+      if (coupon) params.set("coupon", coupon);
+      params.set("category", targetCategoryId);
+      if (selectedPlanId && selectedPlan) {
+        params.set("plan", selectedPlan.planId || "");
+      }
+
+      navigate(`/reservar/${slug}?${params.toString()}`);
+      return;
+    }
+
+    const estAny = establishmentData as any;
     const slug = estAny.slug || estAny.numeric_id?.toString() || estAny.id;
 
     const params = new URLSearchParams();
@@ -1323,11 +1486,37 @@ const BookingEnginePage = () => {
     if (adults) params.set("adults", adults);
     if (children) params.set("children", children);
     if (coupon) params.set("coupon", coupon);
-    if (selectedRoomId) params.set("category", selectedRoomId);
+    params.set("category", targetCategoryId);
     if (selectedPlanId && selectedPlan) {
       params.set("plan", selectedPlan.planId || "");
     }
 
+    navigate(`/reservar/${slug}?${params.toString()}`);
+  };
+
+  const handleSelectEstablishmentForCategory = (establishmentId: string) => {
+    if (!pendingCategoryId) return;
+    
+    const establishmentData = filteredEstablishments.find((est: any) => est.id === establishmentId) ||
+                             companyEstablishments.find((est: any) => est.id === establishmentId);
+    if (!establishmentData) return;
+
+    const estAny = establishmentData as any;
+    const slug = estAny.slug || estAny.numeric_id?.toString() || estAny.id;
+
+    const params = new URLSearchParams();
+    if (checkin) params.set("checkin", checkin);
+    if (checkout) params.set("checkout", checkout);
+    if (adults) params.set("adults", adults);
+    if (children) params.set("children", children);
+    if (coupon) params.set("coupon", coupon);
+    params.set("category", pendingCategoryId);
+    if (selectedPlanId && selectedPlan) {
+      params.set("plan", selectedPlan.planId || "");
+    }
+
+    setShowEstablishmentDialog(false);
+    setPendingCategoryId(null);
     navigate(`/reservar/${slug}?${params.toString()}`);
   };
 
@@ -1372,11 +1561,13 @@ const BookingEnginePage = () => {
   }
 
   const establishmentName = (establishment as any)?.name || (hotelSettings as any)?.name || "";
-  const establishmentCnpj = (hotelSettings as any)?.establishment_cnpj || "";
-  const establishmentPhone = (hotelSettings as any)?.phone || "";
-  const establishmentWhatsappDdi = (hotelSettings as any)?.whatsapp_ddi || "";
-  const establishmentWhatsappNumber = (hotelSettings as any)?.whatsapp_number || "";
-  const establishmentEmail = (hotelSettings as any)?.email || "";
+  
+  // Contatos gerais do motor de reservas (prioridade) ou fallback para contatos do estabelecimento
+  const contactCnpj = company?.booking_engine_contact_cnpj || (hotelSettings as any)?.establishment_cnpj || "";
+  const contactPhone = company?.booking_engine_contact_phone || (hotelSettings as any)?.phone || "";
+  const contactWhatsappDdi = company?.booking_engine_contact_whatsapp_ddi || (hotelSettings as any)?.whatsapp_ddi || "";
+  const contactWhatsappNumber = company?.booking_engine_contact_whatsapp_number || (hotelSettings as any)?.whatsapp_number || "";
+  const contactEmail = company?.booking_engine_contact_email || (hotelSettings as any)?.email || "";
 
   return (
     <>
@@ -1414,10 +1605,10 @@ const BookingEnginePage = () => {
                 <LanguageSelector />
             <Button 
                   className={`${theme.headerButton} px-5 py-2 rounded-full text-sm md:text-base font-medium shadow-sm hover:shadow-md transition-all duration-200`}
-              onClick={handleSubmit}
+              onClick={() => setShowSearchEstablishmentDialog(true)}
             >
               <Search className="w-4 h-4 mr-2" />
-                  {t("bookingEngine.cta.primary")}
+              Buscar Quarto
             </Button>
               </div>
           </div>
@@ -1597,47 +1788,83 @@ const BookingEnginePage = () => {
             <h2 className={`text-2xl font-bold mb-6 ${theme.textPrimary}`}>
                 {t("bookingEngine.establishments.title")}
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredEstablishments.map((est: any) => {
                 const isSelected = selectedEstablishmentId === est.id;
+                const estWithData = establishmentsWithCities.find((e: any) => e.id === est.id);
+                const city = estWithData?.city;
+                const photo = estWithData?.photo;
+                const typeLabel = est.type === 'hotel' ? 'Hotel' : est.type === 'apartment' ? 'Apartamento' : 'Outro';
+                
                 return (
                   <Card
                     key={est.id}
-                    className={`p-5 cursor-pointer transition-all ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow} ${theme.cardHover} ${theme.cardHoverShadow} ${
-                      isSelected ? `${theme.accentBorder} border-2 ${theme.accentBg}` : ""
+                    className={`overflow-hidden cursor-pointer transition-all duration-200 ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow} ${
+                      isSelected 
+                        ? `ring-2 ring-offset-2 ring-blue-500 ${theme.accentBorder} border-2` 
+                        : `hover:shadow-lg hover:scale-[1.02]`
                     }`}
                     onClick={() => {
-                      setSelectedEstablishmentId(est.id);
+                      // Se já está selecionado, desmarcar. Caso contrário, selecionar
+                      if (isSelected) {
+                        setSelectedEstablishmentId(null);
+                        setEstablishment(null);
+                      } else {
+                        setSelectedEstablishmentId(est.id);
+                        setEstablishment(est);
+                      }
                       setSelectedRoomId(null);
                       setSelectedPlanId(null);
                     }}
                   >
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <h3 className={`font-semibold text-lg ${theme.textPrimary}`}>
+                    {/* Foto do estabelecimento */}
+                    <div className="relative w-full h-48 bg-slate-200 overflow-hidden">
+                      {photo ? (
+                        <img
+                          src={photo}
+                          alt={est.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800&q=80";
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
+                          <MapPin className="w-12 h-12 text-slate-400" />
+                        </div>
+                      )}
+                      {isSelected && (
+                        <div className="absolute top-3 right-3">
+                          <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center shadow-lg">
+                            <CheckCircle2 className="w-5 h-5 text-white" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Informações do estabelecimento */}
+                    <div className="p-5 space-y-3">
+                      <div>
+                        <h3 className={`font-semibold text-lg mb-1 ${theme.textPrimary}`}>
                           {est.name}
                         </h3>
-                        {isSelected && (
-                          <Badge className={theme.badgePrimary}>
-                            Selecionado
-                          </Badge>
-                        )}
-                      </div>
-                      {(() => {
-                        const estWithCity = establishmentsWithCities.find((e: any) => e.id === est.id);
-                        const city = estWithCity?.city;
-                        return city ? (
-                          <div className="flex items-center gap-1 text-sm">
-                            <MapPin className={`w-3 h-3 ${theme.textMuted}`} />
+                        {city && (
+                          <div className="flex items-center gap-1.5 text-sm mb-2">
+                            <MapPin className={`w-3.5 h-3.5 ${theme.textMuted}`} />
                             <p className={theme.textMuted}>{city}</p>
                           </div>
-                        ) : null;
-                      })()}
-                      {est.type && (
-                        <p className={`text-sm ${theme.textMuted}`}>
-                          {est.type === 'hotel' ? 'Hotel' : est.type === 'apartment' ? 'Apartamento' : 'Outro'}
-                        </p>
-                      )}
+                        )}
+                        {est.type && (
+                          <div className="inline-flex items-center">
+                            <Badge 
+                              variant="outline" 
+                              className={`text-xs font-medium ${theme.textMuted} border-gray-300`}
+                            >
+                              {typeLabel}
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </Card>
                 );
@@ -1648,15 +1875,7 @@ const BookingEnginePage = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] gap-8 lg:gap-12">
           {/* Room Cards List */}
-          <div className="space-y-8">
-            {!selectedEstablishmentId && filteredEstablishments.length > 0 && (
-              <Card className={`p-8 text-center ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow}`}>
-                <p className={`${theme.textSecondary} text-lg`}>
-                  {t("bookingEngine.establishments.selectPrompt")}
-                </p>
-              </Card>
-            )}
-            
+          <div className="space-y-12">
             {selectedCity !== "all" && filteredEstablishments.length === 0 && (
               <Card className={`p-8 text-center ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow}`}>
                 <p className={`${theme.textSecondary} text-lg`}>
@@ -1681,7 +1900,46 @@ const BookingEnginePage = () => {
               </div>
             )}
 
-            {!roomsLoading && rooms.map((room, index) => (
+            {!roomsLoading && Object.keys(categoriesByEstablishment).length === 0 && !roomsLoading && (
+              <Card className={`p-8 text-center ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow}`}>
+                <p className={`${theme.textSecondary} text-lg`}>
+                  Nenhuma categoria disponível no momento.
+                </p>
+              </Card>
+            )}
+
+            {!roomsLoading && Object.entries(categoriesByEstablishment).map(([establishmentId, { establishment, categories }]) => {
+              // Filtrar rooms para este estabelecimento
+              const establishmentRooms = rooms.filter((room: any) => {
+                const category = roomCategories.find((cat: any) => cat.id === room.categoryId);
+                return category && category.establishment_id === establishmentId;
+              });
+
+              if (establishmentRooms.length === 0) return null;
+
+              const estWithData = establishmentsWithCities.find((e: any) => e.id === establishmentId);
+              const city = estWithData?.city;
+
+              return (
+                <div key={establishmentId} className="space-y-6">
+                  {/* Cabeçalho do Estabelecimento */}
+                  <div className="flex items-center gap-4 pb-4 border-b border-gray-200">
+                    <div className="flex-1">
+                      <h2 className={`text-2xl md:text-3xl font-bold ${theme.textPrimary} mb-1`}>
+                        {establishment.name}
+                      </h2>
+                      {city && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <MapPin className={`w-4 h-4 ${theme.textMuted}`} />
+                          <p className={theme.textMuted}>{city}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Categorias do Estabelecimento */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {establishmentRooms.map((room, index) => (
               <Card
                 key={room.id}
                 className={`overflow-hidden ${theme.roomCardBg} ${theme.roomCardBorder} ${theme.roomCardShadow} ${theme.cardHover} ${theme.cardHoverShadow} transition-all duration-300 animate-fade-in-up`}
@@ -1784,11 +2042,21 @@ const BookingEnginePage = () => {
                     </div>
                   )}
 
-                  {/* Saiba Mais Button */}
-                  <div className="mb-6">
+                  {/* Action Buttons */}
+                  <div className="mb-6 space-y-3">
+                    <Button
+                      className={`w-full ${theme.primaryButton} ${theme.primaryButtonHover} border-2`}
+                      onClick={() => {
+                        handleSubmit(room.categoryId);
+                      }}
+                      disabled={!checkin || !checkout || nights <= 0}
+                    >
+                      <Search className="w-4 h-4 mr-2" />
+                      Ver disponibilidade
+                    </Button>
                     <Button
                       variant="outline"
-                      className={`w-full ${theme.primaryButton} ${theme.primaryButtonHover} border-2`}
+                      className={`w-full ${theme.secondaryButton} ${theme.secondaryButtonHover} border-2`}
                       onClick={() => {
                         const params = new URLSearchParams();
                         if (checkin) params.set("checkin", checkin);
@@ -1815,8 +2083,8 @@ const BookingEnginePage = () => {
                         <AccordionTrigger className={`${theme.textPrimary} hover:no-underline py-4`}>
                           <span className="text-base font-semibold">Ver planos tarifários e preços</span>
                         </AccordionTrigger>
-                        <AccordionContent className="pt-4">
-                          <div className="space-y-4">
+                        <AccordionContent className="pt-2 sm:pt-4">
+                          <div className="space-y-3 sm:space-y-4">
                             {room.plans.map((plan) => {
                               const isSelected = selectedPlanId === plan.id && selectedRoomId === room.id;
                               return (
@@ -1827,16 +2095,16 @@ const BookingEnginePage = () => {
                                     setSelectedRoomId(room.id);
                                     setSelectedPlanId(plan.id);
                                   }}
-                                  className={`w-full text-left p-5 rounded-xl transition-all duration-200 ${
+                                  className={`w-full text-left p-4 sm:p-5 rounded-xl transition-all duration-200 ${
                                     isSelected
                                       ? `${theme.planCardSelected}`
                                       : `${theme.planCardBg} ${theme.planCardBorder} border ${theme.planCardHover}`
                                   }`}
                                 >
-                                  <div className="flex items-start justify-between gap-4">
-                                    <div className="flex-1 space-y-3">
-                                      <div className="flex items-center gap-3">
-                                        <span className={`text-lg font-bold ${theme.textPrimary}`}>
+                                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                                    <div className="flex-1 space-y-2 sm:space-y-3">
+                                      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                                        <span className={`text-base sm:text-lg font-bold ${theme.textPrimary}`}>
                                           {plan.name}
                                         </span>
                                         {plan.tag && (
@@ -1846,36 +2114,36 @@ const BookingEnginePage = () => {
                                           </Badge>
                                         )}
                                       </div>
-                                      <p className={`text-sm ${theme.textSecondary}`}>
+                                      <p className={`text-xs sm:text-sm ${theme.textSecondary} line-clamp-2`}>
                                         {plan.description}
                                       </p>
-                                      <div className="flex flex-wrap gap-2">
+                                      <div className="flex flex-wrap gap-1.5 sm:gap-2">
                                         {plan.benefits.map((benefit, idx) => (
                                           <div
                                             key={idx}
-                                            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full ${theme.badgeSecondary}`}
+                                            className={`flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full ${theme.badgeSecondary}`}
                                           >
-                                            <CheckCircle2 className="w-3 h-3" />
-                                            {benefit}
+                                            <CheckCircle2 className="w-2.5 h-2.5 sm:w-3 sm:h-3 flex-shrink-0" />
+                                            <span className="truncate">{benefit}</span>
                                           </div>
                                         ))}
                                       </div>
                                     </div>
-                                    <div className="text-right min-w-[140px]">
-                                      <div className={`${theme.priceColor} text-2xl font-bold mb-1`}>
+                                    <div className="text-left sm:text-right sm:min-w-[120px] lg:min-w-[140px] flex-shrink-0">
+                                      <div className={`${theme.priceColor} text-xl sm:text-2xl font-bold mb-1`}>
                                         {plan.pricePerNight > 0 && nights > 0 ? (
                                           <>R$ {plan.pricePerNight.toFixed(2)}</>
                                         ) : (
-                                          <span className="text-sm text-slate-400">Selecione datas</span>
+                                          <span className="text-xs sm:text-sm text-slate-400">Selecione datas</span>
                                         )}
                                       </div>
-                                      <div className={`text-xs ${theme.priceLabel}`}>
+                                      <div className={`text-[10px] sm:text-xs ${theme.priceLabel}`}>
                                         {plan.pricePerNight > 0 && nights > 0
                                           ? "por noite"
                                           : "Os valores serão exibidos após escolher datas e hóspedes"}
                                       </div>
                                       {plan.pricePerNight > 0 && nights > 0 && (
-                                        <div className={`text-sm ${theme.textMuted} mt-2`}>
+                                        <div className={`text-xs sm:text-sm ${theme.textMuted} mt-1 sm:mt-2`}>
                                           {nights} noite{nights > 1 ? "s" : ""}: R$ {(plan.pricePerNight * nights).toFixed(2)}
                                         </div>
                                       )}
@@ -1891,7 +2159,11 @@ const BookingEnginePage = () => {
                   </div>
                 </div>
               </Card>
-            ))}
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           {/* Summary Sidebar - Sticky */}
@@ -2005,8 +2277,8 @@ const BookingEnginePage = () => {
                   </span>
                 </div>
               </div>
-              {establishmentCnpj && (
-                <p className={`text-xs ${theme.footerText}`}>CNPJ: {establishmentCnpj}</p>
+              {contactCnpj && (
+                <p className={`text-xs ${theme.footerText}`}>CNPJ: {contactCnpj}</p>
               )}
             </div>
 
@@ -2016,32 +2288,32 @@ const BookingEnginePage = () => {
                 Contato
               </h5>
               <div className="space-y-2 text-sm">
-                {establishmentPhone && (
+                {contactPhone && (
                   <p className={`flex items-center gap-2 ${theme.footerText}`}>
                     <Phone className="w-4 h-4 opacity-70" />
-                    <a href={`tel:${establishmentPhone}`} className="hover:underline">
-                      {establishmentPhone}
+                    <a href={`tel:${contactPhone}`} className="hover:underline">
+                      {contactPhone}
                     </a>
                   </p>
                 )}
-                {establishmentWhatsappNumber && (
+                {contactWhatsappNumber && (
                   <p className={`flex items-center gap-2 ${theme.footerText}`}>
                     <MessageCircle className="w-4 h-4 opacity-70" />
                     <a
-                      href={`https://wa.me/${encodeURIComponent(`${establishmentWhatsappDdi || ""}${establishmentWhatsappNumber}`)}`}
+                      href={`https://wa.me/${encodeURIComponent(`${contactWhatsappDdi || ""}${contactWhatsappNumber}`)}`}
                       target="_blank"
                       rel="noreferrer"
                       className="hover:underline"
                     >
-                      {`${establishmentWhatsappDdi || ""} ${establishmentWhatsappNumber}`.trim()}
+                      {`${contactWhatsappDdi || ""} ${contactWhatsappNumber}`.trim()}
                     </a>
                   </p>
                 )}
-                {establishmentEmail && (
+                {contactEmail && (
                   <p className={`flex items-center gap-2 ${theme.footerText}`}>
                     <Mail className="w-4 h-4 opacity-70" />
-                    <a href={`mailto:${establishmentEmail}`} className="hover:underline">
-                      {establishmentEmail}
+                    <a href={`mailto:${contactEmail}`} className="hover:underline">
+                      {contactEmail}
                     </a>
                   </p>
                 )}
@@ -2154,13 +2426,269 @@ const BookingEnginePage = () => {
       <div className={`lg:hidden fixed inset-x-0 bottom-0 z-50 ${theme.summaryBg} ${theme.summaryBorder} border-t px-4 py-4 backdrop-blur-md shadow-2xl`}>
         <Button
           className={`w-full h-14 ${theme.primaryButton} ${theme.primaryButtonHover} rounded-xl font-semibold text-base flex items-center justify-center gap-2`}
-          onClick={handleSubmit}
-          disabled={!checkin || !checkout || nights <= 0}
+          onClick={() => handleSubmit()}
+          disabled={!checkin || !checkout || nights <= 0 || !selectedRoomId}
         >
           <Search className="w-5 h-5" />
           Ver disponibilidade
         </Button>
       </div>
+
+      {/* Dialog para seleção de estabelecimento */}
+      <Dialog open={showEstablishmentDialog} onOpenChange={setShowEstablishmentDialog}>
+        <DialogContent className={`${theme.cardBg} ${theme.cardBorder} max-w-2xl`}>
+          <DialogHeader>
+            <DialogTitle className={theme.textPrimary}>
+              Selecione um estabelecimento
+            </DialogTitle>
+            <DialogDescription className={theme.textSecondary}>
+              Esta categoria está disponível em múltiplos estabelecimentos. Escolha qual deseja verificar a disponibilidade.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 space-y-3 max-h-[60vh] overflow-y-auto">
+            {pendingCategoryId && (() => {
+              const category = roomCategories.find((cat: any) => cat.id === pendingCategoryId);
+              if (!category) return null;
+              
+              // Encontrar todos os estabelecimentos que têm essa categoria (mesmo nome)
+              const categoriesWithSameName = roomCategories.filter(
+                (cat: any) => cat.name === category.name
+              );
+              const establishmentIds = [...new Set(categoriesWithSameName.map((cat: any) => cat.establishment_id))];
+              const establishmentsForCategory = companyEstablishments.filter((est: any) => 
+                establishmentIds.includes(est.id)
+              );
+
+              return establishmentsForCategory.map((est: any) => {
+                const estWithData = establishmentsWithCities.find((e: any) => e.id === est.id);
+                const city = estWithData?.city;
+                const photo = estWithData?.photo;
+                const typeLabel = est.type === 'hotel' ? 'Hotel' : est.type === 'apartment' ? 'Apartamento' : 'Outro';
+
+                return (
+                  <Card
+                    key={est.id}
+                    className={`overflow-hidden cursor-pointer transition-all duration-200 ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow} hover:shadow-lg hover:scale-[1.02]`}
+                    onClick={() => handleSelectEstablishmentForCategory(est.id)}
+                  >
+                    <div className="flex gap-4 p-4">
+                      {/* Foto do estabelecimento */}
+                      <div className="relative w-24 h-24 bg-slate-200 overflow-hidden rounded-lg flex-shrink-0">
+                        {photo ? (
+                          <img
+                            src={photo}
+                            alt={est.name}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800&q=80";
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
+                            <MapPin className="w-8 h-8 text-slate-400" />
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Informações do estabelecimento */}
+                      <div className="flex-1 space-y-2">
+                        <div>
+                          <h3 className={`font-semibold text-lg mb-1 ${theme.textPrimary}`}>
+                            {est.name}
+                          </h3>
+                          {city && (
+                            <div className="flex items-center gap-1.5 text-sm mb-2">
+                              <MapPin className={`w-3.5 h-3.5 ${theme.textMuted}`} />
+                              <p className={theme.textMuted}>{city}</p>
+                            </div>
+                          )}
+                          {est.type && (
+                            <div className="inline-flex items-center">
+                              <Badge 
+                                variant="outline" 
+                                className={`text-xs font-medium ${theme.textMuted} border-gray-300`}
+                              >
+                                {typeLabel}
+                              </Badge>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Ícone de seta */}
+                      <div className="flex items-center">
+                        <ArrowRight className={`w-5 h-5 ${theme.textMuted}`} />
+                      </div>
+                    </div>
+                  </Card>
+                );
+              });
+            })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para busca de estabelecimentos */}
+      <Dialog open={showSearchEstablishmentDialog} onOpenChange={setShowSearchEstablishmentDialog}>
+        <DialogContent className={`${theme.cardBg} ${theme.cardBorder} max-w-4xl max-h-[90vh] overflow-hidden flex flex-col`}>
+          <DialogHeader>
+            <DialogTitle className={theme.textPrimary}>
+              Buscar Quarto
+            </DialogTitle>
+            <DialogDescription className={theme.textSecondary}>
+              Selecione um estabelecimento para verificar disponibilidade e fazer sua reserva.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {/* Filtro por cidade */}
+          {availableCities.length > 0 && (
+            <div className="mt-4 mb-4">
+              <Label className={`text-sm font-medium mb-3 block ${theme.textSecondary}`}>
+                Filtrar por cidade
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setSearchDialogCity("all")}
+                  className={`px-4 py-2 rounded-full font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
+                    searchDialogCity === "all"
+                      ? "bg-black text-white shadow-md hover:shadow-lg"
+                      : "bg-white text-gray-700 border border-gray-300 hover:border-gray-400 hover:shadow-sm"
+                  }`}
+                >
+                  <MapPin className="w-4 h-4" />
+                  Todas as cidades
+                  {searchDialogCity === "all" && (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )}
+                </button>
+                {availableCities.map((city: string) => {
+                  const isSelected = searchDialogCity === city;
+                  return (
+                    <button
+                      key={city}
+                      onClick={() => setSearchDialogCity(city)}
+                      className={`px-4 py-2 rounded-full font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
+                        isSelected
+                          ? "bg-black text-white shadow-md hover:shadow-lg"
+                          : "bg-white text-gray-700 border border-gray-300 hover:border-gray-400 hover:shadow-sm"
+                      }`}
+                    >
+                      <MapPin className="w-4 h-4" />
+                      {city}
+                      {isSelected && (
+                        <CheckCircle2 className="w-4 h-4" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Lista de estabelecimentos */}
+          <div className="mt-4 space-y-3 overflow-y-auto flex-1">
+            {(() => {
+              // Filtrar estabelecimentos por cidade selecionada no diálogo
+              const filteredEstsForDialog = searchDialogCity === "all"
+                ? companyEstablishments
+                : companyEstablishments.filter((est: any) => {
+                    const estWithData = establishmentsWithCities.find((e: any) => e.id === est.id);
+                    return estWithData?.city === searchDialogCity;
+                  });
+
+              if (filteredEstsForDialog.length === 0) {
+                return (
+                  <Card className={`p-8 text-center ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow}`}>
+                    <p className={`${theme.textSecondary} text-lg`}>
+                      Nenhum estabelecimento encontrado{searchDialogCity !== "all" ? ` em ${searchDialogCity}` : ""}.
+                    </p>
+                  </Card>
+                );
+              }
+
+              return filteredEstsForDialog.map((est: any) => {
+                const estWithData = establishmentsWithCities.find((e: any) => e.id === est.id);
+                const city = estWithData?.city;
+                const photo = estWithData?.photo;
+                const typeLabel = est.type === 'hotel' ? 'Hotel' : est.type === 'apartment' ? 'Apartamento' : 'Outro';
+
+                const handleSelectEstablishment = () => {
+                  const estAny = est as any;
+                  const slug = estAny.slug || estAny.numeric_id?.toString() || estAny.id;
+
+                  const params = new URLSearchParams();
+                  if (checkin) params.set("checkin", checkin);
+                  if (checkout) params.set("checkout", checkout);
+                  if (adults) params.set("adults", adults);
+                  if (children) params.set("children", children);
+                  if (coupon) params.set("coupon", coupon);
+
+                  setShowSearchEstablishmentDialog(false);
+                  navigate(`/reservar/${slug}?${params.toString()}`);
+                };
+
+                return (
+                  <Card
+                    key={est.id}
+                    className={`overflow-hidden cursor-pointer transition-all duration-200 ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow} hover:shadow-lg hover:scale-[1.01]`}
+                    onClick={handleSelectEstablishment}
+                  >
+                    <div className="flex gap-4 p-4">
+                      {/* Foto do estabelecimento */}
+                      <div className="relative w-32 h-32 bg-slate-200 overflow-hidden rounded-lg flex-shrink-0">
+                        {photo ? (
+                          <img
+                            src={photo}
+                            alt={est.name}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800&q=80";
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
+                            <MapPin className="w-10 h-10 text-slate-400" />
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Informações do estabelecimento */}
+                      <div className="flex-1 space-y-2">
+                        <div>
+                          <h3 className={`font-semibold text-xl mb-1 ${theme.textPrimary}`}>
+                            {est.name}
+                          </h3>
+                          {city && (
+                            <div className="flex items-center gap-1.5 text-sm mb-2">
+                              <MapPin className={`w-4 h-4 ${theme.textMuted}`} />
+                              <p className={theme.textMuted}>{city}</p>
+                            </div>
+                          )}
+                          {est.type && (
+                            <div className="inline-flex items-center">
+                              <Badge 
+                                variant="outline" 
+                                className={`text-xs font-medium ${theme.textMuted} border-gray-300`}
+                              >
+                                {typeLabel}
+                              </Badge>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Ícone de seta */}
+                      <div className="flex items-center">
+                        <ArrowRight className={`w-6 h-6 ${theme.textMuted}`} />
+                      </div>
+                    </div>
+                  </Card>
+                );
+              });
+            })()}
+          </div>
+        </DialogContent>
+      </Dialog>
       </div>
     </>
   );

@@ -436,11 +436,12 @@ const CategoryDetailPage = () => {
   const motorLogo = company?.booking_engine_logo || null;
 
   // Dados de contato e redes sociais (mesma lógica do motor principal)
-  const establishmentCnpj = (hotelSettings as any)?.establishment_cnpj || "";
-  const establishmentPhone = (hotelSettings as any)?.phone || "";
-  const establishmentWhatsappDdi = (hotelSettings as any)?.whatsapp_ddi || "";
-  const establishmentWhatsappNumber = (hotelSettings as any)?.whatsapp_number || "";
-  const establishmentEmail = (hotelSettings as any)?.email || "";
+  // Contatos gerais do motor de reservas (prioridade) ou fallback para contatos do estabelecimento
+  const contactCnpj = company?.booking_engine_contact_cnpj || (hotelSettings as any)?.establishment_cnpj || "";
+  const contactPhone = company?.booking_engine_contact_phone || (hotelSettings as any)?.phone || "";
+  const contactWhatsappDdi = company?.booking_engine_contact_whatsapp_ddi || (hotelSettings as any)?.whatsapp_ddi || "";
+  const contactWhatsappNumber = company?.booking_engine_contact_whatsapp_number || (hotelSettings as any)?.whatsapp_number || "";
+  const contactEmail = company?.booking_engine_contact_email || (hotelSettings as any)?.email || "";
 
   const socialInstagram = company?.booking_engine_social_instagram || null;
   const socialFacebook = company?.booking_engine_social_facebook || null;
@@ -886,8 +887,8 @@ const CategoryDetailPage = () => {
                   Experiência moderna de reserva direta, sem taxas ocultas.
                 </span>
               </div>
-              {establishmentCnpj && (
-                <p className={`text-xs ${theme.footerText}`}>CNPJ: {establishmentCnpj}</p>
+              {contactCnpj && (
+                <p className={`text-xs ${theme.footerText}`}>CNPJ: {contactCnpj}</p>
               )}
             </div>
 
@@ -897,32 +898,32 @@ const CategoryDetailPage = () => {
                 Contato
               </h5>
               <div className="space-y-2 text-sm">
-                {establishmentPhone && (
+                {contactPhone && (
                   <p className={`flex items-center gap-2 ${theme.footerText}`}>
                     <Phone className="w-4 h-4 opacity-70" />
-                    <a href={`tel:${establishmentPhone}`} className="hover:underline">
-                      {establishmentPhone}
+                    <a href={`tel:${contactPhone}`} className="hover:underline">
+                      {contactPhone}
                     </a>
                   </p>
                 )}
-                {establishmentWhatsappNumber && (
+                {contactWhatsappNumber && (
                   <p className={`flex items-center gap-2 ${theme.footerText}`}>
                     <MessageCircle className="w-4 h-4 opacity-70" />
                     <a
-                      href={`https://wa.me/${encodeURIComponent(`${establishmentWhatsappDdi || ""}${establishmentWhatsappNumber}`)}`}
+                      href={`https://wa.me/${encodeURIComponent(`${contactWhatsappDdi || ""}${contactWhatsappNumber}`)}`}
                       target="_blank"
                       rel="noreferrer"
                       className="hover:underline"
                     >
-                      {`${establishmentWhatsappDdi || ""} ${establishmentWhatsappNumber}`.trim()}
+                      {`${contactWhatsappDdi || ""} ${contactWhatsappNumber}`.trim()}
                     </a>
                   </p>
                 )}
-                {establishmentEmail && (
+                {contactEmail && (
                   <p className={`flex items-center gap-2 ${theme.footerText}`}>
                     <Mail className="w-4 h-4 opacity-70" />
-                    <a href={`mailto:${establishmentEmail}`} className="hover:underline">
-                      {establishmentEmail}
+                    <a href={`mailto:${contactEmail}`} className="hover:underline">
+                      {contactEmail}
                     </a>
                   </p>
                 )}

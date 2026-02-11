@@ -984,6 +984,118 @@ const BookingEngineSettings = () => {
                 </div>
               </div>
 
+              {/* Contato Geral do Motor de Reservas */}
+              <div className="space-y-3 pt-4 border-t">
+                <Label className="text-sm font-semibold text-slate-700">
+                  Contato Geral do Motor de Reservas
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Configure os dados de contato que aparecerão no rodapé do motor de reservas. Estes contatos são gerais da empresa, não específicos de um estabelecimento.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      Telefone
+                    </Label>
+                    <Input
+                      placeholder="(11) 99999-9999"
+                      defaultValue={company?.booking_engine_contact_phone || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_contact_phone || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_contact_phone: value,
+                          });
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      Email
+                    </Label>
+                    <Input
+                      type="email"
+                      placeholder="contato@empresa.com.br"
+                      defaultValue={company?.booking_engine_contact_email || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_contact_email || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_contact_email: value,
+                          });
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      WhatsApp - DDI
+                    </Label>
+                    <Input
+                      placeholder="55"
+                      defaultValue={company?.booking_engine_contact_whatsapp_ddi || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_contact_whatsapp_ddi || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_contact_whatsapp_ddi: value,
+                          });
+                        }
+                      }}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Código do país (ex: 55 para Brasil)
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      WhatsApp - Número
+                    </Label>
+                    <Input
+                      placeholder="11999999999"
+                      defaultValue={company?.booking_engine_contact_whatsapp_number || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_contact_whatsapp_number || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_contact_whatsapp_number: value,
+                          });
+                        }
+                      }}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Apenas números, sem espaços ou caracteres especiais
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 md:col-span-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      CNPJ
+                    </Label>
+                    <Input
+                      placeholder="00.000.000/0000-00"
+                      defaultValue={company?.booking_engine_contact_cnpj || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_contact_cnpj || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_contact_cnpj: value,
+                          });
+                        }
+                      }}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      CNPJ da empresa para exibição no rodapé
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Domínio personalizado */}
               {canUseCustomDomain && (
                 <div className="space-y-3 pt-4 border-t">
