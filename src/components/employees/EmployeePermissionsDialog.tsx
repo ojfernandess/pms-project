@@ -44,6 +44,7 @@ interface EmployeePermissionsDialogProps {
 const MODULES = [
   { key: "dashboard", label: "Dashboard" },
   { key: "reservations", label: "Reservas" },
+  { key: "quotes", label: "Orçamentos" },
   { key: "pricing", label: "Tarifas" },
   { key: "financial", label: "Financeiro" },
   { key: "clients", label: "Clientes" },

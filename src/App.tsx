@@ -119,6 +119,8 @@ const AppContent = () => {
             <Route path="/auth" element={<Navigate to="/login" replace />} />
             <Route path="/auth/reset-password" element={<Navigate to="/login/reset-password" replace />} />
             <Route path="/logout" element={<Navigate to="/login" replace />} />
+            {/* Rota raiz - verificar se é domínio personalizado do booking engine (deve ser processada primeiro) */}
+            <Route path="/" element={<CustomDomainDetector />} />
             <Route path="/admin-dashboard" element={<SuperAdminRoute><AppLayout><SuperAdmin /></AppLayout></SuperAdminRoute>} />
             <Route path="/super-admin" element={<SuperAdminRoute><AppLayout><SuperAdmin /></AppLayout></SuperAdminRoute>} />
             <Route path="/user-dashboard" element={<ProtectedRoute><AppLayout><UserDashboard /></AppLayout></ProtectedRoute>} />
@@ -169,8 +171,6 @@ const AppContent = () => {
             <Route path="/:establishmentId/perfil" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Profile /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/funcionarios" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Employees /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/orcamentos" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Quotes /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
-            {/* Rota raiz - verificar se é domínio personalizado do booking engine */}
-            <Route path="/" element={<CustomDomainDetector />} />
             {/* Rotas legadas (redirecionar para user-dashboard se não tiver establishmentId) */}
             <Route path="/legacy-redirect" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
             <Route path="/ocupacao" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
