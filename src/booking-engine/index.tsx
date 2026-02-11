@@ -2302,8 +2302,20 @@ const BookingEnginePage = () => {
 
               <Button
                 className={`w-full h-14 ${theme.primaryButton} ${theme.primaryButtonHover} rounded-xl font-semibold text-base flex items-center justify-center gap-2 mb-4`}
-                onClick={handleSubmit}
-                disabled={!checkin || !checkout || nights <= 0}
+                onClick={() => {
+                  // selectedRoomId é o categoryId (id da categoria)
+                  // Se há uma categoria selecionada, usar seu ID
+                  if (selectedRoomId) {
+                    handleSubmit(selectedRoomId);
+                  } else if (selectedRoom?.id) {
+                    // Fallback: usar o ID do selectedRoom se existir
+                    handleSubmit(selectedRoom.id);
+                  } else {
+                    // Se não há categoria selecionada, não fazer nada
+                    handleSubmit();
+                  }
+                }}
+                disabled={!checkin || !checkout || nights <= 0 || !selectedRoomId}
               >
                 <Search className="w-5 h-5" />
                 Continuar para reserva
