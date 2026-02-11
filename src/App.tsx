@@ -45,6 +45,7 @@ import QuotePaymentPage from "./pages/QuotePaymentPage";
 import QuoteRoomSelection from "./pages/QuoteRoomSelection";
 import PublicReservation from "./pages/PublicReservation";
 import BookingEnginePage from "./booking-engine";
+import CategoryDetailPage from "./booking-engine/CategoryDetailPage";
 import Quotes from "./pages/Quotes";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import Documentation from "./pages/Documentation";
@@ -147,6 +148,7 @@ const AppContent = () => {
             {/* Motor de Reservas - Página Pública */}
             <Route path="/motor" element={<BookingEnginePage />} />
             <Route path="/motor/:companySlug" element={<BookingEnginePage />} />
+            <Route path="/motor/:companySlug/categoria/:categoryId" element={<CategoryDetailPage />} />
             <Route path="/reservar/:establishmentSlug" element={<PublicReservation />} />
             <Route path="/policies/:slug/:token" element={<PublicPolicies />} />
             <Route path="/policies/:token" element={<PublicPolicies />} />

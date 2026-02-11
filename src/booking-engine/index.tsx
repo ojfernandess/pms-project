@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube } from "lucide-react";
+import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, ArrowRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 
@@ -1072,6 +1072,7 @@ const BookingEnginePage = () => {
 
       return {
         id: cat.id as string,
+        categoryId: cat.id as string,
         name: cat.name as string,
         size: size || "",
         capacity: capacityLabel || "",
@@ -1250,7 +1251,7 @@ const BookingEnginePage = () => {
       <div className={`min-h-screen ${theme.pageBg}`}>
         {/* Header */}
         <header className={`${theme.headerBg} ${theme.headerText} sticky top-0 z-50 ${theme.headerBorder || ""} transition-colors duration-300`}>
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3 sm:gap-4">
                 {motorLogo && (
@@ -1267,28 +1268,28 @@ const BookingEnginePage = () => {
                 )}
                 <div className="flex flex-col">
                   <span className={`text-lg md:text-2xl font-semibold tracking-tight ${theme.textPrimary}`}>
-                    {motorTitle}
+                {motorTitle}
                   </span>
                   {motorSubtitle && (
                     <span className={`text-xs md:text-sm ${theme.headerSubtitle} transition-colors duration-300`}>
                       {motorSubtitle}
                     </span>
                   )}
-                </div>
-              </div>
-              <div className="flex items-center justify-start sm:justify-end gap-3">
-                <LanguageSelector />
-                <Button
-                  className={`${theme.headerButton} px-5 py-2 rounded-full text-sm md:text-base font-medium shadow-sm hover:shadow-md transition-all duration-200`}
-                  onClick={handleSubmit}
-                >
-                  <Search className="w-4 h-4 mr-2" />
-                  {t("bookingEngine.cta.primary")}
-                </Button>
               </div>
             </div>
+              <div className="flex items-center justify-start sm:justify-end gap-3">
+                <LanguageSelector />
+            <Button 
+                  className={`${theme.headerButton} px-5 py-2 rounded-full text-sm md:text-base font-medium shadow-sm hover:shadow-md transition-all duration-200`}
+              onClick={handleSubmit}
+            >
+              <Search className="w-4 h-4 mr-2" />
+                  {t("bookingEngine.cta.primary")}
+            </Button>
+              </div>
           </div>
-        </header>
+        </div>
+      </header>
 
       {/* Hero Section with Background Image */}
       <section className={`relative min-h-[500px] md:min-h-[600px] lg:min-h-[700px] flex items-center justify-center overflow-hidden`}>
@@ -1412,9 +1413,9 @@ const BookingEnginePage = () => {
         {/* Estabelecimentos da empresa */}
         {companyEstablishments.length > 1 && (
           <div className="mb-12">
-              <h2 className={`text-2xl font-bold mb-6 ${theme.textPrimary}`}>
+            <h2 className={`text-2xl font-bold mb-6 ${theme.textPrimary}`}>
                 {t("bookingEngine.establishments.title")}
-              </h2>
+            </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {companyEstablishments.map((est: any) => {
                 const isSelected = selectedEstablishmentId === est.id;
@@ -1512,11 +1513,11 @@ const BookingEnginePage = () => {
                       <div className={`${theme.cardBg} ${theme.cardBorder} border rounded-lg px-4 py-2 shadow-lg`}>
                         {room.plans[0].pricePerNight > 0 ? (
                           <>
-                            <div className={`text-xs ${theme.textMuted} mb-0.5`}>A partir de</div>
-                            <div className={`${theme.priceColor} text-xl font-bold`}>
-                              R$ {room.plans[0].pricePerNight.toFixed(2)}
-                            </div>
-                            <div className={`text-xs ${theme.priceLabel}`}>por noite</div>
+                        <div className={`text-xs ${theme.textMuted} mb-0.5`}>A partir de</div>
+                        <div className={`${theme.priceColor} text-xl font-bold`}>
+                          R$ {room.plans[0].pricePerNight.toFixed(2)}
+                        </div>
+                        <div className={`text-xs ${theme.priceLabel}`}>por noite</div>
                           </>
                         ) : (
                           <div className="space-y-1">
@@ -1583,6 +1584,26 @@ const BookingEnginePage = () => {
                       </div>
                     </div>
                   )}
+
+                  {/* Saiba Mais Button */}
+                  <div className="mb-6">
+                    <Button
+                      variant="outline"
+                      className={`w-full ${theme.primaryButton} ${theme.primaryButtonHover} border-2`}
+                      onClick={() => {
+                        const params = new URLSearchParams();
+                        if (checkin) params.set("checkin", checkin);
+                        if (checkout) params.set("checkout", checkout);
+                        if (adults) params.set("adults", adults);
+                        if (children) params.set("children", children);
+                        if (coupon) params.set("coupon", coupon);
+                        navigate(`/motor/${companySlug || ""}/categoria/${room.categoryId}?${params.toString()}`);
+                      }}
+                    >
+                      Saiba mais
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </div>
 
                   {/* Pricing Plans Accordion */}
                   <div>
@@ -1916,7 +1937,7 @@ const BookingEnginePage = () => {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pt-4 border-t border-white/5 border-slate-200/10">
               <p className={`text-[11px] ${theme.footerText}`}>
               © {new Date().getFullYear()} {motorTitle}. Todos os direitos reservados.
-            </p>
+              </p>
             <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
               <span>Idioma: Português (Brasil)</span>
               <span className="hidden md:inline-block w-px h-3 bg-slate-700/40" />

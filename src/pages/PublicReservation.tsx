@@ -1253,16 +1253,16 @@ const PublicReservation = () => {
         publicCheckError = error;
       }
 
-      if (publicCheckError && publicCheckError.code !== "PGRST116") {
-        console.error(`[PublicReservation] Erro ao verificar página pública:`, publicCheckError);
-      }
+        if (publicCheckError && publicCheckError.code !== "PGRST116") {
+          console.error(`[PublicReservation] Erro ao verificar página pública:`, publicCheckError);
+        }
 
-      // Se não estiver na tabela ou não estiver ativo, mostrar erro
-      if (!publicReservationCheck || !publicReservationCheck.is_active) {
+        // Se não estiver na tabela ou não estiver ativo, mostrar erro
+        if (!publicReservationCheck || !publicReservationCheck.is_active) {
         console.warn(`[PublicReservation] Estabelecimento ${foundEstablishment.id} (numeric_id: ${foundEstablishment.numeric_id}) não tem página pública ativa`);
-        toast.error("Estabelecimento não encontrado ou página pública não está ativa");
-        setIsLoading(false);
-        return;
+          toast.error("Estabelecimento não encontrado ou página pública não está ativa");
+          setIsLoading(false);
+          return;
       }
 
       // Setar o estabelecimento encontrado
