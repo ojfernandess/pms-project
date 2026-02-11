@@ -41,6 +41,7 @@ function isCrawler(userAgent: string | null): boolean {
 export default async function middleware(request: Request) {
   const url = new URL(request.url);
   const pathname = url.pathname;
+  const host = url.host;
   const userAgent = request.headers.get("user-agent");
 
   // Ignorar requisições para arquivos estáticos, API routes, etc.
@@ -51,6 +52,17 @@ export default async function middleware(request: Request) {
     pathname.match(/\.(ico|png|jpg|jpeg|gif|svg|css|js|woff|woff2|ttf|eot|json|map)$/)
   ) {
     return;
+  }
+
+  // Verificar se é um domínio personalizado (não é o domínio principal do Vercel)
+  // Se for um domínio diferente, permitir que passe para o CustomDomainDetector
+  // O CustomDomainDetector fará a verificação final no cliente
+  const isCustomDomain = host && !host.includes("vercel.app") && !host.includes("localhost");
+  
+  if (isCustomDomain) {
+    console.log("[Middleware] Domínio personalizado detectado:", host);
+    // Permitir que a requisição continue normalmente
+    // O CustomDomainDetector no cliente fará a verificação final
   }
 
   // Se for um crawler, buscar o HTML renderizado da Edge Function do Supabase

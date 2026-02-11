@@ -714,22 +714,45 @@ const BookingEnginePage = () => {
           return;
         }
       } else if (currentHost) {
+        // Normalizar o domínio (remover www. se presente, converter para minúsculas)
+        const normalizeDomain = (domain: string) => {
+          return domain.toLowerCase().replace(/^www\./, "");
+        };
+        
+        const normalizedHost = normalizeDomain(currentHost);
+        
         // Verificar se o domínio atual corresponde a um domínio personalizado configurado
-        const { data: companyByDomain } = await supabase
+        // Buscar todos os domínios configurados e comparar com normalização
+        const { data: companies } = await supabase
           .from("companies")
           .select("*")
-          .eq("booking_engine_custom_domain", currentHost)
-          .maybeSingle();
+          .not("booking_engine_custom_domain", "is", null);
+
+        const companyByDomain = companies?.find((company) => {
+          if (!company.booking_engine_custom_domain) return false;
+          const normalizedConfig = normalizeDomain(company.booking_engine_custom_domain);
+          return normalizedConfig === normalizedHost || 
+                 normalizedConfig === currentHost.toLowerCase() ||
+                 company.booking_engine_custom_domain.toLowerCase() === currentHost.toLowerCase();
+        });
 
         if (companyByDomain) {
           foundCompany = companyByDomain;
         } else {
-          const { data: byDomain } = await supabase
+          // Verificar também em hotel_settings (legado)
+          const { data: hotelSettings } = await supabase
             .from("hotel_settings")
             .select("establishment_id, booking_engine_custom_domain")
-            .eq("booking_engine_custom_domain", currentHost)
-            .maybeSingle();
+            .not("booking_engine_custom_domain", "is", null);
 
+          const byDomain = hotelSettings?.find((setting) => {
+            if (!setting.booking_engine_custom_domain) return false;
+            const normalizedConfig = normalizeDomain(setting.booking_engine_custom_domain);
+            return normalizedConfig === normalizedHost || 
+                   normalizedConfig === currentHost.toLowerCase() ||
+                   setting.booking_engine_custom_domain.toLowerCase() === currentHost.toLowerCase();
+          });
+          
           if (byDomain && (byDomain as any).establishment_id) {
             const { data: est } = await supabase
               .from("establishments")
