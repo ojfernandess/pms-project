@@ -13,6 +13,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, ArrowRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Animações CSS inline via style tag
 const animationStyles = `
@@ -541,7 +542,9 @@ const BookingEnginePage = () => {
   const [company, setCompany] = useState<any>(null);
   const [establishment, setEstablishment] = useState<any>(null);
   const [companyEstablishments, setCompanyEstablishments] = useState<any[]>([]);
+  const [establishmentsWithCities, setEstablishmentsWithCities] = useState<any[]>([]);
   const [selectedEstablishmentId, setSelectedEstablishmentId] = useState<string | null>(null);
+  const [selectedCity, setSelectedCity] = useState<string>("all");
   const [hotelSettings, setHotelSettings] = useState<any>(null);
   const [engineEnabled, setEngineEnabled] = useState(false);
 
@@ -924,6 +927,24 @@ const BookingEnginePage = () => {
         const establishmentsList = engineEstablishments
           .map((e: any) => e.establishments)
           .filter(Boolean);
+        
+        // Buscar cidades dos estabelecimentos
+        const establishmentsWithCityData = await Promise.all(
+          establishmentsList.map(async (est: any) => {
+            const { data: hotelSettingsData } = await supabase
+              .from("hotel_settings")
+              .select("city")
+              .eq("establishment_id", est.id)
+              .maybeSingle();
+            
+            return {
+              ...est,
+              city: hotelSettingsData?.city || null,
+            };
+          })
+        );
+        
+        setEstablishmentsWithCities(establishmentsWithCityData);
         setCompanyEstablishments(establishmentsList);
 
         const toSelect = initialEstablishment && 
@@ -953,7 +974,25 @@ const BookingEnginePage = () => {
         }
         
         if (allEsts && allEsts.length > 0) {
+          // Buscar cidades dos estabelecimentos
+          const establishmentsWithCityData = await Promise.all(
+            allEsts.map(async (est: any) => {
+              const { data: hotelSettingsData } = await supabase
+                .from("hotel_settings")
+                .select("city")
+                .eq("establishment_id", est.id)
+                .maybeSingle();
+              
+              return {
+                ...est,
+                city: hotelSettingsData?.city || null,
+              };
+            })
+          );
+          
+          setEstablishmentsWithCities(establishmentsWithCityData);
           setCompanyEstablishments(allEsts);
+          
           const toSelect = initialEstablishment && 
             allEsts.find((e: any) => e.id === initialEstablishment.id)
             ? initialEstablishment
@@ -1161,6 +1200,40 @@ const BookingEnginePage = () => {
     () => selectedRoom?.plans.find((p) => p.id === selectedPlanId) || null,
     [selectedRoom, selectedPlanId]
   );
+
+  // Obter cidades únicas dos estabelecimentos
+  const availableCities = useMemo(() => {
+    const cities = establishmentsWithCities
+      .map((est: any) => est.city)
+      .filter((city: string | null) => city && city.trim() !== "")
+      .filter((city: string, index: number, self: string[]) => self.indexOf(city) === index)
+      .sort();
+    return cities;
+  }, [establishmentsWithCities]);
+
+  // Filtrar estabelecimentos por cidade selecionada
+  const filteredEstablishments = useMemo(() => {
+    if (selectedCity === "all") {
+      return companyEstablishments;
+    }
+    const filteredIds = establishmentsWithCities
+      .filter((est: any) => est.city === selectedCity)
+      .map((est: any) => est.id);
+    return companyEstablishments.filter((est: any) => filteredIds.includes(est.id));
+  }, [companyEstablishments, establishmentsWithCities, selectedCity]);
+
+  // Desmarcar estabelecimento selecionado se não estiver na cidade filtrada
+  useEffect(() => {
+    if (selectedCity !== "all" && selectedEstablishmentId) {
+      const selectedEst = establishmentsWithCities.find((est: any) => est.id === selectedEstablishmentId);
+      if (selectedEst && selectedEst.city !== selectedCity) {
+        setSelectedEstablishmentId(null);
+        setEstablishment(null);
+        setSelectedRoomId(null);
+        setSelectedPlanId(null);
+      }
+    }
+  }, [selectedCity, selectedEstablishmentId, establishmentsWithCities]);
 
   const totalAmount = useMemo(() => {
     if (!selectedPlan || nights <= 0) return null;
@@ -1470,6 +1543,54 @@ const BookingEnginePage = () => {
 
       {/* Main Content */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">
+        {/* Filtro por Cidade - Botões Elegantes (Estilo Airbnb) */}
+        {availableCities.length > 0 && companyEstablishments.length > 1 && (
+          <div className="mb-12">
+            <h2 className={`text-2xl font-bold mb-6 ${theme.textPrimary}`}>
+              Selecione uma cidade
+            </h2>
+            <div className="flex flex-wrap gap-3 mb-8">
+              {/* Botão "Todas as cidades" */}
+              <button
+                onClick={() => setSelectedCity("all")}
+                className={`px-6 py-3 rounded-full font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
+                  selectedCity === "all"
+                    ? "bg-black text-white shadow-md hover:shadow-lg"
+                    : "bg-white text-gray-700 border border-gray-300 hover:border-gray-400 hover:shadow-sm"
+                }`}
+              >
+                <MapPin className="w-4 h-4" />
+                Todas as cidades
+                {selectedCity === "all" && (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+              </button>
+
+              {/* Botões das cidades */}
+              {availableCities.map((city: string) => {
+                const isSelected = selectedCity === city;
+                return (
+                  <button
+                    key={city}
+                    onClick={() => setSelectedCity(city)}
+                    className={`px-6 py-3 rounded-full font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
+                      isSelected
+                        ? "bg-black text-white shadow-md hover:shadow-lg"
+                        : "bg-white text-gray-700 border border-gray-300 hover:border-gray-400 hover:shadow-sm"
+                    }`}
+                  >
+                    <MapPin className="w-4 h-4" />
+                    {city}
+                    {isSelected && (
+                      <CheckCircle2 className="w-4 h-4" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Estabelecimentos da empresa */}
         {companyEstablishments.length > 1 && (
           <div className="mb-12">
@@ -1477,7 +1598,7 @@ const BookingEnginePage = () => {
                 {t("bookingEngine.establishments.title")}
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {companyEstablishments.map((est: any) => {
+              {filteredEstablishments.map((est: any) => {
                 const isSelected = selectedEstablishmentId === est.id;
                 return (
                   <Card
@@ -1502,6 +1623,16 @@ const BookingEnginePage = () => {
                           </Badge>
                         )}
                       </div>
+                      {(() => {
+                        const estWithCity = establishmentsWithCities.find((e: any) => e.id === est.id);
+                        const city = estWithCity?.city;
+                        return city ? (
+                          <div className="flex items-center gap-1 text-sm">
+                            <MapPin className={`w-3 h-3 ${theme.textMuted}`} />
+                            <p className={theme.textMuted}>{city}</p>
+                          </div>
+                        ) : null;
+                      })()}
                       {est.type && (
                         <p className={`text-sm ${theme.textMuted}`}>
                           {est.type === 'hotel' ? 'Hotel' : est.type === 'apartment' ? 'Apartamento' : 'Outro'}
@@ -1518,10 +1649,18 @@ const BookingEnginePage = () => {
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] gap-8 lg:gap-12">
           {/* Room Cards List */}
           <div className="space-y-8">
-            {!selectedEstablishmentId && companyEstablishments.length > 0 && (
+            {!selectedEstablishmentId && filteredEstablishments.length > 0 && (
               <Card className={`p-8 text-center ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow}`}>
                 <p className={`${theme.textSecondary} text-lg`}>
                   {t("bookingEngine.establishments.selectPrompt")}
+                </p>
+              </Card>
+            )}
+            
+            {selectedCity !== "all" && filteredEstablishments.length === 0 && (
+              <Card className={`p-8 text-center ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow}`}>
+                <p className={`${theme.textSecondary} text-lg`}>
+                  Nenhum estabelecimento encontrado nesta cidade.
                 </p>
               </Card>
             )}
