@@ -761,16 +761,31 @@ const BookingEnginePage = () => {
               .maybeSingle();
             if (est) initialEstablishment = est;
           } else {
-            // Tentar detectar pelo subdomínio (ex: reservas.exemplo.com -> exemplo)
-            const parts = currentHost.split(".");
-            if (parts.length > 2) {
-              const potentialSlug = parts[0];
-              const { data: est } = await supabase
-                .from("establishments")
-                .select("*")
-                .eq("slug", potentialSlug)
-                .maybeSingle();
-              if (est) initialEstablishment = est;
+            // Apenas tentar fallback por subdomínio em domínios do Vercel / desenvolvimento.
+            // Para domínios personalizados (clientes), evitamos essa chamada para não gerar erros 400
+            // e confiamos apenas na configuração explícita de domínio nas tabelas.
+            const isVercelLikeDomain =
+              currentHost.includes("vercel.app") ||
+              currentHost.includes("localhost") ||
+              currentHost.includes("127.0.0.1");
+
+            if (isVercelLikeDomain) {
+              // Tentar detectar pelo subdomínio (ex: reservas.exemplo.com -> exemplo)
+              const parts = currentHost.split(".");
+              if (parts.length > 2) {
+                const potentialSlug = parts[0];
+                const { data: est } = await supabase
+                  .from("establishments")
+                  .select("*")
+                  .eq("slug", potentialSlug)
+                  .maybeSingle();
+                if (est) initialEstablishment = est;
+              }
+            } else {
+              console.warn(
+                "[BookingEngine] Domínio personalizado não mapeado nas configurações do motor:",
+                currentHost
+              );
             }
           }
         }
