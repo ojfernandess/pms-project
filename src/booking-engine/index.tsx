@@ -602,6 +602,27 @@ const BookingEnginePage = () => {
     return "";
   }, [company?.booking_engine_subtitle, company?.name]);
 
+  // Atualizar título da página (aba do navegador) com o título e subtítulo do motor de reservas
+  useEffect(() => {
+    if (motorTitle && motorTitle !== "Motor de Reservas") {
+      // Se houver subtítulo, incluir no título da página
+      if (motorSubtitle) {
+        document.title = `${motorTitle} - ${motorSubtitle}`;
+      } else {
+        document.title = motorTitle;
+      }
+    } else if (company?.name) {
+      // Se houver subtítulo, incluir no título da página
+      if (motorSubtitle) {
+        document.title = `${company.name} - ${motorSubtitle}`;
+      } else {
+        document.title = `${company.name} - Motor de Reservas`;
+      }
+    } else {
+      document.title = "Motor de Reservas";
+    }
+  }, [motorTitle, motorSubtitle, company?.name]);
+
   // Hero title and subtitle from config
   const heroTitle = useMemo(() => {
     return company?.booking_engine_hero_title || 
