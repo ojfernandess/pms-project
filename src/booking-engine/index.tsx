@@ -769,6 +769,41 @@ const BookingEnginePage = () => {
       // Isso pode ser o domínio personalizado ou o domínio padrão do PMS
       const currentHost = typeof window !== "undefined" ? window.location.host : undefined;
 
+      // Verificar se estamos em um domínio personalizado
+      // Se estivermos e houver companySlug na URL, bloquear acesso a outros motores
+      if (currentHost && companySlug) {
+        const normalizeDomain = (domain: string) => {
+          if (!domain) return "";
+          return domain
+            .toLowerCase()
+            .replace(/^https?:\/\//, "")
+            .replace(/^www\./, "")
+            .split("/")[0];
+        };
+        
+        const normalizedHost = normalizeDomain(currentHost);
+        
+        // Verificar se o domínio atual é um domínio personalizado configurado
+        const { data: companies } = await supabase
+          .from("companies")
+          .select("id, booking_engine_custom_domain")
+          .not("booking_engine_custom_domain", "is", null);
+
+        const isCustomDomain = companies?.some((company) => {
+          if (!company.booking_engine_custom_domain) return false;
+          const normalizedConfig = normalizeDomain(company.booking_engine_custom_domain);
+          return normalizedConfig === normalizedHost;
+        });
+
+        // Se for domínio personalizado e houver companySlug, redirecionar para a raiz
+        // Isso impede acesso a outros motores através do domínio personalizado
+        if (isCustomDomain) {
+          console.log("[BookingEngine] Domínio personalizado detectado com companySlug, redirecionando para raiz");
+          navigate("/", { replace: true });
+          return;
+        }
+      }
+
       let initialEstablishment: any = null;
       let foundCompany: any = null;
 
