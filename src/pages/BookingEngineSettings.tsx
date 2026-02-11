@@ -32,6 +32,7 @@ const BookingEngineSettings = () => {
   const [faviconPreview, setFaviconPreview] = useState<string>("");
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [isUploadingFavicon, setIsUploadingFavicon] = useState(false);
+  const [localChatEnabled, setLocalChatEnabled] = useState<boolean>(false);
 
   // Buscar empresa atual
   // Se não houver selectedEstablishment, buscar através de qualquer estabelecimento do usuário
@@ -1094,6 +1095,105 @@ const BookingEngineSettings = () => {
                     </p>
                   </div>
                 </div>
+              </div>
+
+              {/* Sistema de Chat para Hóspedes */}
+              <div className="space-y-3 pt-4 border-t">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <Label className="text-sm font-semibold text-slate-700">
+                      Chat para Hóspedes
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Configure um sistema de chat para que os hóspedes possam entrar em contato diretamente no motor de reservas.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={localChatEnabled}
+                    onCheckedChange={(checked) => {
+                      setLocalChatEnabled(checked); // Atualizar estado local imediatamente
+                      updateCompanyMutation.mutate({
+                        booking_engine_chat_enabled: checked,
+                      });
+                    }}
+                  />
+                </div>
+
+                {localChatEnabled && (
+                  <div className="space-y-4 mt-4">
+                    {/* Tipo de Chat - Preparado para futuras opções */}
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium text-slate-600">
+                        Tipo de Chat
+                      </Label>
+                      <Select
+                        defaultValue="chatwoot"
+                        disabled
+                      >
+                        <SelectTrigger className="h-10">
+                          <SelectValue placeholder="Selecione o tipo de chat" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="chatwoot">Chatwoot</SelectItem>
+                          {/* Futuras opções podem ser adicionadas aqui */}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground">
+                        Atualmente disponível: Chatwoot. Mais opções em breve.
+                      </p>
+                    </div>
+
+                    {/* Configurações do Chatwoot */}
+                    <div className="space-y-3 pt-2 border-t">
+                      <Label className="text-xs font-semibold text-slate-600">
+                        Configurações do Chatwoot
+                      </Label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-medium text-slate-600">
+                            BASE_URL do Chatwoot
+                          </Label>
+                          <Input
+                            placeholder="https://app.agentslabs.cloud"
+                            defaultValue={company?.booking_engine_chat_base_url || ""}
+                            onBlur={(e) => {
+                              const value = e.target.value.trim() || null;
+                              if (value !== (company?.booking_engine_chat_base_url || "")) {
+                                updateCompanyMutation.mutate({
+                                  booking_engine_chat_base_url: value,
+                                });
+                              }
+                            }}
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            URL base do seu Chatwoot (ex: https://app.agentslabs.cloud)
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs font-medium text-slate-600">
+                            Website Token
+                          </Label>
+                          <Input
+                            placeholder="Xaa19ZAndw2xPJysscdpS5dN"
+                            defaultValue={company?.booking_engine_chat_website_token || ""}
+                            onBlur={(e) => {
+                              const value = e.target.value.trim() || null;
+                              if (value !== (company?.booking_engine_chat_website_token || "")) {
+                                updateCompanyMutation.mutate({
+                                  booking_engine_chat_website_token: value,
+                                });
+                              }
+                            }}
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            Token do website configurado no Chatwoot
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Domínio personalizado */}

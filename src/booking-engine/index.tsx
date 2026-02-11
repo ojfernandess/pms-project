@@ -4,6 +4,15 @@ import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
+
+// Declaração de tipos para Chatwoot SDK
+declare global {
+  interface Window {
+    chatwootSDK?: {
+      run: (config: { websiteToken: string; baseUrl: string }) => void;
+    };
+  }
+}
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -663,6 +672,11 @@ const BookingEnginePage = () => {
   const socialWebsite = company?.booking_engine_social_website || null;
   const socialWhatsapp = company?.booking_engine_social_whatsapp || null;
 
+  // Chat Chatwoot
+  const chatEnabled = company?.booking_engine_chat_enabled || false;
+  const chatBaseUrl = company?.booking_engine_chat_base_url || null;
+  const chatWebsiteToken = company?.booking_engine_chat_website_token || null;
+
   // Atualizar favicon dinamicamente (identidade exclusiva do motor)
   useEffect(() => {
     // Remover todos os favicons existentes (do sistema)
@@ -682,6 +696,61 @@ const BookingEnginePage = () => {
     // a página do motor fica sem favicon ou com o que o navegador já tiver em cache,
     // evitando mostrar branding do sistema nesta página.
   }, [motorFavicon]);
+
+  // Carregar Chatwoot quando habilitado
+  useEffect(() => {
+    if (!chatEnabled || !chatBaseUrl || !chatWebsiteToken) {
+      // Se o chat não estiver habilitado ou faltar configuração, remover script existente
+      const existingScript = document.querySelector('script[data-chatwoot]');
+      if (existingScript) {
+        existingScript.remove();
+      }
+      return;
+    }
+
+    // Verificar se o script já foi carregado
+    const existingScript = document.querySelector('script[data-chatwoot]');
+    if (existingScript) {
+      // Se já existe, apenas atualizar a configuração
+      if (window.chatwootSDK) {
+        window.chatwootSDK.run({
+          websiteToken: chatWebsiteToken,
+          baseUrl: chatBaseUrl
+        });
+      }
+      return;
+    }
+
+    // Carregar script do Chatwoot
+    const script = document.createElement('script');
+    script.setAttribute('data-chatwoot', 'true');
+    script.src = `${chatBaseUrl}/packs/js/sdk.js`;
+    script.async = true;
+    
+    script.onload = () => {
+      if (window.chatwootSDK) {
+        window.chatwootSDK.run({
+          websiteToken: chatWebsiteToken,
+          baseUrl: chatBaseUrl
+        });
+      }
+    };
+
+    const firstScript = document.getElementsByTagName('script')[0];
+    if (firstScript && firstScript.parentNode) {
+      firstScript.parentNode.insertBefore(script, firstScript);
+    } else {
+      document.head.appendChild(script);
+    }
+
+    // Cleanup: remover script ao desmontar ou quando desabilitar
+    return () => {
+      const scriptToRemove = document.querySelector('script[data-chatwoot]');
+      if (scriptToRemove) {
+        scriptToRemove.remove();
+      }
+    };
+  }, [chatEnabled, chatBaseUrl, chatWebsiteToken]);
 
   useEffect(() => {
     // Resetar erro ao iniciar carregamento

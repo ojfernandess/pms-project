@@ -280,6 +280,66 @@ const CategoryDetailPage = () => {
     document.title = baseTitle;
   }, [company, category]);
 
+  // Chat Chatwoot - declarar antes do useEffect que o usa
+  const chatEnabled = company?.booking_engine_chat_enabled || false;
+  const chatBaseUrl = company?.booking_engine_chat_base_url || null;
+  const chatWebsiteToken = company?.booking_engine_chat_website_token || null;
+
+  // Carregar Chatwoot quando habilitado
+  useEffect(() => {
+    if (!chatEnabled || !chatBaseUrl || !chatWebsiteToken) {
+      // Se o chat não estiver habilitado ou faltar configuração, remover script existente
+      const existingScript = document.querySelector('script[data-chatwoot]');
+      if (existingScript) {
+        existingScript.remove();
+      }
+      return;
+    }
+
+    // Verificar se o script já foi carregado
+    const existingScript = document.querySelector('script[data-chatwoot]');
+    if (existingScript) {
+      // Se já existe, apenas atualizar a configuração
+      if (window.chatwootSDK) {
+        window.chatwootSDK.run({
+          websiteToken: chatWebsiteToken,
+          baseUrl: chatBaseUrl
+        });
+      }
+      return;
+    }
+
+    // Carregar script do Chatwoot
+    const script = document.createElement('script');
+    script.setAttribute('data-chatwoot', 'true');
+    script.src = `${chatBaseUrl}/packs/js/sdk.js`;
+    script.async = true;
+    
+    script.onload = () => {
+      if (window.chatwootSDK) {
+        window.chatwootSDK.run({
+          websiteToken: chatWebsiteToken,
+          baseUrl: chatBaseUrl
+        });
+      }
+    };
+
+    const firstScript = document.getElementsByTagName('script')[0];
+    if (firstScript && firstScript.parentNode) {
+      firstScript.parentNode.insertBefore(script, firstScript);
+    } else {
+      document.head.appendChild(script);
+    }
+
+    // Cleanup: remover script ao desmontar ou quando desabilitar
+    return () => {
+      const scriptToRemove = document.querySelector('script[data-chatwoot]');
+      if (scriptToRemove) {
+        scriptToRemove.remove();
+      }
+    };
+  }, [chatEnabled, chatBaseUrl, chatWebsiteToken]);
+
   useEffect(() => {
     const loadData = async () => {
       try {
