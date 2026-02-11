@@ -239,6 +239,47 @@ const CategoryDetailPage = () => {
     }
   }, [categoryId]);
 
+  // Atualizar título da página (aba do navegador) com o título e subtítulo do motor de reservas
+  // IMPORTANTE: Este useEffect deve estar ANTES dos if statements que retornam cedo
+  useEffect(() => {
+    if (!company || !category) return; // Retornar cedo se dados não estiverem prontos
+    
+    const motorTitle = company?.booking_engine_title || company?.name || "Motor de Reservas";
+    const motorSubtitle = company?.booking_engine_subtitle || "";
+    const categoryName = category?.name || "";
+    let baseTitle = "";
+    
+    if (motorTitle && motorTitle !== "Motor de Reservas") {
+      // Se houver subtítulo, incluir no título da página
+      if (motorSubtitle) {
+        baseTitle = categoryName 
+          ? `${categoryName} - ${motorTitle} - ${motorSubtitle}`
+          : `${motorTitle} - ${motorSubtitle}`;
+      } else {
+        baseTitle = categoryName 
+          ? `${categoryName} - ${motorTitle}`
+          : motorTitle;
+      }
+    } else if (company?.name) {
+      // Se houver subtítulo, incluir no título da página
+      if (motorSubtitle) {
+        baseTitle = categoryName 
+          ? `${categoryName} - ${company.name} - ${motorSubtitle}`
+          : `${company.name} - ${motorSubtitle}`;
+      } else {
+        baseTitle = categoryName 
+          ? `${categoryName} - ${company.name} - Motor de Reservas`
+          : `${company.name} - Motor de Reservas`;
+      }
+    } else {
+      baseTitle = categoryName 
+        ? `${categoryName} - Motor de Reservas`
+        : "Motor de Reservas";
+    }
+    
+    document.title = baseTitle;
+  }, [company, category]);
+
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -393,42 +434,6 @@ const CategoryDetailPage = () => {
   const motorTitle = company?.booking_engine_title || company?.name || "Motor de Reservas";
   const motorSubtitle = company?.booking_engine_subtitle || "";
   const motorLogo = company?.booking_engine_logo || null;
-
-  // Atualizar título da página (aba do navegador) com o título e subtítulo do motor de reservas
-  useEffect(() => {
-    const categoryName = category?.name || "";
-    let baseTitle = "";
-    
-    if (motorTitle && motorTitle !== "Motor de Reservas") {
-      // Se houver subtítulo, incluir no título da página
-      if (motorSubtitle) {
-        baseTitle = categoryName 
-          ? `${categoryName} - ${motorTitle} - ${motorSubtitle}`
-          : `${motorTitle} - ${motorSubtitle}`;
-      } else {
-        baseTitle = categoryName 
-          ? `${categoryName} - ${motorTitle}`
-          : motorTitle;
-      }
-    } else if (company?.name) {
-      // Se houver subtítulo, incluir no título da página
-      if (motorSubtitle) {
-        baseTitle = categoryName 
-          ? `${categoryName} - ${company.name} - ${motorSubtitle}`
-          : `${company.name} - ${motorSubtitle}`;
-      } else {
-        baseTitle = categoryName 
-          ? `${categoryName} - ${company.name} - Motor de Reservas`
-          : `${company.name} - Motor de Reservas`;
-      }
-    } else {
-      baseTitle = categoryName 
-        ? `${categoryName} - Motor de Reservas`
-        : "Motor de Reservas";
-    }
-    
-    document.title = baseTitle;
-  }, [motorTitle, motorSubtitle, company?.name, category?.name]);
 
   // Dados de contato e redes sociais (mesma lógica do motor principal)
   const establishmentCnpj = (hotelSettings as any)?.establishment_cnpj || "";
