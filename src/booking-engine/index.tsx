@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, ArrowRight } from "lucide-react";
+import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, ArrowRight, Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -561,6 +561,7 @@ const BookingEnginePage = () => {
   const [pendingCategoryId, setPendingCategoryId] = useState<string | null>(null);
   const [showSearchEstablishmentDialog, setShowSearchEstablishmentDialog] = useState(false);
   const [searchDialogCity, setSearchDialogCity] = useState<string>("all");
+  const [showPriceInfoDialog, setShowPriceInfoDialog] = useState(false);
 
   const [checkin, setCheckin] = useState(searchParams.get("checkin") || "");
   const [checkout, setCheckout] = useState(searchParams.get("checkout") || "");
@@ -2233,7 +2234,7 @@ const BookingEnginePage = () => {
                                         ))}
                                       </div>
                                     </div>
-                                    <div className="text-left sm:text-right sm:min-w-[120px] lg:min-w-[140px] flex-shrink-0">
+                                    <div className={`text-left sm:text-right flex-shrink-0 ${plan.pricePerNight > 0 && nights > 0 ? 'sm:min-w-[160px] lg:min-w-[180px]' : 'sm:min-w-[180px] lg:min-w-[200px]'}`}>
                                       <div className={`${theme.priceColor} text-xl sm:text-2xl font-bold mb-1`}>
                                         {plan.pricePerNight > 0 && nights > 0 ? (
                                           <>R$ {plan.pricePerNight.toFixed(2)}</>
@@ -2241,13 +2242,28 @@ const BookingEnginePage = () => {
                                           <span className="text-xs sm:text-sm text-slate-400">Selecione datas</span>
                                         )}
                                       </div>
-                                      <div className={`text-[10px] sm:text-xs ${theme.priceLabel}`}>
-                                        {plan.pricePerNight > 0 && nights > 0
-                                          ? "por noite"
-                                          : "Os valores serão exibidos após escolher datas e hóspedes"}
+                                      <div className={`text-[10px] sm:text-xs ${theme.priceLabel} ${plan.pricePerNight > 0 && nights > 0 ? 'whitespace-nowrap' : 'flex items-center gap-1 justify-end sm:justify-end'}`}>
+                                        {plan.pricePerNight > 0 && nights > 0 ? (
+                                          "por noite"
+                                        ) : (
+                                          <>
+                                            <span className="truncate">Selecione datas</span>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setShowPriceInfoDialog(true);
+                                              }}
+                                              className="flex-shrink-0 hover:opacity-70 transition-opacity"
+                                              aria-label="Informações sobre preços"
+                                            >
+                                              <Info className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                            </button>
+                                          </>
+                                        )}
                                       </div>
                                       {plan.pricePerNight > 0 && nights > 0 && (
-                                        <div className={`text-xs sm:text-sm ${theme.textMuted} mt-1 sm:mt-2`}>
+                                        <div className={`text-xs sm:text-sm ${theme.textMuted} mt-1 sm:mt-2 whitespace-nowrap`}>
                                           {nights} noite{nights > 1 ? "s" : ""}: R$ {(plan.pricePerNight * nights).toFixed(2)}
                                         </div>
                                       )}
@@ -2802,6 +2818,41 @@ const BookingEnginePage = () => {
                 );
               });
             })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de informações sobre preços */}
+      <Dialog open={showPriceInfoDialog} onOpenChange={setShowPriceInfoDialog}>
+        <DialogContent className={`${theme.cardBg} ${theme.cardBorder} max-w-md`}>
+          <DialogHeader>
+            <DialogTitle className={`${theme.textPrimary} flex items-center gap-2`}>
+              <Info className="w-5 h-5" />
+              Informações sobre Preços
+            </DialogTitle>
+            <DialogDescription className={theme.textSecondary}>
+              Os valores serão exibidos após escolher datas e hóspedes
+            </DialogDescription>
+          </DialogHeader>
+          <div className={`mt-4 ${theme.textSecondary} text-sm space-y-2`}>
+            <p>
+              Para visualizar os preços e disponibilidade dos quartos, é necessário:
+            </p>
+            <ul className="list-disc list-inside space-y-1 ml-2">
+              <li>Selecionar as datas de check-in e check-out</li>
+              <li>Informar o número de adultos e crianças</li>
+            </ul>
+            <p className="mt-3">
+              Após preencher essas informações, os valores serão calculados automaticamente com base nas tarifas configuradas para o período selecionado.
+            </p>
+          </div>
+          <div className="mt-6 flex justify-end">
+            <Button
+              onClick={() => setShowPriceInfoDialog(false)}
+              className={`${theme.primaryButton} ${theme.primaryButtonHover}`}
+            >
+              Entendi
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
