@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Settings2, HelpCircle, ArrowUp, ArrowDown, Building2 } from "lucide-react";
+import { Loader2, Settings2, HelpCircle, ArrowUp, ArrowDown, Building2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
@@ -21,10 +21,17 @@ import { Separator } from "@/components/ui/separator";
 const BookingEngineSettings = () => {
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
-  const { settings: siteSettings } = useSiteSettings();
+  const { settings: siteSettings, uploadImage } = useSiteSettings();
   const [showDnsHelp, setShowDnsHelp] = useState(false);
   const [localTitle, setLocalTitle] = useState<string>("");
+  const [localCustomDomain, setLocalCustomDomain] = useState<string>("");
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [faviconFile, setFaviconFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string>("");
+  const [faviconPreview, setFaviconPreview] = useState<string>("");
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [isUploadingFavicon, setIsUploadingFavicon] = useState(false);
 
   // Buscar empresa atual
   // Se não houver selectedEstablishment, buscar através de qualquer estabelecimento do usuário
@@ -90,6 +97,23 @@ const BookingEngineSettings = () => {
     },
     enabled: true, // Sempre habilitado, busca de forma inteligente
   });
+
+  // Sincronizar localCustomDomain com company quando carregar
+  useEffect(() => {
+    if (company?.booking_engine_custom_domain !== undefined) {
+      setLocalCustomDomain(company.booking_engine_custom_domain || "");
+    }
+  }, [company?.booking_engine_custom_domain]);
+
+  // Sincronizar previews com company quando carregar
+  useEffect(() => {
+    if (company?.booking_engine_logo) {
+      setLogoPreview(company.booking_engine_logo);
+    }
+    if (company?.booking_engine_favicon) {
+      setFaviconPreview(company.booking_engine_favicon);
+    }
+  }, [company?.booking_engine_logo, company?.booking_engine_favicon]);
 
   // Buscar estabelecimentos da empresa para o motor
   const { data: engineEstablishments, isLoading: isLoadingEngine } = useQuery({
@@ -376,6 +400,111 @@ const BookingEngineSettings = () => {
     setLocalTitle(company?.booking_engine_title || "");
   }, [company?.booking_engine_title]);
 
+  // Handlers para upload de logo e favicon
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validar tipo de arquivo
+    if (!file.type.startsWith("image/")) {
+      toast.error("Por favor, selecione um arquivo de imagem");
+      return;
+    }
+
+    // Validar tamanho (máximo 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("A imagem deve ter no máximo 5MB");
+      return;
+    }
+
+    setLogoFile(file);
+    setIsUploadingLogo(true);
+
+    try {
+      // Fazer upload
+      const uploadedUrl = await uploadImage(file, "logo");
+      if (uploadedUrl) {
+        // Atualizar empresa com a URL do logo
+        await updateCompanyMutation.mutateAsync({
+          booking_engine_logo: uploadedUrl,
+        });
+        setLogoPreview(uploadedUrl);
+        toast.success("Logo atualizado com sucesso!");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Erro ao fazer upload do logo");
+    } finally {
+      setIsUploadingLogo(false);
+      setLogoFile(null);
+      // Limpar o input
+      e.target.value = "";
+    }
+  };
+
+  const handleFaviconUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validar tipo de arquivo
+    if (!file.type.startsWith("image/")) {
+      toast.error("Por favor, selecione um arquivo de imagem");
+      return;
+    }
+
+    // Validar tamanho (máximo 1MB para favicon)
+    if (file.size > 1 * 1024 * 1024) {
+      toast.error("O favicon deve ter no máximo 1MB");
+      return;
+    }
+
+    setFaviconFile(file);
+    setIsUploadingFavicon(true);
+
+    try {
+      // Fazer upload
+      const uploadedUrl = await uploadImage(file, "favicon");
+      if (uploadedUrl) {
+        // Atualizar empresa com a URL do favicon
+        await updateCompanyMutation.mutateAsync({
+          booking_engine_favicon: uploadedUrl,
+        });
+        setFaviconPreview(uploadedUrl);
+        toast.success("Favicon atualizado com sucesso!");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Erro ao fazer upload do favicon");
+    } finally {
+      setIsUploadingFavicon(false);
+      setFaviconFile(null);
+      // Limpar o input
+      e.target.value = "";
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    try {
+      await updateCompanyMutation.mutateAsync({
+        booking_engine_logo: null,
+      });
+      setLogoPreview("");
+      toast.success("Logo removido com sucesso!");
+    } catch (error: any) {
+      toast.error(error.message || "Erro ao remover logo");
+    }
+  };
+
+  const handleRemoveFavicon = async () => {
+    try {
+      await updateCompanyMutation.mutateAsync({
+        booking_engine_favicon: null,
+      });
+      setFaviconPreview("");
+      toast.success("Favicon removido com sucesso!");
+    } catch (error: any) {
+      toast.error(error.message || "Erro ao remover favicon");
+    }
+  };
+
   // Cleanup do timeout ao desmontar
   useEffect(() => {
     return () => {
@@ -486,6 +615,33 @@ const BookingEngineSettings = () => {
                 </p>
               </div>
 
+              {/* Subtítulo do Motor */}
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold text-slate-700">
+                  Subtítulo do Motor de Reservas
+                </Label>
+                <Input
+                  placeholder="Ex: Reserve com as melhores tarifas direto com o hotel"
+                  defaultValue={company?.booking_engine_subtitle || ""}
+                  onBlur={(e) => {
+                    const value = e.target.value.trim() || null;
+                    if (value !== (company?.booking_engine_subtitle || "")) {
+                      updateCompanyMutation.mutate({
+                        booking_engine_subtitle: value,
+                      });
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.currentTarget.blur();
+                    }
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Texto exibido abaixo do título no cabeçalho do motor (ex.: benefício da reserva direta).
+                </p>
+              </div>
+
               {/* Tema do Motor */}
               {canUseThemes && (
                 <div className="space-y-3">
@@ -555,40 +711,278 @@ const BookingEngineSettings = () => {
                     )}
                   </div>
 
-                  {/* Título do Hero */}
+              {/* Título do Hero */}
+              <div className="space-y-2">
+                <Label className="text-xs font-medium text-slate-600">
+                  Título do Hero
+                </Label>
+                <Input
+                  placeholder="Reserve sua estadia"
+                  defaultValue={company?.booking_engine_hero_title || ""}
+                  onBlur={(e) => {
+                    const value = e.target.value.trim() || null;
+                    if (value !== (company?.booking_engine_hero_title || "")) {
+                      updateCompanyMutation.mutate({
+                        booking_engine_hero_title: value,
+                      });
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.currentTarget.blur();
+                    }
+                  }}
+                />
+              </div>
+
+              {/* Subtítulo do Hero */}
+              <div className="space-y-2">
+                <Label className="text-xs font-medium text-slate-600">
+                  Subtítulo do Hero
+                </Label>
+                <Textarea
+                  placeholder="Encontre o quarto ideal para sua próxima estadia..."
+                  defaultValue={company?.booking_engine_hero_subtitle || ""}
+                  onBlur={(e) => {
+                    const value = e.target.value.trim() || null;
+                    if (value !== (company?.booking_engine_hero_subtitle || "")) {
+                      updateCompanyMutation.mutate({
+                        booking_engine_hero_subtitle: value,
+                      });
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  rows={3}
+                />
+              </div>
+                </div>
+              )}
+
+              {/* Logo e Favicon */}
+              {canUseThemes && (
+                <div className="space-y-4 pt-4 border-t">
+                  <Label className="text-sm font-semibold text-slate-700">
+                    Logo e Favicon do Motor
+                  </Label>
+                  
+                  {/* Logo */}
                   <div className="space-y-2">
                     <Label className="text-xs font-medium text-slate-600">
-                      Título do Hero
+                      Logo do Motor
+                    </Label>
+                    <div className="flex items-center gap-4">
+                      {logoPreview && (
+                        <div className="relative">
+                          <img
+                            src={logoPreview}
+                            alt="Logo preview"
+                            className="h-16 w-auto object-contain border rounded p-2 bg-white"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-red-500 hover:bg-red-600 text-white"
+                            onClick={handleRemoveLogo}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <Input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleLogoUpload}
+                          disabled={isUploadingLogo}
+                          className="cursor-pointer"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Recomendado: PNG ou SVG, máximo 5MB. O logo será exibido no header do motor.
+                        </p>
+                      </div>
+                      {isUploadingLogo && (
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Favicon */}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      Favicon do Motor
+                    </Label>
+                    <div className="flex items-center gap-4">
+                      {faviconPreview && (
+                        <div className="relative">
+                          <img
+                            src={faviconPreview}
+                            alt="Favicon preview"
+                            className="h-16 w-16 object-contain border rounded p-2 bg-white"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-red-500 hover:bg-red-600 text-white"
+                            onClick={handleRemoveFavicon}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <Input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleFaviconUpload}
+                          disabled={isUploadingFavicon}
+                          className="cursor-pointer"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Recomendado: ICO, PNG ou SVG, máximo 1MB. Tamanho ideal: 32x32 ou 64x64 pixels.
+                        </p>
+                      </div>
+                      {isUploadingFavicon && (
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Redes Sociais (Rodapé do Motor) */}
+              <div className="space-y-4 pt-4 border-t">
+                <Label className="text-sm font-semibold text-slate-700">
+                  Redes Sociais no Rodapé
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Adicione links para as redes sociais do estabelecimento. Os ícones aparecerão no rodapé do motor de reservas.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      WhatsApp
                     </Label>
                     <Input
-                      placeholder="Reserve sua estadia"
-                      value={company?.booking_engine_hero_title || ""}
-                      onChange={(e) => {
-                        updateCompanyMutation.mutate({
-                          booking_engine_hero_title: e.target.value.trim() || null,
-                        });
+                      placeholder="https://wa.me/5511999999999"
+                      defaultValue={company?.booking_engine_social_whatsapp || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_social_whatsapp || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_social_whatsapp: value,
+                          });
+                        }
+                      }}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Use o formato oficial do WhatsApp: https://wa.me/DDDNUMERO (apenas números).
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      Instagram
+                    </Label>
+                    <Input
+                      placeholder="https://instagram.com/seu_perfil"
+                      defaultValue={company?.booking_engine_social_instagram || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_social_instagram || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_social_instagram: value,
+                          });
+                        }
                       }}
                     />
                   </div>
 
-                  {/* Subtítulo do Hero */}
                   <div className="space-y-2">
                     <Label className="text-xs font-medium text-slate-600">
-                      Subtítulo do Hero
+                      Facebook
                     </Label>
-                    <Textarea
-                      placeholder="Encontre o quarto ideal para sua próxima estadia..."
-                      value={company?.booking_engine_hero_subtitle || ""}
-                      onChange={(e) => {
-                        updateCompanyMutation.mutate({
-                          booking_engine_hero_subtitle: e.target.value.trim() || null,
-                        });
+                    <Input
+                      placeholder="https://facebook.com/seu_perfil"
+                      defaultValue={company?.booking_engine_social_facebook || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_social_facebook || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_social_facebook: value,
+                          });
+                        }
                       }}
-                      rows={3}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      Twitter / X
+                    </Label>
+                    <Input
+                      placeholder="https://twitter.com/seu_perfil"
+                      defaultValue={company?.booking_engine_social_twitter || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_social_twitter || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_social_twitter: value,
+                          });
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      YouTube
+                    </Label>
+                    <Input
+                      placeholder="https://youtube.com/seu_canal"
+                      defaultValue={company?.booking_engine_social_youtube || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_social_youtube || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_social_youtube: value,
+                          });
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="space-y-2 md:col-span-2">
+                    <Label className="text-xs font-medium text-slate-600">
+                      Site Oficial
+                    </Label>
+                    <Input
+                      placeholder="https://www.seusite.com.br"
+                      defaultValue={company?.booking_engine_social_website || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() || null;
+                        if (value !== (company?.booking_engine_social_website || "")) {
+                          updateCompanyMutation.mutate({
+                            booking_engine_social_website: value,
+                          });
+                        }
+                      }}
                     />
                   </div>
                 </div>
-              )}
+              </div>
 
               {/* Domínio personalizado */}
               {canUseCustomDomain && (
@@ -614,26 +1008,51 @@ const BookingEngineSettings = () => {
                   </div>
 
                   {systemBaseDomain && (
-                    <p className="text-xs text-muted-foreground">
-                      Para apontar corretamente, crie um registro{" "}
-                      <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
-                        CNAME
-                      </code>{" "}
-                      no seu DNS para o domínio acima direcionando para{" "}
-                      <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
-                        {systemBaseDomain}
-                      </code>
-                      .
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Para apontar corretamente, crie um registro{" "}
+                        <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
+                          CNAME
+                        </code>{" "}
+                        no seu DNS para o domínio acima direcionando para{" "}
+                        <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">
+                          {systemBaseDomain}
+                        </code>
+                        .
+                      </p>
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-md">
+                        <p className="text-xs text-amber-800 font-medium mb-1">
+                          ⚠️ Importante sobre domínios personalizados:
+                        </p>
+                        <ul className="text-xs text-amber-700 space-y-1 list-disc list-inside">
+                          <li>Após configurar o CNAME, adicione o domínio no painel do Vercel (Settings → Domains)</li>
+                          <li>O Vercel provisionará automaticamente um certificado SSL (pode levar alguns minutos)</li>
+                          <li>Use sempre HTTPS (com S) - o Vercel redireciona HTTP para HTTPS automaticamente</li>
+                          <li>Se aparecer erro ERR_QUIC_PROTOCOL_ERROR, aguarde alguns minutos para o certificado SSL ser provisionado</li>
+                          <li>O domínio deve estar totalmente configurado no Vercel antes de funcionar corretamente</li>
+                        </ul>
+                      </div>
+                    </div>
                   )}
 
                   <Input
                     placeholder="Ex: reservas.empresa.com.br"
-                    value={company?.booking_engine_custom_domain || ""}
+                    value={localCustomDomain}
                     onChange={(e) => {
-                      updateCompanyMutation.mutate({
-                        booking_engine_custom_domain: e.target.value.trim() || null,
-                      });
+                      setLocalCustomDomain(e.target.value);
+                    }}
+                    onBlur={() => {
+                      const trimmedValue = localCustomDomain.trim() || null;
+                      if (trimmedValue !== (company?.booking_engine_custom_domain || "")) {
+                        updateCompanyMutation.mutate({
+                          booking_engine_custom_domain: trimmedValue,
+                        });
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.currentTarget.blur();
+                      }
                     }}
                   />
                 </div>

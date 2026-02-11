@@ -686,6 +686,28 @@
       "maxRoomsReached": "Maximum available rooms reached. Available: {available}"
     }
   },
+  "bookingEngine": {
+    "loading": "Loading booking engine...",
+    "cta": {
+      "primary": "Check availability",
+      "primaryShort": "Search"
+    },
+    "coupon": {
+      "label": "Coupon",
+      "placeholder": "Promo code (optional)"
+    },
+    "establishments": {
+      "title": "Available properties",
+      "selectPrompt": "Select a property above to see available rooms."
+    },
+    "error": {
+      "title": "Error loading booking engine",
+      "retry": "Try again"
+    },
+    "summary": {
+      "title": "Search summary"
+    }
+  },
   "auth": {
     "hero": {
       "title": "Transform Your Hotel Management",

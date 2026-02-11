@@ -732,6 +732,28 @@
       "insufficientRooms": "Quartos insuficientes. Necessário: {required}, Disponível: {available}",
       "maxRoomsReached": "Limite de quartos disponíveis atingido. Disponível: {available}"
     }
+  },
+  "bookingEngine": {
+    "loading": "Carregando motor de reservas...",
+    "cta": {
+      "primary": "Ver disponibilidade",
+      "primaryShort": "Buscar"
+    },
+    "coupon": {
+      "label": "Cupom",
+      "placeholder": "Código promocional (opcional)"
+    },
+    "establishments": {
+      "title": "Estabelecimentos disponíveis",
+      "selectPrompt": "Selecione um estabelecimento acima para ver os quartos disponíveis."
+    },
+    "error": {
+      "title": "Erro ao carregar motor de reservas",
+      "retry": "Tentar novamente"
+    },
+    "summary": {
+      "title": "Resumo da busca"
+    }
   }
 }
 

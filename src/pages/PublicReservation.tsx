@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useEffect, useState, useRef } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ const PublicReservation = () => {
   const { establishmentSlug } = useParams<{ establishmentSlug: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const [establishment, setEstablishment] = useState<any>(null);
   const [categories, setCategories] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
@@ -51,12 +52,12 @@ const PublicReservation = () => {
     cpf: "",
     email: "",
     phone: "",
-    checkinDate: "",
-    checkoutDate: "",
-    adults: "1",
-    children: "0",
+    checkinDate: searchParams.get("checkin") || "",
+    checkoutDate: searchParams.get("checkout") || "",
+    adults: searchParams.get("adults") || "1",
+    children: searchParams.get("children") || "0",
     notes: "",
-    promotionalCode: "",
+    promotionalCode: searchParams.get("coupon") || "",
     document_type: "CPF",
     document_number: "",
   });
@@ -95,6 +96,8 @@ const PublicReservation = () => {
   const [loadingPolicies, setLoadingPolicies] = useState(false);
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null); // Cupom aplicado
   const [validatingCoupon, setValidatingCoupon] = useState(false); // Validando cupom
+  const couponAutoAppliedRef = useRef(false); // Controlar aplicação automática de cupom vindo do motor
+  const initialCategoryFromUrl = searchParams.get("category") || null;
   const [policiesDialogOpen, setPoliciesDialogOpen] = useState(false);
   // Opção para preencher dados de outros hóspedes
   const [allReservationsInMyName, setAllReservationsInMyName] = useState(true); // true = tudo em meu nome, false = preencher dados de outros
@@ -1323,7 +1326,19 @@ const PublicReservation = () => {
 
       if (!categoriesError && categoriesData) {
         setCategories(categoriesData);
-        if (categoriesData.length > 0 && !selectedCategory) {
+
+        // Se veio uma categoria específica do Motor de Reservas via URL (?category=...)
+        // e ainda não há categoria selecionada, usar essa categoria como inicial
+        if (!selectedCategory && initialCategoryFromUrl) {
+          const existsInList = categoriesData.some((c: any) => c.id === initialCategoryFromUrl);
+          if (existsInList) {
+            setSelectedCategory(initialCategoryFromUrl);
+          } else if (categoriesData.length > 0) {
+            // Fallback: se a categoria da URL não existir mais, usar a primeira
+            setSelectedCategory(categoriesData[0].id);
+          }
+        } else if (categoriesData.length > 0 && !selectedCategory) {
+          // Comportamento padrão: nenhuma categoria veio da URL, usar a primeira
           setSelectedCategory(categoriesData[0].id);
         }
       }
@@ -1471,6 +1486,38 @@ const PublicReservation = () => {
     setAppliedCoupon(null);
     setFormData({ ...formData, promotionalCode: "" });
   };
+
+  // Aplicar automaticamente o cupom vindo do motor de reservas (URL ?coupon=...)
+  useEffect(() => {
+    // Evitar múltiplas execuções
+    if (couponAutoAppliedRef.current) return;
+
+    // Precisa ter cupom vindo da URL / formulário
+    if (!formData.promotionalCode?.trim()) return;
+
+    // Precisa ter datas definidas
+    if (!formData.checkinDate || !formData.checkoutDate) return;
+
+    // Precisa ter estabelecimento carregado
+    if (!establishment?.id) return;
+
+    // Precisa já ter preço calculado (ou categorias com preço) para evitar erro de "Calcule o preço primeiro"
+    const hasPrice =
+      (selectedCategories.length > 0 && selectedCategories.some((cat) => cat.price > 0)) ||
+      (!!calculatedPrice && calculatedPrice > 0);
+
+    if (!hasPrice) return;
+
+    couponAutoAppliedRef.current = true;
+    handleApplyCoupon();
+  }, [
+    formData.promotionalCode,
+    formData.checkinDate,
+    formData.checkoutDate,
+    establishment?.id,
+    selectedCategories,
+    calculatedPrice,
+  ]);
 
   const handleCategoryChange = (categoryId: string) => {
     setSelectedCategory(categoryId);

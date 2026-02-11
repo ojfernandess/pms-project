@@ -10,7 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2 } from "lucide-react";
+import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { LanguageSelector } from "@/components/layout/LanguageSelector";
 
 // Animações CSS inline via style tag
 const animationStyles = `
@@ -82,6 +84,7 @@ interface BookingThemeConfig {
   // Header
   headerBg: string;
   headerText: string;
+  headerSubtitle: string;
   headerButton: string;
   headerBorder?: string;
   
@@ -168,6 +171,7 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
     
     headerBg: "bg-white",
     headerText: "text-slate-900",
+    headerSubtitle: "text-slate-500",
     headerButton: "bg-blue-600 hover:bg-blue-700 text-white",
     headerBorder: "border-b border-slate-200",
     
@@ -240,6 +244,7 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
     
     headerBg: "bg-slate-900/80 backdrop-blur-md",
     headerText: "text-white",
+    headerSubtitle: "text-slate-300",
     headerButton: "bg-amber-500 hover:bg-amber-600 text-slate-900 font-semibold",
     headerBorder: "border-b border-slate-700/50",
     
@@ -312,6 +317,7 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
     
     headerBg: "bg-slate-950/95 backdrop-blur-md",
     headerText: "text-white",
+    headerSubtitle: "text-purple-200/80",
     headerButton: "bg-purple-600 hover:bg-purple-700 text-white font-semibold",
     headerBorder: "border-b border-purple-900/50",
     
@@ -384,6 +390,7 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
     
     headerBg: "bg-white",
     headerText: "text-slate-900",
+    headerSubtitle: "text-slate-500",
     headerButton: "bg-slate-900 hover:bg-slate-800 text-white",
     headerBorder: "border-b border-slate-100",
     
@@ -456,6 +463,7 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
     
     headerBg: "bg-slate-900/95 backdrop-blur-md",
     headerText: "text-white",
+    headerSubtitle: "text-slate-300",
     headerButton: "bg-blue-600 hover:bg-blue-700 text-white",
     headerBorder: "border-b border-slate-800",
     
@@ -523,6 +531,7 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
 
 const BookingEnginePage = () => {
   const { companySlug } = useParams<{ companySlug?: string }>();
+  const { t, i18n } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { settings: siteSettings, isLoading: isLoadingSiteSettings } = useSiteSettings();
@@ -576,6 +585,23 @@ const BookingEnginePage = () => {
            "Motor de Reservas";
   }, [company, hotelSettings, establishment]);
 
+  const motorSubtitle = useMemo(() => {
+    // Subtítulo específico do motor configurado pelo usuário
+    // Se não houver subtítulo configurado, usar nome da empresa ou texto genérico
+    // NÃO usar nome do estabelecimento, pois o motor é por empresa
+    if (company?.booking_engine_subtitle) {
+      return company.booking_engine_subtitle;
+    }
+    
+    // Fallback: usar nome da empresa ou texto genérico
+    if (company?.name) {
+      return `Reservas em ${company.name}`;
+    }
+    
+    // Se não houver nada configurado, retornar vazio (não mostrar subtítulo)
+    return "";
+  }, [company?.booking_engine_subtitle, company?.name]);
+
   // Hero title and subtitle from config
   const heroTitle = useMemo(() => {
     return company?.booking_engine_hero_title || 
@@ -588,6 +614,43 @@ const BookingEnginePage = () => {
            hotelSettings?.booking_engine_hero_subtitle || 
            "Encontre o quarto ideal para sua próxima estadia. Compare categorias, planos tarifários e disponibilidade em tempo real.";
   }, [company, hotelSettings]);
+
+  // Logo e favicon do motor
+  const motorLogo = useMemo(() => {
+    return company?.booking_engine_logo || null;
+  }, [company]);
+
+  const motorFavicon = useMemo(() => {
+    return company?.booking_engine_favicon || null;
+  }, [company]);
+
+  // Redes sociais
+  const socialInstagram = company?.booking_engine_social_instagram || null;
+  const socialFacebook = company?.booking_engine_social_facebook || null;
+  const socialTwitter = company?.booking_engine_social_twitter || null;
+  const socialYoutube = company?.booking_engine_social_youtube || null;
+  const socialWebsite = company?.booking_engine_social_website || null;
+  const socialWhatsapp = company?.booking_engine_social_whatsapp || null;
+
+  // Atualizar favicon dinamicamente (identidade exclusiva do motor)
+  useEffect(() => {
+    // Remover todos os favicons existentes (do sistema)
+    const existingIcons = document.querySelectorAll(
+      "link[rel='icon'], link[rel='shortcut icon'], link[rel='apple-touch-icon']"
+    );
+    existingIcons.forEach((el) => el.parentNode?.removeChild(el));
+
+    // Se o motor tiver favicon configurado, aplicar apenas o favicon do motor
+    if (motorFavicon) {
+      const newLink = document.createElement("link");
+      newLink.rel = "icon";
+      newLink.href = motorFavicon;
+      document.head.appendChild(newLink);
+    }
+    // Se não tiver favicon do motor, não recriamos o favicon do sistema:
+    // a página do motor fica sem favicon ou com o que o navegador já tiver em cache,
+    // evitando mostrar branding do sistema nesta página.
+  }, [motorFavicon]);
 
   useEffect(() => {
     // Resetar erro ao iniciar carregamento
@@ -976,27 +1039,33 @@ const BookingEnginePage = () => {
 
       const plans: any[] = [];
 
+      const hasDynamicPrice = dynamicPricePlan1 !== null && dynamicPricePlan1 !== undefined;
+
       if (publicPricingPlan1Id) {
         plans.push({
           id: `${cat.id}-plan1`,
           name: publicPricingPlan1Title || "Plano Tarifário 1",
-          description: "Tarifa estimada para as datas e hóspedes selecionados. O valor final será calculado nas próximas etapas.",
-          benefits: ["Cálculo em tempo real", "Melhor tarifa disponível"],
-          tag: dynamicPricePlan1 ? "A partir de" : basePrice ? "Base" : undefined,
+          description: hasDynamicPrice
+            ? "Tarifa calculada em tempo real para as datas e hóspedes selecionados."
+            : "Selecione datas e hóspedes para ver o valor desta categoria.",
+          benefits: hasDynamicPrice
+            ? ["Melhor tarifa disponível para o seu período", "Atualização em tempo real"]
+            : ["Cálculo em tempo real na próxima etapa", "Tarifa sujeita a variação"],
+          tag: hasDynamicPrice ? "A partir de" : undefined,
           pricePerNight:
-            dynamicPricePlan1 !== null && dynamicPricePlan1 !== undefined
+            hasDynamicPrice
               ? dynamicPricePlan1
-              : basePrice || 0,
+              : 0,
           planId: publicPricingPlan1Id,
         });
       } else {
         plans.push({
           id: `${cat.id}-default`,
           name: "Tarifa Padrão",
-          description: "Tarifa base da categoria. Selecione datas e hóspedes para ver valores personalizados.",
+          description: "Selecione datas e hóspedes para ver valores personalizados desta categoria.",
           benefits: ["Cálculo em tempo real na página de reserva"],
-          tag: basePrice ? "Base" : undefined,
-          pricePerNight: basePrice || 0,
+          tag: undefined,
+          pricePerNight: 0,
           planId: null,
         });
       }
@@ -1133,7 +1202,7 @@ const BookingEnginePage = () => {
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
-          <p className="text-muted-foreground">Carregando motor de reservas...</p>
+          <p className="text-muted-foreground">{t("bookingEngine.loading")}</p>
         </div>
       </div>
     );
@@ -1144,10 +1213,10 @@ const BookingEnginePage = () => {
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <Card className="max-w-md w-full p-6">
           <div className="text-center">
-            <h2 className="text-2xl font-bold text-slate-900 mb-2">Erro ao carregar motor de reservas</h2>
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">{t("bookingEngine.error.title")}</h2>
             <p className="text-slate-600 mb-6">{error}</p>
             <Button onClick={() => window.location.reload()} variant="default">
-              Tentar novamente
+              {t("bookingEngine.error.retry")}
             </Button>
           </div>
         </Card>
@@ -1161,7 +1230,7 @@ const BookingEnginePage = () => {
         <div className="text-center space-y-4">
           <div className="animate-spin rounded-full h-12 w-12 border-4 border-current border-t-transparent mx-auto" style={{ color: theme.accentColor.replace('text-', '') }}></div>
           <p className={`${theme.textSecondary} text-sm`}>
-            Carregando motor de reservas...
+            {t("bookingEngine.loading")}
           </p>
         </div>
       </div>
@@ -1181,23 +1250,45 @@ const BookingEnginePage = () => {
       <div className={`min-h-screen ${theme.pageBg}`}>
         {/* Header */}
         <header className={`${theme.headerBg} ${theme.headerText} sticky top-0 z-50 ${theme.headerBorder || ""} transition-colors duration-300`}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className={`text-xl md:text-2xl font-bold ${theme.textPrimary}`}>
-                {motorTitle}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3 sm:gap-4">
+                {motorLogo && (
+                  <div className="h-10 w-10 md:h-11 md:w-11 rounded-full bg-white/90 shadow-sm flex items-center justify-center overflow-hidden ring-1 ring-black/5">
+                    <img
+                      src={motorLogo}
+                      alt="Logo"
+                      className="h-8 w-8 md:h-9 md:w-9 object-contain"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
+                    />
+                  </div>
+                )}
+                <div className="flex flex-col">
+                  <span className={`text-lg md:text-2xl font-semibold tracking-tight ${theme.textPrimary}`}>
+                    {motorTitle}
+                  </span>
+                  {motorSubtitle && (
+                    <span className={`text-xs md:text-sm ${theme.headerSubtitle} transition-colors duration-300`}>
+                      {motorSubtitle}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-start sm:justify-end gap-3">
+                <LanguageSelector />
+                <Button
+                  className={`${theme.headerButton} px-5 py-2 rounded-full text-sm md:text-base font-medium shadow-sm hover:shadow-md transition-all duration-200`}
+                  onClick={handleSubmit}
+                >
+                  <Search className="w-4 h-4 mr-2" />
+                  {t("bookingEngine.cta.primary")}
+                </Button>
               </div>
             </div>
-            <Button 
-              className={`${theme.headerButton} px-6 py-2 rounded-lg transition-all duration-200`}
-              onClick={handleSubmit}
-            >
-              <Search className="w-4 h-4 mr-2" />
-              Buscar Quartos
-            </Button>
           </div>
-        </div>
-      </header>
+        </header>
 
       {/* Hero Section with Background Image */}
       <section className={`relative min-h-[500px] md:min-h-[600px] lg:min-h-[700px] flex items-center justify-center overflow-hidden`}>
@@ -1321,9 +1412,9 @@ const BookingEnginePage = () => {
         {/* Estabelecimentos da empresa */}
         {companyEstablishments.length > 1 && (
           <div className="mb-12">
-            <h2 className={`text-2xl font-bold mb-6 ${theme.textPrimary}`}>
-              Estabelecimentos disponíveis
-            </h2>
+              <h2 className={`text-2xl font-bold mb-6 ${theme.textPrimary}`}>
+                {t("bookingEngine.establishments.title")}
+              </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {companyEstablishments.map((est: any) => {
                 const isSelected = selectedEstablishmentId === est.id;
@@ -1369,7 +1460,7 @@ const BookingEnginePage = () => {
             {!selectedEstablishmentId && companyEstablishments.length > 0 && (
               <Card className={`p-8 text-center ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow}`}>
                 <p className={`${theme.textSecondary} text-lg`}>
-                  Selecione um estabelecimento acima para ver os quartos disponíveis.
+                  {t("bookingEngine.establishments.selectPrompt")}
                 </p>
               </Card>
             )}
@@ -1419,11 +1510,23 @@ const BookingEnginePage = () => {
                   {room.plans[0] && (
                     <div className="absolute bottom-4 right-4 z-10">
                       <div className={`${theme.cardBg} ${theme.cardBorder} border rounded-lg px-4 py-2 shadow-lg`}>
-                        <div className={`text-xs ${theme.textMuted} mb-0.5`}>A partir de</div>
-                        <div className={`${theme.priceColor} text-xl font-bold`}>
-                          R$ {room.plans[0].pricePerNight.toFixed(2)}
-                        </div>
-                        <div className={`text-xs ${theme.priceLabel}`}>por noite</div>
+                        {room.plans[0].pricePerNight > 0 ? (
+                          <>
+                            <div className={`text-xs ${theme.textMuted} mb-0.5`}>A partir de</div>
+                            <div className={`${theme.priceColor} text-xl font-bold`}>
+                              R$ {room.plans[0].pricePerNight.toFixed(2)}
+                            </div>
+                            <div className={`text-xs ${theme.priceLabel}`}>por noite</div>
+                          </>
+                        ) : (
+                          <div className="space-y-1">
+                            <div className="h-3 w-20 bg-slate-200/70 dark:bg-slate-700/60 rounded-full animate-pulse" />
+                            <div className="h-4 w-28 bg-slate-200/80 dark:bg-slate-700/70 rounded-full animate-pulse" />
+                            <div className={`text-[11px] ${theme.textMuted}`}>
+                              Selecione datas para ver o preço
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1536,14 +1639,20 @@ const BookingEnginePage = () => {
                                     </div>
                                     <div className="text-right min-w-[140px]">
                                       <div className={`${theme.priceColor} text-2xl font-bold mb-1`}>
-                                        R$ {plan.pricePerNight.toFixed(2)}
+                                        {plan.pricePerNight > 0 && nights > 0 ? (
+                                          <>R$ {plan.pricePerNight.toFixed(2)}</>
+                                        ) : (
+                                          <span className="text-sm text-slate-400">Selecione datas</span>
+                                        )}
                                       </div>
                                       <div className={`text-xs ${theme.priceLabel}`}>
-                                        por noite
+                                        {plan.pricePerNight > 0 && nights > 0
+                                          ? "por noite"
+                                          : "Os valores serão exibidos após escolher datas e hóspedes"}
                                       </div>
-                                      {nights > 0 && (
+                                      {plan.pricePerNight > 0 && nights > 0 && (
                                         <div className={`text-sm ${theme.textMuted} mt-2`}>
-                                          {nights} noite{nights > 1 ? 's' : ''}: R$ {(plan.pricePerNight * nights).toFixed(2)}
+                                          {nights} noite{nights > 1 ? "s" : ""}: R$ {(plan.pricePerNight * nights).toFixed(2)}
                                         </div>
                                       )}
                                     </div>
@@ -1643,34 +1752,57 @@ const BookingEnginePage = () => {
         </div>
       </section>
 
-      {/* Footer */}
+      {/* Footer - estilo moderno inspirado em Booking / Airbnb / Expedia */}
       <footer className={`${theme.footerBg} ${theme.footerBorder} mt-16`}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-6">
+          {/* Linha principal */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div>
-              <h4 className={`text-lg font-bold mb-3 ${theme.textPrimary}`}>
-                {establishmentName || "Seu Estabelecimento"}
-              </h4>
+            {/* Coluna 1 - Marca */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                {motorLogo && (
+                  <div className="h-9 w-9 rounded-full bg-white/90 shadow-sm flex items-center justify-center overflow-hidden ring-1 ring-black/5">
+                    <img
+                      src={motorLogo}
+                      alt="Logo"
+                      className="h-7 w-7 object-contain"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
+                    />
+                  </div>
+                )}
+                <div className="flex flex-col">
+                  <span className={`text-sm font-semibold tracking-tight ${theme.textPrimary}`}>
+                    {motorTitle}
+                  </span>
+                  <span className={`text-xs ${theme.footerText}`}>
+                    Motor de reservas oficial · reserva direta, sem taxas ocultas
+                  </span>
+                </div>
+              </div>
               {establishmentCnpj && (
-                <p className={`text-sm ${theme.footerText}`}>CNPJ: {establishmentCnpj}</p>
+                <p className={`text-xs ${theme.footerText}`}>CNPJ: {establishmentCnpj}</p>
               )}
             </div>
-            <div>
-              <h5 className={`text-sm font-semibold uppercase tracking-wide mb-3 ${theme.textSecondary}`}>
+
+            {/* Coluna 2 - Contato */}
+            <div className="space-y-3">
+              <h5 className={`text-xs font-semibold uppercase tracking-[0.18em] ${theme.textSecondary}`}>
                 Contato
               </h5>
               <div className="space-y-2 text-sm">
                 {establishmentPhone && (
-                  <p className={theme.footerText}>
-                    <span className="font-medium">Telefone:</span>{" "}
+                  <p className={`flex items-center gap-2 ${theme.footerText}`}>
+                    <Phone className="w-4 h-4 opacity-70" />
                     <a href={`tel:${establishmentPhone}`} className="hover:underline">
                       {establishmentPhone}
                     </a>
                   </p>
                 )}
                 {establishmentWhatsappNumber && (
-                  <p className={theme.footerText}>
-                    <span className="font-medium">WhatsApp:</span>{" "}
+                  <p className={`flex items-center gap-2 ${theme.footerText}`}>
+                    <MessageCircle className="w-4 h-4 opacity-70" />
                     <a
                       href={`https://wa.me/${encodeURIComponent(`${establishmentWhatsappDdi || ""}${establishmentWhatsappNumber}`)}`}
                       target="_blank"
@@ -1682,8 +1814,8 @@ const BookingEnginePage = () => {
                   </p>
                 )}
                 {establishmentEmail && (
-                  <p className={theme.footerText}>
-                    <span className="font-medium">E-mail:</span>{" "}
+                  <p className={`flex items-center gap-2 ${theme.footerText}`}>
+                    <Mail className="w-4 h-4 opacity-70" />
                     <a href={`mailto:${establishmentEmail}`} className="hover:underline">
                       {establishmentEmail}
                     </a>
@@ -1691,10 +1823,104 @@ const BookingEnginePage = () => {
                 )}
               </div>
             </div>
-            <div className="md:text-right">
+
+            {/* Coluna 3 - Experiência & tecnologia */}
+            <div className="space-y-3 md:text-right">
+              <h5 className={`text-xs font-semibold uppercase tracking-[0.18em] ${theme.textSecondary}`}>
+                Experiência segura
+              </h5>
               <p className={`text-sm ${theme.footerText}`}>
-                Motor de reservas hospedado em plataforma SaaS.
+                Pagamentos criptografados, disponibilidade em tempo real e confirmação imediata da sua reserva.
               </p>
+              <div className="inline-flex items-center gap-2 text-xs text-slate-400 mt-2 md:justify-end">
+                <Globe2 className="w-3 h-3" />
+                <span>Tecnologia SaaS para hospitalidade</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Redes sociais */}
+          {(socialInstagram || socialFacebook || socialTwitter || socialYoutube || socialWebsite || socialWhatsapp) && (
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <span className={`text-[11px] ${theme.footerText}`}>Siga-nos:</span>
+              {socialInstagram && (
+                <a
+                  href={socialInstagram}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="Instagram"
+                >
+                  <Instagram className="w-4 h-4" />
+                </a>
+              )}
+              {socialFacebook && (
+                <a
+                  href={socialFacebook}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="Facebook"
+                >
+                  <Facebook className="w-4 h-4" />
+                </a>
+              )}
+              {socialTwitter && (
+                <a
+                  href={socialTwitter}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="Twitter / X"
+                >
+                  <Twitter className="w-4 h-4" />
+                </a>
+              )}
+              {socialYoutube && (
+                <a
+                  href={socialYoutube}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="YouTube"
+                >
+                  <Youtube className="w-4 h-4" />
+                </a>
+              )}
+              {socialWhatsapp && (
+                <a
+                  href={socialWhatsapp}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-500 text-white shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="WhatsApp"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                </a>
+              )}
+              {socialWebsite && (
+                <a
+                  href={socialWebsite}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border ${theme.footerBorder}`}
+                >
+                  <Globe2 className="w-3 h-3" />
+                  <span>Site oficial</span>
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* Linha inferior */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pt-4 border-t border-white/5 border-slate-200/10">
+              <p className={`text-[11px] ${theme.footerText}`}>
+              © {new Date().getFullYear()} {motorTitle}. Todos os direitos reservados.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
+              <span>Idioma: Português (Brasil)</span>
+              <span className="hidden md:inline-block w-px h-3 bg-slate-700/40" />
+              <span>Moeda: BRL (R$)</span>
             </div>
           </div>
         </div>

@@ -20,10 +20,18 @@ const CustomDomainDetector = () => {
     const checkCustomDomain = async () => {
       try {
         const currentHost = typeof window !== "undefined" ? window.location.host : undefined;
+        const currentProtocol = typeof window !== "undefined" ? window.location.protocol : undefined;
         
         if (!currentHost) {
           setIsCustomDomain(false);
           setIsLoading(false);
+          return;
+        }
+
+        // Se estiver em HTTP, redirecionar para HTTPS (Vercel deve fazer isso, mas garantimos aqui também)
+        if (currentProtocol === "http:") {
+          const httpsUrl = `https://${currentHost}${location.pathname}${location.search}`;
+          window.location.replace(httpsUrl);
           return;
         }
 
@@ -77,7 +85,7 @@ const CustomDomainDetector = () => {
     };
 
     checkCustomDomain();
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   if (isLoading) {
     return (
