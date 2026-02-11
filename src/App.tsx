@@ -151,6 +151,8 @@ const AppContent = () => {
             <Route path="/motor" element={<BookingEnginePage />} />
             <Route path="/motor/:companySlug" element={<BookingEnginePage />} />
             <Route path="/motor/:companySlug/categoria/:categoryId" element={<CategoryDetailPage />} />
+            {/* Rota para categoria em domínio personalizado (sem /motor/) */}
+            <Route path="/categoria/:categoryId" element={<CategoryDetailPage />} />
             <Route path="/reservar/:establishmentSlug" element={<PublicReservation />} />
             <Route path="/policies/:slug/:token" element={<PublicPolicies />} />
             <Route path="/policies/:token" element={<PublicPolicies />} />

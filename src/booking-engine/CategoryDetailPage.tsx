@@ -440,7 +440,11 @@ const CategoryDetailPage = () => {
               <Button
                 variant="outline"
                 className={`${theme.secondaryButton} ${theme.secondaryButtonHover} border rounded-full px-4 py-2 text-sm font-medium`}
-                onClick={() => navigate(`/motor/${companySlug || ""}`)}
+                onClick={() => {
+                  // Se não houver companySlug (domínio personalizado), voltar para raiz
+                  const backPath = companySlug ? `/motor/${companySlug}` : `/`;
+                  navigate(backPath);
+                }}
               >
                 <ChevronLeft className="w-4 h-4 mr-2" />
                 Voltar

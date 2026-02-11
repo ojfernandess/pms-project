@@ -714,9 +714,14 @@ const BookingEnginePage = () => {
           return;
         }
       } else if (currentHost) {
-        // Normalizar o domínio (remover www. se presente, converter para minúsculas)
+        // Normalizar o domínio (remover protocolo, www., converter para minúsculas)
         const normalizeDomain = (domain: string) => {
-          return domain.toLowerCase().replace(/^www\./, "");
+          if (!domain) return "";
+          return domain
+            .toLowerCase()
+            .replace(/^https?:\/\//, "") // Remover http:// ou https://
+            .replace(/^www\./, "") // Remover www.
+            .split("/")[0]; // Pegar apenas o host (remover path se houver)
         };
         
         const normalizedHost = normalizeDomain(currentHost);
@@ -731,9 +736,7 @@ const BookingEnginePage = () => {
         const companyByDomain = companies?.find((company) => {
           if (!company.booking_engine_custom_domain) return false;
           const normalizedConfig = normalizeDomain(company.booking_engine_custom_domain);
-          return normalizedConfig === normalizedHost || 
-                 normalizedConfig === currentHost.toLowerCase() ||
-                 company.booking_engine_custom_domain.toLowerCase() === currentHost.toLowerCase();
+          return normalizedConfig === normalizedHost;
         });
 
         if (companyByDomain) {
@@ -748,9 +751,7 @@ const BookingEnginePage = () => {
           const byDomain = hotelSettings?.find((setting) => {
             if (!setting.booking_engine_custom_domain) return false;
             const normalizedConfig = normalizeDomain(setting.booking_engine_custom_domain);
-            return normalizedConfig === normalizedHost || 
-                   normalizedConfig === currentHost.toLowerCase() ||
-                   setting.booking_engine_custom_domain.toLowerCase() === currentHost.toLowerCase();
+            return normalizedConfig === normalizedHost;
           });
           
           if (byDomain && (byDomain as any).establishment_id) {
@@ -1635,7 +1636,11 @@ const BookingEnginePage = () => {
                         if (adults) params.set("adults", adults);
                         if (children) params.set("children", children);
                         if (coupon) params.set("coupon", coupon);
-                        navigate(`/motor/${companySlug || ""}/categoria/${room.categoryId}?${params.toString()}`);
+                        // Se não houver companySlug (domínio personalizado), usar rota sem /motor/
+                        const categoryPath = companySlug 
+                          ? `/motor/${companySlug}/categoria/${room.categoryId}`
+                          : `/categoria/${room.categoryId}`;
+                        navigate(`${categoryPath}?${params.toString()}`);
                       }}
                     >
                       Saiba mais
