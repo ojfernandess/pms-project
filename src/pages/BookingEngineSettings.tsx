@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
@@ -23,6 +23,8 @@ const BookingEngineSettings = () => {
   const queryClient = useQueryClient();
   const { settings: siteSettings } = useSiteSettings();
   const [showDnsHelp, setShowDnsHelp] = useState(false);
+  const [localTitle, setLocalTitle] = useState<string>("");
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Buscar empresa atual
   // Se não houver selectedEstablishment, buscar através de qualquer estabelecimento do usuário
@@ -190,20 +192,102 @@ const BookingEngineSettings = () => {
     true
   );
 
-  // Detectar domínio base
-  const systemBaseDomain = typeof window !== "undefined" ? window.location.host : "";
+  // Detectar domínio base - usar pms_base_url das configurações do site, com fallback para window.location.host
+  const systemBaseDomain = (() => {
+    // Priorizar pms_base_url das configurações do site
+    if (siteSettings?.pms_base_url) {
+      try {
+        const url = new URL(siteSettings.pms_base_url);
+        return url.host;
+      } catch {
+        // Se não for uma URL válida, usar como está (pode ser apenas o hostname)
+        return siteSettings.pms_base_url.replace(/^https?:\/\//, '').split('/')[0];
+      }
+    }
+    // Fallback para window.location.host
+    if (typeof window !== "undefined") {
+      return window.location.host;
+    }
+    return "";
+  })();
+
+  // Função helper para gerar slug a partir do título
+  const generateSlug = (title: string): string => {
+    if (!title) return "";
+    let slug = title
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // Remove acentos
+      .replace(/[^a-z0-9]+/g, "-") // Substitui não-alfanuméricos por hífen
+      .replace(/^-+|-+$/g, ""); // Remove hífens no início/fim
+    
+    // Garantir que o slug não esteja vazio
+    if (!slug) {
+      slug = "motor-reservas";
+    }
+    
+    return slug;
+  };
 
   // Mutation para atualizar empresa
   const updateCompanyMutation = useMutation({
     mutationFn: async (updates: any) => {
       if (!company?.id) throw new Error("Empresa não encontrada");
+      
+      // Se o título do motor mudou, gerar slug automaticamente
+      if (updates.booking_engine_title !== undefined) {
+        const newTitle = updates.booking_engine_title?.trim() || null;
+        if (newTitle) {
+          let generatedSlug = generateSlug(newTitle);
+          
+          // Verificar se o slug já existe para outra empresa
+          // Se existir, adicionar sufixo numérico
+          let finalSlug = generatedSlug;
+          let suffix = 1;
+          while (true) {
+            const { data: existing } = await supabase
+              .from("companies")
+              .select("id")
+              .eq("booking_engine_slug", finalSlug)
+              .neq("id", company.id)
+              .maybeSingle();
+            
+            if (!existing) {
+              break; // Slug disponível
+            }
+            
+            finalSlug = `${generatedSlug}-${suffix}`;
+            suffix++;
+            
+            // Limitar tentativas para evitar loop infinito
+            if (suffix > 100) {
+              finalSlug = `${generatedSlug}-${Date.now()}`;
+              break;
+            }
+          }
+          
+          updates.booking_engine_slug = finalSlug;
+          console.log("[BookingEngineSettings] Gerando slug:", { title: newTitle, slug: finalSlug });
+        } else {
+          updates.booking_engine_slug = null;
+        }
+      }
+      
+      console.log("[BookingEngineSettings] Atualizando empresa com:", updates);
+      
       const { data, error } = await supabase
         .from("companies")
         .update(updates)
         .eq("id", company.id)
         .select()
         .single();
-      if (error) throw error;
+      
+      if (error) {
+        console.error("[BookingEngineSettings] Erro ao atualizar:", error);
+        throw error;
+      }
+      
+      console.log("[BookingEngineSettings] Empresa atualizada:", data);
       return data;
     },
     onSuccess: () => {
@@ -287,6 +371,20 @@ const BookingEngineSettings = () => {
     },
   });
 
+  // Sincronizar título local com o da empresa
+  useEffect(() => {
+    setLocalTitle(company?.booking_engine_title || "");
+  }, [company?.booking_engine_title]);
+
+  // Cleanup do timeout ao desmontar
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
+
   if (isLoadingCompany || isLoadingEngine || isLoadingAll) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -302,6 +400,9 @@ const BookingEngineSettings = () => {
       </Card>
     );
   }
+
+  // Gerar slug a partir do título local (para preview)
+  const previewSlug = localTitle ? generateSlug(localTitle) : (company?.booking_engine_slug || "");
 
   const isEstablishmentInEngine = (establishmentId: string) => {
     return engineEstablishments?.some(
@@ -346,15 +447,42 @@ const BookingEngineSettings = () => {
                 </Label>
                 <Input
                   placeholder="Ex: Motor de Reservas"
-                  value={company?.booking_engine_title || ""}
+                  value={localTitle}
                   onChange={(e) => {
+                    const newTitle = e.target.value;
+                    setLocalTitle(newTitle);
+                    
+                    // Limpar timeout anterior
+                    if (saveTimeoutRef.current) {
+                      clearTimeout(saveTimeoutRef.current);
+                    }
+                    
+                    // Salvar após um pequeno delay (debounce)
+                    saveTimeoutRef.current = setTimeout(() => {
+                      updateCompanyMutation.mutate({
+                        booking_engine_title: newTitle.trim() || null,
+                      });
+                    }, 1000);
+                  }}
+                  onBlur={() => {
+                    // Limpar timeout pendente
+                    if (saveTimeoutRef.current) {
+                      clearTimeout(saveTimeoutRef.current);
+                      saveTimeoutRef.current = null;
+                    }
+                    // Garantir que salve ao sair do campo
                     updateCompanyMutation.mutate({
-                      booking_engine_title: e.target.value.trim() || null,
+                      booking_engine_title: localTitle.trim() || null,
                     });
                   }}
                 />
                 <p className="text-xs text-muted-foreground">
                   Título exibido no header do motor de reservas. Deixe em branco para usar o nome da empresa.
+                  {previewSlug && (
+                    <span className="block mt-1 text-blue-600 font-medium">
+                      URL: /motor/{previewSlug}
+                    </span>
+                  )}
                 </p>
               </div>
 

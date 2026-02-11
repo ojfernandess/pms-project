@@ -143,8 +143,9 @@ const AppContent = () => {
             <Route path="/payment/return" element={<PaymentSuccess />} />
             <Route path="/quote-payment/:paymentIntentId" element={<QuotePaymentPage />} />
             <Route path="/quote-room-selection/:selectionToken" element={<QuoteRoomSelection />} />
+            {/* Motor de Reservas - Página Pública */}
             <Route path="/motor" element={<BookingEnginePage />} />
-            <Route path="/motor/:establishmentSlug" element={<BookingEnginePage />} />
+            <Route path="/motor/:companySlug" element={<BookingEnginePage />} />
             <Route path="/reservar/:establishmentSlug" element={<PublicReservation />} />
             <Route path="/policies/:slug/:token" element={<PublicPolicies />} />
             <Route path="/policies/:token" element={<PublicPolicies />} />

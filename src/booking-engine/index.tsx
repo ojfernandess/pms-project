@@ -522,12 +522,13 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
 };
 
 const BookingEnginePage = () => {
-  const { establishmentSlug } = useParams<{ establishmentSlug?: string }>();
+  const { companySlug } = useParams<{ companySlug?: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { settings: siteSettings, isLoading: isLoadingSiteSettings } = useSiteSettings();
 
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [company, setCompany] = useState<any>(null);
   const [establishment, setEstablishment] = useState<any>(null);
   const [companyEstablishments, setCompanyEstablishments] = useState<any[]>([]);
@@ -589,58 +590,97 @@ const BookingEnginePage = () => {
   }, [company, hotelSettings]);
 
   useEffect(() => {
-    if (isLoadingSiteSettings || !siteSettings) {
+    // Resetar erro ao iniciar carregamento
+    setError(null);
+    
+    if (isLoadingSiteSettings) {
       return;
     }
 
     const load = async () => {
-      const host = typeof window !== "undefined" ? window.location.host : undefined;
+      // Se não houver siteSettings, ainda tentar carregar (pode funcionar sem feature flags)
+      const effectiveSiteSettings = siteSettings || {
+        features_enabled: {},
+      } as any;
+      // Detectar host atual (domínio que o usuário está acessando)
+      // Isso pode ser o domínio personalizado ou o domínio padrão do PMS
+      const currentHost = typeof window !== "undefined" ? window.location.host : undefined;
 
       let initialEstablishment: any = null;
       let foundCompany: any = null;
 
-      if (establishmentSlug) {
-        let establishmentQuery = supabase.from("establishments" as any).select("*");
+      // Buscar empresa por slug do motor de reservas
+      if (companySlug) {
+        console.log("[BookingEngine] Buscando empresa por slug:", companySlug);
         
-        if (!isNaN(Number(establishmentSlug))) {
-          establishmentQuery = establishmentQuery.eq("numeric_id", parseInt(establishmentSlug));
-        } else {
-          establishmentQuery = establishmentQuery.eq("slug", establishmentSlug);
+        const { data: companyBySlug, error: companyError } = await supabase
+          .from("companies")
+          .select("*")
+          .eq("booking_engine_slug", companySlug)
+          .maybeSingle();
+
+        if (companyError) {
+          console.error("[BookingEngine] Erro ao buscar empresa por slug:", companyError);
+          setError("Erro ao buscar empresa. Verifique se o motor de reservas está configurado corretamente.");
+          setLoading(false);
+          return;
         }
 
-        const { data: establishments } = await establishmentQuery.limit(1);
-        if (establishments && establishments.length > 0) {
-          initialEstablishment = establishments[0];
+        if (companyBySlug) {
+          console.log("[BookingEngine] Empresa encontrada:", companyBySlug.id, companyBySlug.name);
+          foundCompany = companyBySlug;
+        } else {
+          // Tentar buscar todas as empresas para debug
+          const { data: allCompanies } = await supabase
+            .from("companies")
+            .select("id, name, booking_engine_slug, booking_engine_title")
+            .not("booking_engine_slug", "is", null)
+            .limit(10);
+          
+          console.log("[BookingEngine] Empresas com slug configurado:", allCompanies);
+          console.log("[BookingEngine] Slug buscado:", companySlug);
+          console.log("[BookingEngine] Comparação exata:", allCompanies?.map(c => ({
+            slug: c.booking_engine_slug,
+            matches: c.booking_engine_slug === companySlug
+          })));
+          
+          // Se não encontrou por slug, mostrar erro
+          // Não fazer fallback para estabelecimentos pois o slug é específico para empresas
+          setError(`Empresa não encontrada com o slug "${companySlug}". Verifique se o slug do motor de reservas está configurado corretamente nas configurações.`);
+          setLoading(false);
+          return;
         }
-      } else if (host) {
+      } else if (currentHost) {
+        // Verificar se o domínio atual corresponde a um domínio personalizado configurado
         const { data: companyByDomain } = await supabase
-          .from("companies" as any)
+          .from("companies")
           .select("*")
-          .eq("booking_engine_custom_domain", host)
+          .eq("booking_engine_custom_domain", currentHost)
           .maybeSingle();
 
         if (companyByDomain) {
           foundCompany = companyByDomain;
         } else {
           const { data: byDomain } = await supabase
-            .from("hotel_settings" as any)
+            .from("hotel_settings")
             .select("establishment_id, booking_engine_custom_domain")
-            .eq("booking_engine_custom_domain", host)
+            .eq("booking_engine_custom_domain", currentHost)
             .maybeSingle();
 
           if (byDomain && (byDomain as any).establishment_id) {
             const { data: est } = await supabase
-              .from("establishments" as any)
+              .from("establishments")
               .select("*")
               .eq("id", (byDomain as any).establishment_id)
               .maybeSingle();
             if (est) initialEstablishment = est;
           } else {
-            const parts = host.split(".");
+            // Tentar detectar pelo subdomínio (ex: reservas.exemplo.com -> exemplo)
+            const parts = currentHost.split(".");
             if (parts.length > 2) {
               const potentialSlug = parts[0];
               const { data: est } = await supabase
-                .from("establishments" as any)
+                .from("establishments")
                 .select("*")
                 .eq("slug", potentialSlug)
                 .maybeSingle();
@@ -650,31 +690,78 @@ const BookingEnginePage = () => {
         }
       }
 
-      if (!initialEstablishment && !foundCompany) {
-        navigate("/", { replace: true });
-        return;
-      }
-
-      if (initialEstablishment && !foundCompany) {
-        const { data: companyData } = await supabase
-          .from("companies" as any)
+      // Se encontrou estabelecimento, buscar empresa e verificar se está no motor
+      if (initialEstablishment) {
+        // Buscar empresa do estabelecimento
+        const { data: companyData, error: companyError } = await supabase
+          .from("companies")
           .select("*")
           .eq("id", initialEstablishment.company_id)
           .maybeSingle();
+        
+        if (companyError) {
+          console.error("[BookingEngine] Erro ao buscar empresa:", companyError);
+          setError("Erro ao buscar empresa. Verifique se o motor de reservas está configurado corretamente.");
+          setLoading(false);
+          return;
+        }
+        
         if (companyData) {
           foundCompany = companyData;
+          
+          // Verificar se o estabelecimento está ativo no motor de reservas
+          const { data: engineCheck, error: engineCheckError } = await supabase
+            .from("company_booking_engine_establishments")
+            .select("id, is_active")
+            .eq("company_id", foundCompany.id)
+            .eq("establishment_id", initialEstablishment.id)
+            .eq("is_active", true)
+            .maybeSingle();
+
+          if (engineCheckError && engineCheckError.code !== "PGRST116") {
+            console.error("[BookingEngine] Erro ao verificar motor:", engineCheckError);
+          }
+
+          // Se não estiver no motor, mostrar erro
+          if (!engineCheck || !engineCheck.is_active) {
+            setError("Este estabelecimento não está disponível no motor de reservas.");
+            setLoading(false);
+            return;
+          }
+        } else {
+          setError("Empresa não encontrada para este estabelecimento.");
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Se encontrou empresa diretamente (por domínio), verificar se tem estabelecimentos no motor
+      if (foundCompany && !initialEstablishment) {
+        // Verificar se a empresa tem estabelecimentos no motor
+        const { data: engineCheck } = await supabase
+          .from("company_booking_engine_establishments")
+          .select("id")
+          .eq("company_id", foundCompany.id)
+          .eq("is_active", true)
+          .limit(1);
+
+        if (!engineCheck || engineCheck.length === 0) {
+          setError("Nenhum estabelecimento disponível no motor de reservas para esta empresa.");
+          setLoading(false);
+          return;
         }
       }
 
       if (!foundCompany) {
-        navigate("/", { replace: true });
+        setError("Empresa não encontrada. Verifique se o motor de reservas está configurado corretamente.");
+        setLoading(false);
         return;
       }
 
       setCompany(foundCompany);
 
       const enabled = isFeatureEnabledForEstablishment(
-        (siteSettings?.features_enabled as any)?.booking_engine_enabled,
+        (effectiveSiteSettings?.features_enabled as any)?.booking_engine_enabled,
         foundCompany.id,
         true
       );
@@ -686,20 +773,29 @@ const BookingEnginePage = () => {
           const params = new URLSearchParams(searchParams);
           navigate(`/reservar/${slug}?${params.toString()}`, { replace: true });
         } else {
-          navigate("/", { replace: true });
+          setError("Motor de reservas não está habilitado para esta empresa.");
+          setLoading(false);
         }
         return;
       }
 
       setEngineEnabled(true);
 
-      const { data: engineEstablishments } = await supabase
-        .from("company_booking_engine_establishments" as any)
+      // Buscar estabelecimentos ativos no motor de reservas
+      const { data: engineEstablishments, error: engineError } = await supabase
+        .from("company_booking_engine_establishments")
         .select("*, establishments(*)")
         .eq("company_id", foundCompany.id)
         .eq("is_active", true)
         .order("display_order")
         .order("created_at");
+
+      if (engineError) {
+        console.error("[BookingEngine] Erro ao buscar estabelecimentos do motor:", engineError);
+        setError("Erro ao carregar estabelecimentos do motor de reservas.");
+        setLoading(false);
+        return;
+      }
 
       if (engineEstablishments && engineEstablishments.length > 0) {
         const establishmentsList = engineEstablishments
@@ -717,12 +813,21 @@ const BookingEnginePage = () => {
           setEstablishment(toSelect);
         }
       } else {
-        const { data: allEsts } = await supabase
-          .from("establishments" as any)
+        // Se não houver estabelecimentos configurados no motor, usar todos os estabelecimentos ativos da empresa
+        // (fallback para compatibilidade)
+        const { data: allEsts, error: allEstsError } = await supabase
+          .from("establishments")
           .select("*")
           .eq("company_id", foundCompany.id)
           .eq("is_active", true)
           .order("name");
+        
+        if (allEstsError) {
+          console.error("[BookingEngine] Erro ao buscar estabelecimentos:", allEstsError);
+          setError("Erro ao carregar estabelecimentos.");
+          setLoading(false);
+          return;
+        }
         
         if (allEsts && allEsts.length > 0) {
           setCompanyEstablishments(allEsts);
@@ -735,6 +840,10 @@ const BookingEnginePage = () => {
             setSelectedEstablishmentId(toSelect.id);
             setEstablishment(toSelect);
           }
+        } else {
+          setError("Nenhum estabelecimento encontrado para esta empresa.");
+          setLoading(false);
+          return;
         }
       }
 
@@ -742,7 +851,7 @@ const BookingEnginePage = () => {
     };
 
     load();
-  }, [establishmentSlug, isLoadingSiteSettings, siteSettings, navigate, searchParams]);
+  }, [companySlug, isLoadingSiteSettings, siteSettings, navigate, searchParams]);
 
   useEffect(() => {
     if (!selectedEstablishmentId || !engineEnabled) {
@@ -1020,6 +1129,33 @@ const BookingEnginePage = () => {
   };
 
   if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">Carregando motor de reservas...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <Card className="max-w-md w-full p-6">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">Erro ao carregar motor de reservas</h2>
+            <p className="text-slate-600 mb-6">{error}</p>
+            <Button onClick={() => window.location.reload()} variant="default">
+              Tentar novamente
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!engineEnabled || !company) {
     return (
       <div className={`min-h-screen flex items-center justify-center ${theme.pageBg}`}>
         <div className="text-center space-y-4">
