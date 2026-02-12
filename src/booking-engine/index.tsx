@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, Linkedin, ArrowRight, Info } from "lucide-react";
+import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, Globe2, Instagram, Facebook, Twitter, Youtube, Linkedin, ArrowRight, Info, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -51,6 +51,30 @@ const animationStyles = `
     }
   }
   
+  @keyframes pulse-ring {
+    0% {
+      transform: scale(0.8);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.2);
+      opacity: 0.5;
+    }
+    100% {
+      transform: scale(1.5);
+      opacity: 0;
+    }
+  }
+
+  @keyframes pulse-button {
+    0%, 100% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.05);
+    }
+  }
+
   @keyframes slideInRight {
     from {
       opacity: 0;
@@ -638,6 +662,7 @@ const BookingEnginePage = () => {
   const [showSearchEstablishmentDialog, setShowSearchEstablishmentDialog] = useState(false);
   const [searchDialogCity, setSearchDialogCity] = useState<string>("all");
   const [showPriceInfoDialog, setShowPriceInfoDialog] = useState(false);
+  const [establishmentsPageIndex, setEstablishmentsPageIndex] = useState(0);
 
   const [checkin, setCheckin] = useState(searchParams.get("checkin") || "");
   const [checkout, setCheckout] = useState(searchParams.get("checkout") || "");
@@ -750,10 +775,13 @@ const BookingEnginePage = () => {
   const socialWebsite = company?.booking_engine_social_website || null;
   const socialWhatsapp = company?.booking_engine_social_whatsapp || null;
 
-  // Chat Chatwoot
+  // Chat (Chatwoot ou WhatsApp)
   const chatEnabled = company?.booking_engine_chat_enabled || false;
+  const chatType = company?.booking_engine_chat_type || "chatwoot";
   const chatBaseUrl = company?.booking_engine_chat_base_url || null;
   const chatWebsiteToken = company?.booking_engine_chat_website_token || null;
+  const whatsappDdi = company?.booking_engine_contact_whatsapp_ddi || null;
+  const whatsappNumber = company?.booking_engine_contact_whatsapp_number || null;
 
   // Atualizar favicon dinamicamente (identidade exclusiva do motor)
   useEffect(() => {
@@ -775,10 +803,10 @@ const BookingEnginePage = () => {
     // evitando mostrar branding do sistema nesta página.
   }, [motorFavicon]);
 
-  // Carregar Chatwoot quando habilitado
+  // Carregar Chatwoot quando habilitado (apenas se tipo for chatwoot)
   useEffect(() => {
-    if (!chatEnabled || !chatBaseUrl || !chatWebsiteToken) {
-      // Se o chat não estiver habilitado ou faltar configuração, remover script existente
+    // Se não estiver habilitado, ou for WhatsApp, ou faltar configuração do Chatwoot, remover script
+    if (!chatEnabled || chatType !== "chatwoot" || !chatBaseUrl || !chatWebsiteToken) {
       const existingScript = document.querySelector('script[data-chatwoot]');
       if (existingScript) {
         existingScript.remove();
@@ -828,7 +856,7 @@ const BookingEnginePage = () => {
         scriptToRemove.remove();
       }
     };
-  }, [chatEnabled, chatBaseUrl, chatWebsiteToken]);
+  }, [chatEnabled, chatType, chatBaseUrl, chatWebsiteToken]);
 
   useEffect(() => {
     // Resetar erro ao iniciar carregamento
@@ -1318,6 +1346,11 @@ const BookingEnginePage = () => {
     
     return result;
   }, [companyEstablishments, establishmentsWithCities, selectedCity]);
+
+  // Resetar índice da página quando os estabelecimentos filtrados mudarem
+  useEffect(() => {
+    setEstablishmentsPageIndex(0);
+  }, [selectedCity, filteredEstablishments.length]);
 
   // Carregar categorias de todos os estabelecimentos ativos (ou apenas do selecionado)
   useEffect(() => {
@@ -2138,8 +2171,12 @@ const BookingEnginePage = () => {
             <h2 className={`text-2xl font-bold mb-6 ${theme.textPrimary}`}>
                 {t("bookingEngine.establishments.title")}
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredEstablishments.map((est: any) => {
+            <div className="relative">
+              {/* Container com scroll horizontal ou grid limitado */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 relative">
+                {filteredEstablishments
+                  .slice(establishmentsPageIndex, establishmentsPageIndex + 3)
+                  .map((est: any) => {
                 const isSelected = selectedEstablishmentId === est.id;
                 const estWithData = establishmentsWithCities.find((e: any) => e.id === est.id);
                 const city = estWithData?.city;
@@ -2219,6 +2256,47 @@ const BookingEnginePage = () => {
                   </Card>
                 );
               })}
+              </div>
+              
+              {/* Navegação com setas */}
+              {filteredEstablishments.length > 3 && (
+                <div className="flex items-center justify-center gap-4 mt-6">
+                  {/* Botão Anterior */}
+                  <button
+                    onClick={() => setEstablishmentsPageIndex(Math.max(0, establishmentsPageIndex - 3))}
+                    disabled={establishmentsPageIndex === 0}
+                    className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
+                      establishmentsPageIndex === 0
+                        ? `opacity-50 cursor-not-allowed ${theme.cardBg} ${theme.cardBorder}`
+                        : `${theme.primaryButton} ${theme.primaryButtonHover} shadow-md hover:shadow-lg`
+                    }`}
+                    aria-label="Estabelecimentos anteriores"
+                  >
+                    <ChevronLeft className={`w-5 h-5 ${establishmentsPageIndex === 0 ? theme.textMuted : 'text-white'}`} />
+                  </button>
+                  
+                  {/* Indicador de página */}
+                  <div className={`flex items-center gap-2 ${theme.textSecondary} text-sm`}>
+                    <span>
+                      {Math.floor(establishmentsPageIndex / 3) + 1} de {Math.ceil(filteredEstablishments.length / 3)}
+                    </span>
+                  </div>
+                  
+                  {/* Botão Próximo */}
+                  <button
+                    onClick={() => setEstablishmentsPageIndex(Math.min(filteredEstablishments.length - 3, establishmentsPageIndex + 3))}
+                    disabled={establishmentsPageIndex >= filteredEstablishments.length - 3}
+                    className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
+                      establishmentsPageIndex >= filteredEstablishments.length - 3
+                        ? `opacity-50 cursor-not-allowed ${theme.cardBg} ${theme.cardBorder}`
+                        : `${theme.primaryButton} ${theme.primaryButtonHover} shadow-md hover:shadow-lg`
+                    }`}
+                    aria-label="Próximos estabelecimentos"
+                  >
+                    <ChevronRight className={`w-5 h-5 ${establishmentsPageIndex >= filteredEstablishments.length - 3 ? theme.textMuted : 'text-white'}`} />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -2688,7 +2766,7 @@ const BookingEnginePage = () => {
                 )}
                 {contactWhatsappNumber && (
                   <p className={`flex items-center gap-2 ${theme.footerText}`}>
-                    <MessageCircle className="w-4 h-4 opacity-70" />
+                    <img src="/whatsapp.png" alt="WhatsApp" className="w-4 h-4 opacity-70 object-contain" />
                     <a
                       href={`https://wa.me/${encodeURIComponent(`${contactWhatsappDdi || ""}${contactWhatsappNumber}`)}`}
                       target="_blank"
@@ -2792,7 +2870,7 @@ const BookingEnginePage = () => {
                   className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-500 text-white shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
                   aria-label="WhatsApp"
                 >
-                  <MessageCircle className="w-4 h-4" />
+                  <img src="/whatsapp.png" alt="WhatsApp" className="w-4 h-4 object-contain" />
                 </a>
               )}
               {socialWebsite && (
@@ -3126,6 +3204,34 @@ const BookingEnginePage = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Botão Flutuante do WhatsApp */}
+      {chatEnabled && chatType === "whatsapp" && whatsappDdi && whatsappNumber && (
+        <div className="fixed bottom-6 right-6 z-50">
+          {/* Anel pulsante */}
+          <div className="absolute inset-0 rounded-full bg-green-500 opacity-75 animate-[pulse-ring_2s_cubic-bezier(0.4,0,0.6,1)_infinite]"></div>
+          {/* Segundo anel pulsante com delay */}
+          <div className="absolute inset-0 rounded-full bg-green-500 opacity-50 animate-[pulse-ring_2s_cubic-bezier(0.4,0,0.6,1)_infinite_0.5s]"></div>
+          <a
+            href={`https://wa.me/${whatsappDdi}${whatsappNumber.replace(/\D/g, '')}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="relative flex items-center justify-center w-20 h-20 bg-green-500 hover:bg-green-600 rounded-full shadow-2xl hover:shadow-green-500/50 transition-all duration-300 hover:scale-110 group animate-[pulse-button_2s_ease-in-out_infinite]"
+            aria-label="Fale conosco no WhatsApp"
+          >
+            <img 
+              src="/whatsapp.png" 
+              alt="WhatsApp" 
+              className="w-12 h-12 object-contain relative z-10"
+            />
+            {/* Tooltip */}
+            <div className="absolute right-full mr-3 px-3 py-2 bg-slate-900 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none z-20">
+              Fale conosco no WhatsApp
+              <div className="absolute left-full top-1/2 -translate-y-1/2 border-4 border-transparent border-l-slate-900"></div>
+            </div>
+          </a>
+        </div>
+      )}
       </div>
     </>
   );

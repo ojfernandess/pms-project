@@ -1682,60 +1682,116 @@ const BookingEngineSettings = () => {
                       <div className="space-y-4">
                         <div className="space-y-2">
                           <Label className="text-sm font-medium text-slate-700">Tipo de Chat</Label>
-                          <Select defaultValue="chatwoot" disabled>
+                          <Select 
+                            defaultValue={company?.booking_engine_chat_type || "chatwoot"}
+                            onValueChange={(value) => {
+                              updateCompanyMutation.mutate({
+                                booking_engine_chat_type: value,
+                              });
+                            }}
+                          >
                             <SelectTrigger className="h-11">
                               <SelectValue placeholder="Selecione o tipo de chat" />
                         </SelectTrigger>
                         <SelectContent>
                               <SelectItem value="chatwoot">Chatwoot</SelectItem>
+                              <SelectItem value="whatsapp">WhatsApp</SelectItem>
                         </SelectContent>
                       </Select>
                           <p className="text-xs text-slate-500">
-                            Atualmente disponível: Chatwoot. Mais opções em breve.
+                            Escolha entre Chatwoot ou WhatsApp para contato direto com hóspedes
                           </p>
                     </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium text-slate-700">BASE_URL do Chatwoot</Label>
-                            <Input
-                              placeholder="https://app.agentslabs.cloud"
-                              defaultValue={company?.booking_engine_chat_base_url || ""}
-                              onBlur={(e) => {
-                                const value = e.target.value.trim() || null;
-                                if (value !== (company?.booking_engine_chat_base_url || "")) {
-                                  updateCompanyMutation.mutate({
-                                    booking_engine_chat_base_url: value,
-                                  });
-                                }
-                              }}
-                              className="h-11"
-                            />
-                            <p className="text-xs text-slate-500">
-                              URL base do seu Chatwoot
-                            </p>
-                          </div>
+                        {/* Configurações do Chatwoot */}
+                        {(!company?.booking_engine_chat_type || company?.booking_engine_chat_type === "chatwoot") && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
+                            <div className="space-y-2">
+                              <Label className="text-sm font-medium text-slate-700">BASE_URL do Chatwoot</Label>
+                              <Input
+                                placeholder="https://app.agentslabs.cloud"
+                                defaultValue={company?.booking_engine_chat_base_url || ""}
+                                onBlur={(e) => {
+                                  const value = e.target.value.trim() || null;
+                                  if (value !== (company?.booking_engine_chat_base_url || "")) {
+                                    updateCompanyMutation.mutate({
+                                      booking_engine_chat_base_url: value,
+                                    });
+                                  }
+                                }}
+                                className="h-11"
+                              />
+                              <p className="text-xs text-slate-500">
+                                URL base do seu Chatwoot
+                              </p>
+                            </div>
 
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium text-slate-700">Website Token</Label>
-                            <Input
-                              placeholder="Xaa19ZAndw2xPJysscdpS5dN"
-                              defaultValue={company?.booking_engine_chat_website_token || ""}
-                              onBlur={(e) => {
-                                const value = e.target.value.trim() || null;
-                                if (value !== (company?.booking_engine_chat_website_token || "")) {
-                                  updateCompanyMutation.mutate({
-                                    booking_engine_chat_website_token: value,
-                                  });
-                                }
-                              }}
-                              className="h-11"
-                            />
-                            <p className="text-xs text-slate-500">
-                              Token do website configurado no Chatwoot
-                            </p>
+                            <div className="space-y-2">
+                              <Label className="text-sm font-medium text-slate-700">Website Token</Label>
+                              <Input
+                                placeholder="Xaa19ZAndw2xPJysscdpS5dN"
+                                defaultValue={company?.booking_engine_chat_website_token || ""}
+                                onBlur={(e) => {
+                                  const value = e.target.value.trim() || null;
+                                  if (value !== (company?.booking_engine_chat_website_token || "")) {
+                                    updateCompanyMutation.mutate({
+                                      booking_engine_chat_website_token: value,
+                                    });
+                                  }
+                                }}
+                                className="h-11"
+                              />
+                              <p className="text-xs text-slate-500">
+                                Token do website configurado no Chatwoot
+                              </p>
+                            </div>
                           </div>
-                        </div>
+                        )}
+
+                        {/* Configurações do WhatsApp */}
+                        {company?.booking_engine_chat_type === "whatsapp" && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
+                            <div className="space-y-2">
+                              <Label className="text-sm font-medium text-slate-700">DDI do WhatsApp</Label>
+                              <Input
+                                placeholder="55"
+                                defaultValue={company?.booking_engine_contact_whatsapp_ddi || ""}
+                                onBlur={(e) => {
+                                  const value = e.target.value.trim() || null;
+                                  if (value !== (company?.booking_engine_contact_whatsapp_ddi || "")) {
+                                    updateCompanyMutation.mutate({
+                                      booking_engine_contact_whatsapp_ddi: value,
+                                    });
+                                  }
+                                }}
+                                className="h-11"
+                              />
+                              <p className="text-xs text-slate-500">
+                                Código do país (ex: 55 para Brasil)
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label className="text-sm font-medium text-slate-700">Número do WhatsApp</Label>
+                              <Input
+                                placeholder="11999999999"
+                                defaultValue={company?.booking_engine_contact_whatsapp_number || ""}
+                                onBlur={(e) => {
+                                  const value = e.target.value.trim() || null;
+                                  if (value !== (company?.booking_engine_contact_whatsapp_number || "")) {
+                                    updateCompanyMutation.mutate({
+                                      booking_engine_contact_whatsapp_number: value,
+                                    });
+                                  }
+                                }}
+                                className="h-11"
+                              />
+                              <p className="text-xs text-slate-500">
+                                Número sem espaços ou caracteres especiais (ex: 11999999999)
+                              </p>
+                            </div>
+                          </div>
+                        )}
 
                         <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                           <div className="flex items-start gap-2">

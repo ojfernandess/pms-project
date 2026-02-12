@@ -304,15 +304,18 @@ const CategoryDetailPage = () => {
     document.title = baseTitle;
   }, [company, category]);
 
-  // Chat Chatwoot - declarar antes do useEffect que o usa
+  // Chat (Chatwoot ou WhatsApp) - declarar antes do useEffect que o usa
   const chatEnabled = company?.booking_engine_chat_enabled || false;
+  const chatType = company?.booking_engine_chat_type || "chatwoot";
   const chatBaseUrl = company?.booking_engine_chat_base_url || null;
   const chatWebsiteToken = company?.booking_engine_chat_website_token || null;
+  const whatsappDdi = company?.booking_engine_contact_whatsapp_ddi || null;
+  const whatsappNumber = company?.booking_engine_contact_whatsapp_number || null;
 
-  // Carregar Chatwoot quando habilitado
+  // Carregar Chatwoot quando habilitado (apenas se tipo for chatwoot)
   useEffect(() => {
-    if (!chatEnabled || !chatBaseUrl || !chatWebsiteToken) {
-      // Se o chat não estiver habilitado ou faltar configuração, remover script existente
+    // Se não estiver habilitado, ou for WhatsApp, ou faltar configuração do Chatwoot, remover script
+    if (!chatEnabled || chatType !== "chatwoot" || !chatBaseUrl || !chatWebsiteToken) {
       const existingScript = document.querySelector('script[data-chatwoot]');
       if (existingScript) {
         existingScript.remove();
@@ -362,7 +365,7 @@ const CategoryDetailPage = () => {
         scriptToRemove.remove();
       }
     };
-  }, [chatEnabled, chatBaseUrl, chatWebsiteToken]);
+  }, [chatEnabled, chatType, chatBaseUrl, chatWebsiteToken]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -571,8 +574,37 @@ const CategoryDetailPage = () => {
   const socialWebsite = company?.booking_engine_social_website || null;
   const socialWhatsapp = company?.booking_engine_social_whatsapp || null;
 
+  // Animações CSS para o botão pulsante do WhatsApp
+  const pulseAnimations = `
+    @keyframes pulse-ring {
+      0% {
+        transform: scale(0.8);
+        opacity: 1;
+      }
+      50% {
+        transform: scale(1.2);
+        opacity: 0.5;
+      }
+      100% {
+        transform: scale(1.5);
+        opacity: 0;
+      }
+    }
+
+    @keyframes pulse-button {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+    }
+  `;
+
   return (
-    <div className={`min-h-screen ${theme.pageBg}`}>
+    <>
+      <style>{pulseAnimations}</style>
+      <div className={`min-h-screen ${theme.pageBg}`}>
       {/* Header */}
       <header className={`${theme.headerBg} ${theme.headerText} sticky top-0 z-50 ${theme.headerBorder || ""}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -1163,7 +1195,36 @@ const CategoryDetailPage = () => {
           </div>
         </div>
       </footer>
-    </div>
+
+      {/* Botão Flutuante do WhatsApp */}
+      {chatEnabled && chatType === "whatsapp" && whatsappDdi && whatsappNumber && (
+        <div className="fixed bottom-6 right-6 z-50">
+          {/* Anel pulsante */}
+          <div className="absolute inset-0 rounded-full bg-green-500 opacity-75 animate-[pulse-ring_2s_cubic-bezier(0.4,0,0.6,1)_infinite]"></div>
+          {/* Segundo anel pulsante com delay */}
+          <div className="absolute inset-0 rounded-full bg-green-500 opacity-50 animate-[pulse-ring_2s_cubic-bezier(0.4,0,0.6,1)_infinite_0.5s]"></div>
+          <a
+            href={`https://wa.me/${whatsappDdi}${whatsappNumber.replace(/\D/g, '')}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="relative flex items-center justify-center w-20 h-20 bg-green-500 hover:bg-green-600 rounded-full shadow-2xl hover:shadow-green-500/50 transition-all duration-300 hover:scale-110 group animate-[pulse-button_2s_ease-in-out_infinite]"
+            aria-label="Fale conosco no WhatsApp"
+          >
+            <img 
+              src="/whatsapp.png" 
+              alt="WhatsApp" 
+              className="w-12 h-12 object-contain relative z-10"
+            />
+            {/* Tooltip */}
+            <div className="absolute right-full mr-3 px-3 py-2 bg-slate-900 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none z-20">
+              Fale conosco no WhatsApp
+              <div className="absolute left-full top-1/2 -translate-y-1/2 border-4 border-transparent border-l-slate-900"></div>
+            </div>
+          </a>
+        </div>
+      )}
+      </div>
+    </>
   );
 };
 
