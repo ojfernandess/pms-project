@@ -3236,7 +3236,7 @@ const FeatureFlagsManager = () => {
         const idKey = usesCompanyIds ? 'company_ids' : 'establishment_ids';
         
         return {
-          ...prev,
+      ...prev,
           [feature]: { 
             enabled: value, 
             [idKey]: prev[feature]?.[idKey] || [] 

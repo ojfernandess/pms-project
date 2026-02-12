@@ -33,7 +33,7 @@ import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 
-type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark";
+type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel";
 
 const DETAIL_THEME_CONFIGS: Record<BookingThemeKey, {
   pageBg: string;
@@ -102,26 +102,26 @@ const DETAIL_THEME_CONFIGS: Record<BookingThemeKey, {
     footerText: "text-slate-300",
   },
   luxury: {
-    pageBg: "bg-gradient-to-br from-slate-950 via-purple-950/30 to-slate-950",
-    headerBg: "bg-slate-950/95 backdrop-blur-md",
-    headerText: "text-white",
-    headerSubtitle: "text-purple-200/80",
-    headerBorder: "border-b border-purple-900/50",
-    textPrimary: "text-white",
-    textSecondary: "text-purple-200",
-    textMuted: "text-purple-300/70",
-    heroImageOverlay: "bg-gradient-to-t from-black/90 via-purple-900/40 to-transparent",
-    summaryBg: "bg-slate-900/95 backdrop-blur-xl",
-    summaryBorder: "border border-purple-800/30",
-    primaryButton: "bg-gradient-to-r from-purple-600 to-purple-700 text-white",
-    primaryButtonHover: "hover:from-purple-700 hover:to-purple-800 hover:shadow-xl hover:shadow-purple-500/30",
-    secondaryButton: "bg-slate-900/80 text-purple-200 border border-purple-700/60",
-    secondaryButtonHover: "hover:bg-slate-800/80 hover:border-purple-400/70",
-    iconButton: "bg-slate-900/80 text-purple-200 border border-purple-800/60",
-    iconButtonHover: "hover:bg-slate-800/80 hover:border-purple-400/70",
-    footerBg: "bg-slate-950/95 backdrop-blur-md",
-    footerBorder: "border-t border-purple-900/50",
-    footerText: "text-purple-200",
+    pageBg: "bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950",
+    headerBg: "bg-slate-950/98 backdrop-blur-md",
+    headerText: "text-slate-50",
+    headerSubtitle: "text-slate-300",
+    headerBorder: "border-b border-slate-800/50",
+    textPrimary: "text-slate-50",
+    textSecondary: "text-slate-200",
+    textMuted: "text-slate-400",
+    heroImageOverlay: "bg-gradient-to-t from-black/85 via-purple-900/30 to-transparent",
+    summaryBg: "bg-slate-900/98 backdrop-blur-xl",
+    summaryBorder: "border border-slate-800/50",
+    primaryButton: "bg-gradient-to-r from-purple-600 to-purple-700 text-white font-semibold shadow-lg",
+    primaryButtonHover: "hover:from-purple-700 hover:to-purple-800 hover:shadow-xl hover:shadow-purple-500/40",
+    secondaryButton: "bg-slate-800/90 text-slate-100 border border-slate-700/50",
+    secondaryButtonHover: "hover:bg-slate-700/90 hover:border-purple-500/50",
+    iconButton: "bg-slate-800/90 text-slate-100 border border-slate-700/50",
+    iconButtonHover: "hover:bg-slate-700/90 hover:border-purple-500/50",
+    footerBg: "bg-slate-950/98 backdrop-blur-md",
+    footerBorder: "border-t border-slate-800/50",
+    footerText: "text-slate-300",
   },
   minimal: {
     pageBg: "bg-white",
@@ -166,6 +166,29 @@ const DETAIL_THEME_CONFIGS: Record<BookingThemeKey, {
     footerBg: "bg-slate-950/95 backdrop-blur-md",
     footerBorder: "border-t border-slate-800",
     footerText: "text-slate-300",
+  },
+  travel: {
+    // Travel Landing Page - Estilo Booking.com
+    pageBg: "bg-slate-50",
+    headerBg: "bg-[#003580] text-white",
+    headerText: "text-white",
+    headerSubtitle: "text-blue-100",
+    headerBorder: "border-b border-[#00224d]",
+    textPrimary: "text-slate-900",
+    textSecondary: "text-slate-700",
+    textMuted: "text-slate-500",
+    heroImageOverlay: "bg-gradient-to-t from-black/65 via-black/25 to-transparent",
+    summaryBg: "bg-white",
+    summaryBorder: "border border-slate-200",
+    primaryButton: "bg-[#0071c2] text-white",
+    primaryButtonHover: "hover:bg-[#005fa3] hover:shadow-lg hover:shadow-[#0071c2]/30",
+    secondaryButton: "bg-white text-[#0071c2] border border-[#0071c2]",
+    secondaryButtonHover: "hover:bg-blue-50",
+    iconButton: "bg-white text-slate-700 border border-slate-200",
+    iconButtonHover: "hover:bg-slate-50 hover:border-[#0071c2]/60",
+    footerBg: "bg-[#003580]",
+    footerBorder: "border-t border-[#00224d]",
+    footerText: "text-blue-100",
   },
 };
 
@@ -218,7 +241,7 @@ const CategoryDetailPage = () => {
       (company?.booking_engine_theme as BookingThemeKey) ||
       (hotelSettings?.booking_engine_theme as BookingThemeKey) ||
       "default";
-    const validKeys: BookingThemeKey[] = ["default", "modern", "luxury", "minimal", "dark"];
+    const validKeys: BookingThemeKey[] = ["default", "modern", "luxury", "minimal", "dark", "travel"];
     return validKeys.includes(key) ? key : "default";
   }, [company, hotelSettings]);
 

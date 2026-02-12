@@ -24,6 +24,7 @@ import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, Ch
 import { useTranslation } from "react-i18next";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DateRangePicker } from "@/components/booking-engine/DateRangePicker";
 
 // Animações CSS inline via style tag
 const animationStyles = `
@@ -83,7 +84,7 @@ const animationStyles = `
   }
 `;
 
-type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark";
+type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel";
 
 interface BookingThemeConfig {
   // Page & Layout
@@ -320,77 +321,78 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
     footerText: "text-slate-300",
   },
   luxury: {
-    // Luxury Purple & Gold
-    pageBg: "bg-gradient-to-br from-slate-950 via-purple-950/30 to-slate-950",
-    heroBg: "bg-gradient-to-br from-purple-900/40 via-slate-900/60 to-slate-950",
-    heroOverlay: "bg-black/60",
-    heroImageOverlay: "bg-gradient-to-t from-black/90 via-purple-900/40 to-transparent",
+    // Luxury Purple & Gold - Elegant & Professional with High Readability
+    pageBg: "bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950",
+    heroBg: "bg-gradient-to-br from-purple-900/50 via-slate-900/70 to-slate-950",
+    heroOverlay: "bg-black/50",
+    heroImageOverlay: "bg-gradient-to-t from-black/85 via-purple-900/30 to-transparent",
     
-    headerBg: "bg-slate-950/95 backdrop-blur-md",
-    headerText: "text-white",
-    headerSubtitle: "text-purple-200/80",
-    headerButton: "bg-purple-600 hover:bg-purple-700 text-white font-semibold",
-    headerBorder: "border-b border-purple-900/50",
+    headerBg: "bg-slate-950/98 backdrop-blur-md",
+    headerText: "text-slate-50",
+    headerSubtitle: "text-slate-300",
+    headerButton: "bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-semibold shadow-lg shadow-purple-900/30",
+    headerBorder: "border-b border-slate-800/50",
     
-    heroTitle: "text-white font-serif",
-    heroSubtitle: "text-purple-200",
+    heroTitle: "text-white font-serif drop-shadow-lg",
+    heroSubtitle: "text-slate-100",
     heroTitleSize: "text-5xl md:text-6xl lg:text-7xl",
     heroSubtitleSize: "text-lg md:text-xl",
     
-    searchCard: "bg-slate-900/95 backdrop-blur-xl",
-    searchCardShadow: "shadow-2xl shadow-purple-900/30",
-    searchCardBorder: "border border-purple-500/30",
-    searchInputBg: "bg-slate-800/80",
-    searchInputBorder: "border-purple-700/50",
-    searchInputText: "text-white",
-    searchInputFocus: "focus:border-purple-400 focus:ring-2 focus:ring-purple-400/30",
+    // Card de busca (check-in/checkout) mais sólido e com menos transparência
+    searchCard: "bg-slate-900 border border-slate-800 shadow-2xl",
+    searchCardShadow: "shadow-2xl shadow-black/60",
+    searchCardBorder: "border border-slate-800",
+    searchInputBg: "bg-slate-800",
+    searchInputBorder: "border-slate-700",
+    searchInputText: "text-slate-50",
+    searchInputFocus: "focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30",
     
-    primaryButton: "bg-gradient-to-r from-purple-600 to-purple-700 text-white",
-    primaryButtonHover: "hover:from-purple-700 hover:to-purple-800 hover:shadow-xl hover:shadow-purple-500/30",
-    secondaryButton: "bg-slate-800 text-purple-300 border border-purple-500",
-    secondaryButtonHover: "hover:bg-slate-700",
+    primaryButton: "bg-gradient-to-r from-purple-600 to-purple-700 text-white font-semibold shadow-lg",
+    primaryButtonHover: "hover:from-purple-700 hover:to-purple-800 hover:shadow-xl hover:shadow-purple-500/40",
+    secondaryButton: "bg-slate-800/90 text-slate-100 border border-slate-700/50",
+    secondaryButtonHover: "hover:bg-slate-700/90 hover:border-purple-500/50",
     
-    textPrimary: "text-white",
-    textSecondary: "text-purple-200",
-    textMuted: "text-purple-300/70",
+    textPrimary: "text-slate-50",
+    textSecondary: "text-slate-200",
+    textMuted: "text-slate-400",
     textInverse: "text-slate-900",
     
-    cardBg: "bg-slate-900/90 backdrop-blur",
-    cardBorder: "border border-purple-800/30",
-    cardShadow: "shadow-2xl shadow-purple-900/20",
-    cardHover: "hover:border-purple-500/50",
-    cardHoverShadow: "hover:shadow-2xl hover:shadow-purple-500/30",
+    cardBg: "bg-slate-900/95 backdrop-blur-sm",
+    cardBorder: "border border-slate-800/50",
+    cardShadow: "shadow-xl shadow-black/40",
+    cardHover: "hover:border-purple-500/60",
+    cardHoverShadow: "hover:shadow-2xl hover:shadow-purple-900/30",
     
-    roomCardBg: "bg-slate-900/90 backdrop-blur",
-    roomCardBorder: "border border-purple-800/30",
-    roomCardShadow: "shadow-2xl",
-    roomImageOverlay: "bg-gradient-to-t from-black/80 via-purple-900/30 to-transparent",
+    roomCardBg: "bg-slate-900/95 backdrop-blur-sm",
+    roomCardBorder: "border border-slate-800/50",
+    roomCardShadow: "shadow-xl shadow-black/40",
+    roomImageOverlay: "bg-gradient-to-t from-black/85 via-slate-900/40 to-transparent",
     
     priceColor: "text-purple-300",
-    priceLabel: "text-purple-400/70",
+    priceLabel: "text-slate-400",
     priceHighlight: "text-purple-200 font-bold",
     
-    badgePrimary: "bg-purple-500/20 text-purple-300 border-purple-500/50",
-    badgeSecondary: "bg-slate-800/50 text-slate-300 border-slate-700",
-    badgeSuccess: "bg-emerald-500/20 text-emerald-300 border-emerald-500/50",
-    badgeWarning: "bg-amber-500/20 text-amber-300 border-amber-500/50",
+    badgePrimary: "bg-purple-500/25 text-purple-200 border-purple-500/50",
+    badgeSecondary: "bg-slate-800/70 text-slate-200 border-slate-700/50",
+    badgeSuccess: "bg-emerald-500/25 text-emerald-200 border-emerald-500/50",
+    badgeWarning: "bg-amber-500/25 text-amber-200 border-amber-500/50",
     
-    summaryBg: "bg-slate-900/95 backdrop-blur-xl",
-    summaryBorder: "border border-purple-800/30",
-    summaryShadow: "shadow-2xl shadow-purple-900/30",
+    summaryBg: "bg-slate-900/98 backdrop-blur-xl",
+    summaryBorder: "border border-slate-800/50",
+    summaryShadow: "shadow-2xl shadow-black/50",
     
     accentColor: "text-purple-300",
-    accentBg: "bg-purple-500/10",
-    accentBorder: "border-purple-500/30",
+    accentBg: "bg-purple-500/15",
+    accentBorder: "border-purple-500/40",
     
-    planCardBg: "bg-slate-900/80",
-    planCardBorder: "border border-purple-800/30",
-    planCardSelected: "border-2 border-purple-400 bg-purple-500/10",
-    planCardHover: "hover:border-purple-500/50 hover:shadow-xl",
+    planCardBg: "bg-slate-900/90",
+    planCardBorder: "border border-slate-800/50",
+    planCardSelected: "border-2 border-purple-500 bg-purple-500/15",
+    planCardHover: "hover:border-purple-500/60 hover:shadow-lg",
     
-    footerBg: "bg-slate-950/95 backdrop-blur-md",
-    footerBorder: "border-t border-purple-900/50",
-    footerText: "text-purple-200",
+    footerBg: "bg-slate-950/98 backdrop-blur-md",
+    footerBorder: "border-t border-slate-800/50",
+    footerText: "text-slate-300",
   },
   minimal: {
     // Minimal Clean White
@@ -537,6 +539,79 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
     footerBg: "bg-slate-900/95 backdrop-blur-md",
     footerBorder: "border-t border-slate-800",
     footerText: "text-slate-300",
+  },
+  travel: {
+    // Travel Landing Page - Estilo Booking.com
+    pageBg: "bg-slate-50",
+    heroBg: "bg-gradient-to-br from-[#003580] via-[#0047a3] to-[#0059b3]",
+    heroOverlay: "bg-black/30",
+    heroImageOverlay: "bg-gradient-to-t from-black/65 via-black/25 to-transparent",
+
+    headerBg: "bg-[#003580]",
+    headerText: "text-white",
+    headerSubtitle: "text-blue-100",
+    headerButton: "bg-[#febb02] hover:bg-[#ffd75a] text-slate-900 font-semibold",
+    headerBorder: "border-b border-[#00224d]",
+
+    heroTitle: "text-white font-semibold",
+    heroSubtitle: "text-blue-100",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+
+    searchCard: "bg-white",
+    searchCardShadow: "shadow-2xl shadow-black/10",
+    searchCardBorder: "border border-slate-200",
+    searchInputBg: "bg-white",
+    searchInputBorder: "border-slate-300",
+    searchInputText: "text-slate-900",
+    searchInputFocus: "focus:border-[#003580] focus:ring-2 focus:ring-[#003580]/20",
+
+    primaryButton: "bg-[#0071c2] text-white",
+    primaryButtonHover: "hover:bg-[#005fa3] hover:shadow-lg hover:shadow-[#0071c2]/30",
+    secondaryButton: "bg-white text-[#0071c2] border border-[#0071c2]",
+    secondaryButtonHover: "hover:bg-blue-50",
+
+    textPrimary: "text-slate-900",
+    textSecondary: "text-slate-700",
+    textMuted: "text-slate-500",
+    textInverse: "text-white",
+
+    cardBg: "bg-white",
+    cardBorder: "border border-slate-200",
+    cardShadow: "shadow-md shadow-black/5",
+    cardHover: "hover:border-[#0071c2]/60",
+    cardHoverShadow: "hover:shadow-lg hover:shadow-[#0071c2]/15",
+
+    roomCardBg: "bg-white",
+    roomCardBorder: "border border-slate-200",
+    roomCardShadow: "shadow-md shadow-black/5",
+    roomImageOverlay: "bg-gradient-to-t from-black/55 via-black/15 to-transparent",
+
+    priceColor: "text-[#0071c2]",
+    priceLabel: "text-slate-500",
+    priceHighlight: "text-[#003580] font-bold",
+
+    badgePrimary: "bg-[#e7f3ff] text-[#003580] border-[#b6d6ff]",
+    badgeSecondary: "bg-slate-100 text-slate-700 border-slate-200",
+    badgeSuccess: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    badgeWarning: "bg-[#fff4d1] text-[#8a6b00] border-[#ffe59a]",
+
+    summaryBg: "bg-white",
+    summaryBorder: "border border-slate-200",
+    summaryShadow: "shadow-xl shadow-black/10",
+
+    accentColor: "text-[#0071c2]",
+    accentBg: "bg-[#e7f3ff]",
+    accentBorder: "border-[#b6d6ff]",
+
+    planCardBg: "bg-white",
+    planCardBorder: "border border-slate-200",
+    planCardSelected: "border-2 border-[#0071c2] bg-[#e7f3ff]",
+    planCardHover: "hover:border-[#0071c2]/70 hover:shadow-md",
+
+    footerBg: "bg-[#003580]",
+    footerBorder: "border-t border-[#00224d]",
+    footerText: "text-blue-100",
   },
 };
 
@@ -1267,7 +1342,9 @@ const BookingEnginePage = () => {
       (company?.booking_engine_theme as BookingThemeKey) ||
       (hotelSettings?.booking_engine_theme as BookingThemeKey) ||
       "default";
-    const validKey = (["default", "modern", "luxury", "minimal", "dark"] as BookingThemeKey[]).includes(key)
+    const validKey = (
+      ["default", "modern", "luxury", "minimal", "dark", "travel"] as BookingThemeKey[]
+    ).includes(key)
       ? key
       : "default";
     return validKey;
@@ -1696,8 +1773,12 @@ const BookingEnginePage = () => {
                   </div>
                 )}
                 <div className="flex flex-col">
-                  <span className={`text-lg md:text-2xl font-semibold tracking-tight ${theme.textPrimary}`}>
-                {motorTitle}
+                  <span
+                    className={`text-lg md:text-2xl font-semibold tracking-tight ${
+                      themeKey === "travel" ? "text-white" : theme.textPrimary
+                    }`}
+                  >
+                    {motorTitle}
                   </span>
                   {motorSubtitle && (
                     <span className={`text-xs md:text-sm ${theme.headerSubtitle} transition-colors duration-300`}>
@@ -1745,32 +1826,35 @@ const BookingEnginePage = () => {
           {/* Search Card - Centered */}
           <div className="max-w-5xl mx-auto animate-fade-in-up-delay">
             <Card className={`${theme.searchCard} ${theme.searchCardShadow} ${theme.searchCardBorder} p-6 md:p-8 rounded-2xl transition-all duration-300 hover:scale-[1.01]`}>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                {/* Check-in */}
-                <div className="space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Check-in e Check-out - DateRangePicker */}
+                <div className="space-y-2 sm:col-span-2">
                   <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2`}>
                     <CalendarDays className="w-4 h-4" />
-                    Check-in
+                    Check-in e checkout
                   </Label>
-                  <Input
-                    type="date"
-                    value={checkin}
-                    onChange={(e) => setCheckin(e.target.value)}
-                    className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
-                  />
-                </div>
-
-                {/* Check-out */}
-                <div className="space-y-2">
-                  <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2`}>
-                    <CalendarDays className="w-4 h-4" />
-                    Check-out
-                  </Label>
-                  <Input
-                    type="date"
-                    value={checkout}
-                    onChange={(e) => setCheckout(e.target.value)}
-                    className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
+                  <DateRangePicker
+                    checkin={checkin}
+                    checkout={checkout}
+                    onCheckinChange={setCheckin}
+                    onCheckoutChange={setCheckout}
+                    onClear={() => {
+                      setCheckin("");
+                      setCheckout("");
+                    }}
+                    onSearch={handleSubmit}
+                    theme={{
+                      searchInputBg: theme.searchInputBg,
+                      searchInputBorder: theme.searchInputBorder,
+                      searchInputText: theme.searchInputText,
+                      searchInputFocus: theme.searchInputFocus,
+                      textSecondary: theme.textSecondary,
+                      primaryButton: theme.primaryButton,
+                      primaryButtonHover: theme.primaryButtonHover,
+                      secondaryButton: theme.secondaryButton,
+                      secondaryButtonHover: theme.secondaryButtonHover,
+                    }}
+                    maxNights={365}
                   />
                 </div>
 
@@ -2401,7 +2485,11 @@ const BookingEnginePage = () => {
                   </div>
                 )}
                 <div className="flex flex-col">
-                  <span className={`text-sm font-semibold tracking-tight ${theme.textPrimary}`}>
+                  <span
+                    className={`text-sm font-semibold tracking-tight ${
+                      themeKey === "travel" ? "text-white" : theme.textPrimary
+                    }`}
+                  >
                     {motorTitle}
                   </span>
                   <span className={`text-xs ${theme.footerText}`}>
@@ -2416,7 +2504,11 @@ const BookingEnginePage = () => {
 
             {/* Coluna 2 - Contato */}
             <div className="space-y-3">
-              <h5 className={`text-xs font-semibold uppercase tracking-[0.18em] ${theme.textSecondary}`}>
+              <h5
+                className={`text-xs font-semibold uppercase tracking-[0.18em] ${
+                  themeKey === "travel" ? "text-white" : theme.textSecondary
+                }`}
+              >
                 Contato
               </h5>
               <div className="space-y-2 text-sm">
@@ -2454,13 +2546,13 @@ const BookingEnginePage = () => {
 
             {/* Coluna 3 - Experiência & tecnologia */}
             <div className="space-y-3 md:text-right">
-              <h5 className={`text-xs font-semibold uppercase tracking-[0.18em] ${theme.textSecondary}`}>
+              <h5 className={`text-xs font-semibold uppercase tracking-[0.18em] ${themeKey === "travel" ? "text-white" : theme.textSecondary}`}>
                 Experiência segura
               </h5>
               <p className={`text-sm ${theme.footerText}`}>
                 Pagamentos criptografados, disponibilidade em tempo real e confirmação imediata da sua reserva.
               </p>
-              <div className="inline-flex items-center gap-2 text-xs text-slate-400 mt-2 md:justify-end">
+              <div className={`inline-flex items-center gap-2 text-xs mt-2 md:justify-end ${themeKey === "travel" ? "text-blue-100" : "text-slate-400"}`}>
                 <Globe2 className="w-3 h-3" />
                 <span>Tecnologia SaaS para hospitalidade</span>
               </div>
