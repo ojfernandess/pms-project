@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, addMonths, startOfMonth, differenceInDays, isAfter, isBefore, isSameDay, startOfDay, parseISO } from "date-fns";
+import { format, addMonths, startOfMonth, differenceInDays, isAfter, isBefore, isSameDay, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarDays, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -286,10 +286,10 @@ export function DateRangePicker({
           {buttonText}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0 max-w-[700px]" align="start">
-        <div className="p-4">
+      <PopoverContent className="w-auto p-0 max-w-[95vw] sm:max-w-[700px]" align="start">
+        <div className="p-3 sm:p-4">
           {/* Header com informações */}
-          <div className="mb-4 space-y-2">
+          <div className="mb-3 sm:mb-4 space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-900">Selecione as datas</h3>
               {checkinDate && (
@@ -310,19 +310,20 @@ export function DateRangePicker({
             )}
           </div>
 
-          {/* Calendários lado a lado */}
-          <div className="flex gap-4">
+          {/* Calendários lado a lado - Responsivo */}
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
             {/* Primeiro mês */}
-            <Calendar
-              mode="range"
-              selected={selectedRange}
-              onSelect={handleDateSelect}
-              month={firstMonth}
-              onMonthChange={setSelectedMonth}
-              numberOfMonths={1}
-              locale={ptBR}
-              defaultMonth={firstMonth}
-              disabled={(date) => {
+            <div className="w-full sm:w-auto">
+              <Calendar
+                mode="range"
+                selected={selectedRange}
+                onSelect={handleDateSelect}
+                month={firstMonth}
+                onMonthChange={setSelectedMonth}
+                numberOfMonths={1}
+                locale={ptBR}
+                defaultMonth={firstMonth}
+                disabled={(date) => {
                 const dateStart = startOfDay(date);
                 const today = startOfDay(new Date());
                 
@@ -342,7 +343,7 @@ export function DateRangePicker({
                 
                 return false;
               }}
-              className="rounded-md border-0"
+              className="rounded-md border-0 w-full"
               classNames={{
                 months: "flex flex-col space-y-4",
                 month: "space-y-4",
@@ -373,9 +374,11 @@ export function DateRangePicker({
                 day_hidden: "invisible",
               }}
             />
+            </div>
 
             {/* Segundo mês */}
-            <Calendar
+            <div className="w-full sm:w-auto">
+              <Calendar
               mode="range"
               selected={selectedRange}
               onSelect={handleDateSelect}
@@ -404,7 +407,7 @@ export function DateRangePicker({
                 
                 return false;
               }}
-              className="rounded-md border-0"
+              className="rounded-md border-0 w-full"
               classNames={{
                 months: "flex flex-col space-y-4",
                 month: "space-y-4",
@@ -435,11 +438,12 @@ export function DateRangePicker({
                 day_hidden: "invisible",
               }}
             />
+            </div>
           </div>
 
           {/* Instruções e botões */}
-          <div className="mt-4 pt-4 border-t border-slate-200">
-            <p className="text-xs text-slate-500 mb-4 text-center">
+          <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-slate-200">
+            <p className="text-xs text-slate-500 mb-3 sm:mb-4 text-center">
               Selecione um intervalo de datas entre 1 e {maxNights} noites
             </p>
             <div className="flex flex-col sm:flex-row gap-2 justify-end sm:items-center">

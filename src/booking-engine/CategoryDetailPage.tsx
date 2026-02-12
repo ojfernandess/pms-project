@@ -24,7 +24,8 @@ import {
   Instagram,
   Facebook,
   Twitter,
-  Youtube
+  Youtube,
+  Linkedin
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
@@ -566,6 +567,7 @@ const CategoryDetailPage = () => {
   const socialFacebook = company?.booking_engine_social_facebook || null;
   const socialTwitter = company?.booking_engine_social_twitter || null;
   const socialYoutube = company?.booking_engine_social_youtube || null;
+  const socialLinkedin = company?.booking_engine_social_linkedin || null;
   const socialWebsite = company?.booking_engine_social_website || null;
   const socialWhatsapp = company?.booking_engine_social_whatsapp || null;
 
@@ -1065,7 +1067,7 @@ const CategoryDetailPage = () => {
           </div>
 
           {/* Redes sociais */}
-          {(socialInstagram || socialFacebook || socialTwitter || socialYoutube || socialWebsite || socialWhatsapp) && (
+          {(socialInstagram || socialFacebook || socialTwitter || socialYoutube || socialLinkedin || socialWebsite || socialWhatsapp) && (
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <span className={`text-[11px] ${theme.footerText}`}>Siga-nos:</span>
               {socialInstagram && (
@@ -1110,6 +1112,17 @@ const CategoryDetailPage = () => {
                   aria-label="YouTube"
                 >
                   <Youtube className="w-4 h-4" />
+                </a>
+              )}
+              {socialLinkedin && (
+                <a
+                  href={socialLinkedin}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="LinkedIn"
+                >
+                  <Linkedin className="w-4 h-4" />
                 </a>
               )}
               {socialWhatsapp && (

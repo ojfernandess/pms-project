@@ -21,6 +21,7 @@ import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
+import { DateRangePicker } from "@/components/booking-engine/DateRangePicker";
 
 // Importar tipos e configurações de tema do booking engine
 type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel";
@@ -1432,12 +1433,12 @@ const PublicReservation = () => {
         if (!category) continue;
 
         const basePrice = Number(category.base_price || 0);
-        const categoryCapacity = category?.capacity_adults || 0;
-        const adultsPerRoom = categoryCapacity > 0 
-          ? Math.min(categoryCapacity, Math.ceil(cat.adults / cat.rooms))
-          : (cat.rooms > 0 ? Math.ceil(cat.adults / cat.rooms) : cat.adults);
-        const childrenPerRoom = cat.rooms > 0 ? Math.ceil(children / cat.rooms) : children;
-
+          const categoryCapacity = category?.capacity_adults || 0;
+          const adultsPerRoom = categoryCapacity > 0 
+            ? Math.min(categoryCapacity, Math.ceil(cat.adults / cat.rooms))
+            : (cat.rooms > 0 ? Math.ceil(cat.adults / cat.rooms) : cat.adults);
+          const childrenPerRoom = cat.rooms > 0 ? Math.ceil(children / cat.rooms) : children;
+          
         if (publicPricingPlan1Id) {
           for (let i = 0; i < nights; i++) {
             const currentDate = addDays(checkin, i);
@@ -1454,7 +1455,7 @@ const PublicReservation = () => {
               rooms: cat.rooms,
               basePrice,
             });
-          }
+        }
         }
 
         if (publicPricingPlan2Id) {
@@ -1532,16 +1533,16 @@ const PublicReservation = () => {
           if (totals.plan2.count > 0) {
             prices[categoryId] = {
               ...prices[categoryId],
-              plan2: cat.rooms > 0 && nights > 0 
+            plan2: cat.rooms > 0 && nights > 0 
                 ? totals.plan2.total / cat.rooms / nights 
-                : cat.rooms > 0 
+              : cat.rooms > 0 
                   ? totals.plan2.total / cat.rooms 
-                  : 0,
-            };
-          }
+                : 0,
+          };
+        }
         });
 
-        setSummaryPlanPrices(prices);
+      setSummaryPlanPrices(prices);
       } catch (error) {
         if (!abortController.signal.aborted) {
           console.error("Erro ao calcular preços do resumo:", error);
@@ -1597,32 +1598,32 @@ const PublicReservation = () => {
           const categoryMap: Record<string, typeof selectedCategories[0]> = {};
 
           selectedCategories.forEach((cat) => {
-            const category = categories.find((c) => c.id === cat.categoryId);
+              const category = categories.find((c) => c.id === cat.categoryId);
             if (!category) return;
 
-            const selectedPlan = selectedPlanByCategory[cat.categoryId];
-            const planIdToUse = selectedPlan === "plan1" 
-              ? publicPricingPlan1Id 
-              : selectedPlan === "plan2" 
-                ? publicPricingPlan2Id 
-                : publicPricingPlanId || null;
+              const selectedPlan = selectedPlanByCategory[cat.categoryId];
+              const planIdToUse = selectedPlan === "plan1" 
+                ? publicPricingPlan1Id 
+                : selectedPlan === "plan2" 
+                  ? publicPricingPlan2Id 
+                  : publicPricingPlanId || null;
 
             if (!planIdToUse) return;
 
-            const basePrice = Number(category.base_price || 0);
+              const basePrice = Number(category.base_price || 0);
             categoryMap[cat.categoryId] = cat;
 
-            if (formData.checkinDate && formData.checkoutDate) {
-              const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
-              const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
-              const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
-              const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
-              const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+              if (formData.checkinDate && formData.checkoutDate) {
+                const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
+                const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
+                const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+                const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
+                const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
 
-              if (nights > 0) {
-                for (let i = 0; i < nights; i++) {
-                  const currentDate = addDays(checkin, i);
-                  const dateStr = formatDateLocal(currentDate);
+                if (nights > 0) {
+                  for (let i = 0; i < nights; i++) {
+                    const currentDate = addDays(checkin, i);
+                    const dateStr = formatDateLocal(currentDate);
 
                   priceRequests.push({
                     establishmentId: establishment.id,
@@ -1674,15 +1675,15 @@ const PublicReservation = () => {
               const totals = categoryTotals[cat.categoryId];
               if (totals) {
                 const categoryTotal = totals.total;
-                return {
-                  ...cat,
-                  price: categoryTotal * cat.rooms,
-                };
+              return {
+                ...cat,
+                price: categoryTotal * cat.rooms,
+              };
               }
               return cat;
             });
 
-            setSelectedCategories(updatedCategories);
+          setSelectedCategories(updatedCategories);
           } catch (error) {
             if (!abortController.signal.aborted) {
               console.error("Erro ao calcular distribuição de categorias:", error);
@@ -3093,34 +3094,34 @@ const PublicReservation = () => {
     const isIncreaseDisabled = value >= max || disabled;
     
     return (
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={onDecrease}
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={onDecrease}
           disabled={isDecreaseDisabled}
-          className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
+        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
             isDecreaseDisabled
               ? `${theme.searchInputBorder} ${theme.textMuted} cursor-not-allowed opacity-50`
               : `${theme.searchInputBorder} ${theme.textSecondary} hover:border-blue-500 hover:text-blue-600`
-          }`}
-        >
-          <Minus className="w-4 h-4" />
-        </button>
+        }`}
+      >
+        <Minus className="w-4 h-4" />
+      </button>
         <span className={`w-8 text-center font-semibold ${theme.textPrimary}`}>{value}</span>
-        <button
-          type="button"
-          onClick={onIncrease}
+      <button
+        type="button"
+        onClick={onIncrease}
           disabled={isIncreaseDisabled}
-          className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
+        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
             isIncreaseDisabled
               ? `${theme.searchInputBorder} ${theme.textMuted} cursor-not-allowed opacity-50`
               : `${theme.searchInputBorder} ${theme.textSecondary} hover:border-blue-500 hover:text-blue-600`
-          }`}
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-      </div>
-    );
+        }`}
+      >
+        <Plus className="w-4 h-4" />
+      </button>
+    </div>
+  );
   };
 
   const nights = formData.checkinDate && formData.checkoutDate
@@ -3789,36 +3790,35 @@ const PublicReservation = () => {
 
               <form onSubmit={handleSubmit} className="space-y-6">
                 {/* Datas */}
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="checkinDate" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
-                        {t("publicReservation.checkin")}
+                <div className="space-y-2">
+                  <Label className={`text-sm font-semibold ${theme.textSecondary} flex items-center gap-2`}>
+                    <Calendar className="w-4 h-4" />
+                    {t("publicReservation.checkin")} e {t("publicReservation.checkout")}
                       </Label>
-                      <Input
-                        id="checkinDate"
-                        type="date"
-                        value={formData.checkinDate}
-                        onChange={(e) => setFormData({ ...formData, checkinDate: e.target.value })}
-                        required
-                        min={formatDateLocal(new Date())}
-                        className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="checkoutDate" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
-                        {t("publicReservation.checkout")}
-                      </Label>
-                      <Input
-                        id="checkoutDate"
-                        type="date"
-                        value={formData.checkoutDate}
-                        onChange={(e) => setFormData({ ...formData, checkoutDate: e.target.value })}
-                        required
-                        min={formData.checkinDate || formatDateLocal(new Date())}
-                        className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
-                      />
-                    </div>
+                  <DateRangePicker
+                    checkin={formData.checkinDate}
+                    checkout={formData.checkoutDate}
+                    onCheckinChange={(date) => setFormData({ ...formData, checkinDate: date })}
+                    onCheckoutChange={(date) => setFormData({ ...formData, checkoutDate: date })}
+                    onClear={() => {
+                      setFormData({ ...formData, checkinDate: "", checkoutDate: "" });
+                    }}
+                    onSearch={() => {
+                      // Não fazer nada aqui, o submit do form já cuida disso
+                    }}
+                    theme={{
+                      searchInputBg: theme.searchInputBg,
+                      searchInputBorder: theme.searchInputBorder,
+                      searchInputText: theme.searchInputText,
+                      searchInputFocus: theme.searchInputFocus,
+                      textSecondary: theme.textSecondary,
+                      primaryButton: theme.primaryButton,
+                      primaryButtonHover: theme.primaryButtonHover,
+                      secondaryButton: theme.secondaryButton,
+                      secondaryButtonHover: theme.secondaryButtonHover,
+                    }}
+                    maxNights={365}
+                  />
                   </div>
 
                   {/* Hóspedes e Quartos - Estilo Booking.com */}
@@ -3851,8 +3851,8 @@ const PublicReservation = () => {
                   <Dialog open={guestsModalOpen} onOpenChange={setGuestsModalOpen}>
                   <DialogContent className={`sm:max-w-md ${theme.cardBg}`}>
                     <DialogTitle className={`text-lg font-semibold ${theme.textPrimary} mb-4`}>
-                      {t("publicReservation.selectGuestsAndRooms")}
-                    </DialogTitle>
+                        {t("publicReservation.selectGuestsAndRooms")}
+                      </DialogTitle>
                       
                       <div className="space-y-6">
                         {/* Adultos */}
@@ -4030,7 +4030,6 @@ const PublicReservation = () => {
                       </div>
                     </DialogContent>
                   </Dialog>
-                </div>
 
                 {/* Dados de Contato */}
                 <div className="space-y-4">

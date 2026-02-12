@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, ArrowRight, Info } from "lucide-react";
+import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, Linkedin, ArrowRight, Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -746,6 +746,7 @@ const BookingEnginePage = () => {
   const socialFacebook = company?.booking_engine_social_facebook || null;
   const socialTwitter = company?.booking_engine_social_twitter || null;
   const socialYoutube = company?.booking_engine_social_youtube || null;
+  const socialLinkedin = company?.booking_engine_social_linkedin || null;
   const socialWebsite = company?.booking_engine_social_website || null;
   const socialWhatsapp = company?.booking_engine_social_whatsapp || null;
 
@@ -1112,35 +1113,87 @@ const BookingEnginePage = () => {
       }
 
       if (engineEstablishments && engineEstablishments.length > 0) {
-        const establishmentsList = engineEstablishments
-          .map((e: any) => e.establishments)
-          .filter(Boolean);
+        // DEBUG: Log da ordem original do banco
+        console.log("[BookingEngine] Ordem do banco:", engineEstablishments.map((e: any) => ({
+          id: e.establishment_id,
+          name: e.establishments?.name,
+          display_order: e.display_order
+        })));
+        
+        // IMPORTANTE: Manter a ordem EXATA do banco ao mapear os estabelecimentos
+        // Não usar map/filter que pode alterar a ordem, usar a ordem original do array
+        const establishmentsList: any[] = [];
+        for (const e of engineEstablishments) {
+          const establishment = e.establishments as any;
+          if (establishment && establishment.id) {
+            establishmentsList.push({
+              ...establishment,
+              display_order: e.display_order ?? 999999, // Preservar a ordem de exibição
+            });
+          }
+        }
+        
+        // DEBUG: Log após mapear
+        console.log("[BookingEngine] Após mapear:", establishmentsList.map((e: any) => ({
+          id: e.id,
+          name: e.name,
+          display_order: e.display_order
+        })));
         
         // Buscar cidades e fotos dos estabelecimentos
-        const establishmentsWithCityData = await Promise.all(
-          establishmentsList.map(async (est: any) => {
-            const { data: hotelSettingsData } = await supabase
-              .from("hotel_settings")
-              .select("city, establishment_photos, photo_url")
-              .eq("establishment_id", est.id)
-              .maybeSingle();
-            
-            // Obter primeira foto do array ou photo_url
-            const photos = hotelSettingsData?.establishment_photos || [];
-            const photo = photos.length > 0 
-              ? photos[0] 
-              : hotelSettingsData?.photo_url || null;
-            
-            return {
-              ...est,
-              city: hotelSettingsData?.city || null,
-              photo: photo,
-            };
-          })
-        );
+        // Usar for loop para manter a ordem do display_order
+        const establishmentsWithCityData: any[] = [];
+        for (const est of establishmentsList) {
+          const { data: hotelSettingsData } = await supabase
+            .from("hotel_settings")
+            .select("city, establishment_photos, photo_url")
+            .eq("establishment_id", est.id)
+            .maybeSingle();
+          
+          // Obter primeira foto do array ou photo_url
+          const photos = hotelSettingsData?.establishment_photos || [];
+          const photo = photos.length > 0 
+            ? photos[0] 
+            : hotelSettingsData?.photo_url || null;
+          
+          establishmentsWithCityData.push({
+            ...est,
+            city: hotelSettingsData?.city || null,
+            photo: photo,
+          });
+        }
         
-        setEstablishmentsWithCities(establishmentsWithCityData);
-        setCompanyEstablishments(establishmentsList);
+        // Garantir que a ordem do display_order seja mantida
+        // establishmentsList já está na ordem correta do display_order do banco
+        // establishmentsWithCityData mantém a mesma ordem porque usamos for loop
+        // IMPORTANTE: Preservar display_order em ambos os arrays
+        const establishmentsWithOrder = establishmentsWithCityData.map((est: any) => ({
+          ...est,
+          display_order: est.display_order ?? 999999, // Garantir que display_order existe
+        }));
+        
+        const establishmentsListWithOrder = establishmentsList.map((est: any) => ({
+          ...est,
+          display_order: est.display_order ?? 999999, // Garantir que display_order existe
+        }));
+        
+        // DEBUG: Log antes de definir os estados
+        console.log("[BookingEngine] Antes de definir estados:", {
+          establishmentsWithOrder: establishmentsWithOrder.map((e: any) => ({
+            id: e.id,
+            name: e.name,
+            display_order: e.display_order
+          })),
+          establishmentsListWithOrder: establishmentsListWithOrder.map((e: any) => ({
+            id: e.id,
+            name: e.name,
+            display_order: e.display_order
+          }))
+        });
+        
+        setEstablishmentsWithCities(establishmentsWithOrder);
+        // Manter a ordem original do display_order ao definir companyEstablishments
+        setCompanyEstablishments(establishmentsListWithOrder);
 
         // Apenas selecionar se houver um estabelecimento inicial (vindo de URL ou parâmetro)
         if (initialEstablishment && 
@@ -1219,15 +1272,51 @@ const BookingEnginePage = () => {
     load();
   }, [companySlug, isLoadingSiteSettings, siteSettings, navigate, searchParams]);
 
-  // Filtrar estabelecimentos por cidade selecionada
+  // Filtrar estabelecimentos por cidade selecionada, mantendo a ordem do display_order
   const filteredEstablishments = useMemo(() => {
+    if (companyEstablishments.length === 0) return [];
+    
+    // DEBUG: Log dos estabelecimentos antes de filtrar
+    console.log("[BookingEngine] filteredEstablishments - companyEstablishments:", companyEstablishments.map((e: any) => ({
+      id: e.id,
+      name: e.name,
+      display_order: e.display_order
+    })));
+    
+    let filtered: any[] = [];
+    
     if (selectedCity === "all") {
-      return companyEstablishments;
+      // IMPORTANTE: companyEstablishments já vem ordenado do banco por display_order
+      // Não ordenar novamente, apenas retornar na ordem original
+      filtered = [...companyEstablishments]; // Criar cópia para não mutar o original
+    } else {
+      // Filtrar por cidade, mas manter a ordem original baseada no display_order
+      const filteredIds = new Set(
+        establishmentsWithCities
+          .filter((est: any) => est.city === selectedCity)
+          .map((est: any) => est.id)
+      );
+      
+      // Filtrar mantendo a ordem original do companyEstablishments
+      // Usar Set para busca O(1) e manter ordem original
+      filtered = companyEstablishments.filter((est: any) => filteredIds.has(est.id));
     }
-    const filteredIds = establishmentsWithCities
-      .filter((est: any) => est.city === selectedCity)
-      .map((est: any) => est.id);
-    return companyEstablishments.filter((est: any) => filteredIds.includes(est.id));
+    
+    // IMPORTANTE: Não ordenar novamente se já está na ordem correta
+    // Apenas garantir que display_order existe em todos os itens
+    const result = filtered.map((est: any) => ({
+      ...est,
+      display_order: est.display_order ?? 999999,
+    }));
+    
+    // DEBUG: Log do resultado final
+    console.log("[BookingEngine] filteredEstablishments - resultado final:", result.map((e: any) => ({
+      id: e.id,
+      name: e.name,
+      display_order: e.display_order
+    })));
+    
+    return result;
   }, [companyEstablishments, establishmentsWithCities, selectedCity]);
 
   // Carregar categorias de todos os estabelecimentos ativos (ou apenas do selecionado)
@@ -1897,8 +1986,8 @@ const BookingEnginePage = () => {
 
           {/* Search Card - Centered */}
           <div className="max-w-5xl mx-auto animate-fade-in-up-delay">
-            <Card className={`${theme.searchCard} ${theme.searchCardShadow} ${theme.searchCardBorder} p-6 md:p-8 rounded-2xl transition-all duration-300 hover:scale-[1.01]`}>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card className={`${theme.searchCard} ${theme.searchCardShadow} ${theme.searchCardBorder} p-4 sm:p-6 md:p-8 rounded-2xl transition-all duration-300 hover:scale-[1.01]`}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 {/* Check-in e Check-out - DateRangePicker */}
                 <div className="space-y-2 sm:col-span-2">
                   <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2`}>
@@ -2169,17 +2258,22 @@ const BookingEnginePage = () => {
               </Card>
             )}
 
-            {!roomsLoading && Object.entries(categoriesByEstablishment).map(([establishmentId, { establishment, categories }]) => {
-              // Filtrar rooms para este estabelecimento
-              const establishmentRooms = rooms.filter((room: any) => {
-                const category = roomCategories.find((cat: any) => cat.id === room.categoryId);
-                return category && category.establishment_id === establishmentId;
-              });
+            {!roomsLoading && filteredEstablishments
+              .filter((est: any) => categoriesByEstablishment[est.id]) // Apenas estabelecimentos com categorias
+              .map((est: any) => {
+                const { establishment, categories } = categoriesByEstablishment[est.id];
+                const establishmentId = est.id;
+                
+                // Filtrar rooms para este estabelecimento
+                const establishmentRooms = rooms.filter((room: any) => {
+                  const category = roomCategories.find((cat: any) => cat.id === room.categoryId);
+                  return category && category.establishment_id === establishmentId;
+                });
 
-              if (establishmentRooms.length === 0) return null;
+                if (establishmentRooms.length === 0) return null;
 
-              const estWithData = establishmentsWithCities.find((e: any) => e.id === establishmentId);
-              const city = estWithData?.city;
+                const estWithData = establishmentsWithCities.find((e: any) => e.id === establishmentId);
+                const city = estWithData?.city;
 
               return (
                 <div key={establishmentId} className="space-y-6">
@@ -2632,7 +2726,7 @@ const BookingEnginePage = () => {
           </div>
 
           {/* Redes sociais */}
-          {(socialInstagram || socialFacebook || socialTwitter || socialYoutube || socialWebsite || socialWhatsapp) && (
+          {(socialInstagram || socialFacebook || socialTwitter || socialYoutube || socialLinkedin || socialWebsite || socialWhatsapp) && (
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <span className={`text-[11px] ${theme.footerText}`}>Siga-nos:</span>
               {socialInstagram && (
@@ -2677,6 +2771,17 @@ const BookingEnginePage = () => {
                   aria-label="YouTube"
                 >
                   <Youtube className="w-4 h-4" />
+                </a>
+              )}
+              {socialLinkedin && (
+                <a
+                  href={socialLinkedin}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="LinkedIn"
+                >
+                  <Linkedin className="w-4 h-4" />
                 </a>
               )}
               {socialWhatsapp && (
@@ -2885,9 +2990,10 @@ const BookingEnginePage = () => {
           <div className="mt-4 space-y-3 overflow-y-auto flex-1">
             {(() => {
               // Filtrar estabelecimentos por cidade selecionada no diálogo
+              // Usar filteredEstablishments para manter a ordem do display_order
               const filteredEstsForDialog = searchDialogCity === "all"
-                ? companyEstablishments
-                : companyEstablishments.filter((est: any) => {
+                ? filteredEstablishments
+                : filteredEstablishments.filter((est: any) => {
                     const estWithData = establishmentsWithCities.find((e: any) => e.id === est.id);
                     return estWithData?.city === searchDialogCity;
                   });

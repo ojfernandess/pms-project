@@ -43,6 +43,9 @@ const BookingEngineSettings = () => {
   const [isUploadingFavicon, setIsUploadingFavicon] = useState(false);
   const [localChatEnabled, setLocalChatEnabled] = useState<boolean>(false);
   const [searchEstablishment, setSearchEstablishment] = useState<string>("");
+  const [dnsStatus, setDnsStatus] = useState<"checking" | "active" | "pending" | "inactive">("inactive");
+  const [sslStatus, setSslStatus] = useState<"checking" | "active" | "pending" | "inactive">("inactive");
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
 
   // Buscar empresa atual
   const { data: company, isLoading: isLoadingCompany } = useQuery({
@@ -108,6 +111,118 @@ const BookingEngineSettings = () => {
       setLocalCustomDomain(company.booking_engine_custom_domain || "");
     }
   }, [company?.booking_engine_custom_domain]);
+
+  // Função para verificar status DNS e SSL
+  const checkDomainStatus = async (domain: string) => {
+    if (!domain) {
+      setDnsStatus("inactive");
+      setSslStatus("inactive");
+      return;
+    }
+
+    // Normalizar domínio (remover http:// ou https://)
+    const normalizedDomain = domain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+
+    // Verificar DNS e SSL simultaneamente
+    setDnsStatus("checking");
+    setSslStatus("checking");
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 segundos de timeout
+      
+      try {
+        // Tentar fazer uma requisição para verificar se o domínio está acessível
+        // Usamos uma imagem pequena ou favicon como teste, pois é mais confiável
+        const testUrl = `https://${normalizedDomain}/favicon.ico?t=${Date.now()}`;
+        
+        const response = await fetch(testUrl, {
+          method: "HEAD",
+          mode: "cors", // Tentar CORS primeiro para verificar resposta real
+          signal: controller.signal,
+          cache: "no-cache",
+        }).catch(async (corsError) => {
+          // Se falhar por CORS, tentar no-cors (isso significa que o domínio está acessível)
+          try {
+            await fetch(testUrl, {
+              method: "HEAD",
+              mode: "no-cors",
+              signal: controller.signal,
+              cache: "no-cache",
+            });
+            // Se chegou aqui, o domínio está acessível (DNS funcionando)
+            return { ok: true, cors: false };
+          } catch (noCorsError: any) {
+            throw noCorsError;
+          }
+        });
+
+        // Se chegou aqui sem erro, DNS e SSL estão funcionando
+        if (response && (response.ok || response.type === "opaque")) {
+          setDnsStatus("active");
+          setSslStatus("active");
+        } else {
+          // Se a resposta não foi ok, mas não deu erro de rede, DNS está funcionando
+          setDnsStatus("active");
+          setSslStatus("active");
+        }
+      } catch (error: any) {
+        // Analisar o tipo de erro
+        const errorMessage = error.message || error.toString() || "";
+        const errorName = error.name || "";
+        
+        // Verificar se é erro de SSL/certificado
+        if (
+          errorMessage.includes("SSL") ||
+          errorMessage.includes("certificate") ||
+          errorMessage.includes("ERR_CERT") ||
+          errorMessage.includes("NET::ERR_CERT") ||
+          errorMessage.includes("certificate has expired") ||
+          errorMessage.includes("certificate is not yet valid")
+        ) {
+          // DNS está funcionando, mas SSL não
+          setDnsStatus("active");
+          setSslStatus("pending");
+        } else if (
+          errorMessage.includes("Failed to fetch") ||
+          errorMessage.includes("NetworkError") ||
+          errorMessage.includes("ERR_NAME_NOT_RESOLVED") ||
+          errorMessage.includes("ERR_CONNECTION_REFUSED") ||
+          errorName === "AbortError"
+        ) {
+          // Erro de rede ou timeout - DNS pode não estar configurado
+          setDnsStatus("pending");
+          setSslStatus("pending");
+        } else {
+          // Outros erros - assumir que está funcionando (pode ser CORS)
+          setDnsStatus("active");
+          setSslStatus("active");
+        }
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (error) {
+      // Erro geral - assumir pendente
+      setDnsStatus("pending");
+      setSslStatus("pending");
+    }
+  };
+
+  // Verificar status quando o domínio mudar
+  useEffect(() => {
+    if (localCustomDomain) {
+      checkDomainStatus(localCustomDomain);
+      // Verificar novamente após 30 segundos (para dar tempo de propagação)
+      const interval = setInterval(() => {
+        checkDomainStatus(localCustomDomain);
+      }, 30000); // Verificar a cada 30 segundos
+
+      return () => clearInterval(interval);
+    } else {
+      setDnsStatus("inactive");
+      setSslStatus("inactive");
+    }
+  }, [localCustomDomain]);
 
   useEffect(() => {
     if (company?.booking_engine_chat_enabled !== undefined) {
@@ -373,6 +488,80 @@ const BookingEngineSettings = () => {
     },
   });
 
+  // Função para reordenar via drag & drop
+  const handleDragStart = (e: React.DragEvent, establishmentId: string) => {
+    setDraggedItemId(establishmentId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/html", establishmentId);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetEstablishmentId: string) => {
+    e.preventDefault();
+    
+    if (!draggedItemId || draggedItemId === targetEstablishmentId || !engineEstablishments) {
+      setDraggedItemId(null);
+      return;
+    }
+
+    const draggedIndex = engineEstablishments.findIndex(
+      (e: any) => e.establishment_id === draggedItemId
+    );
+    const targetIndex = engineEstablishments.findIndex(
+      (e: any) => e.establishment_id === targetEstablishmentId
+    );
+
+    if (draggedIndex === -1 || targetIndex === -1) {
+      setDraggedItemId(null);
+      return;
+    }
+
+    // Reordenar todos os itens entre a posição arrastada e a posição alvo
+    const sortedEstablishments = [...engineEstablishments].sort((a, b) => 
+      (a.display_order || 0) - (b.display_order || 0)
+    );
+
+    // Remover o item arrastado da lista
+    const draggedItem = sortedEstablishments[draggedIndex];
+    sortedEstablishments.splice(draggedIndex, 1);
+
+    // Inserir o item na nova posição
+    sortedEstablishments.splice(targetIndex, 0, draggedItem);
+
+    // Atualizar display_order de todos os itens afetados
+    const updates = sortedEstablishments.map((item: any, index: number) => ({
+      id: item.id,
+      display_order: index,
+    }));
+
+    // Executar todas as atualizações
+    try {
+      await Promise.all(
+        updates.map((update) =>
+          supabase
+            .from("company_booking_engine_establishments")
+            .update({ display_order: update.display_order })
+            .eq("id", update.id)
+        )
+      );
+
+      queryClient.invalidateQueries({ queryKey: ["company_booking_engine_establishments", company?.id] });
+      toast.success("Ordem atualizada");
+    } catch (error: any) {
+      toast.error(error.message || "Erro ao reordenar");
+    }
+
+    setDraggedItemId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItemId(null);
+  };
+
   useEffect(() => {
     setLocalTitle(company?.booking_engine_title || "");
   }, [company?.booking_engine_title]);
@@ -507,6 +696,11 @@ const BookingEngineSettings = () => {
       (e: any) => e.establishment_id === establishmentId && e.is_active
     ) || false;
   };
+
+  // Ordenar estabelecimentos ativos no motor primeiro, depois os outros
+  const sortedEngineEstablishments = engineEstablishments
+    ? [...engineEstablishments].sort((a: any, b: any) => (a.display_order || 0) - (b.display_order || 0))
+    : [];
 
   const filteredEstablishments = allEstablishments?.filter((est: any) => 
     est.name.toLowerCase().includes(searchEstablishment.toLowerCase())
@@ -1425,6 +1619,23 @@ const BookingEngineSettings = () => {
                         </div>
 
                         <div className="space-y-2">
+                          <Label className="text-sm font-medium text-slate-700">LinkedIn</Label>
+                          <Input
+                            placeholder="https://linkedin.com/company/sua-empresa"
+                            defaultValue={company?.booking_engine_social_linkedin || ""}
+                            onBlur={(e) => {
+                              const value = e.target.value.trim() || null;
+                              if (value !== (company?.booking_engine_social_linkedin || "")) {
+                                updateCompanyMutation.mutate({
+                                  booking_engine_social_linkedin: value,
+                                });
+                              }
+                            }}
+                            className="h-11"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
                           <Label className="text-sm font-medium text-slate-700">Site Oficial</Label>
                           <Input
                             placeholder="https://www.seusite.com.br"
@@ -1624,18 +1835,28 @@ const BookingEngineSettings = () => {
                         )}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
-              <div className="space-y-2">
+                          <div className="space-y-2">
                             <Label className="text-sm font-medium text-slate-700">Status DNS</Label>
                             <div className="flex items-center gap-2">
-                              {localCustomDomain ? (
-                                <>
-                                  <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                                  <span className="text-sm text-slate-600">Aguardando configuração</span>
-                                </>
-                              ) : (
+                              {!localCustomDomain ? (
                                 <>
                                   <div className="h-2 w-2 rounded-full bg-slate-300" />
                                   <span className="text-sm text-slate-500">Não configurado</span>
+                                </>
+                              ) : dnsStatus === "checking" ? (
+                                <>
+                                  <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                                  <span className="text-sm text-slate-600">Verificando...</span>
+                                </>
+                              ) : dnsStatus === "active" ? (
+                                <>
+                                  <div className="h-2 w-2 rounded-full bg-green-500" />
+                                  <span className="text-sm text-green-700 font-medium">Configurado e ativo</span>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                                  <span className="text-sm text-amber-600">Aguardando configuração</span>
                                 </>
                               )}
                             </div>
@@ -1644,15 +1865,25 @@ const BookingEngineSettings = () => {
                           <div className="space-y-2">
                             <Label className="text-sm font-medium text-slate-700">Status SSL</Label>
                             <div className="flex items-center gap-2">
-                              {localCustomDomain ? (
-                                <>
-                                  <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                                  <span className="text-sm text-slate-600">Provisionamento automático</span>
-                                </>
-                              ) : (
+                              {!localCustomDomain ? (
                                 <>
                                   <div className="h-2 w-2 rounded-full bg-slate-300" />
                                   <span className="text-sm text-slate-500">N/A</span>
+                                </>
+                              ) : sslStatus === "checking" ? (
+                                <>
+                                  <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                                  <span className="text-sm text-slate-600">Verificando...</span>
+                                </>
+                              ) : sslStatus === "active" ? (
+                                <>
+                                  <div className="h-2 w-2 rounded-full bg-green-500" />
+                                  <span className="text-sm text-green-700 font-medium">Certificado ativo</span>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                                  <span className="text-sm text-amber-600">Provisionamento automático</span>
                                 </>
                               )}
                             </div>
@@ -1699,7 +1930,24 @@ const BookingEngineSettings = () => {
                             <p className="text-sm">Nenhum estabelecimento encontrado</p>
                           </div>
                         ) : (
-                          filteredEstablishments.map((est: any) => {
+                          // Ordenar: primeiro os que estão no motor (ordenados por display_order), depois os outros
+                          [...filteredEstablishments].sort((a: any, b: any) => {
+                            const aInEngine = isEstablishmentInEngine(a.id);
+                            const bInEngine = isEstablishmentInEngine(b.id);
+                            
+                            if (aInEngine && !bInEngine) return -1;
+                            if (!aInEngine && bInEngine) return 1;
+                            
+                            if (aInEngine && bInEngine) {
+                              const aEntry = sortedEngineEstablishments.find((e: any) => e.establishment_id === a.id);
+                              const bEntry = sortedEngineEstablishments.find((e: any) => e.establishment_id === b.id);
+                              const aOrder = aEntry?.display_order ?? 999999;
+                              const bOrder = bEntry?.display_order ?? 999999;
+                              return aOrder - bOrder;
+                            }
+                            
+                            return (a.name || "").localeCompare(b.name || "");
+                          }).map((est: any) => {
                   const isInEngine = isEstablishmentInEngine(est.id);
                   const engineEntry = engineEstablishments?.find(
                     (e: any) => e.establishment_id === est.id
@@ -1713,15 +1961,26 @@ const BookingEngineSettings = () => {
                   return (
                     <div
                       key={est.id}
-                                className={`flex items-center gap-3 p-4 border-2 rounded-lg transition-all ${
-                                  isInEngine
-                                    ? "border-blue-200 bg-blue-50/50"
-                                    : "border-slate-200 bg-white hover:border-slate-300"
-                                }`}
-                              >
-                                {isInEngine && (
-                                  <GripVertical className="w-5 h-5 text-slate-400 cursor-move" />
-                                )}
+                      draggable={isInEngine}
+                      onDragStart={(e) => isInEngine && handleDragStart(e, est.id)}
+                      onDragOver={handleDragOver}
+                      onDrop={(e) => isInEngine && handleDrop(e, est.id)}
+                      onDragEnd={handleDragEnd}
+                      className={`flex items-center gap-3 p-4 border-2 rounded-lg transition-all ${
+                        isInEngine
+                          ? "border-blue-200 bg-blue-50/50"
+                          : "border-slate-200 bg-white hover:border-slate-300"
+                      } ${
+                        draggedItemId === est.id
+                          ? "opacity-50 scale-95"
+                          : draggedItemId && isInEngine
+                          ? "border-blue-400 bg-blue-100"
+                          : ""
+                      } ${isInEngine ? "cursor-move" : ""}`}
+                    >
+                      {isInEngine && (
+                        <GripVertical className="w-5 h-5 text-slate-400 cursor-move flex-shrink-0" />
+                      )}
                         <Checkbox
                           checked={isInEngine}
                           onCheckedChange={(checked) => {
