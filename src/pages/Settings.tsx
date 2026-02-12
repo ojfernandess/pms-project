@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,7 @@ import {
 const Settings = () => {
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const { settings, isLoading, saveSettings, uploadImage, isSaving, settingsQuery } = useHotelSettings(selectedEstablishment?.id);
   const { apiSettings, saveApiSetting, deleteApiSetting, isLoading: isLoadingApi } = useApiSettings();
   const { carriers } = usePaymentCarriers();
@@ -46,6 +48,17 @@ const Settings = () => {
   
   // Verificar se a funcionalidade de integrações está habilitada
   const isApiIntegrationsEnabled = siteSettings?.features_enabled?.api_integrations !== false;
+
+  // Ler parâmetro da URL para determinar a aba inicial
+  const tabFromUrl = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState(tabFromUrl || "hotel");
+
+  // Atualizar aba quando o parâmetro da URL mudar
+  useEffect(() => {
+    if (tabFromUrl) {
+      setActiveTab(tabFromUrl);
+    }
+  }, [tabFromUrl]);
 
   // TODOS OS HOOKS DEVEM SER CHAMADOS ANTES DE QUALQUER RETURN CONDICIONAL
   const [formData, setFormData] = useState({
@@ -391,7 +404,7 @@ const Settings = () => {
         </div>
       </div>
 
-      <Tabs defaultValue="hotel" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="hotel">Informações do Hotel</TabsTrigger>
           <TabsTrigger value="schedule">Horário e Pagamento</TabsTrigger>

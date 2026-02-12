@@ -411,7 +411,11 @@ const PublicReservationSettings = () => {
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          navigate(`/${est.id}/configuracoes`);
+                          // Navegar para a página de configurações do estabelecimento
+                          // com a aba "room-display" (Configuração da Página Pública de Reservas) aberta
+                          // Usar numeric_id pois o EstablishmentRoute espera esse valor na URL
+                          const establishmentId = est.numeric_id || est.id;
+                          navigate(`/${establishmentId}/configuracoes?tab=room-display`);
                         }}
                       >
                         <Settings2 className="w-4 h-4 mr-2" />

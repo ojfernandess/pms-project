@@ -708,7 +708,7 @@ const BookingEngineSettings = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2 space-y-6">
                     {/* Seletor de Tema com Preview */}
-                    {canUseThemes && (
+              {canUseThemes && (
                       <Card className="p-6 border-slate-200 shadow-sm">
                         <div className="space-y-6">
                           <div>
@@ -720,26 +720,26 @@ const BookingEngineSettings = () => {
                           <div className="space-y-4">
                             <div className="space-y-2">
                               <Label className="text-sm font-medium text-slate-700">Selecione o Tema</Label>
-                              <Select
-                                value={company?.booking_engine_theme || "default"}
-                                onValueChange={(value) => {
-                                  updateCompanyMutation.mutate({
-                                    booking_engine_theme: value,
-                                  });
-                                }}
-                              >
+                  <Select
+                    value={company?.booking_engine_theme || "default"}
+                    onValueChange={(value) => {
+                      updateCompanyMutation.mutate({
+                        booking_engine_theme: value,
+                      });
+                    }}
+                  >
                                 <SelectTrigger className="h-11">
-                                  <SelectValue placeholder="Selecione um tema" />
-                                </SelectTrigger>
-                                <SelectContent>
+                      <SelectValue placeholder="Selecione um tema" />
+                    </SelectTrigger>
+                    <SelectContent>
                                   <SelectItem value="default">Default - Azul Clássico</SelectItem>
                                   <SelectItem value="modern">Modern - Gradiente Moderno</SelectItem>
                                   <SelectItem value="luxury">Luxury - Roxo Premium</SelectItem>
                                   <SelectItem value="minimal">Minimal - Branco Minimalista</SelectItem>
                                   <SelectItem value="dark">Dark - Modo Escuro</SelectItem>
                                   <SelectItem value="travel">Travel Landing Page - Estilo Booking.com</SelectItem>
-                                </SelectContent>
-                              </Select>
+                    </SelectContent>
+                  </Select>
                             </div>
 
                             {/* Preview dos Temas */}
@@ -914,8 +914,8 @@ const BookingEngineSettings = () => {
                                   <div className="flex items-center gap-2 text-sm text-slate-600">
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                     Enviando...
-                                  </div>
-                                )}
+                </div>
+              )}
                               </div>
                             </div>
                           </div>
@@ -1161,14 +1161,14 @@ const BookingEngineSettings = () => {
                                   if (value !== (company?.booking_engine_hero_title || "")) {
                         updateCompanyMutation.mutate({
                                       booking_engine_hero_title: value,
-                                    });
+                        });
                                   }
                                 }}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") {
                                     e.currentTarget.blur();
                                   }
-                                }}
+                      }}
                                 className="h-11"
                     />
                   </div>
@@ -1188,7 +1188,7 @@ const BookingEngineSettings = () => {
                       }}
                       rows={3}
                                 className="resize-none"
-                              />
+                    />
                             </div>
                           </div>
                         </div>
@@ -1434,9 +1434,9 @@ const BookingEngineSettings = () => {
                               if (value !== (company?.booking_engine_social_website || "")) {
                                 updateCompanyMutation.mutate({
                                   booking_engine_social_website: value,
-                                });
+                          });
                               }
-                            }}
+                        }}
                             className="h-11"
                           />
                         </div>
@@ -1731,7 +1731,7 @@ const BookingEngineSettings = () => {
                             });
                           }}
                                   className="flex-shrink-0"
-                                />
+                        />
                                 <div className="flex-1 min-w-0">
                                   <div className="font-medium text-slate-900">{est.name}</div>
                                   <div className="flex items-center gap-2 mt-1">

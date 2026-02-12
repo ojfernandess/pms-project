@@ -866,8 +866,8 @@ export const useRateSystem = () => {
       // Para erros de rede, usar preço base diretamente sem tentar fallback
       const isNetworkError = 
         fetchError.message?.includes("Failed to fetch") || 
-        fetchError.message?.includes("CORS") || 
-        fetchError.message?.includes("502") ||
+          fetchError.message?.includes("CORS") || 
+          fetchError.message?.includes("502") ||
         fetchError.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
         fetchError.code === "PGRST301";
 

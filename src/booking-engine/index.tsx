@@ -965,7 +965,7 @@ const BookingEnginePage = () => {
             const normalizedConfig = normalizeDomain(setting.booking_engine_custom_domain);
             return normalizedConfig === normalizedHost;
           });
-          
+
           if (byDomain && (byDomain as any).establishment_id) {
             const { data: est } = await supabase
               .from("establishments")
@@ -983,16 +983,16 @@ const BookingEnginePage = () => {
               currentHost.includes("127.0.0.1");
 
             if (isVercelLikeDomain) {
-              // Tentar detectar pelo subdomínio (ex: reservas.exemplo.com -> exemplo)
-              const parts = currentHost.split(".");
-              if (parts.length > 2) {
-                const potentialSlug = parts[0];
-                const { data: est } = await supabase
-                  .from("establishments")
-                  .select("*")
-                  .eq("slug", potentialSlug)
-                  .maybeSingle();
-                if (est) initialEstablishment = est;
+            // Tentar detectar pelo subdomínio (ex: reservas.exemplo.com -> exemplo)
+            const parts = currentHost.split(".");
+            if (parts.length > 2) {
+              const potentialSlug = parts[0];
+              const { data: est } = await supabase
+                .from("establishments")
+                .select("*")
+                .eq("slug", potentialSlug)
+                .maybeSingle();
+              if (est) initialEstablishment = est;
               }
             } else {
               console.warn(
@@ -1289,7 +1289,7 @@ const BookingEnginePage = () => {
       for (const category of categoriesData) {
         const estId = category.establishment_id;
         const establishment = filteredEstablishments.find((est: any) => est.id === estId);
-        
+
         if (establishment) {
           if (!grouped[estId]) {
             grouped[estId] = {
@@ -1307,21 +1307,21 @@ const BookingEnginePage = () => {
       // Buscar hotel_settings de todos os estabelecimentos
       const settingsMap: Record<string, any> = {};
       for (const estId of establishmentIds) {
-        const { data: settingsData } = await supabase
-          .from("hotel_settings" as any)
-          .select("*")
+      const { data: settingsData } = await supabase
+        .from("hotel_settings" as any)
+        .select("*")
           .eq("establishment_id", estId)
-          .maybeSingle();
+        .maybeSingle();
         if (settingsData) {
           settingsMap[estId] = settingsData;
         }
       }
       setAllHotelSettings(settingsMap);
-      
+
       // Se houver um estabelecimento selecionado, carregar suas configurações
       if (selectedEstablishmentId && settingsMap[selectedEstablishmentId]) {
         const settingsData = settingsMap[selectedEstablishmentId];
-        setHotelSettings(settingsData);
+      setHotelSettings(settingsData);
 
         const plan1Id = (settingsData as any).public_pricing_plan_1_id || null;
         const plan2Id = (settingsData as any).public_pricing_plan_2_id || null;
@@ -1330,7 +1330,7 @@ const BookingEnginePage = () => {
         setPublicPricingPlan2Id(plan2Id);
         setPublicPricingPlan2Title((settingsData as any).public_pricing_plan_2_title || null);
       }
-      
+
       setRoomsLoading(false);
     };
 
@@ -1596,7 +1596,7 @@ const BookingEnginePage = () => {
           for (let i = 0; i < nightsCount; i++) {
             const currentDate = addDays(startDate, i);
             const dateStr = formatDateLocal(currentDate);
-            
+
             priceRequests.push({
               establishmentId,
               categoryId: cat.id,
@@ -1655,7 +1655,7 @@ const BookingEnginePage = () => {
         }
       } finally {
         if (!abortController.signal.aborted) {
-          setCalculatingPrices(false);
+        setCalculatingPrices(false);
         }
       }
     };
@@ -1714,14 +1714,14 @@ const BookingEnginePage = () => {
       if (!allEstData) return;
       
       const estAny = allEstData as any;
-      const slug = estAny.slug || estAny.numeric_id?.toString() || estAny.id;
+    const slug = estAny.slug || estAny.numeric_id?.toString() || estAny.id;
 
-      const params = new URLSearchParams();
-      if (checkin) params.set("checkin", checkin);
-      if (checkout) params.set("checkout", checkout);
-      if (adults) params.set("adults", adults);
-      if (children) params.set("children", children);
-      if (coupon) params.set("coupon", coupon);
+    const params = new URLSearchParams();
+    if (checkin) params.set("checkin", checkin);
+    if (checkout) params.set("checkout", checkout);
+    if (adults) params.set("adults", adults);
+    if (children) params.set("children", children);
+    if (coupon) params.set("coupon", coupon);
       params.set("category", targetCategoryId);
       if (selectedPlanId && selectedPlan) {
         params.set("plan", selectedPlan.planId || "");
@@ -1850,7 +1850,7 @@ const BookingEnginePage = () => {
                       themeKey === "travel" ? "text-white" : theme.textPrimary
                     }`}
                   >
-                    {motorTitle}
+                {motorTitle}
                   </span>
                   {motorSubtitle && (
                     <span className={`text-xs md:text-sm ${theme.headerSubtitle} transition-colors duration-300`}>
@@ -2071,7 +2071,7 @@ const BookingEnginePage = () => {
                         setSelectedEstablishmentId(null);
                         setEstablishment(null);
                       } else {
-                        setSelectedEstablishmentId(est.id);
+                      setSelectedEstablishmentId(est.id);
                         setEstablishment(est);
                       }
                       setSelectedRoomId(null);
@@ -2094,14 +2094,14 @@ const BookingEnginePage = () => {
                           <MapPin className="w-12 h-12 text-slate-400" />
                         </div>
                       )}
-                      {isSelected && (
+                        {isSelected && (
                         <div className="absolute top-3 right-3">
                           <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center shadow-lg">
                             <CheckCircle2 className="w-5 h-5 text-white" />
                           </div>
                         </div>
-                      )}
-                    </div>
+                        )}
+                      </div>
                     
                     {/* Informações do estabelecimento */}
                     <div className="p-5 space-y-3">
@@ -2115,7 +2115,7 @@ const BookingEnginePage = () => {
                             <p className={theme.textMuted}>{city}</p>
                           </div>
                         )}
-                        {est.type && (
+                      {est.type && (
                           <div className="inline-flex items-center">
                             <Badge 
                               variant="outline" 
@@ -2124,7 +2124,7 @@ const BookingEnginePage = () => {
                               {typeLabel}
                             </Badge>
                           </div>
-                        )}
+                      )}
                       </div>
                     </div>
                   </Card>
@@ -2435,7 +2435,7 @@ const BookingEnginePage = () => {
                   </div>
                 </div>
               </Card>
-                    ))}
+            ))}
                   </div>
                 </div>
               );
@@ -2567,7 +2567,7 @@ const BookingEnginePage = () => {
                   <span className={`text-xs ${theme.footerText}`}>
                     Motor de reservas oficial · reserva direta, sem taxas ocultas
                   </span>
-                </div>
+            </div>
               </div>
               {contactCnpj && (
                 <p className={`text-xs ${theme.footerText}`}>CNPJ: {contactCnpj}</p>

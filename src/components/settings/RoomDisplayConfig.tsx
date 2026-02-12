@@ -22,8 +22,9 @@ import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import { usePricingPlans } from "@/hooks/usePricingPlans";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useNavigate } from "react-router-dom";
 
 // Lista padrão de comodidades de hotelaria para facilitar o cadastro
 const PREDEFINED_AMENITIES: string[] = [
@@ -78,6 +79,7 @@ const PREDEFINED_AMENITIES: string[] = [
 const RoomDisplayConfig = () => {
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { uploadImage, settings, saveSettings } = useHotelSettings(selectedEstablishment?.id);
   const { settings: siteSettings } = useSiteSettings();
   const { plans } = usePricingPlans();
@@ -88,6 +90,8 @@ const RoomDisplayConfig = () => {
   const [isSavingPlan1Title, setIsSavingPlan1Title] = useState(false);
   const [isSavingPlan2Title, setIsSavingPlan2Title] = useState(false);
   const [showDnsHelp, setShowDnsHelp] = useState(false);
+  const [showBookingEngineModal, setShowBookingEngineModal] = useState(false);
+  const [showPublicPagesModal, setShowPublicPagesModal] = useState(false);
 
   // Detectar domínio base do SaaS para orientar configuração de DNS (CNAME)
   const systemBaseDomain = (() => {
@@ -350,7 +354,7 @@ const RoomDisplayConfig = () => {
                     variant="outline"
                     className="ml-4"
                     onClick={() => {
-                      window.location.href = "/motor-reservas/configuracoes";
+                      setShowBookingEngineModal(true);
                     }}
                   >
                     Configurar Motor
@@ -373,7 +377,7 @@ const RoomDisplayConfig = () => {
                   variant="outline"
                   className="ml-4"
                   onClick={() => {
-                    window.location.href = "/pagina-publica/configuracoes";
+                    setShowPublicPagesModal(true);
                   }}
                 >
                   Gerenciar Páginas Públicas
@@ -821,6 +825,72 @@ const RoomDisplayConfig = () => {
           )}
         </div>
       </Card>
+
+      {/* Modal para Configurar Motor */}
+      <Dialog open={showBookingEngineModal} onOpenChange={setShowBookingEngineModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Configurar Motor de Reservas</DialogTitle>
+            <DialogDescription>
+              O Motor de Reservas é configurado no nível da empresa. Você pode configurar temas, hero section, domínio personalizado e selecionar quais estabelecimentos aparecerão no motor.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              Deseja abrir a página de configuração do Motor de Reservas?
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowBookingEngineModal(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                setShowBookingEngineModal(false);
+                navigate("/motor-reservas/configuracoes");
+              }}
+            >
+              Ir para Configuração
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal para Gerenciar Páginas Públicas */}
+      <Dialog open={showPublicPagesModal} onOpenChange={setShowPublicPagesModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Gerenciar Páginas Públicas</DialogTitle>
+            <DialogDescription>
+              Selecione quais estabelecimentos da empresa terão página pública de reservas ativa. As configurações específicas de cada estabelecimento são gerenciadas nesta página.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              Deseja abrir a página de gerenciamento de páginas públicas?
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowPublicPagesModal(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                setShowPublicPagesModal(false);
+                navigate("/pagina-publica/configuracoes");
+              }}
+            >
+              Ir para Gerenciamento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

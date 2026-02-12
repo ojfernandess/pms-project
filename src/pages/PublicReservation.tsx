@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, CheckCircle2, MapPin, Phone, Mail, Wifi, Car, UtensilsCrossed, Waves, Wind, Tv, Coffee, Bed, Users, Calendar, DollarSign, AlertCircle, MessageCircle, Star, ChevronRight, Sparkles, ChevronLeft, X, ImageIcon, Home, Clock, Plus, Minus, ChevronDown, XCircle, FileText, Info } from "lucide-react";
+import { Loader2, CheckCircle2, MapPin, Phone, Mail, Wifi, Car, UtensilsCrossed, Waves, Wind, Tv, Coffee, Bed, Users, Calendar, DollarSign, AlertCircle, MessageCircle, Star, ChevronRight, Sparkles, ChevronLeft, X, ImageIcon, Home, Clock, Plus, Minus, ChevronDown, XCircle, FileText, Info, Instagram, Facebook, Twitter, Youtube, Globe2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -22,12 +22,434 @@ import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
 
+// Importar tipos e configurações de tema do booking engine
+type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel";
+
+interface BookingThemeConfig {
+  pageBg: string;
+  heroBg: string;
+  heroOverlay: string;
+  heroImageOverlay: string;
+  headerBg: string;
+  headerText: string;
+  headerSubtitle: string;
+  headerButton: string;
+  headerBorder: string;
+  heroTitle: string;
+  heroSubtitle: string;
+  heroTitleSize: string;
+  heroSubtitleSize: string;
+  searchCard: string;
+  searchCardShadow: string;
+  searchCardBorder: string;
+  searchInputBg: string;
+  searchInputBorder: string;
+  searchInputText: string;
+  searchInputFocus: string;
+  primaryButton: string;
+  primaryButtonHover: string;
+  secondaryButton: string;
+  secondaryButtonHover: string;
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  textInverse: string;
+  cardBg: string;
+  cardBorder: string;
+  cardShadow: string;
+  cardHover: string;
+  cardHoverShadow: string;
+  roomCardBg: string;
+  roomCardBorder: string;
+  roomCardShadow: string;
+  roomImageOverlay: string;
+  priceColor: string;
+  priceLabel: string;
+  priceHighlight: string;
+  badgePrimary: string;
+  badgeSecondary: string;
+  badgeSuccess: string;
+  badgeWarning: string;
+  summaryBg: string;
+  summaryBorder: string;
+  summaryShadow: string;
+  accentColor: string;
+  accentBg: string;
+  accentBorder: string;
+  planCardBg: string;
+  planCardBorder: string;
+  planCardSelected: string;
+  planCardHover: string;
+  footerBg: string;
+  footerBorder: string;
+  footerText: string;
+}
+
+// Configurações de tema (mesmas do booking engine)
+const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
+  default: {
+    pageBg: "bg-slate-50",
+    heroBg: "bg-gradient-to-br from-blue-600 via-blue-500 to-blue-700",
+    heroOverlay: "bg-black/20",
+    heroImageOverlay: "bg-gradient-to-t from-black/60 via-black/20 to-transparent",
+    headerBg: "bg-white",
+    headerText: "text-slate-900",
+    headerSubtitle: "text-slate-500",
+    headerButton: "bg-blue-600 hover:bg-blue-700 text-white",
+    headerBorder: "border-b border-slate-200",
+    heroTitle: "text-white",
+    heroSubtitle: "text-blue-50",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+    searchCard: "bg-white",
+    searchCardShadow: "shadow-2xl",
+    searchCardBorder: "border-0",
+    searchInputBg: "bg-slate-50",
+    searchInputBorder: "border-slate-200",
+    searchInputText: "text-slate-900",
+    searchInputFocus: "focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20",
+    primaryButton: "bg-blue-600 text-white",
+    primaryButtonHover: "hover:bg-blue-700 hover:shadow-lg",
+    secondaryButton: "bg-white text-blue-600 border border-blue-600",
+    secondaryButtonHover: "hover:bg-blue-50",
+    textPrimary: "text-slate-900",
+    textSecondary: "text-slate-700",
+    textMuted: "text-slate-500",
+    textInverse: "text-white",
+    cardBg: "bg-white",
+    cardBorder: "border border-slate-200",
+    cardShadow: "shadow-sm",
+    cardHover: "hover:border-blue-300",
+    cardHoverShadow: "hover:shadow-lg",
+    roomCardBg: "bg-white",
+    roomCardBorder: "border border-slate-200",
+    roomCardShadow: "shadow-md",
+    roomImageOverlay: "bg-gradient-to-t from-black/40 to-transparent",
+    priceColor: "text-blue-600",
+    priceLabel: "text-slate-500",
+    priceHighlight: "text-blue-700 font-bold",
+    badgePrimary: "bg-blue-100 text-blue-700 border-blue-200",
+    badgeSecondary: "bg-slate-100 text-slate-700 border-slate-200",
+    badgeSuccess: "bg-green-100 text-green-700 border-green-200",
+    badgeWarning: "bg-amber-100 text-amber-700 border-amber-200",
+    summaryBg: "bg-white",
+    summaryBorder: "border border-slate-200",
+    summaryShadow: "shadow-lg",
+    accentColor: "text-blue-600",
+    accentBg: "bg-blue-50",
+    accentBorder: "border-blue-200",
+    planCardBg: "bg-white",
+    planCardBorder: "border border-slate-200",
+    planCardSelected: "border-2 border-blue-500 bg-blue-50",
+    planCardHover: "hover:border-blue-300 hover:shadow-md",
+    footerBg: "bg-white",
+    footerBorder: "border-t border-slate-200",
+    footerText: "text-slate-600",
+  },
+  modern: {
+    pageBg: "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950",
+    heroBg: "bg-gradient-to-br from-amber-500/20 via-orange-500/20 to-red-500/20",
+    heroOverlay: "bg-black/50",
+    heroImageOverlay: "bg-gradient-to-t from-black/80 via-black/40 to-transparent",
+    headerBg: "bg-slate-900/80 backdrop-blur-md",
+    headerText: "text-white",
+    headerSubtitle: "text-slate-300",
+    headerButton: "bg-amber-500 hover:bg-amber-600 text-slate-900 font-semibold",
+    headerBorder: "border-b border-slate-700/50",
+    heroTitle: "text-white",
+    heroSubtitle: "text-slate-200",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+    searchCard: "bg-slate-800/90 backdrop-blur-xl",
+    searchCardShadow: "shadow-2xl shadow-black/50",
+    searchCardBorder: "border border-slate-700/50",
+    searchInputBg: "bg-slate-700/50",
+    searchInputBorder: "border-slate-600",
+    searchInputText: "text-white",
+    searchInputFocus: "focus:border-amber-500 focus:ring-2 focus:ring-amber-500/30",
+    primaryButton: "bg-amber-500 text-slate-900",
+    primaryButtonHover: "hover:bg-amber-600 hover:shadow-xl hover:shadow-amber-500/30",
+    secondaryButton: "bg-slate-800 text-amber-400 border border-amber-500",
+    secondaryButtonHover: "hover:bg-slate-700",
+    textPrimary: "text-white",
+    textSecondary: "text-slate-200",
+    textMuted: "text-slate-400",
+    textInverse: "text-slate-900",
+    cardBg: "bg-slate-800/90 backdrop-blur",
+    cardBorder: "border border-slate-700",
+    cardShadow: "shadow-xl shadow-black/30",
+    cardHover: "hover:border-amber-500/50",
+    cardHoverShadow: "hover:shadow-2xl hover:shadow-amber-500/20",
+    roomCardBg: "bg-slate-800/90 backdrop-blur",
+    roomCardBorder: "border border-slate-700",
+    roomCardShadow: "shadow-xl",
+    roomImageOverlay: "bg-gradient-to-t from-black/70 via-black/30 to-transparent",
+    priceColor: "text-amber-400",
+    priceLabel: "text-slate-400",
+    priceHighlight: "text-amber-300 font-bold",
+    badgePrimary: "bg-amber-500/20 text-amber-300 border-amber-500/50",
+    badgeSecondary: "bg-slate-700/50 text-slate-300 border-slate-600",
+    badgeSuccess: "bg-green-500/20 text-green-300 border-green-500/50",
+    badgeWarning: "bg-orange-500/20 text-orange-300 border-orange-500/50",
+    summaryBg: "bg-slate-800/95 backdrop-blur-xl",
+    summaryBorder: "border border-slate-700",
+    summaryShadow: "shadow-2xl shadow-black/50",
+    accentColor: "text-amber-400",
+    accentBg: "bg-amber-500/10",
+    accentBorder: "border-amber-500/30",
+    planCardBg: "bg-slate-800/80",
+    planCardBorder: "border border-slate-700",
+    planCardSelected: "border-2 border-amber-500 bg-amber-500/10",
+    planCardHover: "hover:border-amber-500/50 hover:shadow-lg",
+    footerBg: "bg-slate-900/80 backdrop-blur-md",
+    footerBorder: "border-t border-slate-700",
+    footerText: "text-slate-300",
+  },
+  luxury: {
+    pageBg: "bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950",
+    heroBg: "bg-gradient-to-br from-purple-900/50 via-slate-900/70 to-slate-950",
+    heroOverlay: "bg-black/50",
+    heroImageOverlay: "bg-gradient-to-t from-black/85 via-purple-900/30 to-transparent",
+    headerBg: "bg-slate-950/98 backdrop-blur-md",
+    headerText: "text-slate-50",
+    headerSubtitle: "text-slate-300",
+    headerButton: "bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-semibold shadow-lg shadow-purple-900/30",
+    headerBorder: "border-b border-slate-800/50",
+    heroTitle: "text-white font-serif drop-shadow-lg",
+    heroSubtitle: "text-slate-100",
+    heroTitleSize: "text-5xl md:text-6xl lg:text-7xl",
+    heroSubtitleSize: "text-lg md:text-xl",
+    searchCard: "bg-slate-900 border border-slate-800 shadow-2xl",
+    searchCardShadow: "shadow-2xl shadow-black/60",
+    searchCardBorder: "border border-slate-800",
+    searchInputBg: "bg-slate-800",
+    searchInputBorder: "border-slate-700",
+    searchInputText: "text-slate-50",
+    searchInputFocus: "focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30",
+    primaryButton: "bg-gradient-to-r from-purple-600 to-purple-700 text-white font-semibold shadow-lg",
+    primaryButtonHover: "hover:from-purple-700 hover:to-purple-800 hover:shadow-xl hover:shadow-purple-500/40",
+    secondaryButton: "bg-slate-800/90 text-slate-100 border border-slate-700/50",
+    secondaryButtonHover: "hover:bg-slate-700/90 hover:border-purple-500/50",
+    textPrimary: "text-slate-50",
+    textSecondary: "text-slate-200",
+    textMuted: "text-slate-400",
+    textInverse: "text-slate-900",
+    cardBg: "bg-slate-900/95 backdrop-blur-sm",
+    cardBorder: "border border-slate-800/50",
+    cardShadow: "shadow-xl shadow-black/40",
+    cardHover: "hover:border-purple-500/60",
+    cardHoverShadow: "hover:shadow-2xl hover:shadow-purple-900/30",
+    roomCardBg: "bg-slate-900/95 backdrop-blur-sm",
+    roomCardBorder: "border border-slate-800/50",
+    roomCardShadow: "shadow-xl shadow-black/40",
+    roomImageOverlay: "bg-gradient-to-t from-black/85 via-slate-900/40 to-transparent",
+    priceColor: "text-purple-300",
+    priceLabel: "text-slate-400",
+    priceHighlight: "text-purple-200 font-bold",
+    badgePrimary: "bg-purple-500/25 text-purple-200 border-purple-500/50",
+    badgeSecondary: "bg-slate-800/70 text-slate-200 border-slate-700/50",
+    badgeSuccess: "bg-emerald-500/25 text-emerald-200 border-emerald-500/50",
+    badgeWarning: "bg-amber-500/25 text-amber-200 border-amber-500/50",
+    summaryBg: "bg-slate-900/98 backdrop-blur-xl",
+    summaryBorder: "border border-slate-800/50",
+    summaryShadow: "shadow-2xl shadow-black/50",
+    accentColor: "text-purple-300",
+    accentBg: "bg-purple-500/15",
+    accentBorder: "border-purple-500/40",
+    planCardBg: "bg-slate-900/90",
+    planCardBorder: "border border-slate-800/50",
+    planCardSelected: "border-2 border-purple-500 bg-purple-500/15",
+    planCardHover: "hover:border-purple-500/60 hover:shadow-lg",
+    footerBg: "bg-slate-950/98 backdrop-blur-md",
+    footerBorder: "border-t border-slate-800/50",
+    footerText: "text-slate-300",
+  },
+  minimal: {
+    pageBg: "bg-white",
+    heroBg: "bg-gradient-to-br from-slate-50 to-white",
+    heroOverlay: "",
+    heroImageOverlay: "bg-gradient-to-t from-white/90 via-white/50 to-transparent",
+    headerBg: "bg-white",
+    headerText: "text-slate-900",
+    headerSubtitle: "text-slate-500",
+    headerButton: "bg-slate-900 hover:bg-slate-800 text-white",
+    headerBorder: "border-b border-slate-100",
+    heroTitle: "text-slate-900",
+    heroSubtitle: "text-slate-600",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+    searchCard: "bg-white",
+    searchCardShadow: "shadow-lg",
+    searchCardBorder: "border border-slate-200",
+    searchInputBg: "bg-white",
+    searchInputBorder: "border-slate-200",
+    searchInputText: "text-slate-900",
+    searchInputFocus: "focus:border-slate-400 focus:ring-1 focus:ring-slate-400/20",
+    primaryButton: "bg-slate-900 text-white",
+    primaryButtonHover: "hover:bg-slate-800 hover:shadow-md",
+    secondaryButton: "bg-white text-slate-900 border border-slate-300",
+    secondaryButtonHover: "hover:bg-slate-50",
+    textPrimary: "text-slate-900",
+    textSecondary: "text-slate-700",
+    textMuted: "text-slate-500",
+    textInverse: "text-white",
+    cardBg: "bg-white",
+    cardBorder: "border border-slate-100",
+    cardShadow: "shadow-sm",
+    cardHover: "hover:border-slate-300",
+    cardHoverShadow: "hover:shadow-md",
+    roomCardBg: "bg-white",
+    roomCardBorder: "border border-slate-100",
+    roomCardShadow: "shadow-sm",
+    roomImageOverlay: "bg-gradient-to-t from-white/80 to-transparent",
+    priceColor: "text-slate-900",
+    priceLabel: "text-slate-500",
+    priceHighlight: "text-slate-900 font-bold",
+    badgePrimary: "bg-slate-100 text-slate-700 border-slate-200",
+    badgeSecondary: "bg-slate-50 text-slate-600 border-slate-200",
+    badgeSuccess: "bg-green-50 text-green-700 border-green-200",
+    badgeWarning: "bg-amber-50 text-amber-700 border-amber-200",
+    summaryBg: "bg-white",
+    summaryBorder: "border border-slate-200",
+    summaryShadow: "shadow-lg",
+    accentColor: "text-slate-900",
+    accentBg: "bg-slate-50",
+    accentBorder: "border-slate-200",
+    planCardBg: "bg-white",
+    planCardBorder: "border border-slate-200",
+    planCardSelected: "border-2 border-slate-900 bg-slate-50",
+    planCardHover: "hover:border-slate-400 hover:shadow-sm",
+    footerBg: "bg-white",
+    footerBorder: "border-t border-slate-100",
+    footerText: "text-slate-600",
+  },
+  dark: {
+    pageBg: "bg-slate-950",
+    heroBg: "bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950",
+    heroOverlay: "bg-black/50",
+    heroImageOverlay: "bg-gradient-to-t from-black/90 via-slate-900/40 to-transparent",
+    headerBg: "bg-slate-900/95 backdrop-blur-md",
+    headerText: "text-white",
+    headerSubtitle: "text-slate-300",
+    headerButton: "bg-blue-600 hover:bg-blue-700 text-white",
+    headerBorder: "border-b border-slate-800",
+    heroTitle: "text-white",
+    heroSubtitle: "text-slate-300",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+    searchCard: "bg-slate-900/95 backdrop-blur-xl",
+    searchCardShadow: "shadow-2xl shadow-black/60",
+    searchCardBorder: "border border-slate-700",
+    searchInputBg: "bg-slate-800",
+    searchInputBorder: "border-slate-600",
+    searchInputText: "text-white",
+    searchInputFocus: "focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30",
+    primaryButton: "bg-blue-600 text-white",
+    primaryButtonHover: "hover:bg-blue-700 hover:shadow-xl hover:shadow-blue-500/30",
+    secondaryButton: "bg-slate-800 text-blue-400 border border-blue-500",
+    secondaryButtonHover: "hover:bg-slate-700",
+    textPrimary: "text-white",
+    textSecondary: "text-slate-200",
+    textMuted: "text-slate-400",
+    textInverse: "text-slate-900",
+    cardBg: "bg-slate-900/90 backdrop-blur",
+    cardBorder: "border border-slate-700",
+    cardShadow: "shadow-xl shadow-black/40",
+    cardHover: "hover:border-blue-500/50",
+    cardHoverShadow: "hover:shadow-2xl hover:shadow-blue-500/20",
+    roomCardBg: "bg-slate-900/90 backdrop-blur",
+    roomCardBorder: "border border-slate-700",
+    roomCardShadow: "shadow-xl",
+    roomImageOverlay: "bg-gradient-to-t from-black/80 via-slate-900/30 to-transparent",
+    priceColor: "text-blue-400",
+    priceLabel: "text-slate-400",
+    priceHighlight: "text-blue-300 font-bold",
+    badgePrimary: "bg-blue-500/20 text-blue-300 border-blue-500/50",
+    badgeSecondary: "bg-slate-800/50 text-slate-300 border-slate-700",
+    badgeSuccess: "bg-green-500/20 text-green-300 border-green-500/50",
+    badgeWarning: "bg-amber-500/20 text-amber-300 border-amber-500/50",
+    summaryBg: "bg-slate-900/95 backdrop-blur-xl",
+    summaryBorder: "border border-slate-700",
+    summaryShadow: "shadow-2xl shadow-black/60",
+    accentColor: "text-blue-400",
+    accentBg: "bg-blue-500/10",
+    accentBorder: "border-blue-500/30",
+    planCardBg: "bg-slate-900/80",
+    planCardBorder: "border border-slate-700",
+    planCardSelected: "border-2 border-blue-500 bg-blue-500/10",
+    planCardHover: "hover:border-blue-500/50 hover:shadow-lg",
+    footerBg: "bg-slate-900/95 backdrop-blur-md",
+    footerBorder: "border-t border-slate-800",
+    footerText: "text-slate-300",
+  },
+  travel: {
+    pageBg: "bg-slate-50",
+    heroBg: "bg-gradient-to-br from-[#003580] via-[#0047a3] to-[#0059b3]",
+    heroOverlay: "bg-black/30",
+    heroImageOverlay: "bg-gradient-to-t from-black/65 via-black/25 to-transparent",
+    headerBg: "bg-[#003580]",
+    headerText: "text-white",
+    headerSubtitle: "text-blue-100",
+    headerButton: "bg-[#febb02] hover:bg-[#ffd75a] text-slate-900 font-semibold",
+    headerBorder: "border-b border-[#00224d]",
+    heroTitle: "text-white font-semibold",
+    heroSubtitle: "text-blue-100",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+    searchCard: "bg-white",
+    searchCardShadow: "shadow-2xl shadow-black/10",
+    searchCardBorder: "border border-slate-200",
+    searchInputBg: "bg-white",
+    searchInputBorder: "border-slate-300",
+    searchInputText: "text-slate-900",
+    searchInputFocus: "focus:border-[#003580] focus:ring-2 focus:ring-[#003580]/20",
+    primaryButton: "bg-[#0071c2] text-white",
+    primaryButtonHover: "hover:bg-[#005fa3] hover:shadow-lg hover:shadow-[#0071c2]/30",
+    secondaryButton: "bg-white text-[#0071c2] border border-[#0071c2]",
+    secondaryButtonHover: "hover:bg-blue-50",
+    textPrimary: "text-slate-900",
+    textSecondary: "text-slate-700",
+    textMuted: "text-slate-500",
+    textInverse: "text-white",
+    cardBg: "bg-white",
+    cardBorder: "border border-slate-200",
+    cardShadow: "shadow-md shadow-black/5",
+    cardHover: "hover:border-[#0071c2]/60",
+    cardHoverShadow: "hover:shadow-lg hover:shadow-[#0071c2]/15",
+    roomCardBg: "bg-white",
+    roomCardBorder: "border border-slate-200",
+    roomCardShadow: "shadow-md shadow-black/5",
+    roomImageOverlay: "bg-gradient-to-t from-black/55 via-black/15 to-transparent",
+    priceColor: "text-[#0071c2]",
+    priceLabel: "text-slate-500",
+    priceHighlight: "text-[#003580] font-bold",
+    badgePrimary: "bg-[#e7f3ff] text-[#003580] border-[#b6d6ff]",
+    badgeSecondary: "bg-slate-100 text-slate-700 border-slate-200",
+    badgeSuccess: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    badgeWarning: "bg-[#fff4d1] text-[#8a6b00] border-[#ffe59a]",
+    summaryBg: "bg-white",
+    summaryBorder: "border border-slate-200",
+    summaryShadow: "shadow-xl shadow-black/10",
+    accentColor: "text-[#0071c2]",
+    accentBg: "bg-[#e7f3ff]",
+    accentBorder: "border-[#b6d6ff]",
+    planCardBg: "bg-white",
+    planCardBorder: "border border-slate-200",
+    planCardSelected: "border-2 border-[#0071c2] bg-[#e7f3ff]",
+    planCardHover: "hover:border-[#0071c2]/70 hover:shadow-md",
+    footerBg: "bg-[#003580]",
+    footerBorder: "border-t border-[#00224d]",
+    footerText: "text-blue-100",
+  },
+};
+
 const PublicReservation = () => {
   const { establishmentSlug } = useParams<{ establishmentSlug: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const [establishment, setEstablishment] = useState<any>(null);
+  const [company, setCompany] = useState<any>(null);
   const [categories, setCategories] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
   const [establishmentServices, setEstablishmentServices] = useState<any[]>([]);
@@ -100,6 +522,77 @@ const PublicReservation = () => {
   const couponAutoAppliedRef = useRef(false); // Controlar aplicação automática de cupom vindo do motor
   const initialCategoryFromUrl = searchParams.get("category") || null;
   const [policiesDialogOpen, setPoliciesDialogOpen] = useState(false);
+
+  // Tema do motor de reservas (mesmo do booking engine)
+  const themeKey: BookingThemeKey = useMemo(() => {
+    return (
+      (company?.booking_engine_theme as BookingThemeKey) ||
+      (hotelSettings?.booking_engine_theme as BookingThemeKey) ||
+      "default"
+    ) as BookingThemeKey;
+  }, [company?.booking_engine_theme, hotelSettings?.booking_engine_theme]);
+
+  const theme = useMemo(() => {
+    return THEME_CONFIGS[themeKey];
+  }, [themeKey]);
+
+  // Título do motor de reservas (mesmo do booking engine)
+  const motorTitle = useMemo(() => {
+    return company?.booking_engine_title || 
+           hotelSettings?.booking_engine_title || 
+           establishment?.name || 
+           company?.name || 
+           "Reservas";
+  }, [company, hotelSettings, establishment]);
+
+  const motorSubtitle = useMemo(() => {
+    if (company?.booking_engine_subtitle) {
+      return company.booking_engine_subtitle;
+    }
+    if (company?.name) {
+      return `Reservas em ${company.name}`;
+    }
+    return "";
+  }, [company?.booking_engine_subtitle, company?.name]);
+
+  // Logo do motor de reservas
+  const motorLogo = useMemo(() => {
+    return company?.booking_engine_logo || null;
+  }, [company]);
+
+  // Redes sociais
+  const socialInstagram = company?.booking_engine_social_instagram || null;
+  const socialFacebook = company?.booking_engine_social_facebook || null;
+  const socialTwitter = company?.booking_engine_social_twitter || null;
+  const socialYoutube = company?.booking_engine_social_youtube || null;
+  const socialWebsite = company?.booking_engine_social_website || null;
+  const socialWhatsapp = company?.booking_engine_social_whatsapp || null;
+
+  // Contatos gerais do motor de reservas
+  const contactPhone = company?.booking_engine_contact_phone || hotelSettings?.phone || null;
+  const contactEmail = company?.booking_engine_contact_email || hotelSettings?.email || null;
+  const contactWhatsappDdi = company?.booking_engine_contact_whatsapp_ddi || null;
+  const contactWhatsappNumber = company?.booking_engine_contact_whatsapp_number || hotelSettings?.whatsapp || null;
+  const contactCnpj = company?.booking_engine_contact_cnpj || hotelSettings?.establishment_cnpj || null;
+
+  // Atualizar título da página (aba do navegador) com o título do motor de reservas
+  useEffect(() => {
+    if (motorTitle && motorTitle !== "Reservas") {
+      if (motorSubtitle) {
+        document.title = `${motorTitle} - ${motorSubtitle}`;
+      } else {
+        document.title = motorTitle;
+      }
+    } else if (establishment?.name) {
+      if (motorSubtitle) {
+        document.title = `${establishment.name} - ${motorSubtitle}`;
+      } else {
+        document.title = `${establishment.name} - Reservas`;
+      }
+    } else {
+      document.title = "Reservas";
+    }
+  }, [motorTitle, motorSubtitle, establishment?.name]);
   // Opção para preencher dados de outros hóspedes
   const [allReservationsInMyName, setAllReservationsInMyName] = useState(true); // true = tudo em meu nome, false = preencher dados de outros
   // Dados de hóspedes para cada quarto adicional (índice 0 = primeiro quarto adicional, 1 = segundo, etc.)
@@ -1376,6 +1869,19 @@ const PublicReservation = () => {
       setEstablishment(foundEstablishment);
       console.log(`[PublicReservation] Estabelecimento encontrado: ${foundEstablishment.name} (ID: ${foundEstablishment.id}, Slug: ${foundEstablishment.slug})`);
 
+      // Buscar empresa para obter tema e título do motor de reservas
+      if (foundEstablishment.company_id) {
+        const { data: companyData, error: companyError } = await supabase
+          .from("companies")
+          .select("*")
+          .eq("id", foundEstablishment.company_id)
+          .maybeSingle();
+        
+        if (!companyError && companyData) {
+          setCompany(companyData);
+        }
+      }
+
       // Buscar configurações do hotel
       const { data: hotel } = await supabase
         .from("hotel_settings")
@@ -2582,35 +3088,40 @@ const PublicReservation = () => {
     min?: number;
     max?: number;
     disabled?: boolean;
-  }) => (
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        onClick={onDecrease}
-        disabled={value <= min || disabled}
-        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
-          value <= min || disabled
-            ? "border-slate-200 text-slate-300 cursor-not-allowed"
-            : "border-slate-300 text-slate-700 hover:border-blue-500 hover:text-blue-600"
-        }`}
-      >
-        <Minus className="w-4 h-4" />
-      </button>
-      <span className="w-8 text-center font-semibold text-slate-900">{value}</span>
-      <button
-        type="button"
-        onClick={onIncrease}
-        disabled={value >= max || disabled}
-        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
-          value >= max || disabled
-            ? "border-slate-200 text-slate-300 cursor-not-allowed"
-            : "border-slate-300 text-slate-700 hover:border-blue-500 hover:text-blue-600"
-        }`}
-      >
-        <Plus className="w-4 h-4" />
-      </button>
-    </div>
-  );
+  }) => {
+    const isDecreaseDisabled = value <= min || disabled;
+    const isIncreaseDisabled = value >= max || disabled;
+    
+    return (
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onDecrease}
+          disabled={isDecreaseDisabled}
+          className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
+            isDecreaseDisabled
+              ? `${theme.searchInputBorder} ${theme.textMuted} cursor-not-allowed opacity-50`
+              : `${theme.searchInputBorder} ${theme.textSecondary} hover:border-blue-500 hover:text-blue-600`
+          }`}
+        >
+          <Minus className="w-4 h-4" />
+        </button>
+        <span className={`w-8 text-center font-semibold ${theme.textPrimary}`}>{value}</span>
+        <button
+          type="button"
+          onClick={onIncrease}
+          disabled={isIncreaseDisabled}
+          className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
+            isIncreaseDisabled
+              ? `${theme.searchInputBorder} ${theme.textMuted} cursor-not-allowed opacity-50`
+              : `${theme.searchInputBorder} ${theme.textSecondary} hover:border-blue-500 hover:text-blue-600`
+          }`}
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+    );
+  };
 
   const nights = formData.checkinDate && formData.checkoutDate
     ? (() => {
@@ -2697,18 +3208,20 @@ const PublicReservation = () => {
     );
   }
 
-  // Preparar dados de contato
-  const phone = hotelSettings?.phone || 
+  // Preparar dados de contato (priorizar contatos do motor de reservas)
+  const phone = contactPhone || 
     (hotelSettings?.phone_ddi && hotelSettings?.phone_number 
       ? `${hotelSettings.phone_ddi} ${hotelSettings.phone_number}`.trim()
       : hotelSettings?.phone_number || '');
   
-  const whatsapp = hotelSettings?.whatsapp || 
+  const whatsapp = (contactWhatsappDdi && contactWhatsappNumber 
+    ? `${contactWhatsappDdi}${contactWhatsappNumber}`.trim()
+    : contactWhatsappNumber) || 
     (hotelSettings?.whatsapp_ddi && hotelSettings?.whatsapp_number 
       ? `${hotelSettings.whatsapp_ddi}${hotelSettings.whatsapp_number}`.trim()
       : hotelSettings?.whatsapp_number || '');
   
-  const email = hotelSettings?.email || '';
+  const email = contactEmail || hotelSettings?.email || '';
 
   // Foto principal do estabelecimento para o hero
   const heroImage = hotelSettings?.establishment_photos && hotelSettings.establishment_photos.length > 0
@@ -2716,27 +3229,42 @@ const PublicReservation = () => {
     : null;
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className={`min-h-screen ${theme.pageBg}`}>
       {/* Navbar */}
-      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/60 sticky top-0 z-50 shadow-sm">
+      <header className={`${theme.headerBg} ${theme.headerText} ${theme.headerBorder || ""} sticky top-0 z-50 backdrop-blur-md transition-colors duration-300`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex items-center justify-between">
             {/* Logo e Título */}
             <div className="flex items-center gap-2 sm:gap-3">
-              {(pmsLogoUrl || siteSettings?.logo_url) ? (
+              {motorLogo ? (
+                <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-white/90 shadow-sm flex items-center justify-center overflow-hidden ring-1 ring-black/5">
+                  <img
+                    src={motorLogo}
+                    alt="Logo"
+                    className="h-8 w-8 sm:h-9 sm:w-9 object-contain"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                </div>
+              ) : (pmsLogoUrl || siteSettings?.logo_url) ? (
                 <img 
                   src={pmsLogoUrl || siteSettings?.logo_url || ""} 
                   alt="Logo" 
                   className="h-10 w-10 sm:h-12 sm:w-12 object-contain flex-shrink-0"
                 />
               ) : (
-                <Home className="w-6 h-6 sm:w-7 sm:h-7 text-slate-600" />
+                <Home className={`w-6 h-6 sm:w-7 sm:h-7 ${theme.textMuted}`} />
               )}
               <div className="hidden sm:block">
-                <h1 className="text-lg sm:text-xl font-bold text-slate-800">
-                  {siteSettings?.site_title || t("publicReservation.title")}
+                <h1 className={`text-lg sm:text-xl font-bold ${
+                  themeKey === "travel" ? "text-white" : theme.textPrimary
+                }`}>
+                  {motorTitle || siteSettings?.site_title || t("publicReservation.title")}
                 </h1>
-                <p className="text-xs text-slate-500">{t("publicReservation.subtitle")}</p>
+                {motorSubtitle && (
+                  <p className={`text-xs ${theme.headerSubtitle}`}>{motorSubtitle}</p>
+                )}
               </div>
             </div>
 
@@ -2749,23 +3277,21 @@ const PublicReservation = () => {
       </header>
 
       {/* Hero Section */}
-      <div className="relative w-full h-[60vh] min-h-[500px] max-h-[700px] overflow-hidden">
+      <div className={`relative w-full h-[60vh] min-h-[500px] max-h-[700px] overflow-hidden ${theme.heroBg}`}>
         {heroImage ? (
           <img
             src={heroImage}
             alt={hotelSettings?.name || establishment.name}
             className="w-full h-full object-cover"
           />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-br from-blue-600 via-blue-700 to-blue-800" />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/40 to-black/20" />
+        ) : null}
+        <div className={`absolute inset-0 ${theme.heroImageOverlay} ${theme.heroOverlay}`} />
         
         {/* Conteúdo do Hero */}
         <div className="absolute inset-0 flex flex-col justify-end">
           <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pb-12">
             <div className="max-w-3xl">
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-4 leading-tight">
+              <h1 className={`${theme.heroTitleSize} font-bold ${theme.heroTitle} mb-4 leading-tight`}>
                 {hotelSettings?.name || establishment.name || t("publicReservation.establishmentNotFound")}
               </h1>
               {hotelSettings?.street && (
@@ -2783,7 +3309,13 @@ const PublicReservation = () => {
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-white/90 text-lg flex items-center gap-2 mb-6 hover:text-white transition-colors cursor-pointer"
+                  className={`${
+                    themeKey === "modern" || themeKey === "luxury" || themeKey === "dark"
+                      ? "text-white/90"
+                      : themeKey === "travel"
+                      ? "text-white/90"
+                      : `${theme.textInverse}/90`
+                  } text-lg flex items-center gap-2 mb-6 hover:opacity-100 transition-colors cursor-pointer`}
                 >
                   <MapPin className="w-5 h-5" />
                   {hotelSettings.street}
@@ -2791,11 +3323,17 @@ const PublicReservation = () => {
                   {hotelSettings.city && ` - ${hotelSettings.city}`}
                 </a>
               )}
-              <div className="flex flex-wrap items-center gap-4 text-white/90">
+              <div className={`flex flex-wrap items-center gap-4 ${
+                themeKey === "modern" || themeKey === "luxury" || themeKey === "dark"
+                  ? "text-white/90"
+                  : themeKey === "travel"
+                  ? "text-white/90"
+                  : `${theme.textInverse}/90`
+              }`}>
                 {phone && (
                   <a 
                     href={`tel:${phone.replace(/\D/g, '')}`}
-                    className="flex items-center gap-2 hover:text-white transition-colors"
+                    className={`flex items-center gap-2 hover:opacity-100 transition-colors`}
                   >
                     <Phone className="w-5 h-5" />
                     <span>{phone}</span>
@@ -2806,7 +3344,7 @@ const PublicReservation = () => {
                     href={`https://wa.me/${whatsapp.replace(/\D/g, '')}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 hover:text-white transition-colors"
+                    className={`flex items-center gap-2 hover:opacity-100 transition-colors`}
                   >
                     <MessageCircle className="w-5 h-5" />
                     <span>WhatsApp</span>
@@ -2815,7 +3353,7 @@ const PublicReservation = () => {
                 {email && (
                   <a 
                     href={`mailto:${email}`}
-                    className="flex items-center gap-2 hover:text-white transition-colors"
+                    className={`flex items-center gap-2 hover:opacity-100 transition-colors`}
                   >
                     <Mail className="w-5 h-5" />
                     <span>{email}</span>
@@ -2833,14 +3371,14 @@ const PublicReservation = () => {
           {/* Coluna Esquerda - Quartos */}
           <div className="space-y-6">
             <div>
-              <h2 className="text-3xl font-bold text-slate-900 mb-2">{t("publicReservation.chooseRoom")}</h2>
-              <p className="text-slate-600">{t("publicReservation.chooseRoomSubtitle")}</p>
+              <h2 className={`text-3xl font-bold ${theme.textPrimary} mb-2`}>{t("publicReservation.chooseRoom")}</h2>
+              <p className={theme.textSecondary}>{t("publicReservation.chooseRoomSubtitle")}</p>
             </div>
 
             {categories.length === 0 ? (
-              <Card className="p-12 text-center border-0 shadow-lg">
-                <Bed className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-600 text-lg">{t("publicReservation.noCategoriesAvailable")}</p>
+              <Card className={`p-12 text-center ${theme.cardBg} ${theme.cardBorder} ${theme.cardShadow}`}>
+                <Bed className={`w-16 h-16 ${theme.textMuted} mx-auto mb-4`} />
+                <p className={`${theme.textSecondary} text-lg`}>{t("publicReservation.noCategoriesAvailable")}</p>
               </Card>
             ) : (
               <div className="space-y-6">
@@ -2871,10 +3409,10 @@ const PublicReservation = () => {
                   return (
                     <Card
                       key={category.id}
-                      className={`overflow-hidden transition-all cursor-pointer border-2 hover:shadow-2xl ${
+                      className={`overflow-hidden transition-all cursor-pointer ${theme.roomCardBg} ${theme.roomCardBorder} ${theme.roomCardShadow} ${
                         isSelected 
-                          ? "border-blue-500 shadow-xl ring-4 ring-blue-500/20" 
-                          : "border-slate-200 hover:border-slate-300"
+                          ? `${theme.planCardSelected} ${theme.cardHoverShadow}` 
+                          : `${theme.cardHover} ${theme.cardHoverShadow}`
                       }`}
                       onClick={() => setSelectedCategory(category.id)}
                     >
@@ -2930,7 +3468,7 @@ const PublicReservation = () => {
                             <div className="flex items-start justify-between mb-3">
                               <div className="flex-1">
                                 <div className="flex items-center gap-3 mb-2 flex-wrap">
-                                  <h3 className="text-2xl font-bold text-slate-900">
+                                  <h3 className={`text-2xl font-bold ${theme.textPrimary}`}>
                                     {category.name}
                                   </h3>
                                   {/* Badge de Disponibilidade - Tática de Vendas */}
@@ -2969,7 +3507,7 @@ const PublicReservation = () => {
                                   )}
                                 </div>
                                 {categoryDescription && (
-                                  <p className="text-slate-600 text-sm leading-relaxed line-clamp-2 mb-4">
+                                  <p className={`${theme.textSecondary} text-sm leading-relaxed line-clamp-2 mb-4`}>
                                     {categoryDescription}
                                   </p>
                                 )}
@@ -2977,15 +3515,15 @@ const PublicReservation = () => {
                                 {(hotelSettings?.checkin_time || hotelSettings?.checkout_time) && (
                                   <div className="flex items-center gap-4 mt-3 mb-2">
                                     {hotelSettings?.checkin_time && (
-                                      <div className="flex items-center gap-1.5 text-xs text-slate-600">
-                                        <Clock className="w-3.5 h-3.5 text-slate-500" />
+                                      <div className={`flex items-center gap-1.5 text-xs ${theme.textSecondary}`}>
+                                        <Clock className={`w-3.5 h-3.5 ${theme.textMuted}`} />
                                         <span className="font-medium">{t("publicReservation.checkin")}:</span>
                                         <span>{formatTime(hotelSettings.checkin_time)}</span>
                                       </div>
                                     )}
                                     {hotelSettings?.checkout_time && (
-                                      <div className="flex items-center gap-1.5 text-xs text-slate-600">
-                                        <Clock className="w-3.5 h-3.5 text-slate-500" />
+                                      <div className={`flex items-center gap-1.5 text-xs ${theme.textSecondary}`}>
+                                        <Clock className={`w-3.5 h-3.5 ${theme.textMuted}`} />
                                         <span className="font-medium">{t("publicReservation.checkout")}:</span>
                                         <span>{formatTime(hotelSettings.checkout_time)}</span>
                                       </div>
@@ -3002,7 +3540,7 @@ const PublicReservation = () => {
                                   <Badge 
                                     key={index} 
                                     variant="outline" 
-                                    className="bg-slate-50 border-slate-200 text-slate-700 px-3 py-1 text-xs font-medium"
+                                    className={`${theme.badgeSecondary} px-3 py-1 text-xs font-medium`}
                                   >
                                     {getFeatureIcon(feature)}
                                     <span className="ml-1">{feature}</span>
@@ -3033,63 +3571,64 @@ const PublicReservation = () => {
 
                           {/* Preço - Exibir 2 planos se configurados */}
                           {publicPricingPlan1Id || publicPricingPlan2Id ? (
-                            <div className="pt-4 border-t border-slate-200">
+                            <div className="pt-4">
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {/* Plano 1 */}
                                 {publicPricingPlan1Id && (
                                   <div 
-                                    className={`p-4 border-2 rounded-lg bg-white cursor-pointer transition-all hover:shadow-md ${
+                                    className={`p-4 rounded-lg ${theme.planCardBg} cursor-pointer transition-all ${theme.planCardHover} focus:outline-none ${
                                       selectedPlanByCategory[category.id] === "plan1"
-                                        ? "border-blue-500 bg-blue-50 shadow-lg ring-2 ring-blue-500/20"
-                                        : "border-slate-200 hover:border-slate-300"
+                                        ? `border-2 ${theme.planCardSelected} ${theme.cardHoverShadow}`
+                                        : `${theme.planCardBorder}`
                                     }`}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       const newPlan = selectedPlanByCategory[category.id] === "plan1" ? null : "plan1";
                                       handlePlanSelection(category.id, newPlan);
                                     }}
+                                    tabIndex={0}
                                   >
                                     <div className="flex items-start justify-between mb-2">
-                                      <h4 className="text-sm font-semibold text-slate-700">
+                                      <h4 className={`text-sm font-semibold ${theme.textSecondary}`}>
                                         {publicPricingPlan1Title || "Plano 1"}
                                       </h4>
                                       {selectedPlanByCategory[category.id] === "plan1" && (
-                                        <CheckCircle2 className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                                        <CheckCircle2 className={`w-5 h-5 ${theme.priceColor} flex-shrink-0`} />
                                       )}
                                     </div>
                                     {categoryPricesPlan1[category.id] !== undefined ? (
                                       formData.checkinDate && formData.checkoutDate ? (
                                         <>
-                                          <p className="text-xs text-slate-500 mb-1">
+                                          <p className={`text-xs ${theme.priceLabel} mb-1`}>
                                             {t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}
                                           </p>
-                                          <p className="text-2xl font-bold text-green-600">
+                                          <p className={`text-2xl font-bold ${theme.priceHighlight}`}>
                                             R$ {categoryPricesPlan1[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </p>
-                                          <p className="text-xs text-slate-500 mt-1">
+                                          <p className={`text-xs ${theme.priceLabel} mt-1`}>
                                             R$ {(categoryPricesPlan1[category.id] / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
                                           </p>
                                         </>
                                       ) : (
                                         <>
-                                          <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
-                                          <p className="text-2xl font-bold text-green-600">
+                                          <p className={`text-xs ${theme.priceLabel} mb-1`}>{t("publicReservation.pricePerNight")}</p>
+                                          <p className={`text-2xl font-bold ${theme.priceHighlight}`}>
                                             R$ {categoryPricesPlan1[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </p>
-                                          <p className="text-xs text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                          <p className={`text-xs ${theme.textMuted} mt-1`}>{t("publicReservation.selectDatesToSeeTotal")}</p>
                                         </>
                                       )
                                     ) : (
                                       <>
-                                        <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
-                                        <p className="text-2xl font-bold text-slate-400">
+                                        <p className={`text-xs ${theme.priceLabel} mb-1`}>{t("publicReservation.pricePerNight")}</p>
+                                        <p className={`text-2xl font-bold ${theme.textMuted}`}>
                                           {calculatingPrice ? (
-                                            <Loader2 className="w-6 h-6 animate-spin inline-block" />
+                                            <Loader2 className={`w-6 h-6 animate-spin inline-block ${theme.priceColor}`} />
                                           ) : (
                                             `R$ ${Number(category.base_price || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                                           )}
                                         </p>
-                                        <p className="text-xs text-slate-400 mt-1">
+                                        <p className={`text-xs ${theme.textMuted} mt-1`}>
                                           {calculatingPrice ? t("publicReservation.loading") : t("publicReservation.selectDatesToSeeTotal")}
                                         </p>
                                       </>
@@ -3100,58 +3639,59 @@ const PublicReservation = () => {
                                 {/* Plano 2 */}
                                 {publicPricingPlan2Id && (
                                   <div 
-                                    className={`p-4 border-2 rounded-lg bg-white cursor-pointer transition-all hover:shadow-md ${
+                                    className={`p-4 rounded-lg ${theme.planCardBg} cursor-pointer transition-all ${theme.planCardHover} focus:outline-none ${
                                       selectedPlanByCategory[category.id] === "plan2"
-                                        ? "border-blue-500 bg-blue-50 shadow-lg ring-2 ring-blue-500/20"
-                                        : "border-slate-200 hover:border-slate-300"
+                                        ? `border-2 ${theme.planCardSelected} ${theme.cardHoverShadow}`
+                                        : `${theme.planCardBorder}`
                                     }`}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       const newPlan = selectedPlanByCategory[category.id] === "plan2" ? null : "plan2";
                                       handlePlanSelection(category.id, newPlan);
                                     }}
+                                    tabIndex={0}
                                   >
                                     <div className="flex items-start justify-between mb-2">
-                                      <h4 className="text-sm font-semibold text-slate-700">
+                                      <h4 className={`text-sm font-semibold ${theme.textSecondary}`}>
                                         {publicPricingPlan2Title || "Plano 2"}
                                       </h4>
                                       {selectedPlanByCategory[category.id] === "plan2" && (
-                                        <CheckCircle2 className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                                        <CheckCircle2 className={`w-5 h-5 ${theme.priceColor} flex-shrink-0`} />
                                       )}
                                     </div>
                                     {categoryPricesPlan2[category.id] !== undefined ? (
                                       formData.checkinDate && formData.checkoutDate ? (
                                         <>
-                                          <p className="text-xs text-slate-500 mb-1">
+                                          <p className={`text-xs ${theme.priceLabel} mb-1`}>
                                             {t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}
                                           </p>
-                                          <p className="text-2xl font-bold text-green-600">
+                                          <p className={`text-2xl font-bold ${theme.priceHighlight}`}>
                                             R$ {categoryPricesPlan2[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </p>
-                                          <p className="text-xs text-slate-500 mt-1">
+                                          <p className={`text-xs ${theme.priceLabel} mt-1`}>
                                             R$ {(categoryPricesPlan2[category.id] / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
                                           </p>
                                         </>
                                       ) : (
                                         <>
-                                          <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
-                                          <p className="text-2xl font-bold text-green-600">
+                                          <p className={`text-xs ${theme.priceLabel} mb-1`}>{t("publicReservation.pricePerNight")}</p>
+                                          <p className={`text-2xl font-bold ${theme.priceHighlight}`}>
                                             R$ {categoryPricesPlan2[category.id].toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </p>
-                                          <p className="text-xs text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                          <p className={`text-xs ${theme.textMuted} mt-1`}>{t("publicReservation.selectDatesToSeeTotal")}</p>
                                         </>
                                       )
                                     ) : (
                                       <>
-                                        <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
-                                        <p className="text-2xl font-bold text-slate-400">
+                                        <p className={`text-xs ${theme.priceLabel} mb-1`}>{t("publicReservation.pricePerNight")}</p>
+                                        <p className={`text-2xl font-bold ${theme.textMuted}`}>
                                           {calculatingPrice ? (
-                                            <Loader2 className="w-6 h-6 animate-spin inline-block" />
+                                            <Loader2 className={`w-6 h-6 animate-spin inline-block ${theme.priceColor}`} />
                                           ) : (
                                             `R$ ${Number(category.base_price || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                                           )}
                                         </p>
-                                        <p className="text-xs text-slate-400 mt-1">
+                                        <p className={`text-xs ${theme.textMuted} mt-1`}>
                                           {calculatingPrice ? t("publicReservation.loading") : t("publicReservation.selectDatesToSeeTotal")}
                                         </p>
                                       </>
@@ -3161,45 +3701,45 @@ const PublicReservation = () => {
                               </div>
                               {calculatingPrice && (
                                 <div className="flex justify-center mt-2">
-                                  <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+                                  <Loader2 className={`w-5 h-5 animate-spin ${theme.priceColor}`} />
                                 </div>
                               )}
                             </div>
                           ) : (
-                            <div className="flex items-end justify-between pt-4 border-t border-slate-200">
+                            <div className={`flex items-end justify-between pt-4 border-t ${theme.cardBorder}`}>
                               <div>
                                 {categoryPrice !== undefined ? (
                                   formData.checkinDate && formData.checkoutDate ? (
                                     <>
-                                      <p className="text-xs text-slate-500 mb-1">{t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</p>
-                                      <p className="text-3xl font-bold text-blue-600">
+                                      <p className={`text-xs ${theme.priceLabel} mb-1`}>{t("publicReservation.priceTotalFor")} {nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</p>
+                                      <p className={`text-3xl font-bold ${theme.priceHighlight}`}>
                                         R$ {categoryPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </p>
-                                      <p className="text-sm text-slate-500 mt-1">
+                                      <p className={`text-sm ${theme.priceLabel} mt-1`}>
                                         R$ {(categoryPrice / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}
                                       </p>
                                     </>
                                   ) : (
                                     <>
-                                      <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
-                                      <p className="text-3xl font-bold text-blue-600">
+                                      <p className={`text-xs ${theme.priceLabel} mb-1`}>{t("publicReservation.pricePerNight")}</p>
+                                      <p className={`text-3xl font-bold ${theme.priceHighlight}`}>
                                         R$ {categoryPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </p>
-                                      <p className="text-sm text-slate-400 mt-1">{t("publicReservation.selectDatesToSeeTotal")}</p>
+                                      <p className={`text-sm ${theme.textMuted} mt-1`}>{t("publicReservation.selectDatesToSeeTotal")}</p>
                                     </>
                                   )
                                 ) : (
                                   <>
-                                    <p className="text-xs text-slate-500 mb-1">{t("publicReservation.pricePerNight")}</p>
-                                    <p className="text-3xl font-bold text-blue-600">
+                                    <p className={`text-xs ${theme.priceLabel} mb-1`}>{t("publicReservation.pricePerNight")}</p>
+                                    <p className={`text-3xl font-bold ${theme.priceHighlight}`}>
                                       R$ {Number(category.base_price || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </p>
-                                    <p className="text-sm text-slate-400 mt-1">{t("publicReservation.loading")}</p>
+                                    <p className={`text-sm ${theme.textMuted} mt-1`}>{t("publicReservation.loading")}</p>
                                   </>
                                 )}
                               </div>
                               {calculatingPrice && (
-                                <Loader2 className="w-5 h-5 animate-spin text-blue-500 mb-2" />
+                                <Loader2 className={`w-5 h-5 animate-spin ${theme.priceColor} mb-2`} />
                               )}
                             </div>
                           )}
@@ -3214,17 +3754,17 @@ const PublicReservation = () => {
 
           {/* Coluna Direita - Formulário Sticky */}
           <div className="lg:sticky lg:top-8 h-fit">
-            <Card className="border-2 border-slate-200 shadow-xl p-6">
-              <h3 className="text-2xl font-bold text-slate-900 mb-6">{t("publicReservation.completeReservation")}</h3>
+            <Card className={`${theme.searchCard} ${theme.searchCardBorder} ${theme.searchCardShadow} p-6`}>
+              <h3 className={`text-2xl font-bold ${theme.textPrimary} mb-6`}>{t("publicReservation.completeReservation")}</h3>
 
               {/* Informativo sobre variação de preço e disponibilidade */}
               {selectedCategory && (
-                <Alert className="mb-6 border-amber-200 bg-amber-50">
-                  <AlertCircle className="h-4 w-4 text-amber-600" />
-                  <AlertTitle className="text-sm font-semibold text-amber-900">
+                <Alert className={`mb-6 ${theme.badgeWarning} ${theme.accentBorder}`}>
+                  <AlertCircle className={`h-4 w-4 ${theme.priceColor}`} />
+                  <AlertTitle className={`text-sm font-semibold ${theme.textPrimary}`}>
                     {t("publicReservation.priceAvailabilityNotice.title")}
                   </AlertTitle>
-                  <AlertDescription className="text-xs text-amber-800 mt-1">
+                  <AlertDescription className={`text-xs ${theme.textSecondary} mt-1`}>
                     {t("publicReservation.priceAvailabilityNotice.description")}
                   </AlertDescription>
                 </Alert>
@@ -3232,12 +3772,12 @@ const PublicReservation = () => {
 
               {/* Aviso quando múltiplas categorias são selecionadas automaticamente */}
               {selectedCategories.length > 1 && formData.checkinDate && formData.checkoutDate && (
-                <Alert className="mb-6 border-blue-200 bg-blue-50">
-                  <AlertCircle className="h-4 w-4 text-blue-600" />
-                  <AlertTitle className="text-sm font-semibold text-blue-900">
+                <Alert className={`mb-6 ${theme.badgePrimary} ${theme.accentBorder}`}>
+                  <AlertCircle className={`h-4 w-4 ${theme.priceColor}`} />
+                  <AlertTitle className={`text-sm font-semibold ${theme.textPrimary}`}>
                     {t("publicReservation.multipleCategoriesSelected")}
                   </AlertTitle>
-                  <AlertDescription className="text-xs text-blue-800 mt-1">
+                  <AlertDescription className={`text-xs ${theme.textSecondary} mt-1`}>
                     {t("publicReservation.multipleCategoriesDescription", { 
                       count: selectedCategories.length,
                       totalRooms: selectedCategories.reduce((sum, cat) => sum + cat.rooms, 0),
@@ -3252,7 +3792,7 @@ const PublicReservation = () => {
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="checkinDate" className="text-sm font-semibold text-slate-700 mb-2 block">
+                      <Label htmlFor="checkinDate" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                         {t("publicReservation.checkin")}
                       </Label>
                       <Input
@@ -3262,11 +3802,11 @@ const PublicReservation = () => {
                         onChange={(e) => setFormData({ ...formData, checkinDate: e.target.value })}
                         required
                         min={formatDateLocal(new Date())}
-                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                        className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                       />
                     </div>
                     <div>
-                      <Label htmlFor="checkoutDate" className="text-sm font-semibold text-slate-700 mb-2 block">
+                      <Label htmlFor="checkoutDate" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                         {t("publicReservation.checkout")}
                       </Label>
                       <Input
@@ -3276,22 +3816,22 @@ const PublicReservation = () => {
                         onChange={(e) => setFormData({ ...formData, checkoutDate: e.target.value })}
                         required
                         min={formData.checkinDate || formatDateLocal(new Date())}
-                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                        className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                       />
                     </div>
                   </div>
 
                   {/* Hóspedes e Quartos - Estilo Booking.com */}
                   <div>
-                    <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                    <Label className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                       {t("publicReservation.guestsAndRooms")}
                     </Label>
                     <button
                       type="button"
                       onClick={() => setGuestsModalOpen(true)}
-                      className="w-full h-12 border-2 border-slate-200 hover:border-blue-500 focus:border-blue-500 rounded-lg px-4 flex items-center justify-between transition-colors"
+                      className={`w-full h-12 ${theme.searchInputBorder} ${theme.searchInputFocus} rounded-lg px-4 flex items-center justify-between transition-colors ${theme.searchInputBg}`}
                     >
-                      <div className="flex items-center gap-2 text-slate-700">
+                      <div className={`flex items-center gap-2 ${theme.searchInputText}`}>
                         <Users className="w-5 h-5" />
                         <span className="text-sm">
                           {adults} {adults === 1 ? t("publicReservation.adult") : t("publicReservation.adultsPlural")}
@@ -3303,22 +3843,22 @@ const PublicReservation = () => {
                           )}
                         </span>
                       </div>
-                      <ChevronDown className="w-5 h-5 text-slate-400" />
+                      <ChevronDown className={`w-5 h-5 ${theme.textMuted}`} />
                     </button>
                   </div>
 
                   {/* Modal de Seleção de Hóspedes e Quartos */}
                   <Dialog open={guestsModalOpen} onOpenChange={setGuestsModalOpen}>
-                    <DialogContent className="sm:max-w-md">
-                      <DialogTitle className="text-lg font-semibold text-slate-900 mb-4">
-                        {t("publicReservation.selectGuestsAndRooms")}
-                      </DialogTitle>
+                  <DialogContent className={`sm:max-w-md ${theme.cardBg}`}>
+                    <DialogTitle className={`text-lg font-semibold ${theme.textPrimary} mb-4`}>
+                      {t("publicReservation.selectGuestsAndRooms")}
+                    </DialogTitle>
                       
                       <div className="space-y-6">
                         {/* Adultos */}
-                        <div className="flex items-center justify-between py-2 border-b border-slate-200">
+                        <div className="flex items-center justify-between py-2 border-b border-slate-200/50">
                           <div>
-                            <Label className="text-base font-medium text-slate-900">
+                            <Label className={`text-base font-medium ${theme.textPrimary}`}>
                               {t("publicReservation.adults")}
                             </Label>
                           </div>
@@ -3356,12 +3896,12 @@ const PublicReservation = () => {
                         </div>
 
                         {/* Crianças */}
-                        <div className="flex items-center justify-between py-2 border-b border-slate-200">
+                        <div className="flex items-center justify-between py-2 border-b border-slate-200/50">
                           <div>
-                            <Label className="text-base font-medium text-slate-900">
+                            <Label className={`text-base font-medium ${theme.textPrimary}`}>
                               {t("publicReservation.children")}
                             </Label>
-                            <p className="text-xs text-slate-500 mt-1">
+                            <p className={`text-xs ${theme.textMuted} mt-1`}>
                               {t("publicReservation.childrenAgeInfo")}
                             </p>
                           </div>
@@ -3385,25 +3925,25 @@ const PublicReservation = () => {
                         {/* Quartos */}
                         <div className="flex items-center justify-between py-2">
                           <div>
-                            <Label className="text-base font-medium text-slate-900">
+                            <Label className={`text-base font-medium ${theme.textPrimary}`}>
                               {t("publicReservation.rooms")}
                             </Label>
                             {selectedCategories.length > 0 ? (
-                              <p className="text-xs text-slate-500 mt-1">
+                              <p className={`text-xs ${theme.textMuted} mt-1`}>
                                 {t("publicReservation.calculatedFromSelectedCategories")}
                               </p>
                             ) : selectedCategoryData && manualRooms === null ? (
-                              <p className="text-xs text-slate-500 mt-1">
+                              <p className={`text-xs ${theme.textMuted} mt-1`}>
                                 {formatAutoCalculatedText(adults, selectedCategoryData.capacity_adults || 1)}
                               </p>
                             ) : null}
                             {selectedCategories.length === 0 && availableRoomsCount !== null && (
                               <p className={`text-xs mt-1 ${
                                 availableRoomsCount === 0 
-                                  ? "text-red-600 font-semibold" 
+                                  ? `${theme.priceColor} font-semibold` 
                                   : availableRoomsCount < requiredRooms
-                                  ? "text-orange-600"
-                                  : "text-green-600"
+                                  ? theme.priceColor
+                                  : theme.priceColor
                               }`}>
                                 {checkingAvailability ? (
                                   <>{t("publicReservation.checkingAvailability")}...</>
@@ -3417,7 +3957,7 @@ const PublicReservation = () => {
                               </p>
                             )}
                             {selectedCategories.length > 0 && (
-                              <p className="text-xs text-green-600 mt-1 font-semibold">
+                              <p className={`text-xs ${theme.priceColor} mt-1 font-semibold`}>
                                 {totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")} {t("publicReservation.fromSelectedCategories")}
                               </p>
                             )}
@@ -3453,7 +3993,7 @@ const PublicReservation = () => {
                               disabled={checkingAvailability}
                             />
                           ) : (
-                            <div className="text-lg font-bold text-blue-600">
+                            <div className={`text-lg font-bold ${theme.priceColor}`}>
                               {totalRooms}
                             </div>
                           )}
@@ -3461,15 +4001,15 @@ const PublicReservation = () => {
 
                         {/* Informação sobre disponibilidade */}
                         {selectedCategories.length === 0 && selectedCategoryData && formData.checkinDate && formData.checkoutDate && (
-                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                            <p className="text-xs text-blue-800">
+                          <div className={`${theme.accentBg} ${theme.accentBorder} rounded-lg p-3`}>
+                            <p className={`text-xs ${theme.textSecondary}`}>
                               {formatAvailabilityText(requiredRooms, selectedCategoryData.capacity_adults || 1)}
                             </p>
                           </div>
                         )}
                         {selectedCategories.length > 0 && (
-                          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                            <p className="text-xs text-green-800">
+                          <div className={`${theme.badgeSuccess} rounded-lg p-3`}>
+                            <p className={`text-xs ${theme.textSecondary}`}>
                               {t("publicReservation.roomsCalculatedFromPlans")}: {selectedCategories.map((cat, idx) => {
                                 const catName = categories.find(c => c.id === cat.categoryId)?.name || "";
                                 return `${cat.rooms} ${cat.rooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")} ${catName}`;
@@ -3483,7 +4023,7 @@ const PublicReservation = () => {
                         <Button
                           type="button"
                           onClick={() => setGuestsModalOpen(false)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-6"
+                          className={`${theme.primaryButton} ${theme.primaryButtonHover} px-6`}
                         >
                           {t("publicReservation.ok")}
                         </Button>
@@ -3492,14 +4032,12 @@ const PublicReservation = () => {
                   </Dialog>
                 </div>
 
-                <Separator />
-
                 {/* Dados de Contato */}
                 <div className="space-y-4">
-                  <h4 className="font-semibold text-slate-900">{t("publicReservation.contactData")}</h4>
+                  <h4 className={`font-semibold ${theme.textPrimary}`}>{t("publicReservation.contactData")}</h4>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="firstName" className="text-sm font-semibold text-slate-700 mb-2 block">
+                      <Label htmlFor="firstName" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                         {t("publicReservation.firstName")} *
                       </Label>
                       <Input
@@ -3507,11 +4045,11 @@ const PublicReservation = () => {
                         value={formData.firstName}
                         onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
                         required
-                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                        className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                       />
                     </div>
                     <div>
-                      <Label htmlFor="lastName" className="text-sm font-semibold text-slate-700 mb-2 block">
+                      <Label htmlFor="lastName" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                         {t("publicReservation.lastName")} *
                       </Label>
                       <Input
@@ -3519,12 +4057,12 @@ const PublicReservation = () => {
                         value={formData.lastName}
                         onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                         required
-                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                        className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                       />
                     </div>
                   </div>
                   <div>
-                    <Label htmlFor="email" className="text-sm font-semibold text-slate-700 mb-2 block">
+                    <Label htmlFor="email" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                       {t("publicReservation.email")} *
                     </Label>
                     <Input
@@ -3533,11 +4071,11 @@ const PublicReservation = () => {
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       required
-                      className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                      className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                     />
                   </div>
                   {/* Opção Sou Estrangeiro */}
-                  <div className="flex items-center space-x-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                  <div className={`flex items-center space-x-2 p-3 ${theme.accentBg} rounded-lg ${theme.accentBorder}`}>
                     <Switch
                       id="isForeigner"
                       checked={isForeigner}
@@ -3552,7 +4090,7 @@ const PublicReservation = () => {
                         }
                       }}
                     />
-                    <Label htmlFor="isForeigner" className="text-sm font-semibold text-slate-700 cursor-pointer">
+                    <Label htmlFor="isForeigner" className={`text-sm font-semibold ${theme.textSecondary} cursor-pointer`}>
                       Sou Estrangeiro
                     </Label>
                   </div>
@@ -3560,7 +4098,7 @@ const PublicReservation = () => {
                   {!isForeigner ? (
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label htmlFor="cpf" className="text-sm font-semibold text-slate-700 mb-2 block">
+                        <Label htmlFor="cpf" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                           {t("publicReservation.cpf")}
                         </Label>
                         <Input
@@ -3569,11 +4107,11 @@ const PublicReservation = () => {
                           onChange={(e) => setFormData({ ...formData, cpf: formatCPF(e.target.value) })}
                           placeholder="000.000.000-00"
                           maxLength={14}
-                          className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                          className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                         />
                       </div>
                       <div>
-                        <Label htmlFor="phone" className="text-sm font-semibold text-slate-700 mb-2 block">
+                        <Label htmlFor="phone" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                           {t("publicReservation.phone")}
                         </Label>
                         <Input
@@ -3581,7 +4119,7 @@ const PublicReservation = () => {
                           value={formData.phone}
                           onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
                           placeholder="(00) 00000-0000"
-                          className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                          className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                         />
                       </div>
                     </div>
@@ -3589,14 +4127,14 @@ const PublicReservation = () => {
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <Label htmlFor="document_type" className="text-sm font-semibold text-slate-700 mb-2 block">
+                          <Label htmlFor="document_type" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                             Tipo de Documento *
                           </Label>
                           <Select
                             value={formData.document_type}
                             onValueChange={(value) => setFormData({ ...formData, document_type: value, document_number: "" })}
                           >
-                            <SelectTrigger className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg">
+                            <SelectTrigger className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -3608,7 +4146,7 @@ const PublicReservation = () => {
                           </Select>
                         </div>
                         <div>
-                          <Label htmlFor="phone" className="text-sm font-semibold text-slate-700 mb-2 block">
+                          <Label htmlFor="phone" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                             {t("publicReservation.phone")}
                           </Label>
                           <Input
@@ -3616,12 +4154,12 @@ const PublicReservation = () => {
                             value={formData.phone}
                             onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
                             placeholder="(00) 00000-0000"
-                            className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                            className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                           />
                         </div>
                       </div>
                       <div>
-                        <Label htmlFor="document_number" className="text-sm font-semibold text-slate-700 mb-2 block">
+                        <Label htmlFor="document_number" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                           Número do Documento *
                         </Label>
                         <Input
@@ -3630,7 +4168,7 @@ const PublicReservation = () => {
                           onChange={(e) => setFormData({ ...formData, document_number: e.target.value })}
                           placeholder="Número do documento"
                           required={isForeigner}
-                          className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                          className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                         />
                       </div>
                     </div>
@@ -3638,11 +4176,11 @@ const PublicReservation = () => {
 
                   {/* Opção para múltiplas reservas - apenas mostrar se houver mais de 1 quarto */}
                   {selectedCategories.length > 0 && totalRooms > 1 && (
-                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                      <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                    <div className={`mt-4 p-4 ${theme.accentBg} ${theme.accentBorder} rounded-lg`}>
+                      <Label className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                         Opções para múltiplas reservas:
                       </Label>
-                      <p className="text-xs text-slate-600 mb-3">
+                      <p className={`text-xs ${theme.textMuted} mb-3`}>
                         Escolha como deseja receber as informações de check-in e confirmação das reservas.
                       </p>
                       <RadioGroup
@@ -3674,10 +4212,10 @@ const PublicReservation = () => {
                         <div className="flex items-start space-x-2">
                           <RadioGroupItem value="myName" id="myName" className="mt-1" />
                           <div className="flex-1">
-                            <Label htmlFor="myName" className="text-sm text-slate-700 cursor-pointer font-medium">
+                            <Label htmlFor="myName" className={`text-sm ${theme.textSecondary} cursor-pointer font-medium`}>
                               Fazer todas as reservas em meu nome
                             </Label>
-                            <p className="text-xs text-slate-600 mt-1">
+                            <p className={`text-xs ${theme.textMuted} mt-1`}>
                               Você receberá um único email com todas as instruções de check-in e informações de todas as reservas.
                             </p>
                           </div>
@@ -3686,14 +4224,14 @@ const PublicReservation = () => {
                           <RadioGroupItem value="otherGuests" id="otherGuests" className="mt-1" />
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
-                              <Label htmlFor="otherGuests" className="text-sm text-slate-700 cursor-pointer font-medium">
+                              <Label htmlFor="otherGuests" className={`text-sm ${theme.textSecondary} cursor-pointer font-medium`}>
                                 Preencher dados de outros hóspedes
                               </Label>
-                              <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">
+                              <Badge variant="outline" className={`text-xs ${theme.badgeSuccess}`}>
                                 Recomendado
                               </Badge>
                             </div>
-                            <p className="text-xs text-slate-600 mt-1">
+                            <p className={`text-xs ${theme.textMuted} mt-1`}>
                               Cada hóspede receberá um email individual com suas próprias instruções de check-in e informações da sua reserva. Esta opção é mais recomendada para garantir que todos os hóspedes recebam as informações corretas.
                             </p>
                           </div>
@@ -3706,13 +4244,13 @@ const PublicReservation = () => {
                           {additionalGuestsData.map((guest, index) => {
                             const roomNumber = index + 2; // +2 porque o primeiro quarto usa os dados principais
                             return (
-                              <div key={index} className="p-4 bg-white border border-slate-200 rounded-lg">
-                                <h5 className="font-semibold text-slate-900 mb-3">
+                              <div key={index} className={`p-4 ${theme.cardBg} ${theme.cardBorder} rounded-lg`}>
+                                <h5 className={`font-semibold ${theme.textPrimary} mb-3`}>
                                   Dados do Hóspede - Quarto {roomNumber}
                                 </h5>
                                 <div className="grid grid-cols-2 gap-4">
                                   <div>
-                                    <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                    <Label className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                                       Nome *
                                     </Label>
                                     <Input
@@ -3723,12 +4261,12 @@ const PublicReservation = () => {
                                         setAdditionalGuestsData(updated);
                                       }}
                                       required
-                                      className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                      className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                                       placeholder="Nome"
                                     />
                                   </div>
                                   <div>
-                                    <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                    <Label className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                                       Sobrenome *
                                     </Label>
                                     <Input
@@ -3739,13 +4277,13 @@ const PublicReservation = () => {
                                         setAdditionalGuestsData(updated);
                                       }}
                                       required
-                                      className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                      className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                                       placeholder="Sobrenome"
                                     />
                                   </div>
                                 </div>
                                 <div className="mt-4">
-                                  <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                  <Label className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                                     Email *
                                   </Label>
                                   <Input
@@ -3757,13 +4295,13 @@ const PublicReservation = () => {
                                       setAdditionalGuestsData(updated);
                                     }}
                                     required
-                                    className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                    className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                                     placeholder="email@exemplo.com"
                                   />
                                 </div>
 
                                 {/* Opção Sou Estrangeiro para hóspede adicional */}
-                                <div className="flex items-center space-x-2 p-3 bg-slate-50 rounded-lg border border-slate-200 mt-4">
+                                <div className={`flex items-center space-x-2 p-3 ${theme.accentBg} rounded-lg ${theme.accentBorder} mt-4`}>
                                   <Switch
                                     id={`isForeigner-${index}`}
                                     checked={guest.isForeigner}
@@ -3781,7 +4319,7 @@ const PublicReservation = () => {
                                       setAdditionalGuestsData(updated);
                                     }}
                                   />
-                                  <Label htmlFor={`isForeigner-${index}`} className="text-sm font-semibold text-slate-700 cursor-pointer">
+                                  <Label htmlFor={`isForeigner-${index}`} className={`text-sm font-semibold ${theme.textSecondary} cursor-pointer`}>
                                     Sou Estrangeiro
                                   </Label>
                                 </div>
@@ -3789,7 +4327,7 @@ const PublicReservation = () => {
                                 {!guest.isForeigner ? (
                                   <div className="grid grid-cols-2 gap-4 mt-4">
                                     <div>
-                                      <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                      <Label className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                                         CPF
                                       </Label>
                                       <Input
@@ -3801,11 +4339,11 @@ const PublicReservation = () => {
                                         }}
                                         placeholder="000.000.000-00"
                                         maxLength={14}
-                                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                        className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                                       />
                                     </div>
                                     <div>
-                                      <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                                      <Label className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                                         Telefone
                                       </Label>
                                       <Input
@@ -3816,7 +4354,7 @@ const PublicReservation = () => {
                                           setAdditionalGuestsData(updated);
                                         }}
                                         placeholder="(00) 00000-0000"
-                                        className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg"
+                                        className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
                                       />
                                     </div>
                                   </div>
@@ -3836,7 +4374,7 @@ const PublicReservation = () => {
                                             setAdditionalGuestsData(updated);
                                           }}
                                         >
-                                          <SelectTrigger className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg">
+                                          <SelectTrigger className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}>
                                             <SelectValue />
                                           </SelectTrigger>
                                           <SelectContent>
@@ -3890,11 +4428,9 @@ const PublicReservation = () => {
                   )}
                 </div>
 
-                <Separator />
-
                 {/* Cupom de Desconto */}
                 <div className="space-y-2">
-                  <Label htmlFor="promotionalCode" className="text-sm font-semibold text-slate-700 mb-2 block">
+                  <Label htmlFor="promotionalCode" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                     {t("publicReservation.promotionalCode", "Cupom de Desconto")}
                   </Label>
                   <div className="flex gap-2">
@@ -3903,7 +4439,7 @@ const PublicReservation = () => {
                       value={formData.promotionalCode}
                       onChange={(e) => setFormData({ ...formData, promotionalCode: e.target.value.toUpperCase() })}
                       placeholder={t("publicReservation.enterPromotionalCode", "Digite o código do cupom")}
-                      className="h-12 border-2 border-slate-200 focus:border-blue-500 rounded-lg flex-1"
+                      className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg flex-1`}
                       disabled={validatingCoupon || !!appliedCoupon}
                     />
                     {appliedCoupon ? (
@@ -3911,7 +4447,7 @@ const PublicReservation = () => {
                         type="button"
                         variant="outline"
                         onClick={handleRemoveCoupon}
-                        className="h-12 px-4"
+                        className={`h-12 px-4 ${theme.secondaryButton} ${theme.secondaryButtonHover}`}
                       >
                         <X className="h-4 w-4 mr-2" />
                         Remover
@@ -3921,7 +4457,7 @@ const PublicReservation = () => {
                         type="button"
                         onClick={handleApplyCoupon}
                         disabled={validatingCoupon || !formData.promotionalCode.trim()}
-                        className="h-12 px-4 bg-green-600 hover:bg-green-700 text-white"
+                        className={`h-12 px-4 ${theme.primaryButton} ${theme.primaryButtonHover}`}
                       >
                         {validatingCoupon ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -3932,9 +4468,9 @@ const PublicReservation = () => {
                     )}
                   </div>
                   {appliedCoupon && (
-                    <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                      <div className="flex items-center gap-2 text-green-800">
-                        <CheckCircle2 className="h-4 w-4" />
+                    <div className={`p-3 ${theme.badgeSuccess} rounded-lg`}>
+                      <div className={`flex items-center gap-2 ${theme.textSecondary}`}>
+                        <CheckCircle2 className={`h-4 w-4 ${theme.priceColor}`} />
                         <span className="text-sm font-semibold">
                           Cupom "{appliedCoupon.coupon_name}" aplicado! Desconto de{" "}
                           {appliedCoupon.discount_type === "percentage"
@@ -3946,11 +4482,9 @@ const PublicReservation = () => {
                   )}
                 </div>
 
-                <Separator />
-
                 {/* Observações */}
                 <div>
-                  <Label htmlFor="notes" className="text-sm font-semibold text-slate-700 mb-2 block">
+                  <Label htmlFor="notes" className={`text-sm font-semibold ${theme.textSecondary} mb-2 block`}>
                     {t("publicReservation.notes")}
                   </Label>
                   <Textarea
@@ -3959,14 +4493,14 @@ const PublicReservation = () => {
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     rows={3}
                     placeholder={t("publicReservation.notesPlaceholder")}
-                    className="border-2 border-slate-200 focus:border-blue-500 rounded-lg resize-none"
+                    className={`${theme.searchInputBg} ${theme.searchInputBorder} ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg resize-none`}
                   />
                 </div>
 
                 {/* Resumo */}
                 {selectedCategory && (selectedCategories.length > 0 || calculatedPrice) && formData.checkinDate && formData.checkoutDate && (
-                  <div className="bg-slate-50 rounded-lg p-4 space-y-3 border-2 border-slate-200">
-                    <h4 className="font-semibold text-slate-900 mb-3">{t("publicReservation.reservationSummary")}</h4>
+                  <div className={`${theme.summaryBg} rounded-lg p-4 space-y-3 ${theme.summaryBorder} border-2`}>
+                    <h4 className={`font-semibold ${theme.textPrimary} mb-3`}>{t("publicReservation.reservationSummary")}</h4>
                     
                     {/* Detalhamento por categoria */}
                     {selectedCategories.length > 0 && (
@@ -3980,12 +4514,12 @@ const PublicReservation = () => {
                           const plan2PricePerRoomPerNight = summaryPlanPrices[cat.categoryId]?.plan2;
                           
                           return (
-                            <div key={cat.categoryId} className="bg-white rounded-lg p-4 border-2 border-slate-200 relative">
+                            <div key={cat.categoryId} className={`${theme.cardBg} rounded-lg p-4 ${theme.cardBorder} border-2 relative`}>
                               {/* Botão de remover */}
                               <button
                                 type="button"
                                 onClick={() => handleRemoveCategory(cat.categoryId)}
-                                className="absolute top-2 right-2 p-1.5 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                                className={`absolute top-2 right-2 p-1.5 rounded-full hover:bg-red-50 ${theme.textMuted} hover:text-red-600 transition-colors`}
                                 title={t("publicReservation.removeCategory", "Remover categoria")}
                               >
                                 <X className="w-4 h-4" />
@@ -3993,22 +4527,22 @@ const PublicReservation = () => {
                               
                               <div className="flex items-center justify-between mb-3 pr-8">
                                 <div className="flex items-center gap-2">
-                                  <Bed className="w-4 h-4 text-blue-600" />
-                                  <span className="font-semibold text-slate-900 text-sm">
+                                  <Bed className={`w-4 h-4 ${theme.priceColor}`} />
+                                  <span className={`font-semibold ${theme.textPrimary} text-sm`}>
                                     {category?.name || `Categoria ${index + 1}`}
                                   </span>
                                 </div>
-                                <span className="font-bold text-blue-600">
+                                <span className={`font-bold ${theme.priceHighlight}`}>
                                   R$ {cat.price.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </div>
-                              <div className="text-xs text-slate-600 space-y-1 mb-3">
+                              <div className={`text-xs ${theme.textSecondary} space-y-1 mb-3`}>
                                 <div className="flex justify-between">
                                   <span>{cat.rooms} {cat.rooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</span>
                                   <span>{cat.adults} {cat.adults === 1 ? t("publicReservation.adult") : t("publicReservation.adultsPlural")}</span>
                                 </div>
                                 {nights > 0 && (
-                                  <div className="flex justify-between text-slate-500">
+                                  <div className={`flex justify-between ${theme.textMuted}`}>
                                     <span>{nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</span>
                                     <span>R$ {(cat.price / nights).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {t("publicReservation.pricePerNight")}</span>
                                   </div>
@@ -4017,43 +4551,44 @@ const PublicReservation = () => {
 
                               {/* Seleção de Plano Tarifário para esta categoria */}
                               {(publicPricingPlan1Id || publicPricingPlan2Id) && (plan1PricePerRoomPerNight !== undefined || plan2PricePerRoomPerNight !== undefined) && (
-                                <div className="mt-3 pt-3 border-t border-slate-200">
-                                  <Label className="text-xs font-semibold text-slate-700 mb-2 block">
+                                <div className="mt-3 pt-3">
+                                  <Label className={`text-xs font-semibold ${theme.textSecondary} mb-2 block`}>
                                     Selecionar Plano Tarifário:
                                   </Label>
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                     {/* Plano 1 */}
                                     {publicPricingPlan1Id && plan1PricePerRoomPerNight !== undefined && (
                                       <div 
-                                        className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                                        className={`p-3 rounded-lg ${theme.planCardBg} cursor-pointer transition-all ${theme.planCardHover} focus:outline-none ${
                                           selectedPlan === "plan1"
-                                            ? "border-blue-500 bg-blue-50 shadow-md"
-                                            : "border-slate-200 hover:border-slate-300 bg-white"
+                                            ? `border-2 ${theme.planCardSelected} ${theme.cardHoverShadow}`
+                                            : `${theme.planCardBorder}`
                                         }`}
                                         onClick={() => {
                                           const newPlan = selectedPlan === "plan1" ? null : "plan1";
                                           handlePlanSelection(cat.categoryId, newPlan);
                                         }}
+                                        tabIndex={0}
                                       >
                                         <div className="flex items-start justify-between mb-1">
-                                          <h5 className="text-xs font-semibold text-slate-700">
+                                          <h5 className={`text-xs font-semibold ${theme.textSecondary}`}>
                                             {publicPricingPlan1Title || "Plano 1"}
                                           </h5>
                                           {selectedPlan === "plan1" && (
-                                            <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                            <CheckCircle2 className={`w-4 h-4 ${theme.priceColor} flex-shrink-0`} />
                                           )}
                                         </div>
                                         {nights > 0 ? (
                                           <>
-                                            <p className="text-lg font-bold text-green-600">
+                                            <p className={`text-lg font-bold ${theme.priceHighlight}`}>
                                               R$ {plan1PricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </p>
-                                            <p className="text-xs text-slate-500">
+                                            <p className={`text-xs ${theme.priceLabel}`}>
                                               por quarto / por noite
                                             </p>
                                           </>
                                         ) : (
-                                          <p className="text-lg font-bold text-green-600">
+                                          <p className={`text-lg font-bold ${theme.priceHighlight}`}>
                                             R$ {plan1PricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </p>
                                         )}
@@ -4063,35 +4598,36 @@ const PublicReservation = () => {
                                     {/* Plano 2 */}
                                     {publicPricingPlan2Id && plan2PricePerRoomPerNight !== undefined && (
                                       <div 
-                                        className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                                        className={`p-3 rounded-lg ${theme.planCardBg} cursor-pointer transition-all ${theme.planCardHover} focus:outline-none ${
                                           selectedPlan === "plan2"
-                                            ? "border-blue-500 bg-blue-50 shadow-md"
-                                            : "border-slate-200 hover:border-slate-300 bg-white"
+                                            ? `border-2 ${theme.planCardSelected} ${theme.cardHoverShadow}`
+                                            : `${theme.planCardBorder}`
                                         }`}
                                         onClick={() => {
                                           const newPlan = selectedPlan === "plan2" ? null : "plan2";
                                           handlePlanSelection(cat.categoryId, newPlan);
                                         }}
+                                        tabIndex={0}
                                       >
                                         <div className="flex items-start justify-between mb-1">
-                                          <h5 className="text-xs font-semibold text-slate-700">
+                                          <h5 className={`text-xs font-semibold ${theme.textSecondary}`}>
                                             {publicPricingPlan2Title || "Plano 2"}
                                           </h5>
                                           {selectedPlan === "plan2" && (
-                                            <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                            <CheckCircle2 className={`w-4 h-4 ${theme.priceColor} flex-shrink-0`} />
                                           )}
                                         </div>
                                         {nights > 0 ? (
                                           <>
-                                            <p className="text-lg font-bold text-green-600">
+                                            <p className={`text-lg font-bold ${theme.priceHighlight}`}>
                                               R$ {plan2PricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </p>
-                                            <p className="text-xs text-slate-500">
+                                            <p className={`text-xs ${theme.priceLabel}`}>
                                               por quarto / por noite
                                             </p>
                                           </>
                                         ) : (
-                                          <p className="text-lg font-bold text-green-600">
+                                          <p className={`text-lg font-bold ${theme.priceHighlight}`}>
                                             R$ {plan2PricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </p>
                                         )}
@@ -4108,14 +4644,14 @@ const PublicReservation = () => {
 
                     {/* Informação de quartos necessários quando houver apenas uma categoria */}
                     {selectedCategories.length === 1 && selectedCategoryData && totalRooms > 1 && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
-                        <div className="flex items-center gap-2 text-blue-800 text-sm">
-                          <Bed className="w-4 h-4" />
+                      <div className={`${theme.accentBg} ${theme.accentBorder} rounded-lg p-3 mb-3`}>
+                        <div className={`flex items-center gap-2 ${theme.textSecondary} text-sm`}>
+                          <Bed className={`w-4 h-4 ${theme.priceColor}`} />
                           <span className="font-medium">
                             {totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")} {t("publicReservation.required")}
                           </span>
                         </div>
-                        <p className="text-xs text-blue-700 mt-1">
+                        <p className={`text-xs ${theme.textMuted} mt-1`}>
                           {formatRoomsRequiredText(
                             adults, 
                             selectedCategoryData.capacity_adults || 1,
@@ -4129,24 +4665,24 @@ const PublicReservation = () => {
                     {selectedCategories.length === 1 && nights > 0 && (
                       <>
                         <div className="flex justify-between text-sm">
-                          <span className="text-slate-600">
+                          <span className={theme.priceLabel}>
                             {totalRooms > 1 
                               ? `${t("publicReservation.pricePerRoomPerNight")} (${totalRooms} ${totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")})`
                               : t("publicReservation.pricePerNight")
                             }
                           </span>
-                          <span className="font-medium text-slate-900">
+                          <span className={`font-medium ${theme.textPrimary}`}>
                             R$ {pricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
                         <div className="flex justify-between text-sm">
-                          <span className="text-slate-600">{nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</span>
-                          <span className="font-medium text-slate-900">× {nights}</span>
+                          <span className={theme.priceLabel}>{nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</span>
+                          <span className={`font-medium ${theme.textPrimary}`}>× {nights}</span>
                         </div>
                         {totalRooms > 1 && (
                           <div className="flex justify-between text-sm">
-                            <span className="text-slate-600">{totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</span>
-                            <span className="font-medium text-slate-900">× {totalRooms}</span>
+                            <span className={theme.priceLabel}>{totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</span>
+                            <span className={`font-medium ${theme.textPrimary}`}>× {totalRooms}</span>
                           </div>
                         )}
                       </>
@@ -4156,24 +4692,24 @@ const PublicReservation = () => {
                     {selectedCategories.length === 0 && nights > 0 && (
                       <>
                         <div className="flex justify-between text-sm">
-                          <span className="text-slate-600">
+                          <span className={theme.priceLabel}>
                             {totalRooms > 1 
                               ? `${t("publicReservation.pricePerRoomPerNight")} (${totalRooms} ${totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")})`
                               : t("publicReservation.pricePerNight")
                             }
                           </span>
-                          <span className="font-medium text-slate-900">
+                          <span className={`font-medium ${theme.textPrimary}`}>
                             R$ {pricePerRoomPerNight.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
                         <div className="flex justify-between text-sm">
-                          <span className="text-slate-600">{nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</span>
-                          <span className="font-medium text-slate-900">× {nights}</span>
+                          <span className={theme.priceLabel}>{nights} {nights === 1 ? t("publicReservation.night") : t("publicReservation.nights")}</span>
+                          <span className={`font-medium ${theme.textPrimary}`}>× {nights}</span>
                         </div>
                         {totalRooms > 1 && (
                           <div className="flex justify-between text-sm">
-                            <span className="text-slate-600">{totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</span>
-                            <span className="font-medium text-slate-900">× {totalRooms}</span>
+                            <span className={theme.priceLabel}>{totalRooms} {totalRooms === 1 ? t("publicReservation.room") : t("publicReservation.rooms")}</span>
+                            <span className={`font-medium ${theme.textPrimary}`}>× {totalRooms}</span>
                           </div>
                         )}
                       </>
@@ -4183,23 +4719,22 @@ const PublicReservation = () => {
                     {discountAmount > 0 && (
                       <>
                         <div className="flex justify-between text-sm">
-                          <span className="text-slate-600">Subtotal</span>
-                          <span className="text-slate-700">
+                          <span className={theme.priceLabel}>Subtotal</span>
+                          <span className={theme.textSecondary}>
                             R$ {basePrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
-                        <div className="flex justify-between text-sm text-green-600">
+                        <div className={`flex justify-between text-sm ${theme.priceColor}`}>
                           <span>Desconto ({appliedCoupon?.coupon_code})</span>
                           <span className="font-semibold">
                             - R$ {discountAmount.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
-                        <Separator />
                       </>
                     )}
                     <div className="flex justify-between">
-                      <span className="font-bold text-lg text-slate-900">{t("publicReservation.total")}</span>
-                      <span className="font-bold text-2xl text-blue-600">
+                      <span className={`font-bold text-lg ${theme.textPrimary}`}>{t("publicReservation.total")}</span>
+                      <span className={`font-bold text-2xl ${theme.priceHighlight}`}>
                         R$ {finalPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </div>
@@ -4208,12 +4743,12 @@ const PublicReservation = () => {
 
                 {/* Mensagem de indisponibilidade */}
                 {selectedCategory && formData.checkinDate && formData.checkoutDate && !hasSufficientAvailability() && (
-                  <Alert className="mb-4 border-red-200 bg-red-50">
-                    <AlertCircle className="h-4 w-4 text-red-600" />
-                    <AlertTitle className="text-red-800 font-semibold">
+                  <Alert className={`mb-4 ${theme.badgeWarning} ${theme.accentBorder}`}>
+                    <AlertCircle className={`h-4 w-4 ${theme.priceColor}`} />
+                    <AlertTitle className={`${theme.textPrimary} font-semibold`}>
                       {t("publicReservation.noAvailability", "Indisponível")}
                     </AlertTitle>
-                    <AlertDescription className="text-red-700 text-sm mt-1">
+                    <AlertDescription className={`${theme.textSecondary} text-sm mt-1`}>
                       {selectedCategories.length > 0
                         ? t("publicReservation.noAvailabilityForDates", "Não há disponibilidade suficiente para as datas informadas. Algumas categorias selecionadas não possuem quartos disponíveis no período solicitado.")
                         : availableRoomsCount === 0
@@ -4233,9 +4768,9 @@ const PublicReservation = () => {
                     <button
                       type="button"
                       onClick={() => setPoliciesDialogOpen(true)}
-                      className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors group"
+                      className={`inline-flex items-center gap-2 text-sm ${theme.textSecondary} hover:opacity-80 transition-colors group`}
                     >
-                      <Info className="h-4 w-4 text-slate-500 group-hover:text-blue-600 transition-colors" />
+                      <Info className={`h-4 w-4 ${theme.textMuted} group-hover:opacity-100 transition-colors`} />
                       <span className="underline decoration-dotted underline-offset-2">
                         {t("publicReservation.viewPolicies", "Ver políticas")}
                       </span>
@@ -4253,7 +4788,7 @@ const PublicReservation = () => {
                     !formData.checkoutDate ||
                     !hasSufficientAvailability()
                   }
-                  className="w-full h-14 text-lg font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={`w-full h-14 text-lg font-semibold ${theme.primaryButton} ${theme.primaryButtonHover} rounded-lg ${theme.cardShadow} transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   {isSubmitting ? (
                     <>
@@ -4268,13 +4803,13 @@ const PublicReservation = () => {
                   )}
                 </Button>
 
-                <div className="text-xs text-center text-slate-500 space-y-2">
+                <div className={`text-xs text-center ${theme.textMuted} space-y-2`}>
                   <div className="flex items-center justify-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    <CheckCircle2 className={`w-4 h-4 ${theme.priceColor}`} />
                     <span>{t("publicReservation.immediateConfirmation")}</span>
                   </div>
                   <div className="flex items-center justify-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    <CheckCircle2 className={`w-4 h-4 ${theme.priceColor}`} />
                     <span>{t("publicReservation.noChargeNow")}</span>
                   </div>
                 </div>
@@ -4777,6 +5312,188 @@ const PublicReservation = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Footer - estilo moderno inspirado em Booking / Airbnb / Expedia */}
+      <footer className={`${theme.footerBg} ${theme.footerBorder} mt-16`}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-6">
+          {/* Linha principal */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {/* Coluna 1 - Marca */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                {motorLogo && (
+                  <div className="h-9 w-9 rounded-full bg-white/90 shadow-sm flex items-center justify-center overflow-hidden ring-1 ring-black/5">
+                    <img
+                      src={motorLogo}
+                      alt="Logo"
+                      className="h-7 w-7 object-contain"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
+                    />
+                  </div>
+                )}
+                <div className="flex flex-col">
+                  <span
+                    className={`text-sm font-semibold tracking-tight ${
+                      themeKey === "travel" ? "text-white" : theme.textPrimary
+                    }`}
+                  >
+                    {motorTitle}
+                  </span>
+                  <span className={`text-xs ${theme.footerText}`}>
+                    Motor de reservas oficial · reserva direta, sem taxas ocultas
+                  </span>
+                </div>
+              </div>
+              {contactCnpj && (
+                <p className={`text-xs ${theme.footerText}`}>CNPJ: {contactCnpj}</p>
+              )}
+            </div>
+
+            {/* Coluna 2 - Contato */}
+            <div className="space-y-3">
+              <h5
+                className={`text-xs font-semibold uppercase tracking-[0.18em] ${
+                  themeKey === "travel" ? "text-white" : theme.textSecondary
+                }`}
+              >
+                Contato
+              </h5>
+              <div className="space-y-2 text-sm">
+                {contactPhone && (
+                  <p className={`flex items-center gap-2 ${theme.footerText}`}>
+                    <Phone className="w-4 h-4 opacity-70" />
+                    <a href={`tel:${contactPhone}`} className="hover:underline">
+                      {contactPhone}
+                    </a>
+                  </p>
+                )}
+                {contactWhatsappNumber && (
+                  <p className={`flex items-center gap-2 ${theme.footerText}`}>
+                    <MessageCircle className="w-4 h-4 opacity-70" />
+                    <a
+                      href={`https://wa.me/${encodeURIComponent(`${contactWhatsappDdi || ""}${contactWhatsappNumber}`)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover:underline"
+                    >
+                      {`${contactWhatsappDdi || ""} ${contactWhatsappNumber}`.trim()}
+                    </a>
+                  </p>
+                )}
+                {contactEmail && (
+                  <p className={`flex items-center gap-2 ${theme.footerText}`}>
+                    <Mail className="w-4 h-4 opacity-70" />
+                    <a href={`mailto:${contactEmail}`} className="hover:underline">
+                      {contactEmail}
+                    </a>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Coluna 3 - Experiência & tecnologia */}
+            <div className="space-y-3 md:text-right">
+              <h5 className={`text-xs font-semibold uppercase tracking-[0.18em] ${themeKey === "travel" ? "text-white" : theme.textSecondary}`}>
+                Experiência segura
+              </h5>
+              <p className={`text-sm ${theme.footerText}`}>
+                Pagamentos criptografados, disponibilidade em tempo real e confirmação imediata da sua reserva.
+              </p>
+              <div className={`inline-flex items-center gap-2 text-xs mt-2 md:justify-end ${themeKey === "travel" ? "text-blue-100" : "text-slate-400"}`}>
+                <Globe2 className="w-3 h-3" />
+                <span>Tecnologia SaaS para hospitalidade</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Redes sociais */}
+          {(socialInstagram || socialFacebook || socialTwitter || socialYoutube || socialWebsite || socialWhatsapp) && (
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <span className={`text-[11px] ${theme.footerText}`}>Siga-nos:</span>
+              {socialInstagram && (
+                <a
+                  href={socialInstagram}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="Instagram"
+                >
+                  <Instagram className="w-4 h-4" />
+                </a>
+              )}
+              {socialFacebook && (
+                <a
+                  href={socialFacebook}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="Facebook"
+                >
+                  <Facebook className="w-4 h-4" />
+                </a>
+              )}
+              {socialTwitter && (
+                <a
+                  href={socialTwitter}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="Twitter / X"
+                >
+                  <Twitter className="w-4 h-4" />
+                </a>
+              )}
+              {socialYoutube && (
+                <a
+                  href={socialYoutube}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="YouTube"
+                >
+                  <Youtube className="w-4 h-4" />
+                </a>
+              )}
+              {socialWhatsapp && (
+                <a
+                  href={socialWhatsapp}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-500 text-white shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  aria-label="WhatsApp"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                </a>
+              )}
+              {socialWebsite && (
+                <a
+                  href={socialWebsite}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border ${theme.footerBorder}`}
+                >
+                  <Globe2 className="w-3 h-3" />
+                  <span>Site oficial</span>
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* Linha inferior */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pt-4 border-t border-white/5 border-slate-200/10">
+            <p className={`text-[11px] ${theme.footerText}`}>
+              © {new Date().getFullYear()} {motorTitle}. Todos os direitos reservados.
+            </p>
+            <div className={`flex flex-wrap items-center gap-3 text-[11px] ${theme.textMuted}`}>
+              <span>Idioma: Português (Brasil)</span>
+              <span className="hidden md:inline-block w-px h-3 bg-slate-700/40" />
+              <span>Moeda: BRL (R$)</span>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 };
