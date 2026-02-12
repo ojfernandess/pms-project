@@ -799,10 +799,14 @@ export const useRateSystem = () => {
     date: Date,
     adults: number = 1,
     children: number = 0,
-    useEdgeFunction: boolean = false
+    useEdgeFunction: boolean = false,
+    retryCount: number = 0
   ): Promise<number> => {
     const establishmentId = getEstablishmentId();
     if (!establishmentId) return 0;
+
+    // Limitar número de tentativas para evitar loops infinitos
+    const MAX_RETRIES = 1;
 
     // Se useEdgeFunction for true, usar Edge Function
     if (useEdgeFunction) {
@@ -811,7 +815,11 @@ export const useRateSystem = () => {
         return result.final_price;
       } catch (error) {
         console.error("Erro ao usar Edge Function, usando fallback:", error);
-        // Fallback para função PostgreSQL
+        // Fallback para função PostgreSQL apenas se não exceder retries
+        if (retryCount < MAX_RETRIES) {
+          return calculateRatePrice(categoryId, planId, date, adults, children, false, retryCount + 1);
+        }
+        return 0;
       }
     }
 
@@ -827,17 +835,27 @@ export const useRateSystem = () => {
       });
 
       if (error) {
-        console.error("Erro ao calcular preço:", error);
-        // Se for erro de CORS ou 502, tentar usar fallback
-        if (error.message?.includes("CORS") || error.message?.includes("Failed to fetch") || error.code === "PGRST301") {
-          console.warn("Erro de CORS/502 detectado, tentando fallback...");
-          // Tentar usar Edge Function como fallback
+        // Para erros de rede (ERR_INSUFFICIENT_RESOURCES, Failed to fetch), usar preço base diretamente
+        const isNetworkError = 
+          error.message?.includes("CORS") || 
+          error.message?.includes("Failed to fetch") || 
+          error.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
+          error.code === "PGRST301";
+
+        if (isNetworkError && retryCount < MAX_RETRIES) {
+          // Tentar buscar preço base da categoria diretamente, sem fallback para Edge Function
           try {
-            const result = await applyDynamicPricingRules(categoryId, planId, date, adults, children);
-            return result.final_price;
-          } catch (fallbackError) {
-            console.error("Erro no fallback também:", fallbackError);
-            return 0;
+            const { data: categoryData } = await supabase
+              .from("room_categories")
+              .select("base_price")
+              .eq("id", categoryId)
+              .maybeSingle();
+            
+            if (categoryData?.base_price) {
+              return Number(categoryData.base_price);
+            }
+          } catch (categoryError) {
+            console.error("Erro ao buscar preço base:", categoryError);
           }
         }
         return 0;
@@ -845,40 +863,29 @@ export const useRateSystem = () => {
 
       return Number(data || 0);
     } catch (fetchError: any) {
-      console.error("Erro de rede ao calcular preço:", fetchError);
-      // Se for erro de rede (CORS, 502, etc), tentar fallback
-      if (fetchError.message?.includes("Failed to fetch") || 
-          fetchError.message?.includes("CORS") || 
-          fetchError.message?.includes("502") ||
-          fetchError.code === "PGRST301") {
-        console.warn("Erro de rede detectado, tentando fallback...");
-        try {
-          // Tentar Edge Function primeiro
-          const result = await applyDynamicPricingRules(categoryId, planId, date, adults, children);
-          if (result.final_price > 0) {
-            return result.final_price;
-          }
-        } catch (fallbackError) {
-          console.error("Erro no fallback Edge Function:", fallbackError);
-        }
-        
-        // Se Edge Function também falhar, buscar preço base da categoria
+      // Para erros de rede, usar preço base diretamente sem tentar fallback
+      const isNetworkError = 
+        fetchError.message?.includes("Failed to fetch") || 
+        fetchError.message?.includes("CORS") || 
+        fetchError.message?.includes("502") ||
+        fetchError.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
+        fetchError.code === "PGRST301";
+
+      if (isNetworkError && retryCount < MAX_RETRIES) {
+        // Buscar preço base da categoria diretamente
         try {
           const { data: categoryData } = await supabase
             .from("room_categories")
             .select("base_price")
             .eq("id", categoryId)
-            .single();
+            .maybeSingle();
           
           if (categoryData?.base_price) {
-            console.warn("Usando preço base da categoria como fallback:", categoryData.base_price);
             return Number(categoryData.base_price);
           }
         } catch (categoryError) {
-          console.error("Erro ao buscar preço base da categoria:", categoryError);
+          console.error("Erro ao buscar preço base:", categoryError);
         }
-        
-        return 0;
       }
       return 0;
     }

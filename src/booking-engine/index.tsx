@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
+import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
 
 // Declaração de tipos para Chatwoot SDK
 declare global {
@@ -1505,7 +1506,18 @@ const BookingEnginePage = () => {
     return selectedPlan.pricePerNight * nights;
   }, [selectedPlan, nights]);
 
+  // AbortController para cancelar requisições anteriores
+  const priceCalculationAbortRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
+    // Cancelar requisições anteriores
+    if (priceCalculationAbortRef.current) {
+      priceCalculationAbortRef.current.abort();
+    }
+
+    const abortController = new AbortController();
+    priceCalculationAbortRef.current = abortController;
+
     const run = async () => {
       if (!roomCategories.length) {
         return;
@@ -1533,13 +1545,18 @@ const BookingEnginePage = () => {
           nightsCount = 1;
         }
 
-        if (nightsCount <= 0) return;
+        if (nightsCount <= 0) {
+          setCalculatingPrices(false);
+          return;
+        }
 
         // Buscar hotel_settings para cada estabelecimento único
         const establishmentIds = [...new Set(roomCategories.map((cat: any) => cat.establishment_id))];
         const hotelSettingsMap: Record<string, any> = {};
         
         for (const estId of establishmentIds) {
+          if (abortController.signal.aborted) break;
+          
           const { data: settingsData } = await supabase
             .from("hotel_settings" as any)
             .select("*")
@@ -1550,6 +1567,22 @@ const BookingEnginePage = () => {
           }
         }
 
+        if (abortController.signal.aborted) {
+          setCalculatingPrices(false);
+          return;
+        }
+
+        // Preparar todas as requisições
+        const priceRequests: Array<{
+          establishmentId: string;
+          categoryId: string;
+          planId: string;
+          date: string;
+          adults: number;
+          children: number;
+          categoryKey: string; // Para agrupar resultados
+        }> = [];
+
         for (const cat of roomCategories) {
           const establishmentId = cat.establishment_id;
           const settings = hotelSettingsMap[establishmentId];
@@ -1559,40 +1592,79 @@ const BookingEnginePage = () => {
             pricesPlan1[cat.id] = null;
             continue;
           }
-          const basePrice = Number(cat.base_price || 0);
-          let total1 = 0;
+
           for (let i = 0; i < nightsCount; i++) {
             const currentDate = addDays(startDate, i);
             const dateStr = formatDateLocal(currentDate);
-
-            const { data, error } = await (supabase as any).rpc("calculate_rate_price", {
-              p_establishment_id: establishmentId,
-              p_category_id: cat.id,
-              p_pricing_plan_id: plan1Id,
-              p_date: dateStr,
-              p_adults: adultsNum,
-              p_children: childrenNum,
+            
+            priceRequests.push({
+              establishmentId,
+              categoryId: cat.id,
+              planId: plan1Id,
+              date: dateStr,
+              adults: adultsNum,
+              children: childrenNum,
+              categoryKey: cat.id,
             });
-
-            if (error) {
-              total1 += basePrice;
-            } else {
-              const price = Number(data || 0);
-              total1 += price > 0 ? price : basePrice;
-            }
           }
-          pricesPlan1[cat.id as string] =
-            total1 > 0 && nightsCount > 0 ? total1 / nightsCount : null;
         }
+
+        if (priceRequests.length === 0) {
+          setCategoryPricesPlan1(pricesPlan1);
+          setCategoryPrices(pricesPlan1);
+          setCalculatingPrices(false);
+          return;
+        }
+
+        // Executar requisições em batch
+        const results = await batchCalculateRatePrice(
+          priceRequests,
+          supabase,
+          3, // maxConcurrent: 3 requisições por vez
+          abortController.signal
+        );
+
+        if (abortController.signal.aborted) {
+          setCalculatingPrices(false);
+          return;
+        }
+
+        // Agrupar resultados por categoria
+        const categoryTotals: Record<string, { total: number; count: number }> = {};
+
+        priceRequests.forEach((req, index) => {
+          const result = results[index];
+          if (!categoryTotals[req.categoryKey]) {
+            categoryTotals[req.categoryKey] = { total: 0, count: 0 };
+          }
+          categoryTotals[req.categoryKey].total += result.price;
+          categoryTotals[req.categoryKey].count += 1;
+        });
+
+        // Calcular preço médio por noite para cada categoria
+        Object.keys(categoryTotals).forEach((categoryId) => {
+          const { total, count } = categoryTotals[categoryId];
+          pricesPlan1[categoryId] = count > 0 ? total / count : null;
+        });
 
         setCategoryPricesPlan1(pricesPlan1);
         setCategoryPrices(pricesPlan1);
+      } catch (error) {
+        if (!abortController.signal.aborted) {
+          console.error("Erro ao calcular preços:", error);
+        }
       } finally {
-        setCalculatingPrices(false);
+        if (!abortController.signal.aborted) {
+          setCalculatingPrices(false);
+        }
       }
     };
 
     run();
+
+    return () => {
+      abortController.abort();
+    };
   }, [roomCategories, checkin, checkout, adults, children]);
 
   const handleSubmit = (categoryId?: string) => {

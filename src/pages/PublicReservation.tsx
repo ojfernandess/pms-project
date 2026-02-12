@@ -20,6 +20,7 @@ import { Switch } from "@/components/ui/switch";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
 
 const PublicReservation = () => {
   const { establishmentSlug } = useParams<{ establishmentSlug: string }>();
@@ -885,8 +886,19 @@ const PublicReservation = () => {
     manuallyRemovedCategories, // Respeitar categorias removidas manualmente
   ]);
 
+  // AbortController para cancelar requisições anteriores
+  const summaryPricesAbortRef = useRef<AbortController | null>(null);
+
   // Recalcular preços dos planos para cada categoria no resumo usando dados específicos de cada categoria
   useEffect(() => {
+    // Cancelar requisições anteriores
+    if (summaryPricesAbortRef.current) {
+      summaryPricesAbortRef.current.abort();
+    }
+
+    const abortController = new AbortController();
+    summaryPricesAbortRef.current = abortController;
+
     const recalculateSummaryPlanPrices = async () => {
       if (selectedCategories.length === 0 || !formData.checkinDate || !formData.checkoutDate || !establishment?.id) {
         setSummaryPlanPrices({});
@@ -908,116 +920,162 @@ const PublicReservation = () => {
 
       const prices: Record<string, { plan1?: number; plan2?: number }> = {};
 
+      // Preparar todas as requisições
+      const priceRequests: Array<{
+        establishmentId: string;
+        categoryId: string;
+        planId: string;
+        date: string;
+        adults: number;
+        children: number;
+        categoryKey: string;
+        planKey: "plan1" | "plan2";
+        rooms: number;
+        basePrice: number;
+      }> = [];
+
       for (const cat of selectedCategories) {
         const category = categories.find((c) => c.id === cat.categoryId);
         if (!category) continue;
 
         const basePrice = Number(category.base_price || 0);
+        const categoryCapacity = category?.capacity_adults || 0;
+        const adultsPerRoom = categoryCapacity > 0 
+          ? Math.min(categoryCapacity, Math.ceil(cat.adults / cat.rooms))
+          : (cat.rooms > 0 ? Math.ceil(cat.adults / cat.rooms) : cat.adults);
+        const childrenPerRoom = cat.rooms > 0 ? Math.ceil(children / cat.rooms) : children;
 
-        // Calcular preço do plano 1 para esta categoria específica
-        // IMPORTANTE: calculate_rate_price retorna o preço POR QUARTO baseado no número de adultos
-        // Para calcular corretamente, precisamos usar a capacidade máxima do quarto ou adultos por quarto
         if (publicPricingPlan1Id) {
-          // Usar capacidade máxima do quarto se disponível, senão calcular adultos por quarto
-          const categoryCapacity = category?.capacity_adults || 0;
-          const adultsPerRoom = categoryCapacity > 0 
-            ? Math.min(categoryCapacity, Math.ceil(cat.adults / cat.rooms))
-            : (cat.rooms > 0 ? Math.ceil(cat.adults / cat.rooms) : cat.adults);
-          const childrenPerRoom = cat.rooms > 0 ? Math.ceil(children / cat.rooms) : children;
-          
-          let plan1TotalForAllRooms = 0;
           for (let i = 0; i < nights; i++) {
             const currentDate = addDays(checkin, i);
             const dateStr = formatDateLocal(currentDate);
-
-            try {
-              // Calcular preço por quarto usando adultos por quarto
-              const { data, error } = await supabase.rpc("calculate_rate_price", {
-                p_establishment_id: establishment.id,
-                p_category_id: cat.categoryId,
-                p_pricing_plan_id: publicPricingPlan1Id,
-                p_date: dateStr,
-                p_adults: adultsPerRoom,
-                p_children: childrenPerRoom,
-              });
-
-              if (error) {
-                plan1TotalForAllRooms += basePrice * cat.rooms;
-              } else {
-                const pricePerRoom = Number(data || 0);
-                plan1TotalForAllRooms += (pricePerRoom > 0 ? pricePerRoom : basePrice) * cat.rooms;
-              }
-            } catch (error) {
-              plan1TotalForAllRooms += basePrice * cat.rooms;
-            }
+            priceRequests.push({
+              establishmentId: establishment.id,
+              categoryId: cat.categoryId,
+              planId: publicPricingPlan1Id,
+              date: dateStr,
+              adults: adultsPerRoom,
+              children: childrenPerRoom,
+              categoryKey: cat.categoryId,
+              planKey: "plan1",
+              rooms: cat.rooms,
+              basePrice,
+            });
           }
-          // Preço por quarto por noite = total para todos os quartos / número de quartos / número de noites
-          prices[cat.categoryId] = {
-            ...prices[cat.categoryId],
-            plan1: cat.rooms > 0 && nights > 0 
-              ? plan1TotalForAllRooms / cat.rooms / nights 
-              : cat.rooms > 0 
-                ? plan1TotalForAllRooms / cat.rooms 
-                : 0,
-          };
         }
 
-        // Calcular preço do plano 2 para esta categoria específica
         if (publicPricingPlan2Id) {
-          // Usar capacidade máxima do quarto se disponível, senão calcular adultos por quarto
-          const categoryCapacity = category?.capacity_adults || 0;
-          const adultsPerRoom = categoryCapacity > 0 
-            ? Math.min(categoryCapacity, Math.ceil(cat.adults / cat.rooms))
-            : (cat.rooms > 0 ? Math.ceil(cat.adults / cat.rooms) : cat.adults);
-          const childrenPerRoom = cat.rooms > 0 ? Math.ceil(children / cat.rooms) : children;
-          
-          let plan2TotalForAllRooms = 0;
           for (let i = 0; i < nights; i++) {
             const currentDate = addDays(checkin, i);
             const dateStr = formatDateLocal(currentDate);
-
-            try {
-              // Calcular preço por quarto usando adultos por quarto
-              const { data, error } = await supabase.rpc("calculate_rate_price", {
-                p_establishment_id: establishment.id,
-                p_category_id: cat.categoryId,
-                p_pricing_plan_id: publicPricingPlan2Id,
-                p_date: dateStr,
-                p_adults: adultsPerRoom,
-                p_children: childrenPerRoom,
-              });
-
-              if (error) {
-                plan2TotalForAllRooms += basePrice * cat.rooms;
-              } else {
-                const pricePerRoom = Number(data || 0);
-                plan2TotalForAllRooms += (pricePerRoom > 0 ? pricePerRoom : basePrice) * cat.rooms;
-              }
-            } catch (error) {
-              plan2TotalForAllRooms += basePrice * cat.rooms;
-            }
+            priceRequests.push({
+              establishmentId: establishment.id,
+              categoryId: cat.categoryId,
+              planId: publicPricingPlan2Id,
+              date: dateStr,
+              adults: adultsPerRoom,
+              children: childrenPerRoom,
+              categoryKey: cat.categoryId,
+              planKey: "plan2",
+              rooms: cat.rooms,
+              basePrice,
+            });
           }
-          // Preço por quarto por noite = total para todos os quartos / número de quartos / número de noites
-          prices[cat.categoryId] = {
-            ...prices[cat.categoryId],
-            plan2: cat.rooms > 0 && nights > 0 
-              ? plan2TotalForAllRooms / cat.rooms / nights 
-              : cat.rooms > 0 
-                ? plan2TotalForAllRooms / cat.rooms 
-                : 0,
-          };
         }
       }
 
-      setSummaryPlanPrices(prices);
+      if (priceRequests.length === 0) {
+        setSummaryPlanPrices({});
+        return;
+      }
+
+      try {
+        // Executar requisições em batch
+        const results = await batchCalculateRatePrice(
+          priceRequests,
+          supabase,
+          3, // maxConcurrent: 3 requisições por vez
+          abortController.signal
+        );
+
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        // Agrupar resultados por categoria e plano
+        const categoryPlanTotals: Record<string, { plan1: { total: number; count: number }; plan2: { total: number; count: number } }> = {};
+
+        priceRequests.forEach((req, index) => {
+          const result = results[index];
+          if (!categoryPlanTotals[req.categoryKey]) {
+            categoryPlanTotals[req.categoryKey] = {
+              plan1: { total: 0, count: 0 },
+              plan2: { total: 0, count: 0 },
+            };
+          }
+          const pricePerRoom = result.price;
+          const totalForAllRooms = pricePerRoom * req.rooms;
+          categoryPlanTotals[req.categoryKey][req.planKey].total += totalForAllRooms;
+          categoryPlanTotals[req.categoryKey][req.planKey].count += 1;
+        });
+
+        // Calcular preço médio por noite para cada categoria e plano
+        Object.keys(categoryPlanTotals).forEach((categoryId) => {
+          const totals = categoryPlanTotals[categoryId];
+          const cat = selectedCategories.find(c => c.categoryId === categoryId);
+          if (!cat) return;
+
+          if (totals.plan1.count > 0) {
+            prices[categoryId] = {
+              ...prices[categoryId],
+              plan1: cat.rooms > 0 && nights > 0 
+                ? totals.plan1.total / cat.rooms / nights 
+                : cat.rooms > 0 
+                  ? totals.plan1.total / cat.rooms 
+                  : 0,
+            };
+          }
+
+          if (totals.plan2.count > 0) {
+            prices[categoryId] = {
+              ...prices[categoryId],
+              plan2: cat.rooms > 0 && nights > 0 
+                ? totals.plan2.total / cat.rooms / nights 
+                : cat.rooms > 0 
+                  ? totals.plan2.total / cat.rooms 
+                  : 0,
+            };
+          }
+        });
+
+        setSummaryPlanPrices(prices);
+      } catch (error) {
+        if (!abortController.signal.aborted) {
+          console.error("Erro ao calcular preços do resumo:", error);
+        }
+      }
     };
 
     const timeoutId = setTimeout(recalculateSummaryPlanPrices, 500);
-    return () => clearTimeout(timeoutId);
+    return () => {
+      clearTimeout(timeoutId);
+      abortController.abort();
+    };
   }, [selectedCategories, formData.checkinDate, formData.checkoutDate, formData.children, establishment?.id, categories, publicPricingPlan1Id, publicPricingPlan2Id]);
+
+  // AbortController para cancelar requisições anteriores de distribuição de categorias
+  const categoryDistributionAbortRef = useRef<AbortController | null>(null);
 
   // Recalcular preços quando plano selecionado mudar
   useEffect(() => {
+    // Cancelar requisições anteriores
+    if (categoryDistributionAbortRef.current) {
+      categoryDistributionAbortRef.current.abort();
+    }
+
+    const abortController = new AbortController();
+    categoryDistributionAbortRef.current = abortController;
+
     if (selectedCategory && (publicPricingPlan1Id || publicPricingPlan2Id)) {
       // Forçar recálculo da distribuição de categorias quando plano mudar
       const calculateCategoryDistribution = async () => {
@@ -1030,72 +1088,121 @@ const PublicReservation = () => {
 
         // Recalcular apenas se houver categorias selecionadas
         if (selectedCategories.length > 0) {
-          const updatedCategories = await Promise.all(
-            selectedCategories.map(async (cat) => {
-              const category = categories.find((c) => c.id === cat.categoryId);
-              if (!category) return cat;
+          // Preparar todas as requisições
+          const priceRequests: Array<{
+            establishmentId: string;
+            categoryId: string;
+            planId: string;
+            date: string;
+            adults: number;
+            children: number;
+            categoryKey: string;
+            rooms: number;
+            basePrice: number;
+          }> = [];
 
-              const selectedPlan = selectedPlanByCategory[cat.categoryId];
-              const planIdToUse = selectedPlan === "plan1" 
-                ? publicPricingPlan1Id 
-                : selectedPlan === "plan2" 
-                  ? publicPricingPlan2Id 
-                  : publicPricingPlanId || null;
+          const categoryMap: Record<string, typeof selectedCategories[0]> = {};
 
-              let categoryTotal = 0;
-              const basePrice = Number(category.base_price || 0);
+          selectedCategories.forEach((cat) => {
+            const category = categories.find((c) => c.id === cat.categoryId);
+            if (!category) return;
 
-              if (formData.checkinDate && formData.checkoutDate) {
-                // Criar datas no timezone local para evitar problemas de conversão
-                const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
-                const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
-                const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
-                const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
-                const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+            const selectedPlan = selectedPlanByCategory[cat.categoryId];
+            const planIdToUse = selectedPlan === "plan1" 
+              ? publicPricingPlan1Id 
+              : selectedPlan === "plan2" 
+                ? publicPricingPlan2Id 
+                : publicPricingPlanId || null;
 
-                if (nights > 0) {
-                  for (let i = 0; i < nights; i++) {
-                    const currentDate = addDays(checkin, i);
-                    const dateStr = formatDateLocal(currentDate);
+            if (!planIdToUse) return;
 
-                    try {
-                      const { data, error } = await supabase.rpc("calculate_rate_price", {
-                        p_establishment_id: establishment.id,
-                        p_category_id: cat.categoryId,
-                        p_pricing_plan_id: planIdToUse,
-                        p_date: dateStr,
-                        p_adults: cat.adults,
-                        p_children: children,
-                      });
+            const basePrice = Number(category.base_price || 0);
+            categoryMap[cat.categoryId] = cat;
 
-                      if (error) {
-                        categoryTotal += basePrice;
-                      } else {
-                        const price = Number(data || 0);
-                        categoryTotal += price > 0 ? price : basePrice;
-                      }
-                    } catch (error) {
-                      categoryTotal += basePrice;
-                    }
-                  }
+            if (formData.checkinDate && formData.checkoutDate) {
+              const [checkinYear, checkinMonth, checkinDay] = formData.checkinDate.split('-').map(Number);
+              const [checkoutYear, checkoutMonth, checkoutDay] = formData.checkoutDate.split('-').map(Number);
+              const checkin = new Date(checkinYear, checkinMonth - 1, checkinDay);
+              const checkout = new Date(checkoutYear, checkoutMonth - 1, checkoutDay);
+              const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+
+              if (nights > 0) {
+                for (let i = 0; i < nights; i++) {
+                  const currentDate = addDays(checkin, i);
+                  const dateStr = formatDateLocal(currentDate);
+
+                  priceRequests.push({
+                    establishmentId: establishment.id,
+                    categoryId: cat.categoryId,
+                    planId: planIdToUse,
+                    date: dateStr,
+                    adults: cat.adults,
+                    children: children,
+                    categoryKey: cat.categoryId,
+                    rooms: cat.rooms,
+                    basePrice,
+                  });
                 }
-              } else {
-                categoryTotal = basePrice;
               }
+            }
+          });
 
-              return {
-                ...cat,
-                price: categoryTotal * cat.rooms,
-              };
-            })
-          );
+          if (priceRequests.length === 0) {
+            return;
+          }
 
-          setSelectedCategories(updatedCategories);
+          try {
+            // Executar requisições em batch
+            const results = await batchCalculateRatePrice(
+              priceRequests,
+              supabase,
+              3, // maxConcurrent: 3 requisições por vez
+              abortController.signal
+            );
+
+            if (abortController.signal.aborted) {
+              return;
+            }
+
+            // Agrupar resultados por categoria
+            const categoryTotals: Record<string, { total: number; count: number }> = {};
+
+            priceRequests.forEach((req, index) => {
+              const result = results[index];
+              if (!categoryTotals[req.categoryKey]) {
+                categoryTotals[req.categoryKey] = { total: 0, count: 0 };
+              }
+              categoryTotals[req.categoryKey].total += result.price;
+              categoryTotals[req.categoryKey].count += 1;
+            });
+
+            // Atualizar categorias com novos preços
+            const updatedCategories = selectedCategories.map((cat) => {
+              const totals = categoryTotals[cat.categoryId];
+              if (totals) {
+                const categoryTotal = totals.total;
+                return {
+                  ...cat,
+                  price: categoryTotal * cat.rooms,
+                };
+              }
+              return cat;
+            });
+
+            setSelectedCategories(updatedCategories);
+          } catch (error) {
+            if (!abortController.signal.aborted) {
+              console.error("Erro ao calcular distribuição de categorias:", error);
+            }
+          }
         }
       };
 
       const timeoutId = setTimeout(calculateCategoryDistribution, 300);
-      return () => clearTimeout(timeoutId);
+      return () => {
+        clearTimeout(timeoutId);
+        abortController.abort();
+      };
     }
   }, [selectedPlanByCategory, publicPricingPlan1Id, publicPricingPlan2Id]);
 
