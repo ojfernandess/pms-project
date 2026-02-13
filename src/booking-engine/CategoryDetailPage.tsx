@@ -33,6 +33,7 @@ import { ptBR } from "date-fns/locale";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { DateRangePicker } from "@/components/booking-engine/DateRangePicker";
 
 type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel";
 
@@ -220,15 +221,25 @@ const CategoryDetailPage = () => {
   const [children, setChildren] = useState(searchParams.get("children") || "0");
   const [coupon, setCoupon] = useState(searchParams.get("coupon") || "");
 
-  // Fotos da categoria
+  // Verificar se há um parâmetro de reserva na URL
+  const reservationIdFromUrl = searchParams.get("reservation");
+
+  // Fotos da categoria - se houver reserva na URL, buscar foto da categoria da reserva
   const categoryPhotos = useMemo(() => {
     if (!category) return [];
+    
+    // Se houver reservationId na URL, tentar buscar a foto da categoria da reserva
+    if (reservationIdFromUrl && category.id) {
+      // A categoria já foi carregada, então usar suas fotos normalmente
+      // Mas se a reserva tiver uma foto específica, podemos priorizá-la
+    }
+    
     return category.display_photos && Array.isArray(category.display_photos) && category.display_photos.length > 0
       ? category.display_photos
       : category.photo_url
       ? [category.photo_url]
       : ["https://images.unsplash.com/photo-1566073771259-6a8506099945?w=1920&q=80"];
-  }, [category]);
+  }, [category, reservationIdFromUrl]);
 
   // Fotos do estabelecimento
   const establishmentPhotos = useMemo(() => {
@@ -575,6 +586,36 @@ const CategoryDetailPage = () => {
 
         setCompany(foundCompany);
 
+        // Verificar se há um parâmetro de reserva na URL
+        const reservationIdFromUrl = searchParams.get("reservation");
+        let reservationCategoryPhoto: string | null = null;
+
+        // Se houver reservationId, buscar a foto da categoria da reserva
+        if (reservationIdFromUrl) {
+          const { data: reservationData } = await supabase
+            .from("reservations")
+            .select(`
+              category_id,
+              room_categories:category_id (
+                id,
+                photo_url,
+                display_photos
+              )
+            `)
+            .eq("id", reservationIdFromUrl)
+            .maybeSingle();
+
+          if (reservationData?.room_categories) {
+            const reservationCategory = reservationData.room_categories as any;
+            // Priorizar display_photos, depois photo_url
+            if (reservationCategory.display_photos && Array.isArray(reservationCategory.display_photos) && reservationCategory.display_photos.length > 0) {
+              reservationCategoryPhoto = reservationCategory.display_photos[0];
+            } else if (reservationCategory.photo_url) {
+              reservationCategoryPhoto = reservationCategory.photo_url;
+            }
+          }
+        }
+
         // Buscar categoria (inclui only establishment; prédio é buscado em chamada separada)
         const { data: categoryData, error: categoryError } = await supabase
           .from("room_categories")
@@ -592,7 +633,26 @@ const CategoryDetailPage = () => {
           return;
         }
 
-        setCategory(categoryData);
+        // Se houver foto da categoria da reserva, adicionar como primeira foto
+        if (reservationCategoryPhoto && categoryData) {
+          const categoryWithReservationPhoto = { ...categoryData };
+          if (categoryWithReservationPhoto.display_photos && Array.isArray(categoryWithReservationPhoto.display_photos)) {
+            // Adicionar a foto da reserva no início se não estiver já presente
+            if (!categoryWithReservationPhoto.display_photos.includes(reservationCategoryPhoto)) {
+              categoryWithReservationPhoto.display_photos = [reservationCategoryPhoto, ...categoryWithReservationPhoto.display_photos];
+            }
+          } else if (categoryWithReservationPhoto.photo_url !== reservationCategoryPhoto) {
+            // Se não houver display_photos, criar array com a foto da reserva e a foto atual
+            categoryWithReservationPhoto.display_photos = [reservationCategoryPhoto];
+            if (categoryWithReservationPhoto.photo_url) {
+              categoryWithReservationPhoto.display_photos.push(categoryWithReservationPhoto.photo_url);
+            }
+          }
+          setCategory(categoryWithReservationPhoto);
+        } else {
+          setCategory(categoryData);
+        }
+        
         setEstablishment(categoryData.establishment);
         setBuilding(null);
 
@@ -751,11 +811,15 @@ const CategoryDetailPage = () => {
                 </div>
               )}
               <div className="flex flex-col">
-                <span className={`text-lg font-semibold tracking-tight ${theme.textPrimary}`}>
+                <span className={`text-lg font-semibold tracking-tight ${
+                  themeKey === "travel" ? "text-white" : theme.textPrimary
+                }`}>
                   {motorTitle}
                 </span>
                 {motorSubtitle && (
-                  <span className={`text-xs ${theme.headerSubtitle}`}>
+                  <span className={`text-xs ${
+                    themeKey === "travel" ? "text-blue-100" : theme.headerSubtitle
+                  }`}>
                     {motorSubtitle}
                   </span>
                 )}
@@ -1019,22 +1083,28 @@ const CategoryDetailPage = () => {
                   <Label className={`text-sm font-medium mb-2 block ${theme.textSecondary}`}>
                     Check-in e checkout
                   </Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input
-                      type="date"
-                      value={checkin}
-                      onChange={(e) => setCheckin(e.target.value)}
-                      min={format(new Date(), "yyyy-MM-dd")}
-                      className="h-10"
-                    />
-                    <Input
-                      type="date"
-                      value={checkout}
-                      onChange={(e) => setCheckout(e.target.value)}
-                      min={checkin || format(new Date(), "yyyy-MM-dd")}
-                      className="h-10"
-                    />
-                  </div>
+                  <DateRangePicker
+                    checkin={checkin}
+                    checkout={checkout}
+                    onCheckinChange={setCheckin}
+                    onCheckoutChange={setCheckout}
+                    onClear={() => {
+                      setCheckin("");
+                      setCheckout("");
+                    }}
+                    onSearch={handleSubmit}
+                    theme={{
+                      searchInputBg: themeKey === "travel" ? "bg-white" : "bg-white",
+                      searchInputBorder: themeKey === "travel" ? "border-slate-300" : "border-slate-200",
+                      searchInputText: themeKey === "travel" ? "text-slate-900" : "text-slate-900",
+                      searchInputFocus: themeKey === "travel" ? "focus:border-[#003580] focus:ring-2 focus:ring-[#003580]/20" : "focus:border-blue-500",
+                      textSecondary: theme.textSecondary,
+                      primaryButton: theme.primaryButton,
+                      primaryButtonHover: theme.primaryButtonHover,
+                      secondaryButton: theme.secondaryButton,
+                      secondaryButtonHover: theme.secondaryButtonHover,
+                    }}
+                  />
                 </div>
 
                 {/* Guests */}
@@ -1178,7 +1248,9 @@ const CategoryDetailPage = () => {
 
             {/* Coluna 2 - Contato */}
             <div className="space-y-3">
-              <h5 className={`text-xs font-semibold uppercase tracking-[0.18em] ${theme.textSecondary}`}>
+              <h5 className={`text-xs font-semibold uppercase tracking-[0.18em] ${
+                themeKey === "travel" ? "text-white" : theme.textSecondary
+              }`}>
                 Contato
               </h5>
               <div className="space-y-2 text-sm">
@@ -1216,13 +1288,17 @@ const CategoryDetailPage = () => {
 
             {/* Coluna 3 - Experiência & tecnologia */}
             <div className="space-y-3 md:text-right">
-              <h5 className={`text-xs font-semibold uppercase tracking-[0.18em] ${theme.textSecondary}`}>
+              <h5 className={`text-xs font-semibold uppercase tracking-[0.18em] ${
+                themeKey === "travel" ? "text-white" : theme.textSecondary
+              }`}>
                 Experiência segura
               </h5>
               <p className={`text-sm ${theme.footerText}`}>
                 Pagamentos criptografados, disponibilidade em tempo real e confirmação imediata da sua reserva.
               </p>
-              <div className="inline-flex items-center gap-2 text-xs text-slate-400 mt-2 md:justify-end">
+              <div className={`inline-flex items-center gap-2 text-xs mt-2 md:justify-end ${
+                themeKey === "travel" ? "text-blue-100" : "text-slate-400"
+              }`}>
                 <Globe2 className="w-3 h-3" />
                 <span>Tecnologia SaaS para hospitalidade</span>
               </div>

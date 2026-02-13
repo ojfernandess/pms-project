@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, CheckCircle2, MapPin, Phone, Mail, Wifi, Car, UtensilsCrossed, Waves, Wind, Tv, Coffee, Bed, Users, Calendar, DollarSign, AlertCircle, MessageCircle, Star, ChevronRight, Sparkles, ChevronLeft, X, ImageIcon, Home, Clock, Plus, Minus, ChevronDown, XCircle, FileText, Info, Instagram, Facebook, Twitter, Youtube, Globe2 } from "lucide-react";
+import { Loader2, CheckCircle2, MapPin, Phone, Mail, Wifi, Car, UtensilsCrossed, Waves, Wind, Tv, Coffee, Bed, Users, Calendar, DollarSign, AlertCircle, MessageCircle, Star, ChevronRight, Sparkles, ChevronLeft, X, ImageIcon, Home, Clock, Plus, Minus, ChevronDown, XCircle, FileText, Info, Instagram, Facebook, Twitter, Youtube, Globe2, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -3269,8 +3269,35 @@ const PublicReservation = () => {
               </div>
             </div>
 
-            {/* Seletor de Idioma */}
+            {/* Botão Voltar e Seletor de Idioma */}
             <div className="flex items-center gap-2 sm:gap-4">
+              {/* Botão Voltar para Motor de Reservas */}
+              {company && (company.booking_engine_slug || company.booking_engine_custom_domain) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    // Construir URL do motor de reservas
+                    const isOnCustomDomain = company.booking_engine_custom_domain && 
+                      window.location.hostname === company.booking_engine_custom_domain;
+                    
+                    if (company.booking_engine_custom_domain && isOnCustomDomain) {
+                      // Se está no domínio personalizado, navegar para a raiz
+                      window.location.href = '/';
+                    } else if (company.booking_engine_custom_domain && !isOnCustomDomain) {
+                      // Se há domínio personalizado mas não está nele, redirecionar completamente
+                      window.location.href = `https://${company.booking_engine_custom_domain}`;
+                    } else if (company.booking_engine_slug) {
+                      // Se há slug, usar navegação do React Router
+                      navigate(`/motor/${company.booking_engine_slug}`);
+                    }
+                  }}
+                  className={`${theme.secondaryButton} ${theme.secondaryButtonHover} flex items-center gap-2`}
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Voltar</span>
+                </Button>
+              )}
               <LanguageSelector />
             </div>
           </div>

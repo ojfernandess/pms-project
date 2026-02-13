@@ -21,10 +21,11 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, Linkedin, ArrowRight, Info, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, Linkedin, ArrowRight, Info, ChevronLeft, ChevronRight, SlidersHorizontal, ChevronDown, Minus, Plus, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DateRangePicker } from "@/components/booking-engine/DateRangePicker";
 
 // Animações CSS inline via style tag
@@ -666,6 +667,13 @@ const BookingEnginePage = () => {
   const [searchDialogCity, setSearchDialogCity] = useState<string>("all");
   const [showPriceInfoDialog, setShowPriceInfoDialog] = useState(false);
   const [establishmentsPageIndex, setEstablishmentsPageIndex] = useState(0);
+  const [showSearchReservationDialog, setShowSearchReservationDialog] = useState(false);
+  const [reservationSearchData, setReservationSearchData] = useState({
+    locator: "",
+    name: "",
+    phone: "",
+  });
+  const [searchingReservation, setSearchingReservation] = useState(false);
   const [chatwootWidgetOpen, setChatwootWidgetOpen] = useState(false);
 
   const [checkin, setCheckin] = useState(searchParams.get("checkin") || "");
@@ -1882,22 +1890,35 @@ const BookingEnginePage = () => {
           return;
         }
 
-        // Agrupar resultados por categoria
-        const categoryTotals: Record<string, { total: number; count: number }> = {};
+        // Agrupar resultados por categoria (somar todas as noites)
+        const categoryTotals: Record<string, number> = {};
 
         priceRequests.forEach((req, index) => {
           const result = results[index];
           if (!categoryTotals[req.categoryKey]) {
-            categoryTotals[req.categoryKey] = { total: 0, count: 0 };
+            categoryTotals[req.categoryKey] = 0;
           }
-          categoryTotals[req.categoryKey].total += result.price;
-          categoryTotals[req.categoryKey].count += 1;
+          categoryTotals[req.categoryKey] += result.price;
         });
 
-        // Calcular preço médio por noite para cada categoria
+        // Calcular preço total por categoria e multiplicar pelo número de quartos necessários
+        // (mesma lógica da página pública de reservas: soma todas as noites, depois multiplica por requiredRooms)
         Object.keys(categoryTotals).forEach((categoryId) => {
-          const { total, count } = categoryTotals[categoryId];
-          pricesPlan1[categoryId] = count > 0 ? total / count : null;
+          const totalPriceForAllNights = categoryTotals[categoryId];
+          
+          // Encontrar a categoria para calcular quartos necessários
+          const category = roomCategories.find((cat: any) => cat.id === categoryId);
+          if (category) {
+            // Calcular número de quartos necessários baseado na capacidade (mesma lógica da página pública)
+            const requiredRooms = calculateRequiredRooms(adultsNum, category);
+            
+            // Multiplicar preço total (soma de todas as noites) pelo número de quartos necessários
+            // (exatamente como na página pública: return categoryTotal * requiredRooms;)
+            const finalPrice = totalPriceForAllNights * requiredRooms;
+            pricesPlan1[categoryId] = finalPrice > 0 ? finalPrice : null;
+          } else {
+            pricesPlan1[categoryId] = null;
+          }
         });
 
         setCategoryPricesPlan1(pricesPlan1);
@@ -1920,6 +1941,14 @@ const BookingEnginePage = () => {
     };
   }, [roomCategories, checkin, checkout, adults, children]);
 
+  // Função para calcular quartos necessários baseado na capacidade (mesma lógica da página de reserva pública)
+  const calculateRequiredRooms = (adults: number, category: any): number => {
+    if (!category || !category.capacity_adults || category.capacity_adults <= 0) {
+      return 1; // Se não há capacidade definida, assumir 1 quarto
+    }
+    return Math.ceil(adults / category.capacity_adults);
+  };
+
   const handleSubmit = (categoryId?: string) => {
     // Usar categoryId passado como parâmetro ou selectedRoomId
     const targetCategoryId = categoryId || selectedRoomId;
@@ -1934,28 +1963,30 @@ const BookingEnginePage = () => {
     
     const categoryEstablishmentId = selectedCategory.establishment_id;
     
-    // Verificar se há um estabelecimento selecionado e se corresponde à categoria
-    let targetEstablishmentId = selectedEstablishmentId;
+    // Se há um plano selecionado, significa que o usuário já escolheu uma categoria específica
+    // de um estabelecimento específico, então usar diretamente o estabelecimento da categoria
+    let targetEstablishmentId = categoryEstablishmentId;
     
-    // Se não há estabelecimento selecionado OU o estabelecimento selecionado não corresponde à categoria
-    if (!targetEstablishmentId || targetEstablishmentId !== categoryEstablishmentId) {
+    // Só verificar múltiplos estabelecimentos se NÃO houver plano selecionado
+    // (quando há plano selecionado, o estabelecimento já está definido)
+    if (!selectedPlanId) {
       // Verificar se há múltiplos estabelecimentos com essa categoria (mesmo nome)
       const categoriesWithSameName = roomCategories.filter(
         (cat: any) => cat.name === selectedCategory.name
       );
       const uniqueEstablishments = [...new Set(categoriesWithSameName.map((cat: any) => cat.establishment_id))];
       
-      // Se há apenas um estabelecimento para essa categoria, usar diretamente
-      if (uniqueEstablishments.length === 1) {
-        targetEstablishmentId = uniqueEstablishments[0];
-      } else if (uniqueEstablishments.length > 1) {
-        // Se há múltiplos estabelecimentos, mostrar diálogo para escolher
-        setPendingCategoryId(targetCategoryId);
-        setShowEstablishmentDialog(true);
-        return;
-      } else {
-        // Se não encontrou estabelecimentos, usar o da categoria
-        targetEstablishmentId = categoryEstablishmentId;
+      // Se há múltiplos estabelecimentos com a mesma categoria, verificar se precisa mostrar diálogo
+      if (uniqueEstablishments.length > 1) {
+        // Se há um estabelecimento selecionado e corresponde à categoria, usar diretamente
+        if (selectedEstablishmentId && uniqueEstablishments.includes(selectedEstablishmentId)) {
+          targetEstablishmentId = selectedEstablishmentId;
+        } else {
+          // Se há múltiplos estabelecimentos, mostrar diálogo para escolher
+          setPendingCategoryId(targetCategoryId);
+          setShowEstablishmentDialog(true);
+          return;
+        }
       }
     }
 
@@ -2148,16 +2179,38 @@ const BookingEnginePage = () => {
             </p>
           </div>
 
-          {/* Search Card - Centered */}
-          <div className="max-w-5xl mx-auto animate-fade-in-up-delay">
-            <Card className={`${theme.searchCard} ${theme.searchCardShadow} ${theme.searchCardBorder} p-4 sm:p-6 md:p-8 rounded-2xl transition-all duration-300 hover:scale-[1.01]`}>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                {/* Check-in e Check-out - DateRangePicker */}
-                <div className="space-y-2 sm:col-span-2">
-                  <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2`}>
-                    <CalendarDays className="w-4 h-4" />
-                    Check-in e checkout
-                  </Label>
+          {/* Botões de Ação - Disponibilidade e Buscar pelo código */}
+          <div className="max-w-6xl mx-auto mb-4 flex flex-wrap gap-3 justify-center">
+            <Button
+              variant="outline"
+              className={`h-12 px-6 rounded-xl font-semibold text-sm flex items-center gap-2 border-2 ${
+                themeKey === 'default' ? 'border-blue-600 text-blue-600 hover:bg-blue-50' :
+                themeKey === 'modern' ? 'border-amber-500 text-amber-500 hover:bg-amber-500/10' :
+                themeKey === 'luxury' ? 'border-amber-400 text-amber-400 hover:bg-amber-400/10' :
+                themeKey === 'dark' ? 'border-blue-400 text-blue-400 hover:bg-blue-400/10' :
+                themeKey === 'travel' ? 'border-blue-500 text-blue-500 hover:bg-blue-50' :
+                'border-blue-600 text-blue-600 hover:bg-blue-50'
+              } bg-white/90 backdrop-blur-sm`}
+            >
+              <CalendarDays className="w-4 h-4" />
+              Disponibilidade
+            </Button>
+            <Button
+              onClick={() => setShowSearchReservationDialog(true)}
+              className={`h-12 px-6 rounded-xl font-semibold text-sm flex items-center gap-2 ${theme.primaryButton} ${theme.primaryButtonHover} shadow-lg`}
+            >
+              <Search className="w-4 h-4" />
+              Buscar pelo código
+            </Button>
+          </div>
+
+          {/* Search Card - Centered - Elegant Horizontal Layout */}
+          <div className="max-w-6xl mx-auto animate-fade-in-up-delay">
+            <Card className={`${theme.searchCard} ${theme.searchCardShadow} ${theme.searchCardBorder} p-6 md:p-8 rounded-3xl transition-all duration-300`}>
+              {/* Main Search Bar - Horizontal Layout */}
+              <div className="flex flex-col lg:flex-row items-stretch gap-3 lg:gap-0 lg:divide-x lg:divide-slate-200/50">
+                {/* Check-in e Check-out */}
+                <div className="flex-1 lg:flex-[1.5] lg:pr-4">
                   <DateRangePicker
                     checkin={checkin}
                     checkout={checkout}
@@ -2180,47 +2233,218 @@ const BookingEnginePage = () => {
                       secondaryButtonHover: theme.secondaryButtonHover,
                     }}
                     maxNights={365}
+                    customTrigger={
+                      <button
+                        type="button"
+                        className={`w-full h-16 ${theme.searchInputBg} ${theme.searchInputBorder} border rounded-xl px-4 flex items-center gap-3 ${theme.searchInputText} ${theme.searchInputFocus} transition-all hover:shadow-md`}
+                      >
+                        <CalendarDays className={`w-5 h-5 flex-shrink-0 ${
+                          themeKey === 'default' ? 'text-blue-600' :
+                          themeKey === 'modern' ? 'text-amber-500' :
+                          themeKey === 'luxury' ? 'text-amber-400' :
+                          themeKey === 'dark' ? 'text-blue-400' :
+                          themeKey === 'travel' ? 'text-blue-500' :
+                          'text-blue-600'
+                        }`} />
+                        <div className="flex-1 text-left">
+                          <div className={`text-xs ${theme.textMuted} mb-0.5`}>Check-in e checkout</div>
+                          <div className={`text-sm font-medium ${theme.textPrimary}`}>
+                            {checkin && checkout
+                              ? `${checkin} - ${checkout}`
+                              : checkin
+                              ? `${checkin} - Selecionar checkout`
+                              : "Selecione as datas"}
+                          </div>
+                        </div>
+                        <ChevronDown className={`w-4 h-4 ${theme.textMuted}`} />
+                      </button>
+                    }
                   />
                 </div>
 
-                {/* Adultos */}
-                <div className="space-y-2">
-                  <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2`}>
-                    <Users className="w-4 h-4" />
-                    Adultos
-                  </Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={adults}
-                    onChange={(e) => setAdults(e.target.value)}
-                    className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
-                  />
+                {/* Hóspedes (Adultos + Crianças) */}
+                <div className="flex-1 lg:px-4">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        className={`w-full h-16 ${theme.searchInputBg} ${theme.searchInputBorder} border rounded-xl px-4 flex items-center gap-3 ${theme.searchInputText} ${theme.searchInputFocus} transition-all hover:shadow-md`}
+                      >
+                        <Users className={`w-5 h-5 flex-shrink-0 ${
+                          themeKey === 'default' ? 'text-blue-600' :
+                          themeKey === 'modern' ? 'text-amber-500' :
+                          themeKey === 'luxury' ? 'text-amber-400' :
+                          themeKey === 'dark' ? 'text-blue-400' :
+                          themeKey === 'travel' ? 'text-blue-500' :
+                          'text-blue-600'
+                        }`} />
+                        <div className="flex-1 text-left">
+                          <div className={`text-xs ${theme.textMuted} mb-0.5`}>Hóspedes</div>
+                          <div className={`text-sm font-medium ${theme.textPrimary}`}>
+                            {parseInt(adults, 10) || 1} {parseInt(adults, 10) === 1 ? 'adulto' : 'adultos'}
+                            {parseInt(children, 10) > 0 && `, ${parseInt(children, 10)} ${parseInt(children, 10) === 1 ? 'criança' : 'crianças'}`}
+                          </div>
+                        </div>
+                        <ChevronDown className={`w-4 h-4 ${theme.textMuted}`} />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-4" align="start">
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className={`font-medium ${theme.textPrimary}`}>Adultos</div>
+                            <div className={`text-xs ${theme.textMuted}`}>A partir de 18 anos</div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const currentAdults = parseInt(adults, 10) || 1;
+                                if (currentAdults > 1) {
+                                  setAdults((currentAdults - 1).toString());
+                                }
+                              }}
+                              disabled={parseInt(adults, 10) <= 1}
+                              className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center transition-all ${
+                                parseInt(adults, 10) <= 1
+                                  ? `border-slate-300 text-slate-400 opacity-50 cursor-not-allowed`
+                                  : `${theme.searchInputBorder} ${theme.textSecondary} ${theme.primaryButtonHover} hover:text-white`
+                              }`}
+                            >
+                              <Minus className="w-4 h-4" />
+                            </button>
+                            <span className={`w-8 text-center font-semibold ${theme.textPrimary}`}>
+                              {parseInt(adults, 10) || 1}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const currentAdults = parseInt(adults, 10) || 1;
+                                if (currentAdults < 30) {
+                                  setAdults((currentAdults + 1).toString());
+                                }
+                              }}
+                              disabled={parseInt(adults, 10) >= 30}
+                              className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center transition-all ${
+                                parseInt(adults, 10) >= 30
+                                  ? `border-slate-300 text-slate-400 opacity-50 cursor-not-allowed`
+                                  : `${theme.searchInputBorder} ${theme.textSecondary} ${theme.primaryButtonHover} hover:text-white`
+                              }`}
+                            >
+                              <Plus className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className={`font-medium ${theme.textPrimary}`}>Crianças</div>
+                            <div className={`text-xs ${theme.textMuted}`}>Até 17 anos</div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const currentChildren = parseInt(children, 10) || 0;
+                                if (currentChildren > 0) {
+                                  setChildren((currentChildren - 1).toString());
+                                }
+                              }}
+                              disabled={parseInt(children, 10) <= 0}
+                              className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center transition-all ${
+                                parseInt(children, 10) <= 0
+                                  ? `border-slate-300 text-slate-400 opacity-50 cursor-not-allowed`
+                                  : `${theme.searchInputBorder} ${theme.textSecondary} ${theme.primaryButtonHover} hover:text-white`
+                              }`}
+                            >
+                              <Minus className="w-4 h-4" />
+                            </button>
+                            <span className={`w-8 text-center font-semibold ${theme.textPrimary}`}>
+                              {parseInt(children, 10) || 0}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const currentChildren = parseInt(children, 10) || 0;
+                                if (currentChildren < 10) {
+                                  setChildren((currentChildren + 1).toString());
+                                }
+                              }}
+                              disabled={parseInt(children, 10) >= 10}
+                              className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center transition-all ${
+                                parseInt(children, 10) >= 10
+                                  ? `border-slate-300 text-slate-400 opacity-50 cursor-not-allowed`
+                                  : `${theme.searchInputBorder} ${theme.textSecondary} ${theme.primaryButtonHover} hover:text-white`
+                              }`}
+                            >
+                              <Plus className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
 
-                {/* Crianças */}
-                <div className="space-y-2">
-                  <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2`}>
-                    <Users className="w-4 h-4" />
-                    Crianças
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={children}
-                    onChange={(e) => setChildren(e.target.value)}
-                    className={`h-12 ${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus} rounded-lg`}
-                  />
-                </div>
+                {/* Cidade */}
+                {availableCities.length > 0 && (
+                  <div className="flex-1 lg:px-4">
+                    <Select
+                      value={selectedCity}
+                      onValueChange={(value) => {
+                        setSelectedCity(value);
+                        if (value !== "all") {
+                          setSelectedEstablishmentId(null);
+                          setEstablishment(null);
+                          setSelectedRoomId(null);
+                          setSelectedPlanId(null);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className={`h-16 ${theme.searchInputBg} ${theme.searchInputBorder} border rounded-xl px-4 ${theme.searchInputText} ${theme.searchInputFocus} transition-all hover:shadow-md`}>
+                        <div className="flex items-center gap-3 w-full">
+                          <SlidersHorizontal className={`w-5 h-5 flex-shrink-0 ${
+                            themeKey === 'default' ? 'text-blue-600' :
+                            themeKey === 'modern' ? 'text-amber-500' :
+                            themeKey === 'luxury' ? 'text-amber-400' :
+                            themeKey === 'dark' ? 'text-blue-400' :
+                            themeKey === 'travel' ? 'text-blue-500' :
+                            'text-blue-600'
+                          }`} />
+                          <div className="flex-1 text-left">
+                            <div className={`text-xs ${theme.textMuted} mb-0.5`}>Cidade</div>
+                            <SelectValue className={`text-sm font-medium ${theme.textPrimary}`}>
+                              {selectedCity === "all" ? "Todas as cidades" : selectedCity}
+                            </SelectValue>
+                          </div>
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent className={`${theme.cardBg} ${theme.cardBorder}`}>
+                        <SelectItem value="all" className={theme.textPrimary}>
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-4 h-4" />
+                            Todas as cidades
+                          </div>
+                        </SelectItem>
+                        {availableCities.map((city: string) => (
+                          <SelectItem key={city} value={city} className={theme.textPrimary}>
+                            <div className="flex items-center gap-2">
+                              <MapPin className="w-4 h-4" />
+                              {city}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
-                {/* CTA Button */}
-                <div className="flex items-end">
+                {/* Botão de Busca */}
+                <div className="lg:pl-4">
                   <Button
-                    className={`w-full h-12 ${theme.primaryButton} ${theme.primaryButtonHover} rounded-lg font-semibold text-base flex items-center justify-center gap-2`}
-                    onClick={handleSubmit}
+                    className={`h-16 px-8 ${theme.primaryButton} ${theme.primaryButtonHover} rounded-xl font-semibold text-base flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all`}
+                    onClick={() => handleSubmit()}
                   >
                     <Search className="w-5 h-5" />
-                    <span className="hidden sm:inline">Ver disponibilidade</span>
+                    <span className="hidden sm:inline">Procurar</span>
                     <span className="sm:hidden">Buscar</span>
                   </Button>
                 </div>
@@ -2229,10 +2453,14 @@ const BookingEnginePage = () => {
               {/* Cupom de desconto */}
               <div className="mt-4 pt-4 border-t border-slate-200/50">
                 <div className="flex items-center gap-3">
-                  <Label className={`text-sm font-medium ${theme.textSecondary} flex items-center gap-2 whitespace-nowrap`}>
-                    <Percent className="w-4 h-4" />
-                    Cupom
-                  </Label>
+                  <Percent className={`w-4 h-4 ${
+                    themeKey === 'default' ? 'text-blue-600' :
+                    themeKey === 'modern' ? 'text-amber-500' :
+                    themeKey === 'luxury' ? 'text-amber-400' :
+                    themeKey === 'dark' ? 'text-blue-400' :
+                    themeKey === 'travel' ? 'text-blue-500' :
+                    'text-blue-600'
+                  }`} />
                   <Input
                     placeholder="Código promocional (opcional)"
                     value={coupon}
@@ -3331,6 +3559,156 @@ const BookingEnginePage = () => {
               className={`${theme.primaryButton} ${theme.primaryButtonHover}`}
             >
               Entendi
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de busca de reserva */}
+      <Dialog open={showSearchReservationDialog} onOpenChange={setShowSearchReservationDialog}>
+        <DialogContent className={`${theme.cardBg} ${theme.cardBorder} max-w-md`}>
+          <DialogHeader>
+            <DialogTitle className={`${theme.textPrimary} flex items-center gap-2`}>
+              <Search className="w-5 h-5" />
+              Buscar Reserva
+            </DialogTitle>
+            <DialogDescription className={theme.textSecondary}>
+              Informe o localizador ou identificador da reserva, nome e telefone
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 space-y-4">
+            <div className="space-y-2">
+              <Label className={theme.textSecondary}>Localizador/Identificador</Label>
+              <Input
+                placeholder="Ex: ABC123"
+                value={reservationSearchData.locator}
+                onChange={(e) =>
+                  setReservationSearchData({ ...reservationSearchData, locator: e.target.value.toUpperCase() })
+                }
+                className={`${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus}`}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className={theme.textSecondary}>Nome do Hóspede</Label>
+              <Input
+                placeholder="Nome completo"
+                value={reservationSearchData.name}
+                onChange={(e) =>
+                  setReservationSearchData({ ...reservationSearchData, name: e.target.value })
+                }
+                className={`${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus}`}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className={theme.textSecondary}>Telefone</Label>
+              <Input
+                placeholder="(00) 00000-0000"
+                value={reservationSearchData.phone}
+                onChange={(e) =>
+                  setReservationSearchData({ ...reservationSearchData, phone: e.target.value })
+                }
+                className={`${theme.searchInputBg} ${theme.searchInputBorder} border ${theme.searchInputText} ${theme.searchInputFocus}`}
+              />
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end gap-3">
+            <Button
+              onClick={() => {
+                setShowSearchReservationDialog(false);
+                setReservationSearchData({ locator: "", name: "", phone: "" });
+              }}
+              variant="outline"
+              className={`${theme.secondaryButton} ${theme.secondaryButtonHover}`}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!reservationSearchData.locator && !reservationSearchData.name && !reservationSearchData.phone) {
+                  alert("Preencha pelo menos um campo para buscar");
+                  return;
+                }
+
+                setSearchingReservation(true);
+                try {
+                  // Buscar reserva por localizador, nome e telefone
+                  let query = supabase
+                    .from("reservations")
+                    .select(`
+                      *,
+                      clients:client_id (
+                        id,
+                        full_name,
+                        email,
+                        phone
+                      )
+                    `);
+
+                  // Aplicar filtros
+                  if (reservationSearchData.locator) {
+                    query = query.eq("reservation_code", reservationSearchData.locator.toUpperCase());
+                  }
+
+                  const { data: reservations, error } = await query;
+
+                  if (error) throw error;
+
+                  // Filtrar por nome e telefone se fornecidos
+                  let filteredReservations = reservations || [];
+                  
+                  if (reservationSearchData.name) {
+                    filteredReservations = filteredReservations.filter((r: any) => {
+                      const clientName = r.clients?.full_name || r.guest_name || "";
+                      return clientName.toLowerCase().includes(reservationSearchData.name.toLowerCase());
+                    });
+                  }
+
+                  if (reservationSearchData.phone) {
+                    const phoneDigits = reservationSearchData.phone.replace(/\D/g, "");
+                    filteredReservations = filteredReservations.filter((r: any) => {
+                      const clientPhone = r.clients?.phone || "";
+                      return clientPhone.replace(/\D/g, "").includes(phoneDigits);
+                    });
+                  }
+
+                  if (filteredReservations.length === 0) {
+                    alert("Nenhuma reserva encontrada com os dados informados");
+                    setSearchingReservation(false);
+                    return;
+                  }
+
+                  if (filteredReservations.length > 1) {
+                    alert(`Múltiplas reservas encontradas. Por favor, seja mais específico.`);
+                    setSearchingReservation(false);
+                    return;
+                  }
+
+                  // Navegar para a página de detalhes da reserva
+                  const reservation = filteredReservations[0];
+                  navigate(`/motor/${companySlug || company?.booking_engine_slug}/reserva/${reservation.id}`);
+                  setShowSearchReservationDialog(false);
+                  setReservationSearchData({ locator: "", name: "", phone: "" });
+                } catch (err: any) {
+                  console.error("Erro ao buscar reserva:", err);
+                  alert("Erro ao buscar reserva. Tente novamente.");
+                } finally {
+                  setSearchingReservation(false);
+                }
+              }}
+              disabled={searchingReservation}
+              className={`${theme.primaryButton} ${theme.primaryButtonHover}`}
+            >
+              {searchingReservation ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Buscando...
+                </>
+              ) : (
+                <>
+                  <Search className="w-4 h-4 mr-2" />
+                  Buscar
+                </>
+              )}
             </Button>
           </div>
         </DialogContent>

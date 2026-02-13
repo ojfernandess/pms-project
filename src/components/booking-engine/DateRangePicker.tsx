@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import type { ReactNode } from "react";
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -34,6 +35,7 @@ interface DateRangePickerProps {
   };
   minDate?: Date;
   maxNights?: number;
+  customTrigger?: ReactNode;
 }
 
 export function DateRangePicker({
@@ -56,6 +58,7 @@ export function DateRangePicker({
   },
   minDate = new Date(),
   maxNights = 365,
+  customTrigger,
 }: DateRangePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
@@ -271,20 +274,22 @@ export function DateRangePicker({
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          className={cn(
-            "w-full h-12 justify-start text-left font-normal",
-            !checkinDate && "text-muted-foreground",
-            theme.searchInputBg,
-            theme.searchInputBorder,
-            theme.searchInputText,
-            "border rounded-lg"
-          )}
-        >
-          <CalendarDays className="mr-2 h-4 w-4" />
-          {buttonText}
-        </Button>
+        {customTrigger || (
+          <Button
+            variant="outline"
+            className={cn(
+              "w-full h-12 justify-start text-left font-normal",
+              !checkinDate && "text-muted-foreground",
+              theme.searchInputBg,
+              theme.searchInputBorder,
+              theme.searchInputText,
+              "border rounded-lg"
+            )}
+          >
+            <CalendarDays className="mr-2 h-4 w-4" />
+            {buttonText}
+          </Button>
+        )}
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0 max-w-[95vw] sm:max-w-[700px]" align="start">
         <div className="p-3 sm:p-4">
