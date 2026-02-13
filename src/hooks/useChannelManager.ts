@@ -29,36 +29,35 @@ export const useChannelManager = () => {
 
   // Buscar reservas OTA
   const otaReservationsQuery = useQuery({
-    queryKey: ["ota_reservations"],
+    queryKey: ["ota_reservations", getSelectedEstablishmentId()],
     queryFn: async () => {
       const establishmentId = getSelectedEstablishmentId();
-      // Buscar reservas do estabelecimento primeiro
-      let reservationsQuery = supabase.from("reservations").select("id");
-      if (establishmentId) {
-        reservationsQuery = reservationsQuery.eq("establishment_id", establishmentId);
-      }
-      const { data: reservations } = await reservationsQuery;
-      const reservationIds = reservations?.map((r: any) => r.id) || [];
       
-      // Se não há reservas, retornar array vazio
-      if (reservationIds.length === 0) return [];
-      
-      // Buscar reservas OTA das reservas do estabelecimento
-      const { data, error } = await supabase
+      // Abordagem otimizada: buscar todas as reservas OTA e filtrar client-side
+      // Isso evita problemas com URLs muito longas quando há muitas reservas
+      const { data: allOtaReservations, error } = await supabase
         .from("ota_reservations")
         .select(`
           *,
           reservations (*),
           ota_channels (*)
         `)
-        .in("reservation_id", reservationIds)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(1000); // Limitar a 1000 registros para evitar sobrecarga
 
       if (error) {
         toast.error("Erro ao carregar reservas OTA");
         throw error;
       }
-      return data;
+
+      // Filtrar client-side por establishment_id se necessário
+      if (establishmentId && allOtaReservations) {
+        return allOtaReservations.filter((ota: any) => 
+          ota.reservations && ota.reservations.establishment_id === establishmentId
+        );
+      }
+      
+      return allOtaReservations || [];
     },
   });
 

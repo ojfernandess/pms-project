@@ -616,12 +616,13 @@ const CategoryDetailPage = () => {
           }
         }
 
-        // Buscar categoria (inclui only establishment; prédio é buscado em chamada separada)
+        // Buscar categoria (inclui establishment e building)
         const { data: categoryData, error: categoryError } = await supabase
           .from("room_categories")
           .select(`
             *,
-            establishment:establishments(*)
+            establishment:establishments(*),
+            buildings(*)
           `)
           .eq("id", categoryId)
           .maybeSingle();
@@ -956,9 +957,16 @@ const CategoryDetailPage = () => {
           <div className="space-y-8">
             {/* Title and Location */}
             <div>
-              <h1 className={`text-3xl md:text-4xl font-bold mb-4 ${theme.textPrimary}`}>
-                {category.name}
-              </h1>
+              <div className="flex items-center gap-3 mb-4 flex-wrap">
+                <h1 className={`text-3xl md:text-4xl font-bold ${theme.textPrimary}`}>
+                  {category.name}
+                </h1>
+                {category.type && (
+                  <Badge variant="secondary" className="text-sm px-3 py-1">
+                    {category.type}
+                  </Badge>
+                )}
+              </div>
               <div className={`flex items-center gap-2 ${theme.textSecondary}`}>
                 <MapPin className="w-5 h-5" />
                 <span>

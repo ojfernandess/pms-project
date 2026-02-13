@@ -1520,10 +1520,10 @@ const BookingEnginePage = () => {
         return;
       }
 
-      // Buscar todas as categorias dos estabelecimentos filtrados
+      // Buscar todas as categorias dos estabelecimentos filtrados (incluindo dados de prédios)
       const { data: categoriesData, error: categoriesError } = await supabase
         .from("room_categories" as any)
-        .select("*")
+        .select("*, buildings(*)")
         .in("establishment_id", establishmentIds)
         .eq("show_in_public", true)
         .order("display_order")
@@ -1711,6 +1711,7 @@ const BookingEnginePage = () => {
         id: cat.id as string,
         categoryId: cat.id as string,
         name: cat.name as string,
+        type: cat.type || null,
         size: size || "",
         capacity: capacityLabel || "",
         image,
@@ -2786,9 +2787,16 @@ const BookingEnginePage = () => {
                 <div className="p-6 md:p-8">
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex-1">
-                      <h3 className={`text-2xl md:text-3xl font-bold mb-2 ${theme.textPrimary}`}>
-                        {room.name}
-                      </h3>
+                      <div className="flex items-center gap-3 mb-2 flex-wrap">
+                        <h3 className={`text-2xl md:text-3xl font-bold ${theme.textPrimary}`}>
+                          {room.name}
+                        </h3>
+                        {room.type && (
+                          <Badge variant="secondary" className="text-xs px-2.5 py-1">
+                            {room.type}
+                          </Badge>
+                        )}
+                      </div>
                       <div className={`flex flex-wrap items-center gap-4 text-sm ${theme.textSecondary}`}>
                         {room.size && (
                           <div className="flex items-center gap-1.5">

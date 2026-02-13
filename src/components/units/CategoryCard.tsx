@@ -19,12 +19,19 @@ export const CategoryCard = ({ category, onClick }: CategoryCardProps) => {
     >
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-xl font-bold">{category.name}</h3>
-        {category.buildings && (
-          <Badge variant="outline" className="flex items-center gap-1">
-            <Building2 className="h-3 w-3" />
-            {category.buildings.name}
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {category.type && (
+            <Badge variant="secondary" className="text-xs">
+              {category.type}
+            </Badge>
+          )}
+          {category.buildings && (
+            <Badge variant="outline" className="flex items-center gap-1">
+              <Building2 className="h-3 w-3" />
+              {category.buildings.name}
+            </Badge>
+          )}
+        </div>
       </div>
       {category.description && (
         <p className="text-sm text-muted-foreground mb-4">{category.description}</p>
@@ -49,9 +56,6 @@ export const CategoryCard = ({ category, onClick }: CategoryCardProps) => {
             R$ {parseFloat(category.base_price).toFixed(2)}
           </span>
         </div>
-        {category.bed_type && (
-          <Badge variant="secondary">{category.bed_type}</Badge>
-        )}
       </div>
     </Card>
   );

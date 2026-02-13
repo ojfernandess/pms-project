@@ -1929,10 +1929,10 @@ const PublicReservation = () => {
         setEstablishmentServices(services);
       }
 
-      // Buscar categorias disponíveis
+      // Buscar categorias disponíveis (incluindo dados de prédios)
       const { data: categoriesData, error: categoriesError } = await supabase
         .from("room_categories")
-        .select("*")
+        .select("*, buildings(*)")
         .eq("establishment_id", foundEstablishment.id)
         .eq("show_in_public", true)
         .order("display_order")
@@ -3499,6 +3499,11 @@ const PublicReservation = () => {
                                   <h3 className={`text-2xl font-bold ${theme.textPrimary}`}>
                                     {category.name}
                                   </h3>
+                                  {category.type && (
+                                    <Badge variant="secondary" className="text-xs px-2.5 py-1">
+                                      {category.type}
+                                    </Badge>
+                                  )}
                                   {/* Badge de Disponibilidade - Tática de Vendas */}
                                   {/* Mostrar apenas quando há datas selecionadas */}
                                   {formData.checkinDate && formData.checkoutDate && availableRoomsForPeriod !== null && (
