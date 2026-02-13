@@ -155,7 +155,7 @@ const BookingEngineSettings = () => {
           } catch (noCorsError: any) {
             throw noCorsError;
           }
-        });
+  });
 
         // Se chegou aqui sem erro, DNS e SSL estão funcionando
         if (response && (response.ok || response.type === "opaque")) {
@@ -1684,12 +1684,12 @@ const BookingEngineSettings = () => {
                           <Label className="text-sm font-medium text-slate-700">Tipo de Chat</Label>
                           <Select 
                             defaultValue={company?.booking_engine_chat_type || "chatwoot"}
-                            onValueChange={(value) => {
-                              updateCompanyMutation.mutate({
+                        onValueChange={(value) => {
+                          updateCompanyMutation.mutate({
                                 booking_engine_chat_type: value,
-                              });
-                            }}
-                          >
+                          });
+                        }}
+                      >
                             <SelectTrigger className="h-11">
                               <SelectValue placeholder="Selecione o tipo de chat" />
                         </SelectTrigger>
@@ -1705,45 +1705,70 @@ const BookingEngineSettings = () => {
 
                         {/* Configurações do Chatwoot */}
                         {(!company?.booking_engine_chat_type || company?.booking_engine_chat_type === "chatwoot") && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
+                          <div className="space-y-4 pt-4 border-t">
                             <div className="space-y-2">
-                              <Label className="text-sm font-medium text-slate-700">BASE_URL do Chatwoot</Label>
-                              <Input
-                                placeholder="https://app.agentslabs.cloud"
-                                defaultValue={company?.booking_engine_chat_base_url || ""}
-                                onBlur={(e) => {
-                                  const value = e.target.value.trim() || null;
-                                  if (value !== (company?.booking_engine_chat_base_url || "")) {
-                                    updateCompanyMutation.mutate({
-                                      booking_engine_chat_base_url: value,
-                                    });
-                                  }
+                              <Label className="text-sm font-medium text-slate-700">Estilo do Botão</Label>
+                              <Select 
+                                defaultValue={company?.booking_engine_chat_button_style || "custom"}
+                                onValueChange={(value) => {
+                                  updateCompanyMutation.mutate({
+                                    booking_engine_chat_button_style: value,
+                                  });
                                 }}
-                                className="h-11"
-                              />
+                              >
+                                <SelectTrigger className="h-11">
+                                  <SelectValue placeholder="Selecione o estilo do botão" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="native">Ícone Nativo do Chatwoot</SelectItem>
+                                  <SelectItem value="custom">Botão Customizado com Efeito Pulsante</SelectItem>
+                                </SelectContent>
+                              </Select>
                               <p className="text-xs text-slate-500">
-                                URL base do seu Chatwoot
+                                Escolha entre o botão nativo do Chatwoot ou um botão customizado com efeito pulsante
                               </p>
                             </div>
 
-                            <div className="space-y-2">
-                              <Label className="text-sm font-medium text-slate-700">Website Token</Label>
-                              <Input
-                                placeholder="Xaa19ZAndw2xPJysscdpS5dN"
-                                defaultValue={company?.booking_engine_chat_website_token || ""}
-                                onBlur={(e) => {
-                                  const value = e.target.value.trim() || null;
-                                  if (value !== (company?.booking_engine_chat_website_token || "")) {
-                                    updateCompanyMutation.mutate({
-                                      booking_engine_chat_website_token: value,
-                                    });
-                                  }
-                                }}
-                                className="h-11"
-                              />
-                              <p className="text-xs text-slate-500">
-                                Token do website configurado no Chatwoot
-                              </p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label className="text-sm font-medium text-slate-700">BASE_URL do Chatwoot</Label>
+                                <Input
+                                  placeholder="https://app.agentslabs.cloud"
+                                  defaultValue={company?.booking_engine_chat_base_url || ""}
+                                  onBlur={(e) => {
+                                    const value = e.target.value.trim() || null;
+                                    if (value !== (company?.booking_engine_chat_base_url || "")) {
+                                      updateCompanyMutation.mutate({
+                                        booking_engine_chat_base_url: value,
+                                      });
+                                    }
+                                  }}
+                                  className="h-11"
+                                />
+                                <p className="text-xs text-slate-500">
+                                  URL base do seu Chatwoot
+                                </p>
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label className="text-sm font-medium text-slate-700">Website Token</Label>
+                                <Input
+                                  placeholder="Xaa19ZAndw2xPJysscdpS5dN"
+                                  defaultValue={company?.booking_engine_chat_website_token || ""}
+                                  onBlur={(e) => {
+                                    const value = e.target.value.trim() || null;
+                                    if (value !== (company?.booking_engine_chat_website_token || "")) {
+                                      updateCompanyMutation.mutate({
+                                        booking_engine_chat_website_token: value,
+                                      });
+                                    }
+                                  }}
+                                  className="h-11"
+                                />
+                                <p className="text-xs text-slate-500">
+                                  Token do website configurado no Chatwoot
+                                </p>
+                              </div>
                             </div>
                           </div>
                         )}
@@ -1891,7 +1916,7 @@ const BookingEngineSettings = () => {
                         )}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
-                          <div className="space-y-2">
+              <div className="space-y-2">
                             <Label className="text-sm font-medium text-slate-700">Status DNS</Label>
                             <div className="flex items-center gap-2">
                               {!localCustomDomain ? (

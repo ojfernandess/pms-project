@@ -5370,7 +5370,7 @@ const PublicReservation = () => {
                 )}
                 {contactWhatsappNumber && (
                   <p className={`flex items-center gap-2 ${theme.footerText}`}>
-                    <MessageCircle className="w-4 h-4 opacity-70" />
+                    <img src="/whatsapp.png" alt="WhatsApp" className="w-4 h-4 object-contain opacity-70" />
                     <a
                       href={`https://wa.me/${encodeURIComponent(`${contactWhatsappDdi || ""}${contactWhatsappNumber}`)}`}
                       target="_blank"
@@ -5463,7 +5463,7 @@ const PublicReservation = () => {
                   className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-500 text-white shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
                   aria-label="WhatsApp"
                 >
-                  <MessageCircle className="w-4 h-4" />
+                  <img src="/whatsapp.png" alt="WhatsApp" className="w-4 h-4 object-contain" />
                 </a>
               )}
               {socialWebsite && (

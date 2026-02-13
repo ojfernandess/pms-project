@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, Globe2, Instagram, Facebook, Twitter, Youtube, Linkedin, ArrowRight, Info, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, Linkedin, ArrowRight, Info, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -74,6 +74,9 @@ const animationStyles = `
       transform: scale(1.05);
     }
   }
+
+  /* O botão nativo do Chatwoot será controlado via JavaScript baseado no estilo escolhido */
+  /* NÃO esconder #woot-widget-holder pois precisamos detectar quando está aberto */
 
   @keyframes slideInRight {
     from {
@@ -663,6 +666,7 @@ const BookingEnginePage = () => {
   const [searchDialogCity, setSearchDialogCity] = useState<string>("all");
   const [showPriceInfoDialog, setShowPriceInfoDialog] = useState(false);
   const [establishmentsPageIndex, setEstablishmentsPageIndex] = useState(0);
+  const [chatwootWidgetOpen, setChatwootWidgetOpen] = useState(false);
 
   const [checkin, setCheckin] = useState(searchParams.get("checkin") || "");
   const [checkout, setCheckout] = useState(searchParams.get("checkout") || "");
@@ -780,6 +784,7 @@ const BookingEnginePage = () => {
   const chatType = company?.booking_engine_chat_type || "chatwoot";
   const chatBaseUrl = company?.booking_engine_chat_base_url || null;
   const chatWebsiteToken = company?.booking_engine_chat_website_token || null;
+  const chatButtonStyle = company?.booking_engine_chat_button_style || "custom";
   const whatsappDdi = company?.booking_engine_contact_whatsapp_ddi || null;
   const whatsappNumber = company?.booking_engine_contact_whatsapp_number || null;
 
@@ -857,6 +862,132 @@ const BookingEnginePage = () => {
       }
     };
   }, [chatEnabled, chatType, chatBaseUrl, chatWebsiteToken]);
+
+  // Esconder o botão nativo do Chatwoot apenas quando o estilo for "custom"
+  useEffect(() => {
+    if (chatEnabled && chatType === "chatwoot" && chatBaseUrl && chatWebsiteToken && chatButtonStyle === "custom") {
+      // Função para esconder o botão nativo do Chatwoot
+      const hideNativeChatwootButton = () => {
+        const nativeButton = document.querySelector('.woot-widget-bubble') as HTMLElement;
+        const nativeWidget = document.querySelector('[data-chatwoot-widget]') as HTMLElement;
+        
+        if (nativeButton) {
+          nativeButton.style.display = 'none';
+        }
+        if (nativeWidget) {
+          nativeWidget.style.display = 'none';
+        }
+        // NÃO esconder #woot-widget-holder pois precisamos detectar quando está aberto
+      };
+
+      // Esconder imediatamente
+      hideNativeChatwootButton();
+
+      // Observar mudanças no DOM para esconder quando o Chatwoot criar o botão
+      const observer = new MutationObserver(hideNativeChatwootButton);
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+
+      // Verificar periodicamente
+      const interval = setInterval(hideNativeChatwootButton, 500);
+
+      return () => {
+        observer.disconnect();
+        clearInterval(interval);
+      };
+    } else if (chatEnabled && chatType === "chatwoot" && chatBaseUrl && chatWebsiteToken && chatButtonStyle === "native") {
+      // Quando for "native", garantir que o botão nativo esteja visível
+      const showNativeChatwootButton = () => {
+        const nativeButton = document.querySelector('.woot-widget-bubble') as HTMLElement;
+        const nativeWidget = document.querySelector('[data-chatwoot-widget]') as HTMLElement;
+        
+        if (nativeButton) {
+          // Usar setProperty com !important para sobrescrever qualquer CSS
+          nativeButton.style.setProperty('display', '', 'important');
+          nativeButton.style.setProperty('visibility', 'visible', 'important');
+          nativeButton.style.setProperty('opacity', '1', 'important');
+          // Remover qualquer classe que possa estar escondendo
+          nativeButton.classList.remove('woot--hide');
+        }
+        if (nativeWidget) {
+          nativeWidget.style.setProperty('display', '', 'important');
+          nativeWidget.style.setProperty('visibility', 'visible', 'important');
+          nativeWidget.style.setProperty('opacity', '1', 'important');
+        }
+      };
+
+      // Mostrar imediatamente
+      showNativeChatwootButton();
+
+      // Observar mudanças no DOM
+      const observer = new MutationObserver(showNativeChatwootButton);
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+
+      // Verificar periodicamente
+      const interval = setInterval(showNativeChatwootButton, 500);
+
+      return () => {
+        observer.disconnect();
+        clearInterval(interval);
+      };
+    }
+  }, [chatEnabled, chatType, chatBaseUrl, chatWebsiteToken, chatButtonStyle]);
+
+  // Monitorar o estado do widget do Chatwoot (aberto/fechado) e ajustar posição do botão (apenas para estilo custom)
+  useEffect(() => {
+    if (chatEnabled && chatType === "chatwoot" && chatBaseUrl && chatWebsiteToken && chatButtonStyle === "custom") {
+      const checkWidgetState = () => {
+        // Verificar se o widget está aberto
+        // O Chatwoot cria um elemento com id 'woot-widget-holder' quando aberto
+        const widgetHolder = document.querySelector('#woot-widget-holder') as HTMLElement;
+        
+        if (!widgetHolder) {
+          setChatwootWidgetOpen(false);
+          return;
+        }
+        
+        // Verificar múltiplas condições para detectar se está aberto
+        const computedStyle = window.getComputedStyle(widgetHolder);
+        const hasHeight = widgetHolder.offsetHeight > 100; // Widget geralmente tem mais de 100px quando aberto
+        const hasWidth = widgetHolder.offsetWidth > 100;
+        const isVisible = computedStyle.display !== 'none' && computedStyle.visibility !== 'hidden';
+        const isNotHidden = !widgetHolder.classList.contains('woot--hide');
+        
+        // Verificar se há um iframe dentro (indicando que o widget está carregado)
+        const hasIframe = widgetHolder.querySelector('iframe') !== null;
+        
+        // O widget está aberto se todas as condições forem verdadeiras
+        const isOpen = hasHeight && hasWidth && isVisible && isNotHidden && hasIframe;
+        
+        setChatwootWidgetOpen(isOpen);
+      };
+
+      // Verificar periodicamente o estado do widget (mais frequente para melhor responsividade)
+      const interval = setInterval(checkWidgetState, 200);
+
+      // Observar mudanças no DOM
+      const observer = new MutationObserver(checkWidgetState);
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class']
+      });
+
+      // Verificar imediatamente
+      checkWidgetState();
+
+      return () => {
+        observer.disconnect();
+        clearInterval(interval);
+      };
+    }
+  }, [chatEnabled, chatType, chatBaseUrl, chatWebsiteToken, chatButtonStyle]);
 
   useEffect(() => {
     // Resetar erro ao iniciar carregamento
@@ -3205,9 +3336,68 @@ const BookingEnginePage = () => {
         </DialogContent>
       </Dialog>
 
+      {/* Botão Flutuante do Chatwoot (apenas quando estilo for "custom") */}
+      {chatEnabled && chatType === "chatwoot" && chatBaseUrl && chatWebsiteToken && chatButtonStyle === "custom" && (
+        <div 
+          className={`fixed right-6 z-[9999] transition-all duration-300 ${
+            chatwootWidgetOpen 
+              ? 'bottom-[420px]' // Posição abaixo do widget do chat quando aberto (altura aproximada do widget: ~400px)
+              : 'bottom-24' // Posição original quando fechado
+          }`}
+          style={{ pointerEvents: 'auto' }}
+        >
+          {/* Anel pulsante - apenas quando fechado */}
+          {!chatwootWidgetOpen && (
+            <>
+              <div className="absolute inset-0 rounded-full bg-blue-500 opacity-75 animate-[pulse-ring_2s_cubic-bezier(0.4,0,0.6,1)_infinite]"></div>
+              <div className="absolute inset-0 rounded-full bg-blue-500 opacity-50 animate-[pulse-ring_2s_cubic-bezier(0.4,0,0.6,1)_infinite_0.5s]"></div>
+            </>
+          )}
+          <button
+            onClick={() => {
+              // Abrir o widget do Chatwoot programaticamente
+              if (window.chatwootSDK) {
+                window.chatwootSDK.run({
+                  websiteToken: chatWebsiteToken,
+                  baseUrl: chatBaseUrl
+                });
+                
+                // Tentar abrir o widget
+                const chatwootWidget = document.querySelector('[data-chatwoot-widget]') as HTMLElement;
+                if (chatwootWidget) {
+                  chatwootWidget.click();
+                } else {
+                  // Alternativa: procurar pelo botão do widget do Chatwoot
+                  const chatwootButton = document.querySelector('.woot-widget-bubble') as HTMLElement;
+                  if (chatwootButton) {
+                    chatwootButton.click();
+                  }
+                }
+                
+                // Se o SDK tem método toggle, usar
+                if ((window.chatwootSDK as any).toggle) {
+                  (window.chatwootSDK as any).toggle();
+                }
+              }
+            }}
+            className={`relative flex items-center justify-center w-20 h-20 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-2xl hover:shadow-blue-500/50 transition-all duration-300 hover:scale-110 group ${
+              !chatwootWidgetOpen ? 'animate-[pulse-button_2s_ease-in-out_infinite]' : ''
+            } cursor-pointer`}
+            aria-label="Fale conosco via Chat"
+          >
+            <MessageCircle className="w-12 h-12 relative z-10" />
+            {/* Tooltip */}
+            <div className="absolute right-full mr-3 px-3 py-2 bg-slate-900 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none z-20">
+              Fale conosco via Chat
+              <div className="absolute left-full top-1/2 -translate-y-1/2 border-4 border-transparent border-l-slate-900"></div>
+            </div>
+          </button>
+        </div>
+      )}
+
       {/* Botão Flutuante do WhatsApp */}
       {chatEnabled && chatType === "whatsapp" && whatsappDdi && whatsappNumber && (
-        <div className="fixed bottom-6 right-6 z-50">
+        <div className="fixed bottom-24 right-6 z-50">
           {/* Anel pulsante */}
           <div className="absolute inset-0 rounded-full bg-green-500 opacity-75 animate-[pulse-ring_2s_cubic-bezier(0.4,0,0.6,1)_infinite]"></div>
           {/* Segundo anel pulsante com delay */}
