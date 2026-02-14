@@ -70,7 +70,15 @@ const Reservations = () => {
   const [blockViewDialogOpen, setBlockViewDialogOpen] = useState(false);
   const [selectedBlockId, setSelectedBlockId] = useState<string | undefined>();
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
-  const [reservationToCancel, setReservationToCancel] = useState<{ id: string; code?: string } | null>(null);
+  const [reservationToCancel, setReservationToCancel] = useState<{ 
+    id: string; 
+    code?: string;
+    paid_amount?: number;
+    checkin_date?: string;
+    checkout_date?: string;
+    total_amount?: number;
+    pricing_plan_id?: string | null;
+  } | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateFromFilter, setDateFromFilter] = useState<string>("");
@@ -278,8 +286,16 @@ const Reservations = () => {
     }
   };
 
-  const handleCancel = (id: string, code?: string, paidAmount?: number) => {
-    setReservationToCancel({ id, code, paid_amount: paidAmount });
+  const handleCancel = (id: string, code?: string, paidAmount?: number, reservation?: any) => {
+    setReservationToCancel({ 
+      id, 
+      code, 
+      paid_amount: paidAmount,
+      checkin_date: reservation?.checkin_date,
+      checkout_date: reservation?.checkout_date,
+      total_amount: reservation?.total_amount,
+      pricing_plan_id: reservation?.pricing_plan_id,
+    });
     setCancelDialogOpen(true);
   };
 
@@ -594,7 +610,7 @@ const Reservations = () => {
                           <DropdownMenuItem
                             onSelect={(e) => {
                               e.preventDefault();
-                              handleCancel(reservation.id, reservation.reservation_code, reservation.paid_amount);
+                              handleCancel(reservation.id, reservation.reservation_code, reservation.paid_amount, reservation);
                             }}
                             className="text-destructive focus:text-destructive"
                           >
@@ -655,7 +671,7 @@ const Reservations = () => {
                 handleCheckOut(reservationId);
               } else if (action === "cancel") {
                 const reservation = reservations.find((r: any) => r.id === reservationId);
-                handleCancel(reservationId, reservation?.reservation_code, reservation?.paid_amount);
+                handleCancel(reservationId, reservation?.reservation_code, reservation?.paid_amount, reservation);
               }
             }}
           />
@@ -808,6 +824,12 @@ const Reservations = () => {
           reservationCode={reservationToCancel.code}
           paidAmount={reservationToCancel.paid_amount || 0}
           hasPayments={(reservationToCancel.paid_amount || 0) > 0}
+          reservationData={reservationToCancel.checkin_date ? {
+            checkin_date: reservationToCancel.checkin_date,
+            checkout_date: reservationToCancel.checkout_date || reservationToCancel.checkin_date,
+            total_amount: reservationToCancel.total_amount || 0,
+            pricing_plan_id: reservationToCancel.pricing_plan_id || null,
+          } : undefined}
           onConfirm={handleConfirmCancel}
         />
       )}

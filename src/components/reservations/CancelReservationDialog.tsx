@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -11,8 +11,13 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { AlertTriangle, DollarSign } from "lucide-react";
+import { AlertTriangle, DollarSign, Info, Loader2 } from "lucide-react";
 import { formatCurrency } from "@/lib/reservationUtils";
+import { getReservationCancellationPolicy } from "@/utils/cancellationPolicyService";
+import { CancellationCalculationResult, calculateCancellationPenalty } from "@/utils/cancellationPolicyCalculator";
+import type { CancellationPolicy } from "@/utils/cancellationPolicyCalculator";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 interface CancelReservationDialogProps {
   open: boolean;
@@ -21,7 +26,13 @@ interface CancelReservationDialogProps {
   reservationCode?: string;
   paidAmount?: number;
   hasPayments?: boolean;
-  onConfirm: (reason: string, refundPayments: boolean) => Promise<void>;
+  reservationData?: {
+    checkin_date: string;
+    checkout_date: string;
+    total_amount: number;
+    pricing_plan_id?: string | null;
+  };
+  onConfirm: (reason: string, refundPayments: boolean, penalty?: number) => Promise<void>;
 }
 
 export const CancelReservationDialog = ({
@@ -31,11 +42,57 @@ export const CancelReservationDialog = ({
   reservationCode,
   paidAmount = 0,
   hasPayments = false,
+  reservationData,
   onConfirm,
 }: CancelReservationDialogProps) => {
   const [reason, setReason] = useState("");
   const [refundPayments, setRefundPayments] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [calculating, setCalculating] = useState(false);
+  const [penaltyCalculation, setPenaltyCalculation] = useState<CancellationCalculationResult | null>(null);
+  const [policyName, setPolicyName] = useState<string | null>(null);
+
+  // Calcular multa ao abrir o dialog
+  useEffect(() => {
+    if (open && reservationId && reservationData) {
+      calculatePenalty();
+    } else {
+      setPenaltyCalculation(null);
+      setPolicyName(null);
+    }
+  }, [open, reservationId, reservationData]);
+
+  const calculatePenalty = async () => {
+    if (!reservationData) return;
+    
+    setCalculating(true);
+    try {
+      const policy = await getReservationCancellationPolicy(reservationId);
+      
+      if (policy) {
+        setPolicyName(policy.name);
+        
+        // Calcular multa
+        const { result } = await applyCancellation(
+          reservationId,
+          "Cálculo de multa",
+          new Date()
+        );
+        
+        if (result) {
+          setPenaltyCalculation(result);
+        }
+      } else {
+        setPolicyName(null);
+        setPenaltyCalculation(null);
+      }
+    } catch (error) {
+      console.error("Erro ao calcular multa:", error);
+      setPenaltyCalculation(null);
+    } finally {
+      setCalculating(false);
+    }
+  };
 
   const handleConfirm = async () => {
     if (!reason.trim()) {
@@ -44,11 +101,32 @@ export const CancelReservationDialog = ({
 
     try {
       setLoading(true);
-      await onConfirm(reason.trim(), refundPayments);
+      
+      // Aplicar cancelamento com cálculo automático
+      const { applyCancellation } = await import("@/utils/cancellationPolicyService");
+      const cancellationResult = await applyCancellation(
+        reservationId,
+        reason.trim(),
+        new Date()
+      );
+      
+      if (!cancellationResult.success) {
+        throw new Error(cancellationResult.error || "Erro ao cancelar reserva");
+      }
+      
+      await onConfirm(
+        reason.trim(), 
+        refundPayments,
+        cancellationResult.penalty
+      );
+      
       setReason("");
       setRefundPayments(false);
+      setPenaltyCalculation(null);
+      setPolicyName(null);
       onOpenChange(false);
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Erro ao cancelar:", error);
       // Error já tratado no onConfirm
     } finally {
       setLoading(false);
@@ -81,6 +159,64 @@ export const CancelReservationDialog = ({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          {/* Exibição da multa calculada */}
+          {calculating && (
+            <Card className="p-4 bg-blue-50 border-blue-200">
+              <div className="flex items-center gap-2 text-blue-700">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">Calculando multa de cancelamento...</span>
+              </div>
+            </Card>
+          )}
+          
+          {!calculating && penaltyCalculation && (
+            <Card className={`p-4 border-2 ${
+              penaltyCalculation.penalty > 0 
+                ? "bg-amber-50 border-amber-300" 
+                : "bg-green-50 border-green-300"
+            }`}>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Info className={`h-5 w-5 ${
+                      penaltyCalculation.penalty > 0 ? "text-amber-600" : "text-green-600"
+                    }`} />
+                    <Label className="font-semibold">
+                      {penaltyCalculation.penalty > 0 ? "Multa de Cancelamento" : "Cancelamento Gratuito"}
+                    </Label>
+                  </div>
+                  {policyName && (
+                    <Badge variant="outline" className="text-xs">
+                      {policyName}
+                    </Badge>
+                  )}
+                </div>
+                
+                {penaltyCalculation.penalty > 0 ? (
+                  <>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-2xl font-bold text-amber-700">
+                        {formatCurrency(penaltyCalculation.penalty)}
+                      </span>
+                    </div>
+                    <p className="text-sm text-amber-700">
+                      {penaltyCalculation.reason}
+                    </p>
+                    {penaltyCalculation.freeDeadline && (
+                      <p className="text-xs text-muted-foreground">
+                        Prazo de cancelamento gratuito: {new Date(penaltyCalculation.freeDeadline).toLocaleString('pt-BR')}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-green-700">
+                    {penaltyCalculation.reason}
+                  </p>
+                )}
+              </div>
+            </Card>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="cancellation_reason">
               Motivo do Cancelamento <span className="text-destructive">*</span>
@@ -92,7 +228,7 @@ export const CancelReservationDialog = ({
               onChange={(e) => setReason(e.target.value)}
               rows={4}
               className="resize-none"
-              disabled={loading}
+              disabled={loading || calculating}
             />
             <p className="text-xs text-muted-foreground">
               Este motivo será registrado para controle e análise.

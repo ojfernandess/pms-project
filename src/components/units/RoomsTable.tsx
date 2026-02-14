@@ -187,6 +187,12 @@ export const RoomsTable = ({ rooms, categoryId, onUpdate }: RoomsTableProps) => 
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, room.id)}
                   onDragEnd={handleDragEnd}
+                  onClick={(e) => {
+                    // Prevenir que cliques na linha acionem o submit do form
+                    if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).closest('button')) {
+                      e.stopPropagation();
+                    }
+                  }}
                   className={draggedRoomId === room.id ? "opacity-50" : "cursor-move"}
                 >
                   <TableCell>
@@ -242,9 +248,12 @@ export const RoomsTable = ({ rooms, categoryId, onUpdate }: RoomsTableProps) => 
                   <TableCell>
                     <div className="flex gap-2">
                       <Button
+                        type="button"
                         variant="default"
                         size="sm"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
                           setSelectedRoomId(room.id);
                           setSettingsDialogOpen(true);
                         }}
@@ -253,9 +262,12 @@ export const RoomsTable = ({ rooms, categoryId, onUpdate }: RoomsTableProps) => 
                         Definições
                       </Button>
                       <Button
+                        type="button"
                         variant="destructive"
                         size="sm"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
                           setRoomToDelete(room.id);
                           setDeleteDialogOpen(true);
                         }}

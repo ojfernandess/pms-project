@@ -192,6 +192,11 @@ const Pricing = () => {
                   {plan.description && (
                     <div className="text-sm text-muted-foreground">{plan.description}</div>
                   )}
+                  {plan.cancellation_policies && (
+                    <div className="text-sm text-muted-foreground mt-1">
+                      Política: {plan.cancellation_policies.name}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant={plan.is_active ? "default" : "secondary"}>

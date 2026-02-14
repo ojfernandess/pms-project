@@ -11,7 +11,9 @@ export const usePricingPlans = () => {
     queryKey: ["pricing_plans"],
     queryFn: async () => {
       const establishmentId = getSelectedEstablishmentId();
-      let query = supabase.from("pricing_plans").select("*");
+      let query = supabase
+        .from("pricing_plans")
+        .select("*, cancellation_policies:cancellation_policy_id(*)");
       
       if (establishmentId) {
         query = query.eq("establishment_id", establishmentId);

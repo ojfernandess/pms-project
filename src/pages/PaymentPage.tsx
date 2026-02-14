@@ -11,6 +11,9 @@ import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { Badge } from "@/components/ui/badge";
+import { CancellationPolicyDisplay } from "@/components/booking-engine/CancellationPolicyDisplay";
+import { getReservationCancellationPolicy } from "@/utils/cancellationPolicyService";
+import type { CancellationPolicy } from "@/utils/cancellationPolicyCalculator";
 
 // Função para traduzir status do Stripe para português
 const getPaymentStatusLabel = (status: string): string => {
@@ -41,6 +44,8 @@ const PaymentPage = () => {
   const [pmsLogoUrl, setPmsLogoUrl] = useState<string | null>(null);
   const [allReservations, setAllReservations] = useState<any[]>([]);
   const { settings: siteSettings } = useSiteSettings();
+  const [cancellationPolicy, setCancellationPolicy] = useState<CancellationPolicy | null>(null);
+  const [policyAccepted, setPolicyAccepted] = useState(false);
 
   useEffect(() => {
     if (paymentIntentId) {
@@ -407,6 +412,20 @@ const PaymentPage = () => {
 
       setPaymentData(data);
 
+      // Buscar política de cancelamento da primeira reserva (ou da reserva principal)
+      const reservationIdToCheck = paymentAny.reservation_id || (allReservationsData.length > 0 ? allReservationsData[0].id : null);
+      if (reservationIdToCheck) {
+        const policy = await getReservationCancellationPolicy(reservationIdToCheck);
+        setCancellationPolicy(policy);
+        // Se não houver política, permitir pagamento sem aceite
+        if (!policy) {
+          setPolicyAccepted(true);
+        }
+      } else {
+        // Se não houver reserva, permitir pagamento
+        setPolicyAccepted(true);
+      }
+
       // Se o pagamento já foi processado (ou foi atualizado para succeeded), redirecionar para página de sucesso
       if (finalStatus === "succeeded") {
         // Se foi atualizado agora, mostrar mensagem de sucesso
@@ -607,6 +626,19 @@ const PaymentPage = () => {
                 )}
             </div>
 
+              {/* Exibir política de cancelamento se houver */}
+              {cancellationPolicy && paymentData.status !== "succeeded" && (
+                <div className="mb-4">
+                  <CancellationPolicyDisplay
+                    policy={cancellationPolicy}
+                    reservationId={paymentData?.reservation?.id || allReservations[0]?.id}
+                    requireAcceptance={true}
+                    onAcceptanceChange={setPolicyAccepted}
+                    showFullPolicyLink={true}
+                  />
+                </div>
+              )}
+
               {/* Botões de Ação */}
               <div className="pt-3 sm:pt-4 space-y-2 sm:space-y-3">
             {paymentData.status !== "succeeded" && (
@@ -614,10 +646,17 @@ const PaymentPage = () => {
                 onClick={() => setPaymentDialogOpen(true)}
                     className="w-full h-11 sm:h-12 text-sm sm:text-base font-semibold shadow-md hover:shadow-lg transition-all"
                 size="lg"
+                disabled={cancellationPolicy && !policyAccepted}
               >
                     <CreditCard className="w-4 h-4 sm:w-5 sm:h-5 mr-2 flex-shrink-0" />
                     <span className="whitespace-nowrap">Realizar Pagamento</span>
               </Button>
+            )}
+            
+            {cancellationPolicy && !policyAccepted && paymentData.status !== "succeeded" && (
+              <p className="text-xs text-amber-600 mt-2 text-center">
+                ⚠️ É necessário aceitar a política de cancelamento para prosseguir com o pagamento
+              </p>
             )}
 
             <Button

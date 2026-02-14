@@ -25,12 +25,12 @@ export const CategoryCard = ({ category, onClick }: CategoryCardProps) => {
               {category.type}
             </Badge>
           )}
-          {category.buildings && (
-            <Badge variant="outline" className="flex items-center gap-1">
-              <Building2 className="h-3 w-3" />
-              {category.buildings.name}
-            </Badge>
-          )}
+        {category.buildings && (
+          <Badge variant="outline" className="flex items-center gap-1">
+            <Building2 className="h-3 w-3" />
+            {category.buildings.name}
+          </Badge>
+        )}
         </div>
       </div>
       {category.description && (

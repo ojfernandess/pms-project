@@ -5,7 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePricingPlans } from "@/hooks/usePricingPlans";
+import { useCancellationPolicies } from "@/hooks/useCancellationPolicies";
 import { Loader2 } from "lucide-react";
 
 interface PricingPlanDialogProps {
@@ -22,10 +24,12 @@ export const PricingPlanDialog = ({
   planId,
 }: PricingPlanDialogProps) => {
   const { plans, createPlan, updatePlan, isCreating, isUpdating } = usePricingPlans();
+  const { policies } = useCancellationPolicies();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     description: "",
+    cancellation_policy_id: "",
     is_active: true,
   });
 
@@ -36,6 +40,7 @@ export const PricingPlanDialog = ({
         setFormData({
           name: plan.name || "",
           description: plan.description || "",
+          cancellation_policy_id: plan.cancellation_policy_id || "",
           is_active: plan.is_active ?? true,
         });
       }
@@ -43,6 +48,7 @@ export const PricingPlanDialog = ({
       setFormData({
         name: "",
         description: "",
+        cancellation_policy_id: "",
         is_active: true,
       });
     }
@@ -57,10 +63,15 @@ export const PricingPlanDialog = ({
         throw new Error("Nome do plano é obrigatório");
       }
 
+      const planData = {
+        ...formData,
+        cancellation_policy_id: formData.cancellation_policy_id || null,
+      };
+
       if (planId) {
-        await updatePlan({ id: planId, ...formData });
+        await updatePlan({ id: planId, ...planData });
       } else {
-        await createPlan(formData);
+        await createPlan(planData);
       }
 
       onSuccess();
@@ -99,6 +110,36 @@ export const PricingPlanDialog = ({
               placeholder="Descrição do plano de tarifa"
               rows={3}
             />
+          </div>
+
+          <div>
+            <Label htmlFor="cancellation_policy_id">Política de Cancelamento</Label>
+            <Select
+              value={formData.cancellation_policy_id || "none"}
+              onValueChange={(value) =>
+                setFormData({
+                  ...formData,
+                  cancellation_policy_id: value === "none" ? "" : value,
+                })
+              }
+            >
+              <SelectTrigger id="cancellation_policy_id" className="mt-2">
+                <SelectValue placeholder="Selecione uma política de cancelamento" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Nenhuma</SelectItem>
+                {policies
+                  .filter((p: any) => p.is_active)
+                  .map((policy: any) => (
+                    <SelectItem key={policy.id} value={policy.id}>
+                      {policy.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">
+              A política de cancelamento será exibida no motor de reservas e na página pública
+            </p>
           </div>
 
           <div className="flex items-center justify-between">

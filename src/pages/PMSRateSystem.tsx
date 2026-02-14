@@ -18,6 +18,7 @@ import { ptBR } from "date-fns/locale";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { toast } from "sonner";
 import { RateCalendarGrid } from "@/components/rate-system/RateCalendarGrid";
+import { ARIGrid } from "@/components/rate-system/ARIGrid";
 import { RatePlansView } from "@/components/rate-system/RatePlansView";
 import { DynamicRulesView } from "@/components/rate-system/DynamicRulesView";
 import { RestrictionsView } from "@/components/rate-system/RestrictionsView";
@@ -26,6 +27,7 @@ import { ChannelSyncDialog } from "@/components/rate-system/ChannelSyncDialog";
 import { RateSystemSettingsDialog } from "@/components/rate-system/RateSystemSettingsDialog";
 import { PlanTypesView } from "@/components/rate-system/PlanTypesView";
 import { PriceDashboardView } from "@/components/rate-system/PriceDashboardView";
+import CancellationPolicies from "@/pages/CancellationPolicies";
 
 const PMSRateSystem = () => {
   const [activeTab, setActiveTab] = useState('calendar');
@@ -61,8 +63,14 @@ const PMSRateSystem = () => {
   } = useRateSystem();
 
   // Buscar categorias com quartos (seguindo lógica do PMS)
+  // Usar staleTime para evitar refetch desnecessário que pode causar perda temporária de dados
+  // Usar refetchOnWindowFocus e refetchOnMount false para evitar refetch desnecessário
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ["rate_system_categories", getSelectedEstablishmentId()],
+    staleTime: 5 * 60 * 1000, // 5 minutos - evitar refetch desnecessário
+    gcTime: 10 * 60 * 1000, // 10 minutos - manter em cache
+    refetchOnWindowFocus: false, // Não refazer fetch ao focar na janela
+    refetchOnMount: false, // Não refazer fetch ao montar se já tiver dados
     queryFn: async () => {
       const establishmentId = getSelectedEstablishmentId();
       if (!establishmentId) return [];
@@ -127,6 +135,10 @@ const PMSRateSystem = () => {
       return categoriesWithRooms;
     },
   });
+  
+  // Não considerar isLoadingCalendar no loading geral, pois ele pode estar sendo atualizado
+  // sem afetar a disponibilidade das categorias
+  const isInitialLoading = isLoadingRatePlans || categoriesLoading;
 
   // Verificar se a empresa tem acesso à funcionalidade de automação de regras dinâmicas
   useEffect(() => {
@@ -165,12 +177,28 @@ const PMSRateSystem = () => {
     return '';
   }, [activePlans, selectedRatePlan]);
 
-  if (isLoading || categoriesLoading) {
+  // Mostrar loading apenas se estiver carregando categorias ou planos pela primeira vez
+  // Não mostrar loading se apenas rate_calendar estiver sendo atualizado
+  if (isInitialLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
           <p className="text-gray-600">Carregando sistema tarifário...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // Se não houver categorias após o carregamento inicial, mostrar mensagem
+  if (!categoriesLoading && categories.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <p className="text-gray-600 mb-2">Nenhuma categoria encontrada</p>
+          <p className="text-sm text-gray-400">
+            Crie categorias de quartos no sistema para visualizar o grid ARI
+          </p>
         </div>
       </div>
     );
@@ -202,7 +230,7 @@ const PMSRateSystem = () => {
         {/* Navigation Tabs */}
         <div className="px-6">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className={`grid w-full ${hasDynamicPricingAccess ? 'grid-cols-7' : 'grid-cols-6'}`}>
+            <TabsList className={`grid w-full ${hasDynamicPricingAccess ? 'grid-cols-9' : 'grid-cols-8'}`}>
               <TabsTrigger 
                 value="pricing-dashboard" 
                 className="gap-2 data-[state=active]:bg-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md"
@@ -214,6 +242,10 @@ const PMSRateSystem = () => {
                 <Calendar className="w-4 h-4" />
                 Mapa de Tarifas
               </TabsTrigger>
+              <TabsTrigger value="ari-grid" className="gap-2">
+                <BarChart3 className="w-4 h-4" />
+                Grade ARI
+              </TabsTrigger>
               <TabsTrigger value="rateplans" className="gap-2">
                 <Package className="w-4 h-4" />
                 Planos Tarifários
@@ -221,6 +253,10 @@ const PMSRateSystem = () => {
               <TabsTrigger value="plantypes" className="gap-2">
                 <Tag className="w-4 h-4" />
                 Tipos de Planos
+              </TabsTrigger>
+              <TabsTrigger value="cancellation-policies" className="gap-2">
+                <Settings className="w-4 h-4" />
+                Políticas de Cancelamento
               </TabsTrigger>
               {hasDynamicPricingAccess && (
               <TabsTrigger value="dynamic" className="gap-2">
@@ -263,6 +299,20 @@ const PMSRateSystem = () => {
             />
           </TabsContent>
 
+          {/* ARI Grid View */}
+          <TabsContent value="ari-grid" className="space-y-4">
+            <ARIGrid
+              ratePlans={ratePlans}
+              categories={categories}
+              selectedCategory={selectedCategory}
+              selectedRatePlan={defaultPlan}
+              startDate={startDate}
+              onCategoryChange={setSelectedCategory}
+              onPlanChange={setSelectedRatePlan}
+              onStartDateChange={setStartDate}
+            />
+          </TabsContent>
+
           {/* Rate Plans View */}
           <TabsContent value="rateplans" className="space-y-4">
             <RatePlansView
@@ -277,6 +327,11 @@ const PMSRateSystem = () => {
           {/* Plan Types View */}
           <TabsContent value="plantypes" className="space-y-4">
             <PlanTypesView />
+          </TabsContent>
+
+          {/* Cancellation Policies View */}
+          <TabsContent value="cancellation-policies" className="space-y-4">
+            <CancellationPolicies />
           </TabsContent>
 
           {/* Dynamic Rules View */}

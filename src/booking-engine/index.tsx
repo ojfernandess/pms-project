@@ -27,6 +27,7 @@ import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DateRangePicker } from "@/components/booking-engine/DateRangePicker";
+import { CancellationPolicyDisplay } from "@/components/booking-engine/CancellationPolicyDisplay";
 
 // Animações CSS inline via style tag
 const animationStyles = `
@@ -689,11 +690,14 @@ const BookingEnginePage = () => {
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [categoryPrices, setCategoryPrices] = useState<Record<string, number | null>>({});
   const [categoryPricesPlan1, setCategoryPricesPlan1] = useState<Record<string, number | null>>({});
+  const [categoryPricesPlan2, setCategoryPricesPlan2] = useState<Record<string, number | null>>({});
   const [calculatingPrices, setCalculatingPrices] = useState(false);
   const [publicPricingPlan1Id, setPublicPricingPlan1Id] = useState<string | null>(null);
   const [publicPricingPlan1Title, setPublicPricingPlan1Title] = useState<string | null>(null);
   const [publicPricingPlan2Id, setPublicPricingPlan2Id] = useState<string | null>(null);
   const [publicPricingPlan2Title, setPublicPricingPlan2Title] = useState<string | null>(null);
+  const [cancellationPoliciesMap, setCancellationPoliciesMap] = useState<Record<string, any>>({});
+  const [pricingPlansByCategory, setPricingPlansByCategory] = useState<Record<string, any[]>>({});
 
   // Hero image from booking engine config only (não usar establishment_photos)
   const heroImage = useMemo(() => {
@@ -1598,6 +1602,88 @@ const BookingEnginePage = () => {
     loadAllCategories();
   }, [engineEnabled, companyEstablishments, filteredEstablishments, selectedEstablishmentId, selectedCity]);
 
+  // Buscar planos tarifários e políticas de cancelamento
+  useEffect(() => {
+    const loadPricingPlansAndPolicies = async () => {
+      if (!roomCategories.length) return;
+
+      const plansByCategory: Record<string, any[]> = {};
+      const allPlanIds = new Set<string>();
+
+      // Buscar planos para cada categoria
+      for (const cat of roomCategories) {
+        const establishmentId = cat.establishment_id;
+        
+        try {
+          // Buscar planos do novo sistema
+          const { data: availablePlans } = await supabase
+            .from("pricing_plans")
+            .select(`
+              *,
+              cancellation_policies:cancellation_policy_id(*),
+              pricing_plan_categories!inner(category_id)
+            `)
+            .eq("establishment_id", establishmentId)
+            .eq("is_active", true)
+            .eq("available_in_booking_engine", true)
+            .eq("pricing_plan_categories.category_id", cat.id)
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true })
+            .limit(2);
+
+          if (availablePlans && availablePlans.length > 0) {
+            plansByCategory[cat.id as string] = availablePlans;
+            availablePlans.forEach((plan: any) => {
+              allPlanIds.add(plan.id);
+              if (plan.cancellation_policies) {
+                setCancellationPoliciesMap((prev) => ({
+                  ...prev,
+                  [plan.id]: plan.cancellation_policies,
+                }));
+              }
+            });
+          } else {
+            // Fallback para sistema antigo
+            const settings = allHotelSettings[establishmentId];
+            const legacyPlan1Id = settings?.public_pricing_plan_1_id;
+            if (legacyPlan1Id) {
+              allPlanIds.add(legacyPlan1Id);
+            }
+          }
+        } catch (error) {
+          console.error(`Erro ao buscar planos para categoria ${cat.id}:`, error);
+        }
+      }
+
+      // Buscar políticas de cancelamento dos planos legados
+      if (allPlanIds.size > 0) {
+        try {
+          const { data: plansData } = await supabase
+            .from("pricing_plans")
+            .select("id, cancellation_policies:cancellation_policy_id(*)")
+            .in("id", Array.from(allPlanIds));
+
+          if (plansData) {
+            plansData.forEach((plan: any) => {
+              if (plan.cancellation_policies) {
+                setCancellationPoliciesMap((prev) => ({
+                  ...prev,
+                  [plan.id]: plan.cancellation_policies,
+                }));
+              }
+            });
+          }
+        } catch (error) {
+          console.error("Erro ao buscar políticas de cancelamento:", error);
+        }
+      }
+
+      setPricingPlansByCategory(plansByCategory);
+    };
+
+    loadPricingPlansAndPolicies();
+  }, [roomCategories, allHotelSettings]);
+
   const themeKey: BookingThemeKey = useMemo(() => {
     // Priorizar tema da empresa, depois do estabelecimento
     const key =
@@ -1639,6 +1725,15 @@ const BookingEnginePage = () => {
     return result;
   };
 
+  // Calcular número de noites antes de usar no useMemo de rooms
+  const nights = useMemo(() => {
+    if (!checkin || !checkout) return 0;
+    const ci = new Date(checkin);
+    const co = new Date(checkout);
+    const diff = co.getTime() - ci.getTime();
+    return diff > 0 ? Math.ceil(diff / (1000 * 60 * 60 * 24)) : 0;
+  }, [checkin, checkout]);
+
   const rooms = useMemo(() => {
     if (!roomCategories || roomCategories.length === 0) return [];
 
@@ -1667,44 +1762,118 @@ const BookingEnginePage = () => {
 
       const basePrice = cat.base_price || cat.min_price || null;
       const dynamicPricePlan1 = categoryPricesPlan1[cat.id as string];
+      const dynamicPricePlan2 = categoryPricesPlan2[cat.id as string];
 
-      // Buscar hotel_settings do estabelecimento desta categoria
+      // Buscar planos tarifários disponíveis no motor de reservas para esta categoria
       const establishmentId = cat.establishment_id;
       const settings = allHotelSettings[establishmentId];
-      const plan1Id = settings?.public_pricing_plan_1_id || null;
-      const plan1Title = settings?.public_pricing_plan_1_title || null;
+      
+      // Manter compatibilidade com sistema antigo (public_pricing_plan_1_id)
+      const legacyPlan1Id = settings?.public_pricing_plan_1_id || null;
+      const legacyPlan1Title = settings?.public_pricing_plan_1_title || null;
+      const legacyPlan2Id = settings?.public_pricing_plan_2_id || null;
+      const legacyPlan2Title = settings?.public_pricing_plan_2_title || null;
 
       const plans: any[] = [];
 
-      const hasDynamicPrice = dynamicPricePlan1 !== null && dynamicPricePlan1 !== undefined;
-
-      if (plan1Id) {
-        plans.push({
-          id: `${cat.id}-plan1`,
-          name: plan1Title || "Plano Tarifário 1",
-          description: hasDynamicPrice
-            ? "Tarifa calculada em tempo real para as datas e hóspedes selecionados."
-            : "Selecione datas e hóspedes para ver o valor desta categoria.",
-          benefits: hasDynamicPrice
-            ? ["Melhor tarifa disponível para o seu período", "Atualização em tempo real"]
-            : ["Cálculo em tempo real na próxima etapa", "Tarifa sujeita a variação"],
-          tag: hasDynamicPrice ? "A partir de" : undefined,
-          pricePerNight:
-            hasDynamicPrice
-              ? dynamicPricePlan1
-              : 0,
-          planId: plan1Id,
+      // Usar planos do novo sistema se disponíveis (já carregados no useEffect)
+      const availablePlans = pricingPlansByCategory[cat.id as string] || [];
+      
+      if (availablePlans.length > 0) {
+        // Usar planos do novo sistema
+        availablePlans.forEach((plan: any) => {
+          const planLabel = plan.label || plan.booking_engine_label || plan.name;
+          const cancellationPolicy = plan.cancellation_policies || cancellationPoliciesMap[plan.id] || null;
+          
+          // Determinar qual preço usar baseado no ID do plano
+          let planPrice: number | null = null;
+          let hasDynamicPrice = false;
+          
+          // Verificar se é plano 1 ou plano 2 baseado nos IDs configurados
+          if (plan.id === legacyPlan1Id || plan.id === publicPricingPlan1Id) {
+            planPrice = dynamicPricePlan1;
+            hasDynamicPrice = dynamicPricePlan1 !== null && dynamicPricePlan1 !== undefined;
+          } else if (plan.id === legacyPlan2Id || plan.id === publicPricingPlan2Id) {
+            planPrice = dynamicPricePlan2;
+            hasDynamicPrice = dynamicPricePlan2 !== null && dynamicPricePlan2 !== undefined;
+          } else {
+            // Se não for plano 1 nem 2, tentar usar plano 1 como fallback
+            planPrice = dynamicPricePlan1;
+            hasDynamicPrice = dynamicPricePlan1 !== null && dynamicPricePlan1 !== undefined;
+          }
+          
+          plans.push({
+            id: `${cat.id}-plan-${plan.id}`,
+            name: planLabel,
+            description: hasDynamicPrice
+              ? "Tarifa calculada em tempo real para as datas e hóspedes selecionados."
+              : "Selecione datas e hóspedes para ver o valor desta categoria.",
+            benefits: hasDynamicPrice
+              ? ["Melhor tarifa disponível para o seu período", "Atualização em tempo real"]
+              : ["Cálculo em tempo real na próxima etapa", "Tarifa sujeita a variação"],
+            tag: hasDynamicPrice ? "A partir de" : undefined,
+            pricePerNight: hasDynamicPrice && planPrice !== null && nights > 0 ? (planPrice / nights) : (hasDynamicPrice && planPrice !== null ? planPrice : 0),
+            planId: plan.id,
+            cancellationPolicy: cancellationPolicy,
+            requiresCard: plan.requires_card || false,
+            immediateConfirmation: plan.immediate_confirmation ?? true,
+            minNights: plan.min_nights || null,
+            maxNights: plan.max_nights || null,
+          });
         });
       } else {
-        plans.push({
-          id: `${cat.id}-default`,
-          name: "Tarifa Padrão",
-          description: "Selecione datas e hóspedes para ver valores personalizados desta categoria.",
-          benefits: ["Cálculo em tempo real na página de reserva"],
-          tag: undefined,
-          pricePerNight: 0,
-          planId: null,
-        });
+        // Fallback para sistema antigo - usar planos configurados
+        if (legacyPlan1Id) {
+          const hasDynamicPricePlan1 = dynamicPricePlan1 !== null && dynamicPricePlan1 !== undefined;
+          const cancellationPolicy = cancellationPoliciesMap[legacyPlan1Id] || null;
+          plans.push({
+            id: `${cat.id}-plan1`,
+            name: legacyPlan1Title || "Plano Tarifário 1",
+            description: hasDynamicPricePlan1
+              ? "Tarifa calculada em tempo real para as datas e hóspedes selecionados."
+              : "Selecione datas e hóspedes para ver o valor desta categoria.",
+            benefits: hasDynamicPricePlan1
+              ? ["Melhor tarifa disponível para o seu período", "Atualização em tempo real"]
+              : ["Cálculo em tempo real na próxima etapa", "Tarifa sujeita a variação"],
+            tag: hasDynamicPricePlan1 ? "A partir de" : undefined,
+            pricePerNight: hasDynamicPricePlan1 && dynamicPricePlan1 !== null && nights > 0 ? (dynamicPricePlan1 / nights) : (hasDynamicPricePlan1 && dynamicPricePlan1 !== null ? dynamicPricePlan1 : 0),
+            planId: legacyPlan1Id,
+            cancellationPolicy: cancellationPolicy,
+          });
+        }
+        
+        if (legacyPlan2Id) {
+          const hasDynamicPricePlan2 = dynamicPricePlan2 !== null && dynamicPricePlan2 !== undefined;
+          const cancellationPolicy = cancellationPoliciesMap[legacyPlan2Id] || null;
+          plans.push({
+            id: `${cat.id}-plan2`,
+            name: legacyPlan2Title || "Plano Tarifário 2",
+            description: hasDynamicPricePlan2
+              ? "Tarifa calculada em tempo real para as datas e hóspedes selecionados."
+              : "Selecione datas e hóspedes para ver o valor desta categoria.",
+            benefits: hasDynamicPricePlan2
+              ? ["Melhor tarifa disponível para o seu período", "Atualização em tempo real"]
+              : ["Cálculo em tempo real na próxima etapa", "Tarifa sujeita a variação"],
+            tag: hasDynamicPricePlan2 ? "A partir de" : undefined,
+            pricePerNight: hasDynamicPricePlan2 && dynamicPricePlan2 !== null && nights > 0 ? (dynamicPricePlan2 / nights) : (hasDynamicPricePlan2 && dynamicPricePlan2 !== null ? dynamicPricePlan2 : 0),
+            planId: legacyPlan2Id,
+            cancellationPolicy: cancellationPolicy,
+          });
+        }
+        
+        // Se não houver planos configurados, adicionar plano padrão
+        if (plans.length === 0) {
+          plans.push({
+            id: `${cat.id}-default`,
+            name: "Tarifa Padrão",
+            description: "Selecione datas e hóspedes para ver valores personalizados desta categoria.",
+            benefits: ["Cálculo em tempo real na página de reserva"],
+            tag: undefined,
+            pricePerNight: 0,
+            planId: null,
+            cancellationPolicy: null,
+          });
+        }
       }
 
       return {
@@ -1720,15 +1889,7 @@ const BookingEnginePage = () => {
         plans,
       };
     });
-  }, [roomCategories, categoryPricesPlan1, allHotelSettings]);
-
-  const nights = useMemo(() => {
-    if (!checkin || !checkout) return 0;
-    const ci = new Date(checkin);
-    const co = new Date(checkout);
-    const diff = co.getTime() - ci.getTime();
-    return diff > 0 ? Math.ceil(diff / (1000 * 60 * 60 * 24)) : 0;
-  }, [checkin, checkout]);
+  }, [roomCategories, categoryPricesPlan1, categoryPricesPlan2, allHotelSettings, cancellationPoliciesMap, pricingPlansByCategory, publicPricingPlan1Id, publicPricingPlan2Id, nights]);
 
   const selectedRoom = useMemo(
     () => rooms.find((r) => r.id === selectedRoomId) || null,
@@ -1790,6 +1951,7 @@ const BookingEnginePage = () => {
         const adultsNum = parseInt(adults, 10) || 1;
         const childrenNum = parseInt(children, 10) || 0;
         const pricesPlan1: Record<string, number | null> = {};
+        const pricesPlan2: Record<string, number | null> = {};
 
         let startDate: Date;
         let nightsCount: number;
@@ -1843,36 +2005,61 @@ const BookingEnginePage = () => {
           adults: number;
           children: number;
           categoryKey: string; // Para agrupar resultados
+          planType: 'plan1' | 'plan2'; // Identificar qual plano
         }> = [];
 
         for (const cat of roomCategories) {
           const establishmentId = cat.establishment_id;
           const settings = hotelSettingsMap[establishmentId];
           const plan1Id = settings?.public_pricing_plan_1_id || null;
+          const plan2Id = settings?.public_pricing_plan_2_id || null;
           
-          if (!plan1Id) {
+          // Adicionar requisições para plano 1
+          if (plan1Id) {
+            for (let i = 0; i < nightsCount; i++) {
+              const currentDate = addDays(startDate, i);
+              const dateStr = formatDateLocal(currentDate);
+
+              priceRequests.push({
+                establishmentId,
+                categoryId: cat.id,
+                planId: plan1Id,
+                date: dateStr,
+                adults: adultsNum,
+                children: childrenNum,
+                categoryKey: `${cat.id}-plan1`,
+                planType: 'plan1',
+              });
+            }
+          } else {
             pricesPlan1[cat.id] = null;
-            continue;
           }
 
-          for (let i = 0; i < nightsCount; i++) {
-            const currentDate = addDays(startDate, i);
-            const dateStr = formatDateLocal(currentDate);
+          // Adicionar requisições para plano 2
+          if (plan2Id) {
+            for (let i = 0; i < nightsCount; i++) {
+              const currentDate = addDays(startDate, i);
+              const dateStr = formatDateLocal(currentDate);
 
-            priceRequests.push({
-              establishmentId,
-              categoryId: cat.id,
-              planId: plan1Id,
-              date: dateStr,
-              adults: adultsNum,
-              children: childrenNum,
-              categoryKey: cat.id,
-            });
+              priceRequests.push({
+                establishmentId,
+                categoryId: cat.id,
+                planId: plan2Id,
+                date: dateStr,
+                adults: adultsNum,
+                children: childrenNum,
+                categoryKey: `${cat.id}-plan2`,
+                planType: 'plan2',
+              });
+            }
+          } else {
+            pricesPlan2[cat.id] = null;
           }
         }
 
         if (priceRequests.length === 0) {
           setCategoryPricesPlan1(pricesPlan1);
+          setCategoryPricesPlan2(pricesPlan2);
           setCategoryPrices(pricesPlan1);
           setCalculatingPrices(false);
           return;
@@ -1891,30 +2078,37 @@ const BookingEnginePage = () => {
           return;
         }
 
-        // Agrupar resultados por categoria (somar todas as noites)
-        const categoryTotals: Record<string, number> = {};
+        // Agrupar resultados por categoria e plano (somar todas as noites)
+        const categoryTotalsPlan1: Record<string, number> = {};
+        const categoryTotalsPlan2: Record<string, number> = {};
 
         priceRequests.forEach((req, index) => {
           const result = results[index];
-          if (!categoryTotals[req.categoryKey]) {
-            categoryTotals[req.categoryKey] = 0;
+          const baseCategoryId = req.categoryKey.replace('-plan1', '').replace('-plan2', '');
+          
+          if (req.planType === 'plan1') {
+            if (!categoryTotalsPlan1[baseCategoryId]) {
+              categoryTotalsPlan1[baseCategoryId] = 0;
+            }
+            categoryTotalsPlan1[baseCategoryId] += result.price;
+          } else if (req.planType === 'plan2') {
+            if (!categoryTotalsPlan2[baseCategoryId]) {
+              categoryTotalsPlan2[baseCategoryId] = 0;
+            }
+            categoryTotalsPlan2[baseCategoryId] += result.price;
           }
-          categoryTotals[req.categoryKey] += result.price;
         });
 
-        // Calcular preço total por categoria e multiplicar pelo número de quartos necessários
+        // Calcular preço total por categoria e plano, multiplicar pelo número de quartos necessários
         // (mesma lógica da página pública de reservas: soma todas as noites, depois multiplica por requiredRooms)
-        Object.keys(categoryTotals).forEach((categoryId) => {
-          const totalPriceForAllNights = categoryTotals[categoryId];
+        
+        // Processar plano 1
+        Object.keys(categoryTotalsPlan1).forEach((categoryId) => {
+          const totalPriceForAllNights = categoryTotalsPlan1[categoryId];
           
-          // Encontrar a categoria para calcular quartos necessários
           const category = roomCategories.find((cat: any) => cat.id === categoryId);
           if (category) {
-            // Calcular número de quartos necessários baseado na capacidade (mesma lógica da página pública)
             const requiredRooms = calculateRequiredRooms(adultsNum, category);
-            
-            // Multiplicar preço total (soma de todas as noites) pelo número de quartos necessários
-            // (exatamente como na página pública: return categoryTotal * requiredRooms;)
             const finalPrice = totalPriceForAllNights * requiredRooms;
             pricesPlan1[categoryId] = finalPrice > 0 ? finalPrice : null;
           } else {
@@ -1922,7 +2116,22 @@ const BookingEnginePage = () => {
           }
         });
 
+        // Processar plano 2
+        Object.keys(categoryTotalsPlan2).forEach((categoryId) => {
+          const totalPriceForAllNights = categoryTotalsPlan2[categoryId];
+          
+          const category = roomCategories.find((cat: any) => cat.id === categoryId);
+          if (category) {
+            const requiredRooms = calculateRequiredRooms(adultsNum, category);
+            const finalPrice = totalPriceForAllNights * requiredRooms;
+            pricesPlan2[categoryId] = finalPrice > 0 ? finalPrice : null;
+          } else {
+            pricesPlan2[categoryId] = null;
+          }
+        });
+
         setCategoryPricesPlan1(pricesPlan1);
+        setCategoryPricesPlan2(pricesPlan2);
         setCategoryPrices(pricesPlan1);
       } catch (error) {
         if (!abortController.signal.aborted) {
@@ -2928,6 +3137,13 @@ const BookingEnginePage = () => {
                                           </div>
                                         ))}
                                       </div>
+                                      {plan.cancellationPolicy && (
+                                        <CancellationPolicyDisplay 
+                                          policy={plan.cancellationPolicy} 
+                                          theme={theme}
+                                          companySlug={companySlug}
+                                        />
+                                      )}
                                     </div>
                                     <div className={`text-left sm:text-right flex-shrink-0 ${plan.pricePerNight > 0 && nights > 0 ? 'sm:min-w-[160px] lg:min-w-[180px]' : 'sm:min-w-[180px] lg:min-w-[200px]'}`}>
                                       <div className={`${theme.priceColor} text-xl sm:text-2xl font-bold mb-1`}>

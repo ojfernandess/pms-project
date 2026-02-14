@@ -7,6 +7,7 @@ import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { logActivity, createReservationUpdateDescription } from "@/lib/activityLogger";
 import { useEffect } from "react";
 import { format } from "date-fns";
+import { recalculatePolicyAfterDateChange } from "@/utils/cancellationPolicyDateChange";
 
 type ReservationInsert = TablesInsert<"reservations">;
 type ReservationUpdate = TablesUpdate<"reservations">;
@@ -640,6 +641,24 @@ export const useReservations = () => {
         category: data.category_id?.substring(0, 8) || "sem categoria",
         isExtension
       });
+
+      // Recalcular política de cancelamento se datas foram alteradas
+      if (oldReservation && (updates.checkin_date || updates.checkout_date)) {
+        const oldCheckin = oldReservation.checkin_date;
+        const oldCheckout = oldReservation.checkout_date;
+        const newCheckin = updates.checkin_date || oldCheckin;
+        const newCheckout = updates.checkout_date || oldCheckout;
+
+        if (oldCheckin && oldCheckout && (oldCheckin !== newCheckin || oldCheckout !== newCheckout)) {
+          try {
+            await recalculatePolicyAfterDateChange(data.id, newCheckin, newCheckout);
+            console.log("✅ Política de cancelamento recalculada após alteração de datas");
+          } catch (error) {
+            console.error("⚠️ Erro ao recalcular política de cancelamento:", error);
+            // Não falhar o update se houver erro no recálculo
+          }
+        }
+      }
       
       // IMPORTANTE: NÃO enviar email de extensão aqui no updateReservation
       // O email de extensão será enviado pelo ReservationPaymentModal quando o pagamento for confirmado

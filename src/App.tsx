@@ -19,6 +19,7 @@ import WebCheckin from "./pages/WebCheckin";
 import GuestDashboard from "./pages/GuestDashboard";
 import GuestResetPassword from "./pages/GuestResetPassword";
 import PublicPolicies from "./pages/PublicPolicies";
+import PublicCancellationPolicy from "./pages/PublicCancellationPolicy";
 import Clients from "./pages/Clients";
 import ClientDeduplication from "./pages/ClientDeduplication";
 import Units from "./pages/Units";
@@ -160,6 +161,9 @@ const AppContent = () => {
             <Route path="/reservar/:establishmentSlug" element={<PublicReservation />} />
             <Route path="/policies/:slug/:token" element={<PublicPolicies />} />
             <Route path="/policies/:token" element={<PublicPolicies />} />
+            {/* Rota para política de cancelamento completa */}
+            <Route path="/motor/:companySlug/politica/:policyId" element={<PublicCancellationPolicy />} />
+            <Route path="/politica/:policyId" element={<PublicCancellationPolicy />} />
             <Route path="/documentation" element={<ProtectedRoute><AppLayout><Documentation /></AppLayout></ProtectedRoute>} />
             <Route path="/:establishmentId/documentation" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Documentation /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/clientes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Clients /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />

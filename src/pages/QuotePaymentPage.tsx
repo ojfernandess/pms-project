@@ -13,6 +13,9 @@ import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { CancellationPolicyDisplay } from "@/components/booking-engine/CancellationPolicyDisplay";
+import { getQuoteCancellationPolicy } from "@/utils/cancellationPolicyService";
+import type { CancellationPolicy } from "@/utils/cancellationPolicyCalculator";
 
 const QuotePaymentPage = () => {
   const { paymentIntentId } = useParams<{ paymentIntentId: string }>();
@@ -30,6 +33,8 @@ const QuotePaymentPage = () => {
   const [isCancelling, setIsCancelling] = useState(false);
   const [shouldReload, setShouldReload] = useState(false);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [cancellationPolicy, setCancellationPolicy] = useState<CancellationPolicy | null>(null);
+  const [policyAccepted, setPolicyAccepted] = useState(false);
 
   const handleExpiredQuote = useCallback(async (quoteId: string) => {
     if (isCancelling) return;
@@ -130,6 +135,16 @@ const QuotePaymentPage = () => {
       }
 
       setQuoteData(quote);
+
+      // Buscar política de cancelamento do quote
+      if (quote.id) {
+        const policy = await getQuoteCancellationPolicy(quote.id);
+        setCancellationPolicy(policy);
+        // Se não houver política, permitir pagamento sem aceite
+        if (!policy) {
+          setPolicyAccepted(true);
+        }
+      }
 
       // Buscar estabelecimento separadamente
       if (quote.establishment_id) {
@@ -593,15 +608,34 @@ const QuotePaymentPage = () => {
                 existingPaymentIntentId={quoteData.payment_intent_id || undefined}
                 onSuccess={handlePaymentSuccess}
               />
+              {/* Exibir política de cancelamento se houver */}
+              {cancellationPolicy && (
+                <div className="mb-4">
+                  <CancellationPolicyDisplay
+                    policy={cancellationPolicy}
+                    quoteId={quoteData?.id}
+                    requireAcceptance={true}
+                    onAcceptanceChange={setPolicyAccepted}
+                    showFullPolicyLink={true}
+                  />
+                </div>
+              )}
+
               <Button
                 onClick={() => setPaymentDialogOpen(true)}
                 className="w-full h-12 text-base"
                 size="lg"
-                disabled={isExpired || isCancelling}
+                disabled={isExpired || isCancelling || (cancellationPolicy && !policyAccepted)}
               >
                 <CreditCard className="mr-2 h-5 w-5" />
                 {isCancelling ? "Cancelando..." : "Pagar Agora"}
               </Button>
+              
+              {cancellationPolicy && !policyAccepted && (
+                <p className="text-xs text-amber-600 mt-2 text-center">
+                  ⚠️ É necessário aceitar a política de cancelamento para prosseguir com o pagamento
+                </p>
+              )}
             </StripeProvider>
           </Card>
         ) : (

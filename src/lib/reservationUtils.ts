@@ -28,6 +28,8 @@ export const calculateReservationTotal = (
   return basePrice * nights;
 };
 
+import { checkDateAvailabilityForSale, checkPeriodAvailabilityForSale, checkInventoryAvailability } from "./ariAvailabilityUtils";
+
 /**
  * Busca quartos disponíveis para um período
  */
@@ -57,6 +59,22 @@ export const getAvailableRooms = async (
 
   if (roomsError) throw roomsError;
   if (!rooms) return [];
+
+  // Verificar se o período está disponível para venda (ARI)
+  if (establishmentId) {
+    const periodCheck = await checkPeriodAvailabilityForSale(
+      establishmentId,
+      categoryId,
+      new Date(checkinDate),
+      new Date(checkoutDate),
+      'booking_engine'
+    );
+
+    if (!periodCheck.available) {
+      // Se houver datas bloqueadas, retornar array vazio
+      return [];
+    }
+  }
 
   // Buscar reservas que conflitam com o período
   // IMPORTANTE: Verificar conflito considerando que checkout é exclusivo

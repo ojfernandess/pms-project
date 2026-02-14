@@ -535,14 +535,30 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Double">Double</SelectItem>
-                        <SelectItem value="Single">Single</SelectItem>
-                        <SelectItem value="Twin">Twin</SelectItem>
-                        <SelectItem value="Triple">Triple</SelectItem>
-                        <SelectItem value="Quad">Quad</SelectItem>
-                        <SelectItem value="Suite">Suite</SelectItem>
+                        <SelectItem value="Alojamento">Alojamento</SelectItem>
                         <SelectItem value="Apartment">Apartment</SelectItem>
-                        <SelectItem value="House">House</SelectItem>
+                        <SelectItem value="Bed in Dormitory">Bed in Dormitory</SelectItem>
+                        <SelectItem value="Bungalow">Bungalow</SelectItem>
+                        <SelectItem value="Casa 1 quarto">Casa 1 quarto</SelectItem>
+                        <SelectItem value="Casa 2 quartos">Casa 2 quartos</SelectItem>
+                        <SelectItem value="Casa 3 quartos">Casa 3 quartos</SelectItem>
+                        <SelectItem value="Casa 4 quartos">Casa 4 quartos</SelectItem>
+                        <SelectItem value="Casa 5 quartos">Casa 5 quartos</SelectItem>
+                        <SelectItem value="Chalet">Chalet</SelectItem>
+                        <SelectItem value="Double">Double</SelectItem>
+                        <SelectItem value="Dormitory room">Dormitory room</SelectItem>
+                        <SelectItem value="Familia">Familia</SelectItem>
+                        <SelectItem value="Holiday home">Holiday home</SelectItem>
+                        <SelectItem value="Mobile home">Mobile home</SelectItem>
+                        <SelectItem value="Quadruplo">Quadruplo</SelectItem>
+                        <SelectItem value="Single">Single</SelectItem>
+                        <SelectItem value="Studio">Studio</SelectItem>
+                        <SelectItem value="Suite">Suite</SelectItem>
+                        <SelectItem value="Tent">Tent</SelectItem>
+                        <SelectItem value="Triple">Triple</SelectItem>
+                        <SelectItem value="Twin">Twin</SelectItem>
+                        <SelectItem value="Twin/Double">Twin/Double</SelectItem>
+                        <SelectItem value="Villa">Villa</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

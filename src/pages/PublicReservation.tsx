@@ -921,6 +921,46 @@ const PublicReservation = () => {
           return;
         }
 
+        // Verificar se o período está disponível para venda (ARI)
+        const { checkPeriodAvailabilityForSale, checkInventoryAvailability } = await import("@/lib/ariAvailabilityUtils");
+        const periodCheck = await checkPeriodAvailabilityForSale(
+          establishment.id,
+          selectedCategory,
+          new Date(formData.checkinDate),
+          new Date(formData.checkoutDate),
+          'booking_engine'
+        );
+
+        if (!periodCheck.available) {
+          setAvailableRoomsCount(0);
+          setCheckingAvailability(false);
+          return;
+        }
+
+        // Verificar inventário para cada data do período
+        const checkin = new Date(formData.checkinDate);
+        const checkout = new Date(formData.checkoutDate);
+        let minAvailableRooms = Infinity;
+        
+        const current = new Date(checkin);
+        while (current < checkout) {
+          const inventoryCheck = await checkInventoryAvailability(
+            establishment.id,
+            selectedCategory,
+            current,
+            currentRequiredRooms
+          );
+          
+          if (!inventoryCheck.available || inventoryCheck.availableRooms < currentRequiredRooms) {
+            setAvailableRoomsCount(0);
+            setCheckingAvailability(false);
+            return;
+          }
+          
+          minAvailableRooms = Math.min(minAvailableRooms, inventoryCheck.availableRooms);
+          current.setDate(current.getDate() + 1);
+        }
+
         // Buscar reservas que conflitam com o período
         const { data: conflictingReservations, error: reservationsError } = await supabase
           .from("reservations")

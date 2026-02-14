@@ -3826,6 +3826,12 @@ const ReservationDetails = () => {
           reservationCode={reservation.reservation_code}
           paidAmount={reservation.paid_amount || 0}
           hasPayments={(payments && payments.length > 0) || (reservation.paid_amount || 0) > 0}
+          reservationData={reservation ? {
+            checkin_date: reservation.checkin_date,
+            checkout_date: reservation.checkout_date,
+            total_amount: reservation.total_amount || 0,
+            pricing_plan_id: reservation.pricing_plan_id || null,
+          } : undefined}
           onConfirm={handleConfirmCancel}
         />
       )}

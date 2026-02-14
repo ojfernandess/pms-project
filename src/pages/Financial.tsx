@@ -45,6 +45,13 @@ import { PaymentTypeDialog } from "@/components/financial/PaymentTypeDialog";
 import { useServiceFees } from "@/hooks/useServiceFees";
 import { ServiceFeeDialog } from "@/components/financial/ServiceFeeDialog";
 import { ClosingReport } from "@/components/financial/ClosingReport";
+import { AccountsReceivableList } from "@/components/financial/AccountsReceivableList";
+import { AccountsPayableList } from "@/components/financial/AccountsPayableList";
+import { BankReconciliationDashboard } from "@/components/financial/BankReconciliationDashboard";
+import { InvoiceList } from "@/components/financial/InvoiceList";
+import { RefundsList } from "@/components/financial/RefundsList";
+import { CancellationReport } from "@/components/financial/CancellationReport";
+import { NoShowReport } from "@/components/financial/NoShowReport";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -586,6 +593,11 @@ const Financial = () => {
           <Tabs defaultValue="overview" className="space-y-4">
             <TabsList>
               <TabsTrigger value="overview">Visão Geral</TabsTrigger>
+              <TabsTrigger value="receivables">Contas a Receber</TabsTrigger>
+              <TabsTrigger value="payables">Contas a Pagar</TabsTrigger>
+              <TabsTrigger value="invoices">Faturas</TabsTrigger>
+              <TabsTrigger value="reconciliation">Conciliação</TabsTrigger>
+              <TabsTrigger value="refunds">Estornos</TabsTrigger>
               <TabsTrigger value="payments">Pagamentos</TabsTrigger>
               <TabsTrigger value="carriers">Portadores</TabsTrigger>
               <TabsTrigger value="service_fees">Taxas</TabsTrigger>
@@ -633,6 +645,26 @@ const Financial = () => {
                   />
                 </Card>
               </div>
+            </TabsContent>
+
+            <TabsContent value="receivables">
+              <AccountsReceivableList />
+            </TabsContent>
+
+            <TabsContent value="payables">
+              <AccountsPayableList />
+            </TabsContent>
+
+            <TabsContent value="invoices">
+              <InvoiceList />
+            </TabsContent>
+
+            <TabsContent value="reconciliation">
+              <BankReconciliationDashboard />
+            </TabsContent>
+
+            <TabsContent value="refunds">
+              <RefundsList />
             </TabsContent>
 
             <TabsContent value="payments">
@@ -1102,6 +1134,18 @@ const Financial = () => {
                   
                   {/* Relatório de Fechamento */}
                   <ClosingReport />
+                  
+                  {/* Relatório de Cancelamentos */}
+                  <Card className="p-6">
+                    <h4 className="font-medium mb-4">Relatório de Cancelamentos</h4>
+                    <CancellationReport />
+                  </Card>
+                  
+                  {/* Relatório de No-Show */}
+                  <Card className="p-6">
+                    <h4 className="font-medium mb-4">Relatório de No-Show</h4>
+                    <NoShowReport />
+                  </Card>
                   
                   <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer">
                     <h4 className="font-medium">Relatório de Taxa OTAs</h4>

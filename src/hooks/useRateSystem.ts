@@ -243,6 +243,18 @@ export const useRateSystem = () => {
         .select("*")
         .eq("establishment_id", establishmentId)
         .order("date", { ascending: true });
+      
+      // Log para verificar se os campos de flutuação estão sendo retornados
+      if (data && data.length > 0) {
+        const sampleEntry = data[0];
+        console.log('[useRateSystem] Sample rate_calendar entry:', {
+          has_occupancy_1_fluctuation_type: !!sampleEntry.occupancy_1_fluctuation_type,
+          has_occupancy_1_fluctuation_value: sampleEntry.occupancy_1_fluctuation_value !== null && sampleEntry.occupancy_1_fluctuation_value !== undefined,
+          occupancy_1_fluctuation_type: sampleEntry.occupancy_1_fluctuation_type,
+          occupancy_1_fluctuation_value: sampleEntry.occupancy_1_fluctuation_value,
+          allFields: Object.keys(sampleEntry),
+        });
+      }
 
       if (error) throw error;
       return (data || []) as RateCalendarEntry[];
@@ -295,18 +307,27 @@ export const useRateSystem = () => {
       }));
 
       // Buscar informações das categorias e planos para o log
-      const categoryIds = [...new Set(entries.map(e => e.category_id))];
-      const planIds = [...new Set(entries.map(e => e.pricing_plan_id))];
+      const categoryIds = [...new Set(entries.map(e => e.category_id).filter(Boolean))];
+      const planIds = [...new Set(entries.map(e => e.pricing_plan_id).filter(Boolean))];
       
-      const { data: categories } = await supabase
-        .from("room_categories")
-        .select("id, name")
-        .in("id", categoryIds);
+      let categories: any[] = [];
+      let plans: any[] = [];
       
-      const { data: plans } = await supabase
-        .from("pricing_plans")
-        .select("id, name, code")
-        .in("id", planIds);
+      if (categoryIds.length > 0) {
+        const { data: categoriesData } = await supabase
+          .from("room_categories")
+          .select("id, name")
+          .in("id", categoryIds);
+        categories = categoriesData || [];
+      }
+      
+      if (planIds.length > 0) {
+        const { data: plansData } = await supabase
+          .from("pricing_plans")
+          .select("id, name, code")
+          .in("id", planIds);
+        plans = plansData || [];
+      }
 
       const { data, error } = await supabase
         .from("rate_calendar")
@@ -325,25 +346,31 @@ export const useRateSystem = () => {
           : `${dates[0]} até ${dates[dates.length - 1]}`
         : "";
       
-      const categoryNames = categories?.map(c => c.name).join(", ") || "";
-      const planNames = plans?.map(p => p.code || p.name).join(", ") || "";
+      const categoryNames = (categories && categories.length > 0) ? categories.map(c => c.name).join(", ") : "";
+      const planNames = (plans && plans.length > 0) ? plans.map(p => p.code || p.name).join(", ") : "";
       
-      await logActivity({
-        actionType: "updated",
-        entityType: "rate_calendar",
-        description: `Tarifas atualizadas: ${categoryNames} - ${planNames} (${entries.length} entrada(s), ${dateRange})`,
-        newValues: {
-          entries_count: entries.length,
-          categories: categoryNames,
-          plans: planNames,
-          date_range: dateRange,
-        },
-        metadata: {
-          categories_count: categoryIds.length,
-          plans_count: planIds.length,
-          dates_count: dates.length,
-        },
-      });
+      // Só registrar log se tivermos dados válidos
+      try {
+        await logActivity({
+          actionType: "updated",
+          entityType: "rate_calendar",
+          description: `Tarifas atualizadas: ${categoryNames || 'N/A'} - ${planNames || 'N/A'} (${entries.length} entrada(s), ${dateRange || 'N/A'})`,
+          newValues: {
+            entries_count: entries.length,
+            categories: categoryNames || "N/A",
+            plans: planNames || "N/A",
+            date_range: dateRange || "N/A",
+          },
+          metadata: {
+            categories_count: categoryIds.length,
+            plans_count: planIds.length,
+            dates_count: dates.length,
+          },
+        });
+      } catch (logError: any) {
+        // Não falhar a operação se o log falhar
+        console.warn('[useRateSystem] Erro ao registrar log de atividade:', logError);
+      }
       
       return data;
     },
