@@ -32,7 +32,7 @@ import CancellationPolicies from "@/pages/CancellationPolicies";
 const PMSRateSystem = () => {
   const [activeTab, setActiveTab] = useState('calendar');
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [selectedRatePlan, setSelectedRatePlan] = useState<string>('');
+  const [selectedRatePlan, setSelectedRatePlan] = useState<string>('all');
   const [startDate, setStartDate] = useState(startOfDay(new Date()));
   const [channelSyncOpen, setChannelSyncOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -63,16 +63,17 @@ const PMSRateSystem = () => {
   } = useRateSystem();
 
   // Buscar categorias com quartos (seguindo lógica do PMS)
-  // Usar staleTime para evitar refetch desnecessário que pode causar perda temporária de dados
-  // Usar refetchOnWindowFocus e refetchOnMount false para evitar refetch desnecessário
+  // Usar o mesmo establishment do contexto (selectedEstablishment) para evitar perda de categorias
+  // após salvar preço no grid ARI (invalidação de rate_calendar não deve afetar esta query).
+  const establishmentIdForCategories = selectedEstablishment?.id ?? getSelectedEstablishmentId();
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
-    queryKey: ["rate_system_categories", getSelectedEstablishmentId()],
+    queryKey: ["rate_system_categories", establishmentIdForCategories],
     staleTime: 5 * 60 * 1000, // 5 minutos - evitar refetch desnecessário
     gcTime: 10 * 60 * 1000, // 10 minutos - manter em cache
     refetchOnWindowFocus: false, // Não refazer fetch ao focar na janela
     refetchOnMount: false, // Não refazer fetch ao montar se já tiver dados
     queryFn: async () => {
-      const establishmentId = getSelectedEstablishmentId();
+      const establishmentId = establishmentIdForCategories;
       if (!establishmentId) return [];
 
       // Buscar quartos com suas categorias
@@ -163,7 +164,7 @@ const PMSRateSystem = () => {
     checkAccess();
   }, [selectedEstablishment?.id]);
 
-  // Selecionar primeiro plano ativo por padrão
+  // No mapa de tarifas, exibir "Todos os Planos" por padrão; fallback para um plano se o usuário mudar
   const activePlans = useMemo(() => {
     return ratePlans.filter(p => p.is_active);
   }, [ratePlans]);
@@ -174,7 +175,7 @@ const PMSRateSystem = () => {
       const barPlan = activePlans.find(p => p.code === 'BAR');
       return barPlan?.id || activePlans[0].id;
     }
-    return '';
+    return 'all';
   }, [activePlans, selectedRatePlan]);
 
   // Mostrar loading apenas se estiver carregando categorias ou planos pela primeira vez

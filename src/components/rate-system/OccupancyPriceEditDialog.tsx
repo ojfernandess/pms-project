@@ -75,8 +75,14 @@ export const OccupancyPriceEditDialog = ({
   const normalizeValue = (input: string): number => {
     if (!input || input.trim() === '') return 0;
     
-    // Remover espaços e caracteres não numéricos exceto vírgula e ponto
-    let cleaned = input.replace(/\s/g, '').replace(/[^0-9,.-]/g, '');
+    // Remover espaços
+    let cleaned = input.trim();
+    
+    // Preservar sinal negativo no início
+    const isNegative = cleaned.startsWith('-');
+    if (isNegative) {
+      cleaned = cleaned.substring(1); // Remover o sinal negativo temporariamente
+    }
     
     // Se houver vírgula, tratar como separador decimal brasileiro
     if (cleaned.includes(',')) {
@@ -86,11 +92,38 @@ export const OccupancyPriceEditDialog = ({
       cleaned = cleaned.replace(',', '.');
     }
     
+    // Remover caracteres não numéricos exceto ponto
+    cleaned = cleaned.replace(/[^0-9.]/g, '');
+    
+    // Se estiver vazio após limpeza, retornar 0
+    if (!cleaned || cleaned === '' || cleaned === '.') return 0;
+    
     const parsed = parseFloat(cleaned);
-    return isNaN(parsed) ? 0 : parsed;
+    if (isNaN(parsed)) return 0;
+    
+    // Aplicar sinal negativo se necessário
+    return isNegative ? -parsed : parsed;
+  };
+
+  // Formatar valor para exibição (com vírgula como separador decimal)
+  const formatValueForDisplay = (value: number): string => {
+    // Tratar valores especiais
+    if (value === 0) return '0';
+    if (isNaN(value)) return '0';
+    
+    // Converter para string
+    let str = value.toString();
+    
+    // Se tiver decimais, substituir ponto por vírgula
+    if (str.includes('.')) {
+      str = str.replace('.', ',');
+    }
+    
+    return str;
   };
 
   // Calcular preço esperado baseado na flutuação
+  // IMPORTANTE: A flutuação é aplicada sobre o preço ATUAL (que já inclui flutuações anteriores)
   const calculateExpectedPrice = () => {
     if (!fluctuationValue || fluctuationValue.trim() === '') return currentPrice;
     
@@ -98,6 +131,7 @@ export const OccupancyPriceEditDialog = ({
     if (value === 0) return currentPrice;
 
     if (fluctuationType === 'percentage') {
+      // Porcentagem: aplicar sobre o preço atual
       return currentPrice * (1 + value / 100);
     } else {
       // Valor absoluto: adicionar/subtrair do preço atual
@@ -119,14 +153,13 @@ export const OccupancyPriceEditDialog = ({
             {isBulkEdit ? (
               <>
                 <strong>Edição em massa:</strong> A alteração será aplicada a todas as datas futuras visíveis no grid.
-                O valor será aplicado ao <strong>preço padrão (base_price)</strong> de cada data para calcular o preço da ocupação de {occupancy} {occupancy === 1 ? 'adulto' : 'adultos'}.
-                Cada data manterá seu próprio preço padrão, e a flutuação será aplicada individualmente.
+                O ajuste será aplicado sobre o <strong>preço atual</strong> de cada data (que já inclui flutuações anteriores).
+                Use os botões + e - para aumentar ou diminuir o valor.
               </>
             ) : (
               <>
-                O valor será adicionado ou subtraído do valor da ocupação padrão. 
-                Atenção ao alterar para valor absoluto ou porcentagem, também será alterado 
-                para outras variações desta tarifa.
+                O ajuste será aplicado sobre o <strong>preço atual</strong> (que já inclui flutuações anteriores).
+                Use os botões + e - para aumentar ou diminuir o valor, ou digite o valor diretamente.
               </>
             )}
           </p>
@@ -154,51 +187,129 @@ export const OccupancyPriceEditDialog = ({
 
           <div className="space-y-2">
             <Label htmlFor="fluctuation-value">
-              {occupancy} {occupancy === 1 ? 'adulto' : 'adultos'}
+              Ajuste para {occupancy} {occupancy === 1 ? 'adulto' : 'adultos'}
             </Label>
-            <div className="flex gap-0">
-              <div className="flex items-center px-3 border border-r-0 rounded-l-md bg-muted">
-                <span className="text-sm text-muted-foreground">
-                  {fluctuationType === "fixed" ? "R$" : ""}
-                </span>
-              </div>
-              <Input
-                id="fluctuation-value"
-                type="text"
-                value={fluctuationValue}
-                onChange={(e) => {
-                  let value = e.target.value;
-                  
-                  // Permitir apenas números, vírgula, ponto e sinal negativo
-                  value = value.replace(/[^0-9,.-]/g, '');
-                  
-                  // Se for valor absoluto, formatar melhor
-                  if (fluctuationType === "fixed") {
-                    // Permitir apenas uma vírgula ou ponto como separador decimal
-                    const parts = value.split(/[,.]/);
-                    if (parts.length > 2) {
-                      // Se houver múltiplos separadores, manter apenas o primeiro
-                      value = parts[0] + (parts[1] ? ',' + parts.slice(1).join('') : '');
-                    }
-                  }
-                  
-                  setFluctuationValue(value);
-                }}
-                placeholder={fluctuationType === "fixed" ? "0,00" : "0"}
-                className="flex-1 rounded-none border-x-0"
-              />
-              {fluctuationType === "percentage" && (
-                <div className="flex items-center px-3 border border-l-0 rounded-r-md bg-muted">
-                  <span className="text-sm text-muted-foreground">%</span>
-                </div>
-              )}
-            </div>
-            {fluctuationValue && !isBulkEdit && (
-              <div className="text-xs space-y-1">
-                <p className="text-muted-foreground">
+            
+            {/* Mostrar preço atual */}
+            {!isBulkEdit && (
+              <div className="p-3 bg-gray-50 rounded-md border border-gray-200">
+                <p className="text-sm text-gray-600">
                   <span className="font-medium">Preço atual:</span> {formatCurrency(currentPrice)}
                 </p>
-                <p className="text-muted-foreground">
+              </div>
+            )}
+            
+            <div className="flex gap-2">
+              {/* Botão de diminuir */}
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 shrink-0"
+                onClick={() => {
+                  // Obter valor atual do campo
+                  const current = normalizeValue(fluctuationValue);
+                  const step = fluctuationType === 'percentage' ? 1 : (fluctuationType === 'fixed' ? 10 : 1);
+                  
+                  // Diminuir o valor (subtrair o step)
+                  let newValue = current - step;
+                  
+                  console.log('[OccupancyPriceEditDialog] Botão - clicado:', {
+                    fluctuationValue,
+                    current,
+                    step,
+                    newValue,
+                    fluctuationType,
+                  });
+                  
+                  // Para porcentagem, não permitir valores negativos
+                  // Mas apenas se o valor original era positivo ou zero
+                  if (fluctuationType === 'percentage' && newValue < 0 && current >= 0) {
+                    newValue = 0;
+                  }
+                  // Se o valor original já era negativo, permitir continuar negativo
+                  
+                  const formatted = formatValueForDisplay(newValue);
+                  console.log('[OccupancyPriceEditDialog] Valor formatado (botão -):', formatted);
+                  setFluctuationValue(formatted);
+                }}
+              >
+                <span className="text-lg">−</span>
+              </Button>
+              
+              {/* Input de valor */}
+              <div className="flex gap-0 flex-1">
+                <div className="flex items-center px-3 border border-r-0 rounded-l-md bg-muted">
+                  <span className="text-sm text-muted-foreground">
+                    {fluctuationType === "fixed" ? "R$" : ""}
+                  </span>
+                </div>
+                <Input
+                  id="fluctuation-value"
+                  type="text"
+                  value={fluctuationValue}
+                  onChange={(e) => {
+                    let value = e.target.value;
+                    
+                    // Permitir apenas números, vírgula, ponto e sinal negativo
+                    value = value.replace(/[^0-9,.-]/g, '');
+                    
+                    // Se for valor absoluto, formatar melhor
+                    if (fluctuationType === "fixed") {
+                      // Permitir apenas uma vírgula ou ponto como separador decimal
+                      const parts = value.split(/[,.]/);
+                      if (parts.length > 2) {
+                        // Se houver múltiplos separadores, manter apenas o primeiro
+                        value = parts[0] + (parts[1] ? ',' + parts.slice(1).join('') : '');
+                      }
+                    }
+                    
+                    setFluctuationValue(value);
+                  }}
+                  placeholder={fluctuationType === "fixed" ? "0,00" : "0"}
+                  className="flex-1 rounded-none border-x-0"
+                />
+                {fluctuationType === "percentage" && (
+                  <div className="flex items-center px-3 border border-l-0 rounded-r-md bg-muted">
+                    <span className="text-sm text-muted-foreground">%</span>
+                  </div>
+                )}
+              </div>
+              
+              {/* Botão de aumentar */}
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 shrink-0"
+                onClick={() => {
+                  // Obter valor atual do campo
+                  const current = normalizeValue(fluctuationValue);
+                  const step = fluctuationType === 'percentage' ? 1 : (fluctuationType === 'fixed' ? 10 : 1);
+                  
+                  // Aumentar o valor (adicionar o step)
+                  const newValue = current + step;
+                  
+                  console.log('[OccupancyPriceEditDialog] Botão + clicado:', {
+                    fluctuationValue,
+                    current,
+                    step,
+                    newValue,
+                    fluctuationType,
+                  });
+                  
+                  // Formatar para exibição
+                  const formatted = formatValueForDisplay(newValue);
+                  console.log('[OccupancyPriceEditDialog] Valor formatado (botão +):', formatted);
+                  setFluctuationValue(formatted);
+                }}
+              >
+                <span className="text-lg">+</span>
+              </Button>
+            </div>
+            {fluctuationValue && !isBulkEdit && (
+              <div className="text-xs space-y-1 p-3 bg-blue-50 rounded-md border border-blue-200">
+                <p className="text-blue-800">
                   {fluctuationType === 'percentage' ? (
                     <>
                       <span className="font-medium">Ajuste:</span> {normalizeValue(fluctuationValue) > 0 ? '+' : ''}{normalizeValue(fluctuationValue)}%
@@ -209,8 +320,8 @@ export const OccupancyPriceEditDialog = ({
                     </>
                   )}
                 </p>
-                <p className="text-blue-600 font-semibold">
-                  <span className="font-medium">Preço esperado:</span> {formatCurrency(expectedPrice)}
+                <p className="text-blue-600 font-semibold mt-1">
+                  <span className="font-medium">Novo preço:</span> {formatCurrency(expectedPrice)}
                 </p>
               </div>
             )}

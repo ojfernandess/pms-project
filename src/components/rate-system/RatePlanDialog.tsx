@@ -159,7 +159,7 @@ export const RatePlanDialog = ({
       setName("");
       setCode("");
       setDescription("");
-      setPlanType(activePlanTypes.length > 0 ? activePlanTypes[0].name : "");
+      setPlanType(activePlanTypes.length > 0 ? activePlanTypes[0].name : "__no_type_available__");
       setCancellationPolicyId("");
       setRequiresCard(false);
       setBasePlanId("");
@@ -181,7 +181,7 @@ export const RatePlanDialog = ({
         name,
         code: code || undefined,
         description: description || undefined,
-        plan_type: planType || undefined,
+        plan_type: (planType && planType !== '__no_type_available__') ? planType : undefined,
         is_active: isActive,
         requires_card: requiresCard,
         base_plan_id_for_rate: basePlanId || null,
@@ -461,7 +461,7 @@ export const RatePlanDialog = ({
                   </SelectTrigger>
                   <SelectContent>
                     {activePlanTypes.length === 0 ? (
-                      <SelectItem value="" disabled>
+                      <SelectItem value="__no_type_available__" disabled>
                         Nenhum tipo disponível
                       </SelectItem>
                     ) : (
@@ -548,7 +548,8 @@ export const RatePlanDialog = ({
             disabled={
               isLoadingData ||
               !name.trim() || 
-              !planType || 
+              !planType ||
+              planType === '__no_type_available__' ||
               selectedCategories.length === 0
             }
             title={
@@ -556,7 +557,7 @@ export const RatePlanDialog = ({
                 ? "Carregando dados do plano..." 
                 : !name.trim() 
                 ? "Nome do plano é obrigatório" 
-                : !planType 
+                : !planType || planType === '__no_type_available__'
                 ? "Tipo de plano é obrigatório" 
                 : selectedCategories.length === 0 
                 ? "Selecione pelo menos uma acomodação" 

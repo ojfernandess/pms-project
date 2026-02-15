@@ -288,33 +288,33 @@ const CancellationPolicies = () => {
                 />
                 
                 <Card className="p-4">
-                  <div className="space-y-2">
-                    <h4 className="font-semibold">Sobre o Processamento de No-Shows</h4>
-                    <p className="text-sm text-muted-foreground">
-                      O sistema detecta automaticamente reservas confirmadas que passaram do horário de check-in (18:00)
-                      sem que o hóspede tenha feito check-in. Ao processar, o sistema:
-                    </p>
-                    <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
-                      <li>Marca a reserva como "no-show"</li>
-                      <li>Calcula a multa de no-show baseada na política de cancelamento</li>
-                      <li>Cria uma fatura para a multa</li>
-                      <li>Registra um log de auditoria</li>
-                    </ul>
-                    <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <p className="text-sm font-semibold text-amber-800 mb-1">
-                        ⚠️ Função RPC não encontrada
-                      </p>
-                      <p className="text-xs text-amber-700">
-                        Para melhor performance, aplique a migration <code className="bg-amber-100 px-1 rounded">20251225000016_create_no_show_processor_function.sql</code> no Supabase.
-                        O sistema continuará funcionando usando o método via serviço como fallback.
-                      </p>
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-4">
-                      <strong>Recomendação:</strong> Configure um processamento automático diário às 19:00
-                      usando Supabase Edge Functions ou cron job.
-                    </p>
-                  </div>
-                </Card>
+              <div className="space-y-2">
+                <h4 className="font-semibold">Sobre o Processamento de No-Shows</h4>
+                <p className="text-sm text-muted-foreground">
+                  O sistema detecta automaticamente reservas confirmadas que passaram do horário de check-in (18:00)
+                  sem que o hóspede tenha feito check-in. Ao processar, o sistema:
+                </p>
+                <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
+                  <li>Marca a reserva como "no-show"</li>
+                  <li>Calcula a multa de no-show baseada na política de cancelamento</li>
+                  <li>Cria uma fatura para a multa</li>
+                  <li>Registra um log de auditoria</li>
+                </ul>
+                <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <p className="text-sm font-semibold text-amber-800 mb-1">
+                    ⚠️ Função RPC não encontrada
+                  </p>
+                  <p className="text-xs text-amber-700">
+                    Para melhor performance, aplique a migration <code className="bg-amber-100 px-1 rounded">20251225000016_create_no_show_processor_function.sql</code> no Supabase.
+                    O sistema continuará funcionando usando o método via serviço como fallback.
+                  </p>
+                </div>
+                <p className="text-sm text-muted-foreground mt-4">
+                  <strong>Recomendação:</strong> Configure um processamento automático diário às 19:00
+                  usando Supabase Edge Functions ou cron job.
+                </p>
+              </div>
+            </Card>
               </div>
             </div>
           </TabsContent>

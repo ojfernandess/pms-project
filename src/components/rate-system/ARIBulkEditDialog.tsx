@@ -54,7 +54,7 @@ export const ARIBulkEditDialog = ({
   const [overbookingAllowed, setOverbookingAllowed] = useState('');
   
   // Price
-  const [selectedPlanId, setSelectedPlanId] = useState<string>('');
+  const [selectedPlanId, setSelectedPlanId] = useState<string>('__all__');
   const [priceAction, setPriceAction] = useState<'set' | 'add' | 'subtract' | 'percentage'>('set');
   const [priceValue, setPriceValue] = useState('');
   
@@ -180,7 +180,7 @@ export const ARIBulkEditDialog = ({
       return;
     }
 
-    if (!selectedPlanId) {
+    if (!selectedPlanId || selectedPlanId === '__all__') {
       toast.error('Selecione um plano tarifário');
       return;
     }
@@ -250,7 +250,7 @@ export const ARIBulkEditDialog = ({
       
       const updates = dateStrings.flatMap(dateStr => {
         // Atualizar para todos os planos ou apenas o selecionado
-        const plansToUpdate = selectedPlanId 
+        const plansToUpdate = (selectedPlanId && selectedPlanId !== '__all__')
           ? [selectedPlanId]
           : ratePlans?.map(p => p.id) || [];
 
@@ -566,7 +566,7 @@ export const ARIBulkEditDialog = ({
                     <SelectValue placeholder="Todos os planos" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Todos os planos</SelectItem>
+                    <SelectItem value="__all__">Todos os planos</SelectItem>
                     {ratePlans?.filter(p => p.is_active).map((plan) => (
                       <SelectItem key={plan.id} value={plan.id}>
                         {plan.name}

@@ -1,6 +1,10 @@
 /**
  * Utilitário para fazer requisições de cálculo de preço em batch
- * com limite de concorrência e cancelamento de requisições anteriores
+ * com limite de concorrência e cancelamento de requisições anteriores.
+ *
+ * O preço retornado segue a liga de preços por quantidade de hóspedes (x1, x2, x3, x4):
+ * - adults=1 → Preço x1 | adults=2 → Preço padrão x2 | adults=3 → Preço x3 | adults≥4 → Preço x4
+ * Usado pelo motor de reservas e pela página pública de reserva.
  */
 
 interface PriceRequest {
@@ -8,6 +12,7 @@ interface PriceRequest {
   categoryId: string;
   planId: string;
   date: string;
+  /** Número de adultos (define qual preço da liga x1/x2/x3/x4 será usado) */
   adults: number;
   children: number;
 }

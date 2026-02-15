@@ -60,6 +60,8 @@ export const ARIGrid = ({
 }: ARIGridProps) => {
   const [viewDays, setViewDays] = useState(30);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  /** Categoria em edição em massa: definida ao clicar em "Edição da categoria" no card (permite abrir mesmo com "Todas" selecionadas) */
+  const [categoryBulkEditCategoryId, setCategoryBulkEditCategoryId] = useState<string | null>(null);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const [expandedPlans, setExpandedPlans] = useState<ExpandedPlans>({});
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
@@ -577,18 +579,14 @@ export const ARIGrid = ({
         // Aplicar flutuação ao preço BASE x1
         if (entry.occupancy_1_fluctuation_type === 'percentage') {
           // Porcentagem: aplicar ao preço base
-          // Exemplo: se basePrice = 190, adultPrice = 32.5, então baseCalculatedPrice = 157.5
-          // Se flutuação = -5%, então: 157.5 * (1 + (-5)/100) = 157.5 * 0.95 = 149.625
           finalPrice = baseCalculatedPrice * (1 + fluctuationValue / 100);
         } else {
           // Valor absoluto: adicionar/subtrair do preço base
-          // Exemplo: se baseCalculatedPrice = 157.5 e flutuação = -10, então: 157.5 - 10 = 147.5
           finalPrice = baseCalculatedPrice + fluctuationValue;
         }
         
-        // IMPORTANTE: Para x1, o preço não pode ser maior que basePrice
-        // Se a flutuação resultar em um preço maior que basePrice, limitar ao basePrice
-        finalPrice = Math.min(finalPrice, basePrice);
+        // Permitir que x1 ultrapasse o preço padrão quando há ajuste explícito (ex.: +10)
+        // Assim, ao editar e colocar +10 com preço padrão 190, o x1 passa a 200.
         
         console.log(`[ARIGrid] Aplicando flutuação x1:`, {
           basePrice,
@@ -596,16 +594,7 @@ export const ARIGrid = ({
           baseCalculatedPrice,
           fluctuationType: entry.occupancy_1_fluctuation_type,
           fluctuationValue: fluctuationValue,
-          calculation: entry.occupancy_1_fluctuation_type === 'percentage' 
-            ? `${baseCalculatedPrice} * (1 + ${fluctuationValue}/100) = ${baseCalculatedPrice * (1 + fluctuationValue / 100)}`
-            : `${baseCalculatedPrice} + ${fluctuationValue} = ${baseCalculatedPrice + fluctuationValue}`,
-          beforeLimit: entry.occupancy_1_fluctuation_type === 'percentage' 
-            ? baseCalculatedPrice * (1 + fluctuationValue / 100)
-            : baseCalculatedPrice + fluctuationValue,
           finalPrice,
-          isLimited: finalPrice < (entry.occupancy_1_fluctuation_type === 'percentage' 
-            ? baseCalculatedPrice * (1 + fluctuationValue / 100)
-            : baseCalculatedPrice + fluctuationValue),
         });
       }
     } else if (occupancy === 3) {
@@ -998,8 +987,16 @@ export const ARIGrid = ({
         // IMPORTANTE: Sempre usar o base_price específico desta data
         // Se não houver entrada, buscar valores padrão da categoria ou de outra data
         // CRÍTICO: Usar base_price e adult_price da entrada, não o preço calculado com flutuação
+        // IMPORTANTE: O base_price e adult_price devem ser os valores ORIGINAIS, não alterados por flutuações
+        // As flutuações são armazenadas separadamente e aplicadas apenas no cálculo de exibição
         let basePrice = entry?.base_price || 0;
         let adultPrice = entry?.adult_price || 0;
+        
+        // Se a entrada existe mas basePrice é 0, pode ser que esteja incorreto
+        // Neste caso, tentar buscar de outra fonte
+        if (entry && basePrice === 0) {
+          console.warn(`[ARIGrid] Entrada existe mas basePrice é 0 para ${format(date, 'yyyy-MM-dd')}, tentando buscar de outra fonte...`);
+        }
         
         // Log para debug
         console.log(`[ARIGrid] Data ${format(date, 'yyyy-MM-dd')}:`, {
@@ -1082,23 +1079,35 @@ export const ARIGrid = ({
           continue;
         }
         
-        // Calcular preço atual para esta ocupação baseado no base_price desta data
-        // IMPORTANTE: Este cálculo usa o basePrice e adultPrice específicos desta data
-        // CRÍTICO: NÃO usar calculatePriceForOccupancy aqui, pois isso aplicaria flutuações anteriores
-        // Precisamos do preço BASE (sem flutuação) para aplicar a nova flutuação
+        // Calcular preço atual para esta ocupação
+        // IMPORTANTE: Para x1, x3, x4, usar o preço ATUAL (com flutuações anteriores aplicadas)
+        // Para x2, usar o basePrice diretamente
         let currentPrice: number;
         if (occupancyPriceDialog.occupancy === 1) {
-          // x1 = base_price - adult_price (baseado no base_price desta data, SEM flutuação)
-          currentPrice = Math.max(0, basePrice - adultPrice);
+          // Para x1, x3, x4: usar calculatePriceForOccupancy para obter o preço atual (com flutuações anteriores)
+          // Isso permite aplicar a nova flutuação sobre o preço atual, não sobre o preço base
+          currentPrice = calculatePriceForOccupancy(entry, occupancyPriceDialog.occupancy);
+          // Se não há entrada ou o preço calculado é 0, usar o preço base
+          if (!entry || currentPrice === 0) {
+            currentPrice = Math.max(0, basePrice - adultPrice);
+          }
         } else if (occupancyPriceDialog.occupancy === 2) {
           // x2 = base_price (baseado no base_price desta data, SEM flutuação)
           currentPrice = basePrice;
         } else if (occupancyPriceDialog.occupancy === 3) {
-          // x3 = base_price + adult_price (baseado no base_price desta data, SEM flutuação)
-          currentPrice = basePrice + adultPrice;
+          // Para x3: usar calculatePriceForOccupancy para obter o preço atual (com flutuações anteriores)
+          currentPrice = calculatePriceForOccupancy(entry, occupancyPriceDialog.occupancy);
+          // Se não há entrada ou o preço calculado é 0, usar o preço base
+          if (!entry || currentPrice === 0) {
+            currentPrice = basePrice + adultPrice;
+          }
         } else if (occupancyPriceDialog.occupancy === 4) {
-          // x4 = base_price + (adult_price * 2) (baseado no base_price desta data, SEM flutuação)
-          currentPrice = basePrice + (adultPrice * 2);
+          // Para x4: usar calculatePriceForOccupancy para obter o preço atual (com flutuações anteriores)
+          currentPrice = calculatePriceForOccupancy(entry, occupancyPriceDialog.occupancy);
+          // Se não há entrada ou o preço calculado é 0, usar o preço base
+          if (!entry || currentPrice === 0) {
+            currentPrice = basePrice + (adultPrice * 2);
+          }
         } else {
           currentPrice = basePrice;
         }
@@ -1147,23 +1156,65 @@ export const ARIGrid = ({
         // Isso garante que o preço padrão nunca seja alterado acidentalmente
 
         if (occupancyPriceDialog.occupancy === 1) {
-          // Preço x1 = base_price - adult_price (quando não há flutuação)
-          // Com flutuação: x1 = basePrice * (1 + fluctuation/100) ou basePrice + fluctuation
-          // IMPORTANTE: Não alterar adult_price, apenas salvar a flutuação
-          // O preço será calculado dinamicamente pela função calculatePriceForOccupancy
+          // IMPORTANTE: A nova flutuação é aplicada sobre o preço ATUAL (que já inclui flutuações anteriores)
+          // Precisamos calcular qual flutuação (em relação ao preço base) resultaria no novo preço
+          
           updateData.base_price = basePrice; // Manter base_price fixo (preço padrão desta data)
-          updateData.adult_price = adultPrice; // Manter adult_price original (não alterar)
-          // Salvar tipo e valor da flutuação (garantir conversão para Number)
-          // IMPORTANTE: Substituir a flutuação anterior, não adicionar a ela
+          updateData.adult_price = adultPrice; // Manter adult_price original
+          
+          // Calcular o preço base x1 (sem flutuação)
+          const baseX1Price = Math.max(0, basePrice - adultPrice);
+          
+          // Aplicar a nova flutuação sobre o preço ATUAL (que já inclui flutuações anteriores)
+          let newPrice: number;
+          if (data.fluctuationType === 'percentage') {
+            // Porcentagem: aplicar sobre o preço atual
+            newPrice = currentPrice * (1 + Number(data.fluctuationValue) / 100);
+          } else {
+            // Valor absoluto: adicionar/subtrair do preço atual
+            newPrice = currentPrice + Number(data.fluctuationValue);
+          }
+          
+          // Permitir que o preço x1 altere mesmo quando igual ao padrão: aplicar o valor solicitado
+          // (não limitar a basePrice para que +10, por exemplo, produza 190+10=200)
+          
+          // Calcular qual flutuação (em relação ao preço base) resultaria no novo preço
+          let calculatedFluctuationValue: number;
+          if (data.fluctuationType === 'percentage') {
+            // Se porcentagem: baseX1Price * (1 + x/100) = newPrice
+            // Então: 1 + x/100 = newPrice / baseX1Price
+            // Então: x/100 = (newPrice / baseX1Price) - 1
+            // Então: x = ((newPrice / baseX1Price) - 1) * 100
+            if (baseX1Price > 0) {
+              calculatedFluctuationValue = ((newPrice / baseX1Price) - 1) * 100;
+            } else {
+              calculatedFluctuationValue = 0;
+            }
+          } else {
+            // Se valor absoluto: baseX1Price + x = newPrice
+            // Então: x = newPrice - baseX1Price
+            calculatedFluctuationValue = newPrice - baseX1Price;
+          }
+          
+          // Salvar tipo e valor da flutuação calculada
           updateData.occupancy_1_fluctuation_type = data.fluctuationType;
-          updateData.occupancy_1_fluctuation_value = Number(data.fluctuationValue);
+          updateData.occupancy_1_fluctuation_value = calculatedFluctuationValue;
+          
+          // Validar que o valor da flutuação é um número válido
+          if (isNaN(updateData.occupancy_1_fluctuation_value)) {
+            console.error(`[ARIGrid] Valor de flutuação inválido para x1: ${data.fluctuationValue}`);
+            continue; // Pular esta data se o valor for inválido
+          }
           
           console.log(`[ARIGrid] Salvando flutuação x1 para ${format(date, 'yyyy-MM-dd')}:`, {
             fluctuationType: updateData.occupancy_1_fluctuation_type,
             fluctuationValue: updateData.occupancy_1_fluctuation_value,
+            inputFluctuationValue: Number(data.fluctuationValue),
             basePrice: updateData.base_price,
             adultPrice: updateData.adult_price,
-            currentPrice,
+            baseX1Price: baseX1Price,
+            currentPrice: currentPrice,
+            newPrice: newPrice,
             previousFluctuation: entry ? {
               type: entry.occupancy_1_fluctuation_type,
               value: entry.occupancy_1_fluctuation_value,
@@ -1195,44 +1246,108 @@ export const ARIGrid = ({
           updateData.base_price = newPrice;
           updateData.adult_price = adultPrice; // Manter adult_price fixo
         } else if (occupancyPriceDialog.occupancy === 3) {
-          // Preço x3 = base_price + adult_price (quando não há flutuação)
-          // Com flutuação: x3 será calculado dinamicamente pela função calculatePriceForOccupancy
-          // IMPORTANTE: Não alterar adult_price, apenas salvar a flutuação
-          // O preço será calculado dinamicamente pela função calculatePriceForOccupancy
+          // IMPORTANTE: A nova flutuação é aplicada sobre o preço ATUAL (que já inclui flutuações anteriores)
+          // Precisamos calcular qual flutuação (em relação ao preço base) resultaria no novo preço
+          
           updateData.base_price = basePrice; // Manter base_price fixo (preço padrão desta data)
-          updateData.adult_price = adultPrice; // Manter adult_price original (não alterar)
-          // Salvar tipo e valor da flutuação (garantir conversão para Number)
+          updateData.adult_price = adultPrice; // Manter adult_price original
+          
+          // Calcular o preço base x3 (sem flutuação)
+          const baseX3Price = basePrice + adultPrice;
+          
+          // Aplicar a nova flutuação sobre o preço ATUAL (que já inclui flutuações anteriores)
+          let newPrice: number;
+          if (data.fluctuationType === 'percentage') {
+            newPrice = currentPrice * (1 + Number(data.fluctuationValue) / 100);
+          } else {
+            newPrice = currentPrice + Number(data.fluctuationValue);
+          }
+          
+          // Calcular qual flutuação (em relação ao preço base) resultaria no novo preço
+          let calculatedFluctuationValue: number;
+          if (data.fluctuationType === 'percentage') {
+            if (baseX3Price > 0) {
+              calculatedFluctuationValue = ((newPrice / baseX3Price) - 1) * 100;
+            } else {
+              calculatedFluctuationValue = 0;
+            }
+          } else {
+            calculatedFluctuationValue = newPrice - baseX3Price;
+          }
+          
+          // Salvar tipo e valor da flutuação calculada
           updateData.occupancy_3_fluctuation_type = data.fluctuationType;
-          updateData.occupancy_3_fluctuation_value = Number(data.fluctuationValue);
+          updateData.occupancy_3_fluctuation_value = calculatedFluctuationValue;
+          
+          // Validar que o valor da flutuação é um número válido
+          if (isNaN(updateData.occupancy_3_fluctuation_value)) {
+            console.error(`[ARIGrid] Valor de flutuação inválido para x3: ${data.fluctuationValue}`);
+            continue; // Pular esta data se o valor for inválido
+          }
           
           console.log(`[ARIGrid] Salvando flutuação x3 para ${format(date, 'yyyy-MM-dd')}:`, {
             fluctuationType: updateData.occupancy_3_fluctuation_type,
             fluctuationValue: updateData.occupancy_3_fluctuation_value,
+            inputFluctuationValue: Number(data.fluctuationValue),
             basePrice: updateData.base_price,
             adultPrice: updateData.adult_price,
-            currentPrice,
+            baseX3Price: baseX3Price,
+            currentPrice: currentPrice,
+            newPrice: newPrice,
             previousFluctuation: entry ? {
               type: entry.occupancy_3_fluctuation_type,
               value: entry.occupancy_3_fluctuation_value,
             } : null,
           });
         } else if (occupancyPriceDialog.occupancy === 4) {
-          // Preço x4 = base_price + (adult_price * 2) (quando não há flutuação)
-          // Com flutuação: x4 será calculado dinamicamente pela função calculatePriceForOccupancy
-          // IMPORTANTE: Não alterar adult_price, apenas salvar a flutuação
-          // O preço será calculado dinamicamente pela função calculatePriceForOccupancy
+          // IMPORTANTE: A nova flutuação é aplicada sobre o preço ATUAL (que já inclui flutuações anteriores)
+          // Precisamos calcular qual flutuação (em relação ao preço base) resultaria no novo preço
+          
           updateData.base_price = basePrice; // Manter base_price fixo (preço padrão desta data)
-          updateData.adult_price = adultPrice; // Manter adult_price original (não alterar)
-          // Salvar tipo e valor da flutuação (garantir conversão para Number)
+          updateData.adult_price = adultPrice; // Manter adult_price original
+          
+          // Calcular o preço base x4 (sem flutuação)
+          const baseX4Price = basePrice + (adultPrice * 2);
+          
+          // Aplicar a nova flutuação sobre o preço ATUAL (que já inclui flutuações anteriores)
+          let newPrice: number;
+          if (data.fluctuationType === 'percentage') {
+            newPrice = currentPrice * (1 + Number(data.fluctuationValue) / 100);
+          } else {
+            newPrice = currentPrice + Number(data.fluctuationValue);
+          }
+          
+          // Calcular qual flutuação (em relação ao preço base) resultaria no novo preço
+          let calculatedFluctuationValue: number;
+          if (data.fluctuationType === 'percentage') {
+            if (baseX4Price > 0) {
+              calculatedFluctuationValue = ((newPrice / baseX4Price) - 1) * 100;
+            } else {
+              calculatedFluctuationValue = 0;
+            }
+          } else {
+            calculatedFluctuationValue = newPrice - baseX4Price;
+          }
+          
+          // Salvar tipo e valor da flutuação calculada
           updateData.occupancy_4_fluctuation_type = data.fluctuationType;
-          updateData.occupancy_4_fluctuation_value = Number(data.fluctuationValue);
+          updateData.occupancy_4_fluctuation_value = calculatedFluctuationValue;
+          
+          // Validar que o valor da flutuação é um número válido
+          if (isNaN(updateData.occupancy_4_fluctuation_value)) {
+            console.error(`[ARIGrid] Valor de flutuação inválido para x4: ${data.fluctuationValue}`);
+            continue; // Pular esta data se o valor for inválido
+          }
           
           console.log(`[ARIGrid] Salvando flutuação x4 para ${format(date, 'yyyy-MM-dd')}:`, {
             fluctuationType: updateData.occupancy_4_fluctuation_type,
             fluctuationValue: updateData.occupancy_4_fluctuation_value,
+            inputFluctuationValue: Number(data.fluctuationValue),
             basePrice: updateData.base_price,
             adultPrice: updateData.adult_price,
-            currentPrice,
+            baseX4Price: baseX4Price,
+            currentPrice: currentPrice,
+            newPrice: newPrice,
             previousFluctuation: entry ? {
               type: entry.occupancy_4_fluctuation_type,
               value: entry.occupancy_4_fluctuation_value,
@@ -1324,7 +1439,6 @@ export const ARIGrid = ({
           } else {
             expectedPrices.x1 = expectedPrices.x1 + Number(updateData.occupancy_1_fluctuation_value);
           }
-          expectedPrices.x1 = Math.min(expectedPrices.x1, updateData.base_price);
         }
         if (updateData.occupancy_3_fluctuation_type && updateData.occupancy_3_fluctuation_value !== null) {
           if (updateData.occupancy_3_fluctuation_type === 'percentage') {
@@ -1392,8 +1506,8 @@ export const ARIGrid = ({
       });
       
       console.log('[ARIGrid] Refetch concluído:', {
-        refetchCount: refetchResult.length,
-        rateCalendarLength: rateCalendar?.length,
+        refetchCount: Array.isArray(refetchResult) ? refetchResult.length : 0,
+        rateCalendarLength: rateCalendar?.length || 0,
       });
       
       // Fechar o modal após salvar
@@ -1414,7 +1528,19 @@ export const ARIGrid = ({
       );
     } catch (error: any) {
       console.error('[ARIGrid] Erro ao salvar preço por ocupação:', error);
-      toast.error('Erro ao salvar: ' + error.message);
+      const errorMessage = error?.message || error?.toString() || 'Erro desconhecido';
+      
+      // Verificar se o erro é relacionado a 'length'
+      if (errorMessage.includes('length') || errorMessage.includes('Cannot read properties')) {
+        console.error('[ARIGrid] Erro relacionado a length:', {
+          error,
+          updateDataArrayLength: updateDataArray?.length,
+          result: result,
+          stack: error?.stack,
+        });
+      }
+      
+      toast.error(`Erro ao salvar: ${errorMessage}`);
     }
   };
 
@@ -1899,7 +2025,8 @@ export const ARIGrid = ({
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  // TODO: Abrir dialog de edição de categoria
+                  setCategoryBulkEditCategoryId(category.id);
+                  setBulkEditOpen(true);
                 }}
               >
                 Edição da categoria
@@ -2255,19 +2382,25 @@ export const ARIGrid = ({
         </Card>
       ))}
 
-      {/* Dialog de edição em massa */}
-      {selectedCategory !== 'all' && (
-        <ARIBulkEditDialog
-          open={bulkEditOpen}
-          onOpenChange={setBulkEditOpen}
-          categoryId={selectedCategory}
-          startDate={startDate}
-          endDate={addDays(startDate, viewDays - 1)}
-          onSuccess={() => {
-            setRefetchTrigger(prev => prev + 1);
-          }}
-        />
-      )}
+      {/* Dialog de edição em massa / edição de categoria (abre pelo toolbar ou pelo botão "Edição da categoria" de cada card) */}
+      {(() => {
+        const effectiveCategoryId = categoryBulkEditCategoryId ?? (selectedCategory !== 'all' ? selectedCategory : null);
+        return effectiveCategoryId ? (
+          <ARIBulkEditDialog
+            open={bulkEditOpen}
+            onOpenChange={(open) => {
+              setBulkEditOpen(open);
+              if (!open) setCategoryBulkEditCategoryId(null);
+            }}
+            categoryId={effectiveCategoryId}
+            startDate={startDate}
+            endDate={addDays(startDate, viewDays - 1)}
+            onSuccess={() => {
+              setRefetchTrigger(prev => prev + 1);
+            }}
+          />
+        ) : null;
+      })()}
 
       {/* Dialog de edição de status */}
       <Dialog open={statusEditDialog.open} onOpenChange={(open) => setStatusEditDialog({ ...statusEditDialog, open })}>
@@ -2326,18 +2459,27 @@ export const ARIGrid = ({
           planName={occupancyPriceDialog.planName}
           occupancy={occupancyPriceDialog.occupancy}
           currentPrice={(() => {
-            // Para edição em massa (x1, x3, x4), não mostrar preço atual
-            // pois a alteração será baseada no preço padrão de cada data
-            if (occupancyPriceDialog.date === null || occupancyPriceDialog.occupancy !== 2) {
-              return 0; // Não mostrar preço atual em edições em massa
+            // Para edição em massa, usar a primeira data futura como referência
+            if (occupancyPriceDialog.date === null) {
+              const firstFutureDate = visibleDates.find(date => date >= startOfDay(new Date()));
+              if (!firstFutureDate) return 0;
+              
+              const entry = getRateCalendarEntry(
+                occupancyPriceDialog.categoryId,
+                occupancyPriceDialog.planId,
+                firstFutureDate
+              );
+              // Usar calculatePriceForOccupancy para obter o preço atual (com flutuações anteriores)
+              return calculatePriceForOccupancy(entry, occupancyPriceDialog.occupancy);
             }
             
-            // Se for edição de uma data específica (x2), usar o preço dessa data
+            // Se for edição de uma data específica, usar o preço dessa data
             const entry = getRateCalendarEntry(
               occupancyPriceDialog.categoryId,
               occupancyPriceDialog.planId,
               occupancyPriceDialog.date!
             );
+            // Usar calculatePriceForOccupancy para obter o preço atual (com flutuações anteriores)
             return calculatePriceForOccupancy(entry, occupancyPriceDialog.occupancy);
           })()}
           basePrice={(() => {
