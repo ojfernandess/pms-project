@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { RuleSimulationPreview } from "./RuleSimulationPreview";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,6 +23,7 @@ interface DynamicRuleDialogProps {
   rule?: DynamicPricingRule | null;
   categories: any[];
   ratePlans: any[];
+  rateCalendar?: Array<{ pricing_plan_id: string; category_id: string; date: string; base_price: number }>;
   onSave: (rule: Partial<DynamicPricingRule>) => void;
 }
 
@@ -31,6 +33,7 @@ export const DynamicRuleDialog = ({
   rule,
   categories,
   ratePlans,
+  rateCalendar = [],
   onSave,
 }: DynamicRuleDialogProps) => {
   const [formData, setFormData] = useState({
@@ -925,6 +928,16 @@ export const DynamicRuleDialog = ({
               onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
             />
           </div>
+
+          {/* Simulador: prévia do impacto antes de salvar (novas regras) */}
+          {!rule && categories.length > 0 && ratePlans.length > 0 && (
+            <RuleSimulationPreview
+              formData={formData}
+              rateCalendar={rateCalendar}
+              categories={categories}
+              ratePlans={ratePlans}
+            />
+          )}
         </div>
 
         <div className="flex justify-end gap-3 mt-6">

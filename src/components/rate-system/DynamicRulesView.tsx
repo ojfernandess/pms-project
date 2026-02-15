@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Edit2, Trash2, GripVertical, AlertCircle } from "lucide-react";
 import { DynamicPricingRule } from "@/hooks/useRateSystem";
 import { DynamicRuleDialog } from "./DynamicRuleDialog";
+import { RuleImpactSummary } from "./RuleImpactSummary";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +25,7 @@ interface DynamicRulesViewProps {
   isLoading: boolean;
   categories: any[];
   ratePlans: any[];
+  rateCalendar?: Array<{ pricing_plan_id: string; category_id: string; date: string; base_price: number }>;
   onCreate: (rule: Partial<DynamicPricingRule>) => void;
   onUpdate: (id: string, rule: Partial<DynamicPricingRule>) => void;
   onDelete: (id: string) => void;
@@ -34,6 +36,7 @@ export const DynamicRulesView = ({
   isLoading,
   categories,
   ratePlans,
+  rateCalendar = [],
   onCreate,
   onUpdate,
   onDelete,
@@ -142,6 +145,15 @@ export const DynamicRulesView = ({
           Nova Regra
         </Button>
       </div>
+
+      {rateCalendar.length > 0 && rules.filter((r) => r.is_active).length > 0 && (
+        <RuleImpactSummary
+          rules={rules}
+          rateCalendar={rateCalendar}
+          categories={categories}
+          ratePlans={ratePlans}
+        />
+      )}
 
       {rules.length === 0 ? (
         <Card className="p-12 text-center">
@@ -280,6 +292,7 @@ export const DynamicRulesView = ({
         rule={selectedRule}
         categories={categories}
         ratePlans={ratePlans}
+        rateCalendar={rateCalendar}
         onSave={handleSave}
       />
 

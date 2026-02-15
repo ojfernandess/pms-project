@@ -11,12 +11,13 @@ import { ptBR } from "date-fns/locale";
 import { CalendarIcon, ChevronLeft, ChevronRight, Filter, Download, Edit2, DollarSign, TrendingUp, Users, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatCurrency, formatCurrencyWithoutZeroCents } from "@/lib/reservationUtils";
+import { RatePriceBreakdown } from "./RatePriceBreakdown";
 import { useRateSystem, RatePlan } from "@/hooks/useRateSystem";
 import { useRateMetrics } from "@/hooks/useRateMetrics";
 import { toast } from "sonner";
-import { logSystemActivity } from "@/lib/activityLogger";
 import { checkEstablishmentFeatureAccess } from "@/lib/featureAccess";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { useDynamicRatePrices } from "@/contexts/DynamicRatePricesContext";
 import { RateEditDialog } from "./RateEditDialog";
 import { BulkEditDialog } from "./BulkEditDialog";
 import { RateMetricsSummary } from "./RateMetricsSummary";
@@ -53,8 +54,6 @@ export const RateCalendarGrid = ({
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [createRateOpen, setCreateRateOpen] = useState(false);
   const [calculatedPrices, setCalculatedPrices] = useState<Map<string, number>>(new Map());
-  const [isSavingPrices, setIsSavingPrices] = useState(false);
-  const [lastSavedPrices, setLastSavedPrices] = useState<Map<string, number>>(new Map());
   const [categoryOccupancy, setCategoryOccupancy] = useState<Map<string, number>>(new Map()); // key: categoryId-dateStr, value: occupancy
   const [dynamicPriceKeys, setDynamicPriceKeys] = useState<Set<string>>(new Set()); // Rastrear quais preços foram alterados por regras dinâmicas
   const [hasFeatureAccess, setHasFeatureAccess] = useState<boolean | null>(null); // null = ainda não verificado
@@ -72,6 +71,7 @@ export const RateCalendarGrid = ({
   } = useRateSystem();
 
   const { getMetricsForDate, calculateOccupancy, calculatePickupRate } = useRateMetrics();
+  const dynamicPrices = useDynamicRatePrices();
 
   // Verificar se a empresa tem acesso à funcionalidade de automação de regras dinâmicas
   useEffect(() => {
@@ -131,32 +131,18 @@ export const RateCalendarGrid = ({
   // Limpar cache quando o plano mudar
   useEffect(() => {
     setCalculatedPrices(new Map());
-    setLastSavedPrices(new Map());
-    setIsSavingPrices(false);
     setDynamicPriceKeys(new Set()); // Limpar também os preços dinâmicos
   }, [selectedRatePlan]);
 
   // Calcular preços quando o plano ou período mudar (apenas para datas sem entrada no calendário)
   useEffect(() => {
     if (!selectedRatePlan || filteredCategories.length === 0 || visibleDates.length === 0) {
-      console.log("RateCalendarGrid: Condições não atendidas para calcular preços", {
-        selectedRatePlan,
-        categoriesCount: filteredCategories.length,
-        datesCount: visibleDates.length
-      });
       return;
     }
 
-    console.log("RateCalendarGrid: Iniciando cálculo de preços com regras dinâmicas", {
-      selectedRatePlan,
-      categoriesCount: filteredCategories.length,
-      datesCount: visibleDates.length,
-      plansCount: activePlansToShow.length
-    });
-
     // Filtrar datas baseado nas regras dinâmicas ativas
     // Se houver regras, calcular apenas para datas dentro do período das regras
-    let datesToProcess = visibleDates.slice(0, 14);
+    let datesToProcess = visibleDates;
     
     if (dynamicRules && dynamicRules.length > 0) {
       // Encontrar o período mínimo e máximo das regras ativas
@@ -189,40 +175,36 @@ export const RateCalendarGrid = ({
               if (ruleEnd && dateObj > ruleEnd) return false;
               return true;
             });
-          }).slice(0, 14);
-          
-          console.log("RateCalendarGrid: Filtrando datas baseado nas regras dinâmicas", {
-            totalDates: visibleDates.length,
-            filteredDates: datesToProcess.length,
-            minDate: minDate ? format(minDate, "yyyy-MM-dd") : null,
-            maxDate: maxDate ? format(maxDate, "yyyy-MM-dd") : null
           });
+          
         }
       }
     }
     
-    // Limitar cálculo para evitar sobrecarga (apenas primeiras 3 categorias)
-    const categoriesToProcess = filteredCategories.slice(0, 3);
+    // Limites para evitar ERR_INSUFFICIENT_RESOURCES no navegador
+    const categoriesToProcess = filteredCategories.slice(0, 4);
     const plansToProcess = selectedRatePlan === 'all' ? activePlansToShow.slice(0, 3) : activePlansToShow;
     
-    console.log("RateCalendarGrid: Processando preços", {
-      categories: categoriesToProcess.length,
-      dates: datesToProcess.length,
-      plans: plansToProcess.length
-    });
-
     const calculateMissingPrices = async () => {
         // Inicializar com os preços do rate_calendar para evitar flash
       const newPrices = new Map<string, number>();
       
-        // Primeiro, preencher com os valores do rate_calendar OU do cache existente
+        // Primeiro, preencher com os valores do cache compartilhado (sobrevive troca de aba)
+        if (dynamicPrices) {
+          const snapshot = dynamicPrices.getPricesSnapshot();
+          Object.entries(snapshot).forEach(([k, v]) => {
+            if (v > 0) newPrices.set(k, v);
+          });
+        }
+        // Depois, preencher com rate_calendar ou cache local para chaves ainda vazias
         for (const plan of plansToProcess) {
           for (const category of categoriesToProcess) {
             for (const date of datesToProcess) {
               const dateStr = format(date, "yyyy-MM-dd");
               const key = `${plan.id}-${category.id}-${dateStr}`;
               
-              // Verificar se já está no cache calculado
+              if (newPrices.has(key) && (newPrices.get(key) || 0) > 0) continue;
+              
               const cachedPrice = calculatedPrices.get(key);
               if (cachedPrice && cachedPrice > 0) {
                 newPrices.set(key, cachedPrice);
@@ -260,229 +242,94 @@ export const RateCalendarGrid = ({
           return merged;
         });
         
-        // Agora calcular os preços com regras dinâmicas
-        // Só aplicar se a empresa tiver acesso à funcionalidade
+        // Calcular preços com regras dinâmicas (evitar ERR_INSUFFICIENT_RESOURCES)
         if (hasFeatureAccess === true) {
-          for (const plan of plansToProcess) {
-            for (const category of categoriesToProcess) {
-              for (const date of datesToProcess) {
-              const dateStr = format(date, "yyyy-MM-dd");
-              const key = `${plan.id}-${category.id}-${dateStr}`;
-              
-              // Calcular o preço usando a função para aplicar regras dinâmicas
-              // Só atualizar se o preço calculado for diferente do que já está no newPrices
-              const currentPrice = newPrices.get(key) || 0;
-              
-              try {
-                console.log(`RateCalendarGrid: Calculando preço para ${category.name} - ${plan.name} em ${dateStr}`);
-                const calculatedPrice = await calculateRatePrice(category.id, plan.id, date);
-                console.log(`RateCalendarGrid: Preço calculado: R$ ${calculatedPrice.toFixed(2)} para ${category.name} - ${plan.name} em ${dateStr} (atual: R$ ${currentPrice.toFixed(2)})`);
-                
-                // Verificar se o preço foi alterado pelas regras dinâmicas
-                const rateEntry = filteredRateCalendar.find(
-                  r => r.pricing_plan_id === plan.id &&
-                  r.category_id === category.id &&
-                  r.date === dateStr
-                );
-                const originalPrice = rateEntry?.base_price || Number(category.base_price) || 0;
-                const isDynamicPrice = calculatedPrice > 0 && Math.abs(calculatedPrice - originalPrice) > 0.01;
-                
-                // Só atualizar se o preço calculado for diferente (mais de 0.01 de diferença)
-                if (calculatedPrice > 0 && Math.abs(calculatedPrice - currentPrice) > 0.01) {
-                  newPrices.set(key, calculatedPrice);
-                  console.log(`RateCalendarGrid: Preço atualizado de R$ ${currentPrice.toFixed(2)} para R$ ${calculatedPrice.toFixed(2)}`);
-                  
-                  // Marcar como preço alterado por regras dinâmicas
-                  if (isDynamicPrice) {
-                    setDynamicPriceKeys(prev => new Set(prev).add(key));
-                  }
-                } else if (calculatedPrice > 0 && currentPrice === 0) {
-                  // Se não havia preço, usar o calculado
-                  newPrices.set(key, calculatedPrice);
-                  if (isDynamicPrice) {
-                    setDynamicPriceKeys(prev => new Set(prev).add(key));
-                  }
-                }
-                // Se o preço calculado é igual ou menor que 0, manter o que já está no newPrices
-              } catch (error) {
-                // Se houver erro, manter o preço que já está no newPrices (do rate_calendar)
-                console.warn(`Erro ao calcular preço para ${category.name} - ${plan.name} em ${dateStr}:`, error);
-                // Não alterar newPrices, já tem o valor do rate_calendar
-              }
-            }
-          }
-        }
-      } else if (hasFeatureAccess === false) {
-        console.log('RateCalendarGrid: Empresa não tem acesso à automação de regras dinâmicas');
-      }
-      
-      console.log(`RateCalendarGrid: Preços calculados armazenados:`, {
-        count: newPrices.size,
-        prices: Array.from(newPrices.entries()).slice(0, 5) // Mostrar apenas os primeiros 5
-      });
-      
-      // Salvar os preços calculados no rate_calendar para persistir as alterações das regras dinâmicas
-      // Apenas se não estiver salvando, houver diferença dos últimos preços salvos E a empresa tiver acesso
-      if (!isSavingPrices && newPrices.size > 0 && dynamicRules && dynamicRules.length > 0 && hasFeatureAccess === true) {
-        const activeRules = dynamicRules.filter(r => r.is_active);
-        if (activeRules.length > 0) {
-          // Verificar se há mudança na ocupação E diferença nos preços
-          let hasOccupancyChange = false;
-          let hasPriceChanges = false;
-          
-          // Verificar mudanças na ocupação por categoria/data
-      for (const category of categoriesToProcess) {
-        for (const date of datesToProcess) {
-          const dateStr = format(date, "yyyy-MM-dd");
-              const occupancyKey = `${category.id}-${dateStr}`;
-              const currentOccupancy = categoryOccupancy.get(occupancyKey);
-              const previousOccupancy = lastSavedPrices.get(`occupancy-${occupancyKey}`);
-              
-              if (currentOccupancy !== undefined) {
-                if (previousOccupancy === undefined || Math.abs(previousOccupancy - currentOccupancy) > 1) {
-                  hasOccupancyChange = true;
-                  break;
-                }
-              }
-            }
-            if (hasOccupancyChange) break;
-          }
-          
-          // Verificar mudanças nos preços
-          for (const [key, price] of newPrices.entries()) {
-            const lastSaved = lastSavedPrices.get(key);
-            if (lastSaved === undefined || Math.abs(lastSaved - price) > 0.01) {
-              hasPriceChanges = true;
-              break;
-            }
-          }
-          
-          // Só salvar se houver mudança na ocupação E mudança no preço
-          if (hasOccupancyChange && hasPriceChanges) {
-            console.log('RateCalendarGrid: Ocupação e preços mudaram, salvando...');
-            setIsSavingPrices(true);
-            try {
-              const entriesToSave: Array<{
-                pricing_plan_id: string;
-                category_id: string;
-                date: string;
-                base_price: number;
-              }> = [];
-              
-              // Reconstruir as entradas usando os dados que já processamos
-              for (const plan of plansToProcess) {
-                for (const category of categoriesToProcess) {
-                  for (const date of datesToProcess) {
-                    const dateStr = format(date, "yyyy-MM-dd");
-                    const key = `${plan.id}-${category.id}-${dateStr}`;
-                    const calculatedPrice = newPrices.get(key);
-                    
-                    if (calculatedPrice && calculatedPrice > 0) {
-                      // Verificar se o preço no calendário é diferente do calculado
-                      const rateEntry = filteredRateCalendar.find(
-                        r => r.pricing_plan_id === plan.id &&
-                        r.category_id === category.id &&
-                        r.date === dateStr
-                      );
-                      
-                      // Só salvar se o preço for diferente do que está no calendário
-                      if (!rateEntry || Math.abs(rateEntry.base_price - calculatedPrice) > 0.01) {
-                        entriesToSave.push({
-                          pricing_plan_id: plan.id,
-                          category_id: category.id,
-                          date: dateStr,
-                          base_price: calculatedPrice,
-                        });
-                      }
-                    }
-                  }
-                }
-              }
-              
-              if (entriesToSave.length > 0) {
-                console.log(`RateCalendarGrid: Salvando ${entriesToSave.length} preços calculados no rate_calendar`);
-                await upsertRateCalendar(entriesToSave);
-                console.log(`RateCalendarGrid: Preços salvos com sucesso`);
-                
-                // Registrar logs de atividades para cada preço alterado
-                for (const entry of entriesToSave) {
-                  const category = categoriesToProcess.find(c => c.id === entry.category_id);
-                  const plan = plansToProcess.find(p => p.id === entry.pricing_plan_id);
+          const hasEnrichedData = filteredRateCalendar.some(
+            (e) => e && "original_base_price" in e && (e as { original_base_price?: number }).original_base_price !== undefined
+          );
+
+          if (hasEnrichedData) {
+            const enrichedKeys = new Set<string>();
+            for (const plan of plansToProcess) {
+              for (const category of categoriesToProcess) {
+                for (const date of datesToProcess) {
+                  const dateStr = format(date, "yyyy-MM-dd");
                   const rateEntry = filteredRateCalendar.find(
-                    r => r.pricing_plan_id === entry.pricing_plan_id &&
-                    r.category_id === entry.category_id &&
-                    r.date === entry.date
+                    (r) => r.pricing_plan_id === plan.id && r.category_id === category.id && r.date === dateStr
                   );
-                  const oldPrice = rateEntry?.base_price || 0;
-                  
-                  if (Math.abs(oldPrice - entry.base_price) > 0.01) {
-                    await logSystemActivity({
-                      actionType: "dynamic_rule_applied",
-                      entityType: "rate_calendar",
-                      entityId: rateEntry?.id,
-                      description: `Tarifa ajustada por regra dinâmica: ${category?.name || 'Categoria'} - ${plan?.name || 'Plano'} em ${format(new Date(entry.date), "dd/MM/yyyy", { locale: ptBR })}`,
-                      oldValues: {
-                        base_price: oldPrice,
-                        date: entry.date,
-                        category_id: entry.category_id,
-                        pricing_plan_id: entry.pricing_plan_id,
-                      },
-                      newValues: {
-                        base_price: entry.base_price,
-                        date: entry.date,
-                        category_id: entry.category_id,
-                        pricing_plan_id: entry.pricing_plan_id,
-                      },
-                      metadata: {
-                        applied_by: "dynamic_pricing_rule",
-                        rule_count: activeRules.length,
-                        occupancy: categoryOccupancy.get(`${entry.category_id}-${entry.date}`) || 0,
-                      },
-                    });
+                  const entry = rateEntry as { base_price?: number; original_base_price?: number } | undefined;
+                  if (entry?.original_base_price !== undefined && entry?.base_price && Math.abs(entry.base_price - entry.original_base_price) > 0.01) {
+                    const key = `${plan.id}-${category.id}-${dateStr}`;
+                    newPrices.set(key, entry.base_price);
+                    enrichedKeys.add(key);
                   }
                 }
-                
-                // Atualizar o mapa de últimos preços salvos
-                setLastSavedPrices(new Map(newPrices));
-                
-                // Atualizar também as ocupações salvas
-                const newOccupancyMap = new Map<string, number>();
-                for (const category of categoriesToProcess) {
-                  for (const date of datesToProcess) {
-                    const dateStr = format(date, "yyyy-MM-dd");
-                    const occupancyKey = `${category.id}-${dateStr}`;
-                    const occupancy = categoryOccupancy.get(occupancyKey);
-                    if (occupancy !== undefined) {
-                      newOccupancyMap.set(`occupancy-${occupancyKey}`, occupancy);
-                    }
-                  }
-                }
-                setLastSavedPrices(prev => {
-                  const updated = new Map(prev);
-                  newOccupancyMap.forEach((value, key) => updated.set(key, value));
-                  return updated;
-                });
-                
-                // NÃO chamar refetchRateCalendar aqui para evitar loop infinito
-                // Os preços serão atualizados na próxima renderização natural
               }
-              
-              setIsSavingPrices(false);
-            } catch (error) {
-              console.error('RateCalendarGrid: Erro ao salvar preços calculados:', error);
-              setIsSavingPrices(false);
-              // Não bloquear a exibição se houver erro ao salvar
+            }
+            if (enrichedKeys.size > 0) {
+              setDynamicPriceKeys((prev) => new Set([...prev, ...enrichedKeys]));
             }
           } else {
-            if (!hasOccupancyChange) {
-              console.log('RateCalendarGrid: Ocupação não mudou, não salvando preços');
-            } else if (!hasPriceChanges) {
-              console.log('RateCalendarGrid: Preços não mudaram, não salvando');
+            const BATCH_SIZE = 2;
+            const BATCH_DELAY_MS = 300;
+            const MAX_TASKS = 120;
+            const tasks: Array<{ key: string; plan: typeof plansToProcess[0]; category: typeof categoriesToProcess[0]; date: Date }> = [];
+            for (const plan of plansToProcess) {
+              for (const category of categoriesToProcess) {
+                for (const date of datesToProcess) {
+                  const dateStr = format(date, "yyyy-MM-dd");
+                  tasks.push({ key: `${plan.id}-${category.id}-${dateStr}`, plan, category, date });
+                }
+              }
+            }
+            const tasksToRun = tasks.slice(0, MAX_TASKS);
+            for (let i = 0; i < tasksToRun.length; i += BATCH_SIZE) {
+              const batch = tasksToRun.slice(i, i + BATCH_SIZE);
+              const results = await Promise.all(
+                batch.map(async ({ key, plan, category, date }) => {
+                  try {
+                    const calculatedPrice = await calculateRatePrice(category.id, plan.id, date, 2, 0);
+                    const dateStr = format(date, "yyyy-MM-dd");
+                    const rateEntry = filteredRateCalendar.find(
+                      (r) => r.pricing_plan_id === plan.id && r.category_id === category.id && r.date === dateStr
+                    );
+                    const originalPrice = rateEntry?.base_price || Number(category.base_price) || 0;
+                    const isDynamicPrice = calculatedPrice > 0 && Math.abs(calculatedPrice - originalPrice) > 0.01;
+                    if (calculatedPrice > 0) {
+                      return { key, price: calculatedPrice, isDynamicPrice };
+                    }
+                  } catch (error) {
+                    console.warn(`Erro ao calcular preço para ${category.name} - ${plan.name}:`, error);
+                  }
+                  return null;
+                })
+              );
+              results.forEach((r) => {
+                if (r) {
+                  newPrices.set(r.key, r.price);
+                  if (r.isDynamicPrice) {
+                    setDynamicPriceKeys((prev) => new Set(prev).add(r!.key));
+                  }
+                }
+              });
+              if (i + BATCH_SIZE < tasksToRun.length) {
+                await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
+              }
             }
           }
+          // Atualizar cache compartilhado para Grade ARI e persistir na troca de aba
+          if (dynamicPrices) {
+            const toSet: Record<string, number> = {};
+            newPrices.forEach((v, k) => {
+              if (v > 0) toSet[k] = v;
+            });
+            dynamicPrices.setPrices(toSet);
+          }
         }
-      }
       
+      // Modo Preview Dinâmico: NÃO persistir no banco a cada acesso.
+      // Preços calculados por regras dinâmicas ficam apenas em cache (calculatedPrices, DynamicRatePricesContext).
+      // Persistir apenas quando o usuário editar manualmente (RateEditDialog, BulkEditDialog, etc.).
       // Atualizar o estado de forma suave, mesclando com valores existentes para evitar flash
       setCalculatedPrices(prev => {
         const merged = new Map(prev);
@@ -500,7 +347,7 @@ export const RateCalendarGrid = ({
     // Debounce para evitar muitas chamadas
     const timeoutId = setTimeout(calculateMissingPrices, 300);
     return () => clearTimeout(timeoutId);
-  }, [selectedRatePlan, filteredCategories, visibleDates, calculateRatePrice, activePlansToShow, dynamicRules, hasFeatureAccess, filteredRateCalendar]);
+  }, [selectedRatePlan, filteredCategories, visibleDates, calculateRatePrice, activePlansToShow, dynamicRules, hasFeatureAccess, filteredRateCalendar, dynamicPrices]);
 
   const getRateForDate = async (planId: string, categoryId: string, date: Date) => {
     const dateStr = format(date, "yyyy-MM-dd");
@@ -723,8 +570,12 @@ export const RateCalendarGrid = ({
       </Card>
 
       {/* Rate Calendar Grid */}
-      <Card className="p-0 overflow-x-auto">
-        <div className="min-w-full">
+      {(() => {
+        const cellMinPx = viewDays <= 14 ? 90 : viewDays <= 30 ? 70 : viewDays <= 60 ? 50 : 40;
+        const gridMinWidth = visibleDates.length * cellMinPx;
+        return (
+      <Card className="p-0 overflow-x-auto overflow-y-visible max-w-full">
+        <div className="pr-12 pb-2" style={{ minWidth: Math.max(gridMinWidth + 208, 0), width: 'max-content' }}>
           {/* Indicador do Plano no Topo do Grid */}
           {selectedRatePlan && selectedRatePlan !== 'all' && (() => {
             const selectedPlan = ratePlans.find(p => p.id === selectedRatePlan);
@@ -784,7 +635,7 @@ export const RateCalendarGrid = ({
               <div className="w-48 sm:w-56 flex-shrink-0 p-2 border-r border-slate-300 bg-slate-200 font-semibold text-xs flex items-center">
                 <span>Categoria</span>
               </div>
-              <div className="flex-1 flex" style={{ display: 'grid', gridTemplateColumns: `repeat(${visibleDates.length}, 1fr)` }}>
+              <div className="flex-1 flex flex-shrink-0" style={{ display: 'grid', gridTemplateColumns: `repeat(${visibleDates.length}, minmax(${cellMinPx}px, 1fr))`, minWidth: gridMinWidth }}>
                 {visibleDates.map((date) => {
                   const isToday = isSameDay(date, new Date());
                   const isWeekend = date.getDay() === 0 || date.getDay() === 6;
@@ -902,7 +753,7 @@ export const RateCalendarGrid = ({
                     </div>
                   </div>
                 </div>
-                <div className="flex-1 flex" style={{ display: 'grid', gridTemplateColumns: `repeat(${visibleDates.length}, 1fr)` }}>
+                <div className="flex-1 flex flex-shrink-0" style={{ display: 'grid', gridTemplateColumns: `repeat(${visibleDates.length}, minmax(${cellMinPx}px, 1fr))`, minWidth: gridMinWidth }}>
                   {visibleDates.map((date) => {
                     const dateStr = format(date, "yyyy-MM-dd");
                       // Buscar entrada específica para o plano e categoria
@@ -912,24 +763,23 @@ export const RateCalendarGrid = ({
                       r.date === dateStr
                     );
                     
-                      // Determinar preço: sempre usar a função de cálculo para aplicar regras dinâmicas
-                      // Primeiro tentar do cache calculado (já aplica regras), depois do calendário, depois base da categoria
+                      // Determinar preço: cache calculado, calendário (ou enriched do Redis), base da categoria
                       const cacheKey = `${plan.id}-${category.id}-${dateStr}`;
+                      const entryEnriched = rateEntry && 'original_base_price' in rateEntry && rateEntry.original_base_price !== undefined;
                       let price = calculatedPrices.get(cacheKey);
-                      
+
                       if (!price || price === 0) {
-                        // Se não está no cache, usar do calendário (mas isso não aplica regras dinâmicas)
                         price = rateEntry?.base_price;
-                        
-                    if (!price || price === 0) {
-                        // Fallback: usar preço base da categoria
-                        price = Number(category.base_price) || 0;
+                        if (!price || price === 0) {
+                          price = Number(category.base_price) || 0;
+                        }
                       }
-                    }
-                      
-                      // Verificar se este preço foi alterado por regras dinâmicas
-                      const isDynamicPrice = dynamicPriceKeys.has(cacheKey);
-                      const originalPrice = rateEntry?.base_price || Number(category.base_price) || 0;
+
+                      // original_base_price = preços enriquecidos pelo rates-map (Redis)
+                      const originalPrice = entryEnriched
+                        ? Number((rateEntry as { original_base_price?: number }).original_base_price)
+                        : (rateEntry?.base_price ?? (Number(category.base_price) || 0));
+                      const isDynamicPrice = entryEnriched || dynamicPriceKeys.has(cacheKey);
                       const isActuallyDynamic = isDynamicPrice && price > 0 && Math.abs(price - originalPrice) > 0.01;
                     
                     // Usar ocupação do rate_calendar ou calcular em tempo real
@@ -958,18 +808,28 @@ export const RateCalendarGrid = ({
                         }}
                       >
                         <div className={cn(
-                          "rounded-lg w-full transition-all duration-500 ease-in-out flex flex-col items-center justify-center",
+                          "rounded-lg w-full min-w-0 transition-all duration-500 ease-in-out flex flex-col items-center justify-center overflow-visible",
                           innerPadding,
                           getOccupancyColor(occupancy || projectedOccupancy),
                           "bg-opacity-10 group-hover:bg-opacity-20",
                           isActuallyDynamic && "ring-2 ring-purple-400 ring-opacity-60 bg-purple-50 dark:bg-purple-950/20 shadow-md"
                         )}>
                           <div className={cn(
-                            "font-semibold transition-all duration-500 ease-in-out leading-tight break-words",
+                            "font-semibold transition-all duration-500 ease-in-out leading-tight break-words whitespace-nowrap",
                             fontSize,
                             isActuallyDynamic ? "text-purple-700 dark:text-purple-300" : "text-gray-900"
                           )}>
-                            {formatCurrencyWithoutZeroCents(price)}
+                            {isActuallyDynamic ? (
+                              <RatePriceBreakdown
+                                basePrice={originalPrice}
+                                finalPrice={price}
+                                size={viewDays <= 14 ? "md" : "sm"}
+                                showBadge={viewDays <= 30}
+                                compact={viewDays > 14}
+                              />
+                            ) : (
+                              formatCurrencyWithoutZeroCents(price)
+                            )}
                           </div>
                           {(occupancy > 0 || projectedOccupancy > 0) && viewDays <= 60 && (
                             <div className="text-[9px] text-gray-600 mt-0.5 leading-tight">
@@ -999,6 +859,8 @@ export const RateCalendarGrid = ({
           </div>
         </div>
       </Card>
+        );
+      })()}
 
       {/* Summary Cards */}
       <RateMetricsSummary

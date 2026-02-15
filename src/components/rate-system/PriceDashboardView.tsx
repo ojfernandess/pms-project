@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { fetchRatesDashboard } from "@/lib/ratesApi";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { toast } from "sonner";
 import { DollarSign, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, AlertCircle, CalendarIcon, X, Save, Download, Upload, RotateCcw } from "lucide-react";
@@ -75,81 +76,77 @@ export const PriceDashboardView = () => {
   const [showDynamicRulesWarning, setShowDynamicRulesWarning] = useState(false);
   const [pendingApply, setPendingApply] = useState(false);
 
-  // Buscar categorias do estabelecimento
-  const { data: categories = [], isLoading: isLoadingCategories } = useQuery({
-    queryKey: ["price_dashboard_categories", establishmentId],
+  // Configuração de resiliência: retry, refetch ao focar janela, auto-fetch
+  const dashboardQueryOptions = {
+    retry: 3,
+    retryDelay: (i: number) => Math.min(1000 * 2 ** i, 8000),
+    refetchOnWindowFocus: true,
+    staleTime: 60 * 1000,
+  };
+
+  // Buscar dados do dashboard via endpoint otimizado (fallback para queries diretas)
+  const { data: dashboardData, isLoading: isLoadingDashboard } = useQuery({
+    queryKey: ["rates_dashboard", establishmentId],
+    ...dashboardQueryOptions,
     queryFn: async () => {
-      if (!establishmentId) return [];
-      
-      const { data, error } = await supabase
-        .from("room_categories")
-        .select("id, name, base_price")
-        .eq("establishment_id", establishmentId)
-        .order("name");
-
-      if (error) throw error;
-      return (data || []) as Category[];
-    },
-    enabled: !!establishmentId,
-  });
-
-  // Buscar planos tarifários
-  const { data: ratePlans = [], isLoading: isLoadingRatePlans } = useQuery({
-    queryKey: ["price_dashboard_rate_plans", establishmentId],
-    queryFn: async () => {
-      if (!establishmentId) return [];
-      
-      const { data, error } = await supabase
-        .from("pricing_plans")
-        .select("id, name, code, plan_type, is_active")
-        .eq("establishment_id", establishmentId)
-        .eq("is_active", true)
-        .order("sort_order", { ascending: true })
-        .order("name");
-
-      if (error) throw error;
-      return (data || []) as RatePlan[];
-    },
-    enabled: !!establishmentId,
-  });
-
-  // Buscar tipos de planos tarifários
-  const { data: planTypes = [], isLoading: isLoadingPlanTypes } = useQuery({
-    queryKey: ["price_dashboard_plan_types"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("pricing_plan_types")
-        .select("id, name, description, color, is_active")
-        .eq("is_active", true)
-        .order("sort_order", { ascending: true })
-        .order("name");
-
-      if (error) throw error;
-      return (data || []) as PlanType[];
-    },
-  });
-
-  // Buscar configurações do sistema tarifário para verificar se regras dinâmicas estão ativas
-  const { data: hotelSettings } = useQuery({
-    queryKey: ["hotel_settings_rate_system", establishmentId],
-    queryFn: async () => {
-      if (!establishmentId) return null;
-      
-      const { data, error } = await supabase
-        .from("hotel_settings")
-        .select("rate_system_settings")
-        .eq("establishment_id", establishmentId)
-        .single();
-
-      if (error) {
-        // Se não encontrar configurações, retornar null (regras dinâmicas não ativas)
-        if (error.code === "PGRST116") return null;
-        throw error;
+      if (!establishmentId) {
+        return { categories: [], ratePlans: [], planTypes: [], hotelSettings: null };
       }
-      return data;
+
+      const apiData = await fetchRatesDashboard(establishmentId);
+      if (apiData) {
+        return apiData;
+      }
+
+      // Fallback: queries Supabase diretas
+      const [categoriesRes, ratePlansRes, planTypesRes, hotelSettingsRes] = await Promise.all([
+        supabase
+          .from("room_categories")
+          .select("id, name, base_price")
+          .eq("establishment_id", establishmentId)
+          .order("name"),
+        supabase
+          .from("pricing_plans")
+          .select("id, name, code, plan_type, is_active")
+          .eq("establishment_id", establishmentId)
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true })
+          .order("name"),
+        supabase
+          .from("pricing_plan_types")
+          .select("id, name, description, color, is_active")
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true })
+          .order("name"),
+        supabase
+          .from("hotel_settings")
+          .select("rate_system_settings")
+          .eq("establishment_id", establishmentId)
+          .maybeSingle(),
+      ]);
+
+      if (categoriesRes.error) throw categoriesRes.error;
+      if (ratePlansRes.error) throw ratePlansRes.error;
+      if (planTypesRes.error) throw planTypesRes.error;
+      if (hotelSettingsRes.error) throw hotelSettingsRes.error;
+
+      return {
+        categories: (categoriesRes.data || []) as Category[],
+        ratePlans: (ratePlansRes.data || []) as RatePlan[],
+        planTypes: (planTypesRes.data || []) as PlanType[],
+        hotelSettings: hotelSettingsRes.data,
+      };
     },
     enabled: !!establishmentId,
   });
+
+  const categories = dashboardData?.categories ?? [];
+  const ratePlans = dashboardData?.ratePlans ?? [];
+  const planTypes = dashboardData?.planTypes ?? [];
+  const hotelSettings = dashboardData?.hotelSettings ?? null;
+  const isLoadingCategories = isLoadingDashboard;
+  const isLoadingRatePlans = isLoadingDashboard;
+  const isLoadingPlanTypes = isLoadingDashboard;
 
   // Verificar se auto_apply_dynamic_rules está ativo
   const isDynamicRulesEnabled = useMemo(() => {
@@ -711,9 +708,20 @@ export const PriceDashboardView = () => {
 
   if (isLoadingCategories || isLoadingRatePlans || isLoadingPlanTypes) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-        <span className="ml-2 text-muted-foreground">Carregando dados...</span>
+      <div className="space-y-6 animate-in fade-in duration-300">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-24 rounded-lg bg-muted/50 animate-pulse" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="h-64 rounded-lg bg-muted/50 animate-pulse" />
+          <div className="h-64 rounded-lg bg-muted/50 animate-pulse" />
+        </div>
+        <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+          <RefreshCw className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Carregando tarifas...</span>
+        </div>
       </div>
     );
   }

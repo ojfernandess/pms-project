@@ -14,6 +14,7 @@ import { CalendarIcon, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp,
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { useRateSystem, RatePlan } from "@/hooks/useRateSystem";
+import { useDynamicRatePrices } from "@/contexts/DynamicRatePricesContext";
 import { useARISystem } from "@/hooks/useARISystem";
 import { toast } from "sonner";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
@@ -92,6 +93,7 @@ export const ARIGrid = ({
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
   const { rateCalendar, isLoadingCalendar, upsertRateCalendar } = useRateSystem();
+  const dynamicPrices = useDynamicRatePrices();
   const {
     updateSalesStatus,
     bulkUpdateSalesStatus,
@@ -1551,10 +1553,16 @@ export const ARIGrid = ({
     occupancy: number,
     isEditing: boolean
   ) => {
-    const entry = getRateCalendarEntry(category.id, plan.id, date);
-    const price = calculatePriceForOccupancy(entry, occupancy);
-    const isPast = date < startOfDay(new Date());
     const dateStr = format(date, 'yyyy-MM-dd');
+    const cacheKey = `${plan.id}-${category.id}-${dateStr}`;
+    // Preço dinâmico (calculado com regras) tem prioridade sobre rate_calendar
+    const dynamicPrice = dynamicPrices?.getPrice(cacheKey);
+    const entry = getRateCalendarEntry(category.id, plan.id, date);
+    const entryWithDynamicBase = dynamicPrice != null && dynamicPrice > 0 && occupancy === 2
+      ? { ...entry, base_price: dynamicPrice }
+      : entry;
+    const price = calculatePriceForOccupancy(entryWithDynamicBase, occupancy);
+    const isPast = date < startOfDay(new Date());
     const isStandardPrice = occupancy === 2;
 
     // Para preço padrão (x2), permitir edição inline
@@ -2156,8 +2164,14 @@ export const ARIGrid = ({
                       </div>
                       <div className="flex-1 flex">
                         {visibleDates.map((date) => {
+                          const dateStr = format(date, 'yyyy-MM-dd');
+                          const cacheKey = `${plan.id}-${category.id}-${dateStr}`;
+                          const dynamicPrice = dynamicPrices?.getPrice(cacheKey);
                           const entry = getRateCalendarEntry(category.id, plan.id, date);
-                          const price = calculatePriceForOccupancy(entry, 2); // Preço padrão x2
+                          const entryWithDynamic = dynamicPrice != null && dynamicPrice > 0
+                            ? { ...entry, base_price: dynamicPrice }
+                            : entry;
+                          const price = calculatePriceForOccupancy(entryWithDynamic, 2); // Preço padrão x2
                           const status = getSalesStatusForDate(category.id, date);
                           
                           return (

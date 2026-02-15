@@ -20,7 +20,9 @@ import {
   Lock,
   Key,
   DollarSign,
-  Star
+  Star,
+  Map,
+  Building2
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -2892,16 +2894,31 @@ await logError({
                         <div>
                           <h4 className="font-semibold mb-2 text-slate-800">Funcionalidades Principais:</h4>
                           <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Contas a Receber:</strong> Geração automática a partir de reservas confirmadas, multas de cancelamento e no-show</li>
+                            <li><strong>Contas a Pagar:</strong> Controle de despesas, fornecedores, parcelamento e recorrência</li>
+                            <li><strong>Faturas e Invoices:</strong> Gestão completa de faturas com status automático</li>
+                            <li><strong>Multas de Cancelamento:</strong> Geração automática de faturas conforme política aplicada</li>
+                            <li><strong>Multas de No-Show:</strong> Processamento automático via RPC <code>process_no_shows</code></li>
                             <li><strong>Registro de Pagamentos:</strong> Criação manual ou automática via Stripe</li>
                             <li><strong>Múltiplos Métodos:</strong> Dinheiro, cartão (crédito/débito), PIX, transferência, cheque</li>
                             <li><strong>Parcelamento:</strong> Pagamento parcelado com registro de número de parcelas, taxas e datas</li>
+                            <li><strong>Estornos:</strong> Solicitação, aprovação e registro de reembolsos</li>
+                            <li><strong>Conciliação Bancária:</strong> Registro de bancos e reconciliação de transações</li>
                             <li><strong>Taxas de Serviço:</strong> Gestão de taxas extras (limpeza, estacionamento, etc.)</li>
-                            <li><strong>Relatórios Financeiros:</strong> Receitas, despesas, pendências, histórico completo</li>
-                            <li><strong>Relatório de Fechamento:</strong> Consolidação mensal com métricas (ADR, RevPAR, ocupação)</li>
+                            <li><strong>Relatórios Financeiros:</strong> Receitas, despesas, pendências, cancelamentos, no-shows</li>
                             <li><strong>Exportação:</strong> Export para CSV e XLSX com todos os detalhes</li>
                             <li><strong>Integração Stripe:</strong> Pagamentos online seguros via cartão</li>
-                            <li><strong>Status de Pagamento:</strong> Pendente, Parcial, Pago, Reembolsado</li>
-                            <li><strong>Rastreamento:</strong> Histórico completo de todos os pagamentos e alterações</li>
+                            <li><strong>Status:</strong> Pendente, Parcial, Pago, Vencido, Cancelado</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-green-50 rounded border border-green-200">
+                          <h4 className="font-semibold mb-2 text-green-900">Contas a Receber - Detalhes Técnicos:</h4>
+                          <ul className="space-y-1 text-xs text-green-800">
+                            <li><strong>Tabela:</strong> <code>accounts_receivable</code></li>
+                            <li><strong>Origens:</strong> reservation, prepayment, penalty, cancellation_penalty, no_show_penalty, extra_consumption, service_fee, other</li>
+                            <li><strong>Geração Automática:</strong> Triggers ao criar reserva confirmada e ao aplicar multas</li>
+                            <li><strong>Vencimento:</strong> Multas de cancelamento/no-show com vencimento em 7 dias</li>
+                            <li><strong>Status Automático:</strong> Atualizado para overdue quando passa do due_date</li>
                           </ul>
                         </div>
                         <div className="p-3 bg-green-50 rounded border border-green-200">
@@ -2911,7 +2928,6 @@ await logError({
                             <li><strong>Notas:</strong> <code>payments.notes</code> - Detalhes completos (valor por parcela, taxas, datas)</li>
                             <li><strong>Registro:</strong> Um único registro de pagamento com informações consolidadas</li>
                             <li><strong>Export:</strong> Inclui <code>quantidade_parcelas</code> com breakdown completo</li>
-                            <li><strong>Cálculo:</strong> Taxas e valores líquidos calculados automaticamente</li>
                           </ul>
                         </div>
                         <div className="p-3 bg-slate-50 rounded">
@@ -2922,6 +2938,497 @@ await logError({
                             <div><strong>Taxa de Ocupação:</strong> (Quartos ocupados / Quartos disponíveis) × 100</div>
                             <div><strong>Receita Total:</strong> Soma de todos os pagamentos confirmados</div>
                             <div><strong>Pendências:</strong> Valor total - Valor pago</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  {/* Sistema Tarifário */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.rateSystem}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, rateSystem: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Sistema Tarifário</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.rateSystem ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-4 text-sm text-slate-700">
+                        <div>
+                          <h4 className="font-semibold mb-2 text-slate-800">Visão Geral:</h4>
+                          <p className="mb-2">Sistema tarifário sincronizado em tempo real, integrando Dashboard de Preços, Mapa de Tarifas, Grade ARI, Planos Tarifários, Regras Dinâmicas e Restrições.</p>
+                          <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Dashboard de Preços:</strong> Visualização agregada de categorias, planos e configurações</li>
+                            <li><strong>Mapa de Tarifas:</strong> Grade por plano/categoria/data com edição em lote</li>
+                            <li><strong>Planos Tarifários:</strong> Flexível, Não Reembolsável, Meia Pensão, etc.</li>
+                            <li><strong>Regras Dinâmicas:</strong> Ajuste automático por ocupação, ADR, antecipação, mínimo de diárias</li>
+                            <li><strong>Restrições:</strong> Stop-sale, mínimo de noites, máximo de estadia</li>
+                            <li><strong>Liga de Ocupação:</strong> x1, x2, x3, x4 por número de hóspedes (calculate_rate_price)</li>
+                            <li><strong>Modo Preview Dinâmico:</strong> Regras calculam em cache sem persistir no banco a cada acesso</li>
+                            <li><strong>Sincronização Realtime:</strong> rate_calendar, dynamic_pricing_rules, rate_restrictions</li>
+                            <li><strong>Cache Redis:</strong> rates-map enriquece preços com Upstash quando configurado</li>
+                            <li><strong>Worker recalc-rates:</strong> Edge Function via Cron para recálculo em background</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                          <h4 className="font-semibold mb-2 text-blue-900">Hierarquia de Cálculo (calculate_rate_price):</h4>
+                          <ol className="list-decimal list-inside text-xs text-blue-800 space-y-1">
+                            <li>Tarifa base (rate_calendar ou room_categories)</li>
+                            <li>Ajuste por plano tarifário</li>
+                            <li>Liga de ocupação (x1/x2/x3/x4)</li>
+                            <li>Regras dinâmicas (prioridade)</li>
+                            <li>Restrições</li>
+                          </ol>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded">
+                          <h4 className="font-semibold mb-2 text-slate-800">Endpoints REST:</h4>
+                          <div className="text-xs space-y-1">
+                            <div><code>GET /functions/v1/rates-dashboard?establishment_id=xxx</code> — categories, ratePlans, planTypes, hotelSettings</div>
+                            <div><code>GET /functions/v1/rates-map?establishment_id=xxx&start_date&end_date</code> — rate_calendar com enriquecimento opcional (Redis)</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  {/* Grade ARI */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.gradeAri}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, gradeAri: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Map className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Grade ARI (Availability, Restrictions, Inventory)</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.gradeAri ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-4 text-sm text-slate-700">
+                        <div>
+                          <h4 className="font-semibold mb-2 text-slate-800">O que é a Grade ARI:</h4>
+                          <p className="mb-2">Grade integrada que une disponibilidade, restrições e inventário em uma única interface, sincronizada com o Mapa de Tarifas e o sistema tarifário.</p>
+                          <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Availability (Disponibilidade):</strong> Quartos disponíveis por categoria/plano/data</li>
+                            <li><strong>Restrictions (Restrições):</strong> Stop-sale, mínimo de noites, máximo de estadia, CTA/CTD</li>
+                            <li><strong>Inventory (Inventário):</strong> Controle de quartos liberados por categoria</li>
+                            <li><strong>Cálculo de Disponibilidade:</strong> RPC <code>calculate_category_availability</code></li>
+                            <li><strong>Cache Compartilhado:</strong> Preços dinâmicos compartilhados entre Mapa e Grade ARI (DynamicRatePricesContext)</li>
+                            <li><strong>Edição em Lote:</strong> ARIBulkEditDialog para alterações rápidas</li>
+                            <li><strong>Integração Channel Manager:</strong> Sincronização com OTAs via Bukly</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-amber-50 rounded border border-amber-200">
+                          <h4 className="font-semibold mb-2 text-amber-900">Rota e Migrations:</h4>
+                          <ul className="space-y-1 text-xs text-amber-800">
+                            <li><strong>Rota:</strong> <code>/tarifario</code> — Aba &quot;Grade ARI&quot; dentro do PMS Rate System</li>
+                            <li><strong>Migration:</strong> <code>20250127000001_create_ari_rate_availability_grid.sql</code></li>
+                            <li><strong>Tabelas:</strong> <code>rate_availability</code>, <code>rate_restrictions</code></li>
+                          </ul>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  {/* Políticas de Cancelamento */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.cancellationPolicies}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, cancellationPolicies: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Shield className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Políticas de Cancelamento</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.cancellationPolicies ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-4 text-sm text-slate-700">
+                        <div>
+                          <h4 className="font-semibold mb-2 text-slate-800">Funcionalidades:</h4>
+                          <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Cadastro de Políticas:</strong> Criar políticas com prazo gratuito, tipo de multa e regras de no-show</li>
+                            <li><strong>Associação a Planos Tarifários:</strong> Cada plano pode ter uma política via <code>cancellation_policy_id</code></li>
+                            <li><strong>Prazo Gratuito:</strong> Dias antes da chegada ou horário específico (ex: &quot;até 18:00 do dia da chegada&quot;)</li>
+                            <li><strong>Tipos de Multa:</strong> Primeira diária ou percentual do total</li>
+                            <li><strong>No-Show:</strong> Detecção automática e multa separada (process_no_shows RPC)</li>
+                            <li><strong>Pré-pagamento:</strong> Configuração de percentual e quando cobrar</li>
+                            <li><strong>Exibição no Motor:</strong> CancellationPolicyDisplay com resumo curto e link para política completa</li>
+                            <li><strong>Cálculo Automático:</strong> cancellationPolicyCalculator e applyCancellation para aplicar multas</li>
+                            <li><strong>Integração Financeira:</strong> Geração automática de contas a receber (createPenaltyInvoice)</li>
+                            <li><strong>Página Pública:</strong> <code>/motor/:slug/politica/:policyId</code></li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded">
+                          <h4 className="font-semibold mb-2 text-slate-800">Tabela e Estrutura:</h4>
+                          <div className="text-xs space-y-1">
+                            <div><strong>Tabela:</strong> <code>cancellation_policies</code></div>
+                            <div><strong>Campos:</strong> has_free_cancellation, free_cancellation_deadline, cancellation_fee_type, cancellation_fee_percentage, no_show_fee_type, no_show_fee_percentage</div>
+                            <div><strong>Migrations:</strong> 20251225000012_add_cancellation_policies.sql, 20251225000013_expand_cancellation_policies.sql</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  {/* Orçamentos */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.quotes}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, quotes: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Orçamentos (Quotes)</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.quotes ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-4 text-sm text-slate-700">
+                        <div>
+                          <h4 className="font-semibold mb-2 text-slate-800">Funcionalidades:</h4>
+                          <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Criação de Orçamentos:</strong> Geração de orçamentos para reservas com múltiplas categorias/quartos</li>
+                            <li><strong>Status:</strong> Pendente, Enviado, Aceito, Rejeitado, Expirado, Convertido</li>
+                            <li><strong>Envio por E-mail:</strong> Compartilhar orçamento com o cliente</li>
+                            <li><strong>Link de Pagamento:</strong> Geração de link para pagamento online (Stripe)</li>
+                            <li><strong>Conversão em Reserva:</strong> Transformar orçamento aceito em reserva confirmada</li>
+                            <li><strong>Suporte a Múltiplas Reservas:</strong> Um orçamento pode gerar várias reservas (múltiplos quartos)</li>
+                            <li><strong>Página de Pagamento:</strong> <code>/orcamento/:token</code> — QuotePaymentPage com política de cancelamento</li>
+                            <li><strong>Integração com Sistema Tarifário:</strong> Preços calculados conforme planos e categorias</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded">
+                          <h4 className="font-semibold mb-2 text-slate-800">Rota e Hook:</h4>
+                          <div className="text-xs space-y-1">
+                            <div><strong>Página:</strong> <code>Quotes.tsx</code> — Lista de orçamentos com filtros</div>
+                            <div><strong>Hook:</strong> <code>useQuotes</code> — createQuote, deleteQuote, convertQuoteToReservation, generatePaymentLink</div>
+                            <div><strong>Tabela:</strong> <code>quotes</code></div>
+                          </div>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  {/* Motor de Reservas */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.bookingEngine}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, bookingEngine: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Motor de Reservas</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.bookingEngine ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-4 text-sm text-slate-700">
+                        <div>
+                          <h4 className="font-semibold mb-2 text-slate-800">Como Funciona:</h4>
+                          <p className="mb-2">Motor de reservas centralizado por empresa, permitindo busca de disponibilidade em múltiplos estabelecimentos e reserva com seleção de planos tarifários.</p>
+                          <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Rota:</strong> <code>/motor</code> ou <code>/motor/:companySlug</code> — slug da empresa (booking_engine_slug)</li>
+                            <li><strong>Fluxo:</strong> Seleção de datas → Escolha de estabelecimento → Categorias → Planos tarifários → Confirmação</li>
+                            <li><strong>Planos Tarifários:</strong> Exibição de preços por plano com política de cancelamento (CancellationPolicyDisplay)</li>
+                            <li><strong>Temas:</strong> default, modern, luxury, minimal, dark, travel — configuráveis por empresa</li>
+                            <li><strong>Domínio Personalizado:</strong> reservas.empresa.com.br redireciona para o motor</li>
+                            <li><strong>Pagamento:</strong> Integração com Stripe para pagamento na conclusão</li>
+                            <li><strong>Configuração:</strong> <code>/motor-reservas/configuracoes</code> — tema, slug, domínio, estabelecimentos</li>
+                            <li><strong>Estabelecimentos no Motor:</strong> Gerenciador para vincular quais estabelecimentos aparecem no motor de cada empresa</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                          <h4 className="font-semibold mb-2 text-blue-900">Rotas do Motor:</h4>
+                          <ul className="space-y-1 text-xs text-blue-800">
+                            <li><code>/motor/:companySlug</code> — Página inicial (seleção de estabelecimento)</li>
+                            <li><code>/motor/:companySlug/categoria/:categoryId</code> — Detalhes da categoria</li>
+                            <li><code>/motor/:companySlug/reserva/:reservationId</code> — Detalhes da reserva</li>
+                            <li><code>/motor/:companySlug/politica/:policyId</code> — Política de cancelamento pública</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  {/* Página Pública de Reservas */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.publicReservation}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, publicReservation: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Página Pública de Reservas</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.publicReservation ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-4 text-sm text-slate-700">
+                        <div>
+                          <h4 className="font-semibold mb-2 text-slate-800">Como Funciona:</h4>
+                          <p className="mb-2">Página de reserva direta por estabelecimento (estilo Booking.com), com seleção de múltiplas categorias/quartos, planos tarifários e cupons promocionais.</p>
+                          <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Rota:</strong> <code>/reservar/:establishmentSlug</code> — slug ou numeric_id do estabelecimento</li>
+                            <li><strong>Ativação:</strong> Configurado em Configurações → Página Pública de Reservas (PublicReservationSettings)</li>
+                            <li><strong>Fluxo:</strong> Datas → Categorias/quartos (múltiplas) → Planos (Plan1/Plan2) → Dados do hóspede → Confirmação</li>
+                            <li><strong>Múltiplas Categorias:</strong> Reservar vários quartos de categorias diferentes em uma única transação</li>
+                            <li><strong>Cupons:</strong> Parâmetro <code>?coupon=CODE</code> na URL aplica cupom automaticamente</li>
+                            <li><strong>Políticas do Prédio:</strong> Exibição de políticas de cancelamento, check-in/check-out do estabelecimento</li>
+                            <li><strong>Criação de Reserva:</strong> RPC <code>create_reservation_with_lock</code> com validação de disponibilidade</li>
+                            <li><strong>Temas:</strong> Mesmos temas do motor (default, modern, luxury, etc.)</li>
+                            <li><strong>URL Pública:</strong> <code>{`{baseUrl}/reservar/{slug}`}</code></li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-amber-50 rounded border border-amber-200">
+                          <h4 className="font-semibold mb-2 text-amber-900">Diferença Motor vs Página Pública:</h4>
+                          <ul className="space-y-1 text-xs text-amber-800">
+                            <li><strong>Motor:</strong> Uma empresa com vários estabelecimentos — usuário escolhe o hotel</li>
+                            <li><strong>Página Pública:</strong> Um estabelecimento por URL — acesso direto ao hotel específico</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  {/* Gerente Multi-Estabelecimento */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.multiEstablishment}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, multiEstablishment: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Gerente Administrando Múltiplas Empresas</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.multiEstablishment ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-4 text-sm text-slate-700">
+                        <div>
+                          <h4 className="font-semibold mb-2 text-slate-800">Como Funciona:</h4>
+                          <p className="mb-2">Um gerente pode administrar estabelecimentos de diferentes empresas através de vínculos como proprietário (user_companies) ou como funcionário (employees).</p>
+                          <ul className="space-y-1 list-disc list-inside">
+                            <li><strong>Proprietário:</strong> Via <code>user_companies</code> — usuário vinculado a empresas com role (owner, admin)</li>
+                            <li><strong>Gerente/Funcionário:</strong> Via <code>employees</code> — usuário vinculado a estabelecimentos com role (manager, receptionist, etc.)</li>
+                            <li><strong>Combinação:</strong> O mesmo usuário pode ser proprietário de uma empresa e gerente de outra</li>
+                            <li><strong>Seletor de Estabelecimento:</strong> Header agrupa estabelecimentos por empresa (establishmentsByCompany)</li>
+                            <li><strong>Troca de Contexto:</strong> Ao selecionar estabelecimento, a URL muda para <code>/:establishmentId/...</code></li>
+                            <li><strong>Página Pública:</strong> Gerente vê todos os estabelecimentos que administra para ativar página pública</li>
+                            <li><strong>Motor de Reservas:</strong> Gerente vê estabelecimentos de todas as empresas vinculadas para configurar</li>
+                            <li><strong>Query:</strong> Busca user_companies + employees para montar lista completa de estabelecimentos</li>
+                          </ul>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded">
+                          <h4 className="font-semibold mb-2 text-slate-800">Estrutura de Dados:</h4>
+                          <div className="text-xs space-y-1">
+                            <div><strong>user_companies:</strong> user_id, company_id, role, is_active — empresas como proprietário</div>
+                            <div><strong>employees:</strong> user_id, establishment_id, role_id, is_active — estabelecimentos como funcionário</div>
+                            <div><strong>companies → establishments:</strong> Uma empresa possui N estabelecimentos</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  {/* Edge Functions e Upstash */}
+                  <Collapsible 
+                    className="border rounded-lg"
+                    open={openSections.edgeFunctions}
+                    onOpenChange={(open) => setOpenSections(prev => ({ ...prev, edgeFunctions: open }))}
+                  >
+                    <CollapsibleTrigger className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-semibold text-slate-800">Edge Functions e Upstash Redis</h3>
+                      </div>
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${openSections.edgeFunctions ? 'rotate-90' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="px-4 pb-4">
+                      <div className="space-y-6 text-sm text-slate-700">
+                        {/* Tabela Visão Geral */}
+                        <div>
+                          <h4 className="font-semibold mb-3 text-slate-800">Visão Geral das Edge Functions</h4>
+                          <div className="overflow-x-auto rounded border border-slate-200">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="bg-slate-100">
+                                  <th className="text-left p-2 font-semibold">Função</th>
+                                  <th className="text-left p-2 font-semibold">Endpoint</th>
+                                  <th className="text-left p-2 font-semibold">Método</th>
+                                  <th className="text-left p-2 font-semibold">Auth</th>
+                                  <th className="text-left p-2 font-semibold">Descrição</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                <tr><td className="p-2">rates-dashboard</td><td className="p-2">/functions/v1/rates-dashboard</td><td className="p-2">GET</td><td className="p-2">Bearer</td><td className="p-2">Agrega categorias, planos, tipos do tarifário</td></tr>
+                                <tr><td className="p-2">rates-map</td><td className="p-2">/functions/v1/rates-map</td><td className="p-2">GET</td><td className="p-2">Bearer</td><td className="p-2">rate_calendar + Redis (Upstash)</td></tr>
+                                <tr><td className="p-2">recalc-rates</td><td className="p-2">/functions/v1/recalc-rates</td><td className="p-2">GET/POST</td><td className="p-2">Bearer/Service</td><td className="p-2">Worker Cron de preços dinâmicos</td></tr>
+                                <tr><td className="p-2">process-no-shows</td><td className="p-2">/functions/v1/process-no-shows</td><td className="p-2">POST</td><td className="p-2">-</td><td className="p-2">Processa no-shows (Cron diário)</td></tr>
+                                <tr><td className="p-2">stripe-payment</td><td className="p-2">/functions/v1/stripe-payment</td><td className="p-2">POST</td><td className="p-2">Opcional</td><td className="p-2">Cria Payment Intent Stripe</td></tr>
+                                <tr><td className="p-2">stripe-payment-status</td><td className="p-2">/functions/v1/stripe-payment-status</td><td className="p-2">POST</td><td className="p-2">-</td><td className="p-2">Verifica status do pagamento</td></tr>
+                                <tr><td className="p-2">stripe-refund</td><td className="p-2">/functions/v1/stripe-refund</td><td className="p-2">POST</td><td className="p-2">Bearer</td><td className="p-2">Reembolso Stripe</td></tr>
+                                <tr><td className="p-2">stripe-webhook</td><td className="p-2">/functions/v1/stripe-webhook</td><td className="p-2">POST</td><td className="p-2">Stripe-Signature</td><td className="p-2">Webhook Stripe</td></tr>
+                                <tr><td className="p-2">send-email-resend</td><td className="p-2">/functions/v1/send-email-resend</td><td className="p-2">POST</td><td className="p-2">Bearer</td><td className="p-2">E-mail via Resend API</td></tr>
+                                <tr><td className="p-2">send-email-smtp</td><td className="p-2">/functions/v1/send-email-smtp</td><td className="p-2">POST</td><td className="p-2">Bearer</td><td className="p-2">E-mail via SMTP</td></tr>
+                                <tr><td className="p-2">send-email-sendgrid</td><td className="p-2">/functions/v1/send-email-sendgrid</td><td className="p-2">POST</td><td className="p-2">Bearer</td><td className="p-2">E-mail via SendGrid</td></tr>
+                                <tr><td className="p-2">send-checkout-reminders</td><td className="p-2">/functions/v1/send-checkout-reminders</td><td className="p-2">GET/POST</td><td className="p-2">-</td><td className="p-2">Lembretes de check-out (Cron)</td></tr>
+                                <tr><td className="p-2">get-reservation</td><td className="p-2">/functions/v1/get-reservation</td><td className="p-2">GET/POST</td><td className="p-2">Bearer/Guest</td><td className="p-2">Busca reserva por identificador</td></tr>
+                                <tr><td className="p-2">get-site-settings</td><td className="p-2">/functions/v1/get-site-settings</td><td className="p-2">GET</td><td className="p-2">-</td><td className="p-2">Configurações públicas (cache 5 min)</td></tr>
+                                <tr><td className="p-2">render-html</td><td className="p-2">/functions/v1/render-html</td><td className="p-2">GET</td><td className="p-2">-</td><td className="p-2">Renderiza HTML para SEO</td></tr>
+                                <tr><td className="p-2">health-check</td><td className="p-2">/functions/v1/health-check</td><td className="p-2">GET</td><td className="p-2">-</td><td className="p-2">Monitoramento DB e Storage</td></tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* Tutorial Upstash - Completo */}
+                        <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
+                          <h4 className="font-semibold mb-3 text-amber-900">Tutorial Upstash Redis — Passo a Passo</h4>
+                          <p className="text-xs text-amber-800 mb-3">Upstash é Redis serverless com API REST. Usado no rates-map para cache de preços calculados (evita centenas de RPCs). TTL: 15 min. Sem Redis, rates-map retorna rate_calendar sem enriquecimento.</p>
+                          <div className="space-y-3 text-xs text-amber-800">
+                            <div><strong>Passo 1 — Criar conta:</strong> Acesse <a href="https://upstash.com" target="_blank" rel="noopener noreferrer" className="underline">upstash.com</a>, crie conta (free tier), Create Database, anote UPSTASH_REDIS_REST_URL e UPSTASH_REDIS_REST_TOKEN.</div>
+                            <div><strong>Passo 2 — Configurar no Supabase:</strong>
+                              <pre className="mt-1 p-2 bg-amber-100 rounded overflow-x-auto">supabase secrets set UPSTASH_REDIS_REST_URL=https://xxx.upstash.io
+supabase secrets set UPSTASH_REDIS_REST_TOKEN=AXxxxxxxx</pre>
+                              Ou Dashboard: Project Settings → Edge Functions → Secrets
+                            </div>
+                            <div><strong>Passo 3 — Verificar:</strong> rates-map usa Redis automaticamente. Teste: <code>curl -H &quot;Authorization: Bearer JWT&quot; &quot;.../rates-map?establishment_id=UUID&quot;</code>. Se resposta tiver <code>_enriched: true</code>, Redis está ativo.</div>
+                            <div><strong>Passo 4 — Invalidação (opcional):</strong> Ao alterar rate_calendar, dynamic_pricing_rules ou rate_restrictions, deletar keys: <code>{`rate:${'{estId}'}:*`}</code></div>
+                          </div>
+                        </div>
+
+                        {/* Tutoriais por Função */}
+                        <div>
+                          <h4 className="font-semibold mb-3 text-slate-800">Tutoriais por Edge Function</h4>
+                          <div className="space-y-4">
+                            <div className="p-3 bg-slate-50 rounded border">
+                              <strong>rates-dashboard</strong> — <code>curl -H &quot;Authorization: Bearer JWT&quot; &quot;.../rates-dashboard?establishment_id=UUID&quot;</code>. Retorna categories, ratePlans, planTypes, hotelSettings.
+                            </div>
+                            <div className="p-3 bg-slate-50 rounded border">
+                              <strong>rates-map</strong> — <code>curl -H &quot;Authorization: Bearer JWT&quot; &quot;.../rates-map?establishment_id=UUID&start_date=2025-02-15&end_date=2025-02-28&quot;</code>. Com Redis enriquece até 300 entradas.
+                            </div>
+                            <div className="p-3 bg-slate-50 rounded border">
+                              <strong>recalc-rates</strong> — Worker Cron. <code>curl -H &quot;Authorization: Bearer JWT&quot; &quot;.../recalc-rates?establishment_id=UUID&days_ahead=14&quot;</code>. Configurar via pg_cron ou cron-job.org.
+                            </div>
+                            <div className="p-3 bg-slate-50 rounded border">
+                              <strong>process-no-shows</strong> — <code>curl -X POST &quot;.../process-no-shows&quot; -H &quot;Content-Type: application/json&quot; -d &quot;{`{\"establishment_id\":\"UUID\"}`}&quot;</code>. Cron diário às 19:00.
+                            </div>
+                            <div className="p-3 bg-slate-50 rounded border">
+                              <strong>Stripe Webhook</strong> — Stripe Dashboard → Developers → Webhooks → URL: <code>.../stripe-webhook</code>. Eventos: payment_intent.succeeded, payment_intent.payment_failed, charge.refunded.
+                            </div>
+                            <div className="p-3 bg-slate-50 rounded border">
+                              <strong>send-checkout-reminders</strong> — <code>curl &quot;.../send-checkout-reminders?days=1&establishment_id=UUID&quot;</code>. Cron diário.
+                            </div>
+                            <div className="p-3 bg-slate-50 rounded border">
+                              <strong>get-reservation</strong> — GET/POST com identifier, locator ou reservation_code. Auth: Bearer ou guest_account_id. <strong>get-site-settings</strong> — GET sem auth, cache 5 min. <strong>health-check</strong> — GET, retorna 200 ou 503.
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Alternativas AWS */}
+                        <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                          <h4 className="font-semibold mb-2 text-blue-900">Alternativa: AWS Lambda + API Gateway</h4>
+                          <p className="text-xs text-blue-800 mb-2">Migrar Edge Functions: Lambda (Node.js 18+), Secrets Manager, EventBridge para Cron, API Gateway para HTTP.</p>
+                          <pre className="p-2 bg-blue-100 rounded text-xs overflow-x-auto">{`// lambda/rates-map/index.mjs
+import { createClient } from '@supabase/supabase-js';
+import { Redis } from '@upstash/redis';
+
+export const handler = async (event) => {
+  const authHeader = event.headers?.Authorization;
+  if (!authHeader) return { statusCode: 401, body: JSON.stringify({ error: 'Autorização obrigatória' }) };
+  const establishmentId = event.queryStringParameters?.establishment_id;
+  if (!establishmentId) return { statusCode: 400, body: JSON.stringify({ error: 'establishment_id obrigatório' }) };
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const redis = process.env.UPSTASH_REDIS_REST_URL ? new Redis({ url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN }) : null;
+  // ... lógica idêntica ... retornar { statusCode: 200, body: JSON.stringify({ rateCalendar, _enriched }) }
+};`}</pre>
+                        </div>
+
+                        {/* Alternativas Vercel e Netlify */}
+                        <div className="grid md:grid-cols-2 gap-4">
+                          <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                            <h4 className="font-semibold mb-2 text-emerald-900">Vercel (Next.js API Routes)</h4>
+                            <p className="text-xs text-emerald-800 mb-2">API Routes em /api/. Cron: vercel.json (Pro) ou cron-job.org.</p>
+                            <pre className="p-2 bg-emerald-100 rounded text-xs overflow-x-auto">{`// app/api/rates-map/route.ts
+export async function GET(req) {
+  const auth = req.headers.get('Authorization');
+  if (!auth) return Response.json({ error: 'Auth obrigatória' }, { status: 401 });
+  const { searchParams } = new URL(req.url);
+  const estId = searchParams.get('establishment_id');
+  if (!estId) return Response.json({ error: 'establishment_id obrigatório' }, { status: 400 });
+  const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  // ... lógica ...
+  return Response.json({ rateCalendar, _enriched });
+}`}</pre>
+                            <p className="mt-2 text-xs text-emerald-800"><strong>vercel.json:</strong> <code>{`{"crons":[{"path":"/api/recalc-rates","schedule":"0 2 * * *"}]}`}</code></p>
+                          </div>
+                          <div className="p-4 bg-violet-50 rounded-lg border border-violet-200">
+                            <h4 className="font-semibold mb-2 text-violet-900">Netlify Functions</h4>
+                            <p className="text-xs text-violet-800 mb-2">Funções em netlify/functions/. Cron: Scheduled Functions (Beta) ou cron-job.org.</p>
+                            <pre className="p-2 bg-violet-100 rounded text-xs overflow-x-auto">{`// netlify/functions/rates-map.ts
+import type { Handler } from '@netlify/functions';
+export const handler: Handler = async (event) => {
+  const auth = event.headers['authorization'];
+  if (!auth) return { statusCode: 401, body: JSON.stringify({ error: 'Auth obrigatória' }) };
+  const estId = event.queryStringParameters?.establishment_id;
+  if (!estId) return { statusCode: 400, body: JSON.stringify({ error: 'establishment_id obrigatório' }) };
+  // ... lógica ...
+  return { statusCode: 200, body: JSON.stringify({ rateCalendar, _enriched }) };
+};`}</pre>
+                          </div>
+                        </div>
+
+                        {/* Alternativas Redis e Banco */}
+                        <div className="p-4 bg-slate-100 rounded-lg border border-slate-300">
+                          <h4 className="font-semibold mb-2 text-slate-800">Alternativas ao Redis e ao Supabase</h4>
+                          <div className="grid md:grid-cols-2 gap-4 text-xs">
+                            <div>
+                              <strong>Redis:</strong> Upstash (recomendado serverless) | ElastiCache (VPC) | Redis Cloud | DynamoDB (cache key-value com TTL)
+                            </div>
+                            <div>
+                              <strong>Banco/Auth:</strong> RDS/Aurora (PostgreSQL) | Cognito/Auth0 | S3 (Storage) | AppSync/Ably (Realtime)
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Secrets e Checklist */}
+                        <div className="grid md:grid-cols-2 gap-4">
+                          <div className="p-4 bg-slate-50 rounded-lg border">
+                            <h4 className="font-semibold mb-2 text-slate-800">Secrets Obrigatórios</h4>
+                            <table className="w-full text-xs">
+                              <tbody>
+                                <tr><td className="py-1"><code>SUPABASE_URL</code></td><td className="py-1">Todas</td></tr>
+                                <tr><td className="py-1"><code>SUPABASE_SERVICE_ROLE_KEY</code></td><td className="py-1">Todas</td></tr>
+                                <tr><td className="py-1"><code>UPSTASH_REDIS_REST_URL</code></td><td className="py-1">rates-map (opcional)</td></tr>
+                                <tr><td className="py-1"><code>UPSTASH_REDIS_REST_TOKEN</code></td><td className="py-1">rates-map (opcional)</td></tr>
+                                <tr><td className="py-1"><code>STRIPE_SECRET_KEY</code></td><td className="py-1">Stripe</td></tr>
+                                <tr><td className="py-1"><code>STRIPE_WEBHOOK_SECRET</code></td><td className="py-1">stripe-webhook</td></tr>
+                                <tr><td className="py-1"><code>RESEND_API_KEY</code></td><td className="py-1">send-email-resend</td></tr>
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                            <h4 className="font-semibold mb-2 text-green-900">Checklist de Deploy</h4>
+                            <ul className="text-xs text-green-800 space-y-1 list-disc list-inside">
+                              <li>Configurar secrets no Supabase</li>
+                              <li>Deploy: <code>supabase functions deploy</code></li>
+                              <li>Cron: recalc-rates, process-no-shows, send-checkout-reminders</li>
+                              <li>Webhook Stripe → stripe-webhook</li>
+                              <li>(Opcional) Upstash para rates-map</li>
+                              <li>Testar health-check</li>
+                            </ul>
                           </div>
                         </div>
                       </div>
@@ -4493,12 +5000,16 @@ if (data) {
                       </div>
                       
                       <div className="mt-4">
-                        <strong className="text-slate-800">Outras Edge Functions:</strong>
+                        <strong className="text-slate-800">Todas as Edge Functions e Tutoriais:</strong>
                         <ul className="list-disc list-inside mt-1 text-slate-600 space-y-1">
-                          <li><code>get-reservation</code>: Busca informações completas de reserva por identificador/localizador</li>
-                          <li><code>send-email-smtp</code>: Envio de emails via SMTP</li>
-                          <li><code>send-email-resend</code>: Envio de emails via Resend API</li>
+                          <li><code>rates-dashboard</code>, <code>rates-map</code> (com Upstash Redis), <code>recalc-rates</code></li>
+                          <li><code>process-no-shows</code>, <code>send-checkout-reminders</code></li>
+                          <li><code>get-reservation</code>, <code>get-site-settings</code>, <code>render-html</code>, <code>health-check</code></li>
+                          <li><code>send-email-smtp</code>, <code>send-email-resend</code>, <code>send-email-sendgrid</code></li>
                         </ul>
+                        <p className="mt-2 text-xs text-slate-500">
+                          Tutoriais completos, Upstash e alternativas AWS/Vercel/Netlify na aba <strong>Funcionalidades</strong> → <strong>Edge Functions e Upstash Redis</strong>.
+                        </p>
                       </div>
                       
                       <div>

@@ -34,11 +34,13 @@ import { CancellationPolicyTestSuite } from "@/components/cancellation/Cancellat
 import { NoShowProcessor } from "@/components/cancellation/NoShowProcessor";
 import { NoShowSelector } from "@/components/cancellation/NoShowSelector";
 import { NoShowScheduleConfig } from "@/components/cancellation/NoShowScheduleConfig";
+import { useNoShowMigrations } from "@/hooks/useNoShowMigrations";
 import { formatDate } from "@/lib/reservationUtils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const CancellationPolicies = () => {
   const { policies, isLoading, refetch, deletePolicy } = useCancellationPolicies();
+  const { rpcFunctionExists, isLoading: migrationsLoading } = useNoShowMigrations();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedPolicyId, setSelectedPolicyId] = useState<string | undefined>();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -300,15 +302,17 @@ const CancellationPolicies = () => {
                   <li>Cria uma fatura para a multa</li>
                   <li>Registra um log de auditoria</li>
                 </ul>
-                <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                  <p className="text-sm font-semibold text-amber-800 mb-1">
-                    ⚠️ Função RPC não encontrada
-                  </p>
-                  <p className="text-xs text-amber-700">
-                    Para melhor performance, aplique a migration <code className="bg-amber-100 px-1 rounded">20251225000016_create_no_show_processor_function.sql</code> no Supabase.
-                    O sistema continuará funcionando usando o método via serviço como fallback.
-                  </p>
-                </div>
+                {!migrationsLoading && !rpcFunctionExists && (
+                  <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-sm font-semibold text-amber-800 mb-1">
+                      ⚠️ Função RPC não encontrada
+                    </p>
+                    <p className="text-xs text-amber-700">
+                      Para melhor performance, aplique a migration <code className="bg-amber-100 px-1 rounded">20251225000016_create_no_show_processor_function.sql</code> no Supabase.
+                      O sistema continuará funcionando usando o método via serviço como fallback.
+                    </p>
+                  </div>
+                )}
                 <p className="text-sm text-muted-foreground mt-4">
                   <strong>Recomendação:</strong> Configure um processamento automático diário às 19:00
                   usando Supabase Edge Functions ou cron job.

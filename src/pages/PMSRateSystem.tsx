@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useRateSystem } from "@/hooks/useRateSystem";
+import { useRateSystemRealtime } from "@/hooks/useRateSystemRealtime";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
@@ -28,6 +29,7 @@ import { RateSystemSettingsDialog } from "@/components/rate-system/RateSystemSet
 import { PlanTypesView } from "@/components/rate-system/PlanTypesView";
 import { PriceDashboardView } from "@/components/rate-system/PriceDashboardView";
 import CancellationPolicies from "@/pages/CancellationPolicies";
+import { DynamicRatePricesProvider } from "@/contexts/DynamicRatePricesContext";
 
 const PMSRateSystem = () => {
   const [activeTab, setActiveTab] = useState('calendar');
@@ -61,6 +63,9 @@ const PMSRateSystem = () => {
     isLoading,
     refetch: refetchRateSystem,
   } = useRateSystem();
+
+  // Sincronização em tempo real: rate_calendar, regras dinâmicas, restrições
+  useRateSystemRealtime();
 
   // Buscar categorias com quartos (seguindo lógica do PMS)
   // Usar o mesmo establishment do contexto (selectedEstablishment) para evitar perda de categorias
@@ -137,9 +142,10 @@ const PMSRateSystem = () => {
     },
   });
   
-  // Não considerar isLoadingCalendar no loading geral, pois ele pode estar sendo atualizado
-  // sem afetar a disponibilidade das categorias
-  const isInitialLoading = isLoadingRatePlans || categoriesLoading;
+  // Incluir isLoadingCalendar no carregamento inicial para evitar flash de preço base
+  // (rateCalendar vazio → exibe base_price; ao carregar → exibe tarifário correto)
+  // React Query: isLoading só é true quando não há dados em cache, não durante refetch
+  const isInitialLoading = isLoadingRatePlans || categoriesLoading || isLoadingCalendar;
 
   // Verificar se a empresa tem acesso à funcionalidade de automação de regras dinâmicas
   useEffect(() => {
@@ -286,8 +292,14 @@ const PMSRateSystem = () => {
             <PriceDashboardView />
           </TabsContent>
 
+          {/* Mapa Tarifário e Grade ARI: forceMount para manter estado ao trocar de aba */}
+          <DynamicRatePricesProvider>
           {/* Calendar View */}
-          <TabsContent value="calendar" className="space-y-4">
+          <TabsContent 
+            value="calendar" 
+            className="space-y-4 data-[state=inactive]:hidden" 
+            forceMount
+          >
             <RateCalendarGrid
               ratePlans={ratePlans}
               categories={categories}
@@ -301,7 +313,11 @@ const PMSRateSystem = () => {
           </TabsContent>
 
           {/* ARI Grid View */}
-          <TabsContent value="ari-grid" className="space-y-4">
+          <TabsContent 
+            value="ari-grid" 
+            className="space-y-4 data-[state=inactive]:hidden" 
+            forceMount
+          >
             <ARIGrid
               ratePlans={ratePlans}
               categories={categories}
@@ -313,6 +329,7 @@ const PMSRateSystem = () => {
               onStartDateChange={setStartDate}
             />
           </TabsContent>
+          </DynamicRatePricesProvider>
 
           {/* Rate Plans View */}
           <TabsContent value="rateplans" className="space-y-4">
@@ -343,6 +360,7 @@ const PMSRateSystem = () => {
               isLoading={isLoadingRules}
               categories={categories}
               ratePlans={ratePlans}
+              rateCalendar={rateCalendar}
               onCreate={createDynamicRule}
               onUpdate={updateDynamicRule}
               onDelete={deleteDynamicRule}

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { fetchRatesMap } from "@/lib/ratesApi";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { toast } from "sonner";
 import { format, eachDayOfInterval, startOfDay, addDays } from "date-fns";
@@ -30,6 +31,8 @@ export interface RateCalendarEntry {
   adult_price?: number;
   child_price?: number;
   occupancy_percentage?: number;
+  projected_occupancy?: number;
+  pickup_rate?: number;
 }
 
 export interface DynamicPricingRule {
@@ -77,9 +80,18 @@ export const useRateSystem = () => {
     return getSelectedEstablishmentId();
   };
 
+  // Configuração de resiliência para queries tarifárias (retry, refetch automático)
+  const rateQueryOptions = {
+    retry: 3,
+    retryDelay: (attemptIndex: number) => Math.min(1000 * 2 ** attemptIndex, 10000),
+    refetchOnWindowFocus: true,
+    staleTime: 60 * 1000, // 1 minuto
+  };
+
   // ========== RATE PLANS ==========
   const ratePlansQuery = useQuery({
     queryKey: ["rate_plans", selectedEstablishment?.id],
+    ...rateQueryOptions,
     queryFn: async () => {
       const establishmentId = getEstablishmentId();
       let query = supabase
@@ -234,27 +246,21 @@ export const useRateSystem = () => {
   // ========== RATE CALENDAR ==========
   const rateCalendarQuery = useQuery({
     queryKey: ["rate_calendar", selectedEstablishment?.id],
+    ...rateQueryOptions,
     queryFn: async () => {
       const establishmentId = getEstablishmentId();
       if (!establishmentId) return [];
+
+      const apiData = await fetchRatesMap(establishmentId);
+      if (apiData?.rateCalendar?.length !== undefined) {
+        return apiData.rateCalendar as RateCalendarEntry[];
+      }
 
       const { data, error } = await supabase
         .from("rate_calendar")
         .select("*")
         .eq("establishment_id", establishmentId)
         .order("date", { ascending: true });
-      
-      // Log para verificar se os campos de flutuação estão sendo retornados
-      if (data && data.length > 0) {
-        const sampleEntry = data[0];
-        console.log('[useRateSystem] Sample rate_calendar entry:', {
-          has_occupancy_1_fluctuation_type: !!sampleEntry.occupancy_1_fluctuation_type,
-          has_occupancy_1_fluctuation_value: sampleEntry.occupancy_1_fluctuation_value !== null && sampleEntry.occupancy_1_fluctuation_value !== undefined,
-          occupancy_1_fluctuation_type: sampleEntry.occupancy_1_fluctuation_type,
-          occupancy_1_fluctuation_value: sampleEntry.occupancy_1_fluctuation_value,
-          allFields: Object.keys(sampleEntry),
-        });
-      }
 
       if (error) throw error;
       return (data || []) as RateCalendarEntry[];
@@ -296,8 +302,17 @@ export const useRateSystem = () => {
     return Number(data.base_price || 0);
   };
 
+  type RateUpdateSource = 'manual' | 'dynamic_rule' | 'system_recalc' | 'restriction' | 'channel_sync' | 'api_import';
+
+  type UpsertRateCalendarInput =
+    | Partial<RateCalendarEntry>[]
+    | { entries: Partial<RateCalendarEntry>[]; update_source?: RateUpdateSource };
+
   const upsertRateCalendar = useMutation({
-    mutationFn: async (entries: Partial<RateCalendarEntry>[]) => {
+    mutationFn: async (input: UpsertRateCalendarInput) => {
+      const entries = Array.isArray(input) ? input : input.entries;
+      const updateSource = Array.isArray(input) ? 'manual' : (input.update_source ?? 'manual');
+
       const establishmentId = getEstablishmentId();
       if (!establishmentId) throw new Error("Establishment ID não encontrado");
 
@@ -365,6 +380,7 @@ export const useRateSystem = () => {
             categories_count: categoryIds.length,
             plans_count: planIds.length,
             dates_count: dates.length,
+            update_source: updateSource,
           },
         });
       } catch (logError: any) {
@@ -374,13 +390,16 @@ export const useRateSystem = () => {
       
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
-      toast.success("Tarifas atualizadas com sucesso!");
+      const updateSource = Array.isArray(variables) ? 'manual' : (variables.update_source ?? 'manual');
+      if (updateSource === 'manual') {
+        toast.success("Tarifário atualizado");
+      }
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Erro ao atualizar tarifas");
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Erro ao atualizar tarifas");
     },
   });
 
@@ -508,6 +527,7 @@ export const useRateSystem = () => {
   // ========== DYNAMIC RULES ==========
   const dynamicRulesQuery = useQuery({
     queryKey: ["dynamic_pricing_rules", selectedEstablishment?.id],
+    ...rateQueryOptions,
     queryFn: async () => {
       const establishmentId = getEstablishmentId();
       if (!establishmentId) return [];
@@ -558,6 +578,8 @@ export const useRateSystem = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dynamic_pricing_rules"] });
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      queryClient.invalidateQueries({ queryKey: ["hotel_settings_rate_system"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica criada com sucesso!");
     },
@@ -613,6 +635,8 @@ export const useRateSystem = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dynamic_pricing_rules"] });
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      queryClient.invalidateQueries({ queryKey: ["hotel_settings_rate_system"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica atualizada com sucesso!");
     },
@@ -658,6 +682,8 @@ export const useRateSystem = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dynamic_pricing_rules"] });
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      queryClient.invalidateQueries({ queryKey: ["hotel_settings_rate_system"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica excluída com sucesso!");
     },
@@ -669,6 +695,7 @@ export const useRateSystem = () => {
   // ========== RESTRICTIONS ==========
   const restrictionsQuery = useQuery({
     queryKey: ["rate_restrictions", selectedEstablishment?.id],
+    ...rateQueryOptions,
     queryFn: async () => {
       const establishmentId = getEstablishmentId();
       if (!establishmentId) return [];
@@ -716,6 +743,7 @@ export const useRateSystem = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_restrictions"] });
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição criada com sucesso!");
     },
@@ -768,6 +796,7 @@ export const useRateSystem = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_restrictions"] });
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição atualizada com sucesso!");
     },
@@ -811,6 +840,7 @@ export const useRateSystem = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rate_restrictions"] });
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição excluída com sucesso!");
     },
@@ -832,8 +862,8 @@ export const useRateSystem = () => {
     const establishmentId = getEstablishmentId();
     if (!establishmentId) return 0;
 
-    // Limitar número de tentativas para evitar loops infinitos
-    const MAX_RETRIES = 1;
+    // Limitar número de tentativas (retry para erros QUIC/rede transitórios)
+    const MAX_RETRIES = 2;
 
     // Se useEdgeFunction for true, usar Edge Function
     if (useEdgeFunction) {
@@ -862,57 +892,53 @@ export const useRateSystem = () => {
       });
 
       if (error) {
-        // Para erros de rede (ERR_INSUFFICIENT_RESOURCES, Failed to fetch), usar preço base diretamente
         const isNetworkError = 
           error.message?.includes("CORS") || 
           error.message?.includes("Failed to fetch") || 
           error.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
+          error.message?.includes("ERR_QUIC_PROTOCOL_ERROR") ||
           error.code === "PGRST301";
 
         if (isNetworkError && retryCount < MAX_RETRIES) {
-          // Tentar buscar preço base da categoria diretamente, sem fallback para Edge Function
+          await new Promise(r => setTimeout(r, 300 * (retryCount + 1)));
+          return calculateRatePrice(categoryId, planId, date, adults, children, false, retryCount + 1);
+        }
+        if (isNetworkError) {
           try {
             const { data: categoryData } = await supabase
               .from("room_categories")
               .select("base_price")
               .eq("id", categoryId)
               .maybeSingle();
-            
-            if (categoryData?.base_price) {
-              return Number(categoryData.base_price);
-            }
-          } catch (categoryError) {
-            console.error("Erro ao buscar preço base:", categoryError);
-          }
+            if (categoryData?.base_price) return Number(categoryData.base_price);
+          } catch (e) { /* fallback */ }
         }
         return 0;
       }
 
       return Number(data || 0);
     } catch (fetchError: any) {
-      // Para erros de rede, usar preço base diretamente sem tentar fallback
       const isNetworkError = 
-        fetchError.message?.includes("Failed to fetch") || 
-          fetchError.message?.includes("CORS") || 
-          fetchError.message?.includes("502") ||
-        fetchError.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
-        fetchError.code === "PGRST301";
+        fetchError?.message?.includes("Failed to fetch") || 
+        fetchError?.message?.includes("CORS") || 
+        fetchError?.message?.includes("502") ||
+        fetchError?.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
+        fetchError?.message?.includes("ERR_QUIC_PROTOCOL_ERROR") ||
+        fetchError?.code === "PGRST301";
 
       if (isNetworkError && retryCount < MAX_RETRIES) {
-        // Buscar preço base da categoria diretamente
+        await new Promise(r => setTimeout(r, 300 * (retryCount + 1)));
+        return calculateRatePrice(categoryId, planId, date, adults, children, false, retryCount + 1);
+      }
+      if (isNetworkError) {
         try {
           const { data: categoryData } = await supabase
             .from("room_categories")
             .select("base_price")
             .eq("id", categoryId)
             .maybeSingle();
-          
-          if (categoryData?.base_price) {
-            return Number(categoryData.base_price);
-          }
-        } catch (categoryError) {
-          console.error("Erro ao buscar preço base:", categoryError);
-        }
+          if (categoryData?.base_price) return Number(categoryData.base_price);
+        } catch (e) { /* fallback */ }
       }
       return 0;
     }

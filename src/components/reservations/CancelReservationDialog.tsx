@@ -13,9 +13,10 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertTriangle, DollarSign, Info, Loader2 } from "lucide-react";
 import { formatCurrency } from "@/lib/reservationUtils";
+import { supabase } from "@/integrations/supabase/client";
 import { getReservationCancellationPolicy } from "@/utils/cancellationPolicyService";
 import { CancellationCalculationResult, calculateCancellationPenalty } from "@/utils/cancellationPolicyCalculator";
-import type { CancellationPolicy } from "@/utils/cancellationPolicyCalculator";
+import type { ReservationData } from "@/utils/cancellationPolicyCalculator";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -72,16 +73,32 @@ export const CancelReservationDialog = ({
       if (policy) {
         setPolicyName(policy.name);
         
-        // Calcular multa
-        const { result } = await applyCancellation(
-          reservationId,
-          "Cálculo de multa",
+        // Buscar dados completos da reserva para o cálculo (created_at, establishment_id, etc.)
+        const { data: reservation } = await supabase
+          .from("reservations")
+          .select("id, checkin_date, checkout_date, total_amount, paid_amount, pricing_plan_id, status, establishment_id, created_at, channel")
+          .eq("id", reservationId)
+          .single();
+
+        const reservationDataForCalc: ReservationData = {
+          id: reservation?.id || reservationId,
+          checkin_date: reservation?.checkin_date || reservationData.checkin_date,
+          checkout_date: reservation?.checkout_date || reservationData.checkout_date,
+          total_amount: reservation?.total_amount ?? reservationData.total_amount ?? 0,
+          paid_amount: reservation?.paid_amount ?? paidAmount ?? 0,
+          pricing_plan_id: reservation?.pricing_plan_id ?? reservationData.pricing_plan_id ?? null,
+          status: reservation?.status || "confirmed",
+          establishment_id: reservation?.establishment_id || "",
+          created_at: reservation?.created_at || "",
+          channel: (reservation as ReservationData)?.channel || "direct",
+        };
+
+        const result = calculateCancellationPenalty(
+          policy,
+          reservationDataForCalc,
           new Date()
         );
-        
-        if (result) {
-          setPenaltyCalculation(result);
-        }
+        setPenaltyCalculation(result);
       } else {
         setPolicyName(null);
         setPenaltyCalculation(null);
