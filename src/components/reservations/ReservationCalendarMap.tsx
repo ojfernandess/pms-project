@@ -128,7 +128,6 @@ export const ReservationCalendarMap = ({
   const navigate = useNavigate();
   const { establishmentId: establishmentIdFromParams } = useParams<{ establishmentId?: string }>();
   const { selectedEstablishment, establishments, setSelectedEstablishment } = useEstablishment();
-  const { rateCalendar, ratePlans, calculateRatePrice } = useRateSystem();
   
   // Cache de preços calculados para evitar recálculos desnecessários
   const [calculatedPricesCache, setCalculatedPricesCache] = useState<Map<string, number>>(new Map());
@@ -169,6 +168,14 @@ export const ReservationCalendarMap = ({
   }, [selectedEstablishment, establishmentIdFromParams, establishments, setSelectedEstablishment]);
   const [startDate, setStartDate] = useState(startOfDay(new Date()));
   const [viewDays, setViewDays] = useState(30);
+
+  // Período visível para pré-carregar rate_calendar (alinhado ao mapa de tarifas e Grid ARI)
+  const rateCalendarDateRange = useMemo(() => ({
+    start: startOfDay(addDays(startDate, -1)),
+    end: startOfDay(addDays(startDate, viewDays - 1)),
+  }), [startDate, viewDays]);
+
+  const { rateCalendar, ratePlans, calculateRatePrice } = useRateSystem({ dateRange: rateCalendarDateRange });
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedBuildings, setExpandedBuildings] = useState<Set<string>>(new Set());
   const [quickDialogOpen, setQuickDialogOpen] = useState(false);
@@ -601,12 +608,13 @@ export const ReservationCalendarMap = ({
         return;
       }
 
-      // Apenas agrupar reservas com room_id válido
-      if (r.room_id && typeof r.room_id === 'string' && r.room_id.trim() !== '') {
-        if (!grouped[r.room_id]) {
-          grouped[r.room_id] = [];
+      // Incluir reservas com room_id válido (pré-reservas e outras podem vir com UUID em formatos diferentes)
+      const roomId = r.room_id != null ? String(r.room_id).trim() : '';
+      if (roomId) {
+        if (!grouped[roomId]) {
+          grouped[roomId] = [];
         }
-        grouped[r.room_id].push(r);
+        grouped[roomId].push(r);
       }
     });
 
@@ -3194,6 +3202,7 @@ export const ReservationCalendarMap = ({
             }
           }}
           initialData={quickDialogData}
+          rateCalendar={rateCalendar}
         />
       )}
 

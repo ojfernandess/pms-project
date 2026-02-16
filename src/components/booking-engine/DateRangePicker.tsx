@@ -28,6 +28,7 @@ interface DateRangePickerProps {
     searchInputText: string;
     searchInputFocus: string;
     textSecondary: string;
+    accentColor?: string;
     primaryButton: string;
     primaryButtonHover: string;
     secondaryButton: string;
@@ -51,6 +52,7 @@ export function DateRangePicker({
     searchInputText: "text-slate-900",
     searchInputFocus: "focus:border-blue-500",
     textSecondary: "text-slate-600",
+    accentColor: "text-blue-600",
     primaryButton: "bg-blue-600 text-white",
     primaryButtonHover: "hover:bg-blue-700",
     secondaryButton: "bg-white text-slate-700 border border-slate-300",
@@ -286,7 +288,7 @@ export function DateRangePicker({
               "border rounded-lg"
             )}
           >
-            <CalendarDays className="mr-2 h-4 w-4" />
+            <CalendarDays className={cn("mr-2 h-4 w-4", theme.accentColor || "text-blue-600")} />
             {buttonText}
           </Button>
         )}

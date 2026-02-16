@@ -692,11 +692,13 @@ const Reservations = () => {
           }
         }}
         onSuccess={() => {
-          // Invalidar todas as queries de reservas (incluindo as do mapa com datas específicas)
+          // Invalidar e refetch imediato para reservas (incluindo mapa e pré-reservas)
           queryClient.invalidateQueries({ queryKey: ["reservations"] });
+          queryClient.refetchQueries({ queryKey: ["reservations"] });
           // Invalidar também queries relacionadas
           queryClient.invalidateQueries({ queryKey: ["rooms"] });
           queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+          queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
           // Forçar refetch das reservas para garantir que a lista seja atualizada
           refetch();
           setDialogOpen(false);

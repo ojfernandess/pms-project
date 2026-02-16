@@ -35,7 +35,7 @@ import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 
-type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel";
+type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel" | "airbnb";
 
 const DETAIL_THEME_CONFIGS: Record<BookingThemeKey, {
   pageBg: string;
@@ -192,6 +192,28 @@ const DETAIL_THEME_CONFIGS: Record<BookingThemeKey, {
     footerBorder: "border-t border-[#00224d]",
     footerText: "text-blue-100",
   },
+  airbnb: {
+    pageBg: "bg-neutral-50",
+    headerBg: "bg-white",
+    headerText: "text-neutral-900",
+    headerSubtitle: "text-neutral-600",
+    headerBorder: "border-b border-neutral-200",
+    textPrimary: "text-neutral-900",
+    textSecondary: "text-neutral-700",
+    textMuted: "text-neutral-500",
+    heroImageOverlay: "bg-gradient-to-t from-black/50 via-black/15 to-transparent",
+    summaryBg: "bg-white",
+    summaryBorder: "border border-neutral-200",
+    primaryButton: "bg-[#FF5A5F] text-white font-semibold",
+    primaryButtonHover: "hover:bg-[#E04550] hover:shadow-lg hover:shadow-[#FF5A5F]/25",
+    secondaryButton: "bg-white text-neutral-900 border-2 border-neutral-900",
+    secondaryButtonHover: "hover:bg-neutral-50",
+    iconButton: "bg-white text-neutral-900 border border-neutral-200",
+    iconButtonHover: "hover:bg-neutral-50 hover:border-[#FF5A5F]/60",
+    footerBg: "bg-neutral-100",
+    footerBorder: "border-t border-neutral-200",
+    footerText: "text-neutral-600",
+  },
 };
 
 export default function ReservationDetailPage() {
@@ -289,7 +311,7 @@ export default function ReservationDetailPage() {
       (finalCompany?.booking_engine_theme as BookingThemeKey) ||
       (hotelSettings?.booking_engine_theme as BookingThemeKey) ||
       "default";
-    const validKeys: BookingThemeKey[] = ["default", "modern", "luxury", "minimal", "dark", "travel"];
+    const validKeys: BookingThemeKey[] = ["default", "modern", "luxury", "minimal", "dark", "travel", "airbnb"];
     const validKey = validKeys.includes(key) ? key : "default";
     
     // Debug: log para verificar qual tema está sendo usado

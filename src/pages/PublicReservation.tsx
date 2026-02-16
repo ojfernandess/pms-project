@@ -24,7 +24,7 @@ import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
 import { DateRangePicker } from "@/components/booking-engine/DateRangePicker";
 
 // Importar tipos e configurações de tema do booking engine
-type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel";
+type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel" | "airbnb";
 
 interface BookingThemeConfig {
   pageBg: string;
@@ -442,6 +442,65 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
     footerBorder: "border-t border-[#00224d]",
     footerText: "text-blue-100",
   },
+  airbnb: {
+    pageBg: "bg-neutral-50",
+    heroBg: "bg-white",
+    heroOverlay: "bg-black/15",
+    heroImageOverlay: "bg-gradient-to-t from-black/50 via-black/10 to-transparent",
+    headerBg: "bg-white",
+    headerText: "text-neutral-900",
+    headerSubtitle: "text-neutral-600",
+    headerButton: "bg-[#FF5A5F] hover:bg-[#E04550] text-white font-semibold",
+    headerBorder: "border-b border-neutral-200",
+    heroTitle: "text-neutral-900 font-semibold",
+    heroSubtitle: "text-neutral-600",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+    searchCard: "bg-white",
+    searchCardShadow: "shadow-xl shadow-black/8",
+    searchCardBorder: "border border-neutral-200",
+    searchInputBg: "bg-white",
+    searchInputBorder: "border-neutral-300",
+    searchInputText: "text-neutral-900",
+    searchInputFocus: "focus:border-[#FF5A5F] focus:ring-2 focus:ring-[#FF5A5F]/15",
+    primaryButton: "bg-[#FF5A5F] text-white",
+    primaryButtonHover: "hover:bg-[#E04550] hover:shadow-lg hover:shadow-[#FF5A5F]/25",
+    secondaryButton: "bg-white text-neutral-900 border-2 border-neutral-900",
+    secondaryButtonHover: "hover:bg-neutral-50",
+    textPrimary: "text-neutral-900",
+    textSecondary: "text-neutral-700",
+    textMuted: "text-neutral-500",
+    textInverse: "text-white",
+    cardBg: "bg-white",
+    cardBorder: "border border-neutral-200",
+    cardShadow: "shadow-md shadow-black/6",
+    cardHover: "hover:shadow-lg hover:shadow-black/12",
+    cardHoverShadow: "hover:shadow-xl",
+    roomCardBg: "bg-white",
+    roomCardBorder: "border border-neutral-200",
+    roomCardShadow: "shadow-md shadow-black/6",
+    roomImageOverlay: "bg-gradient-to-t from-black/45 via-black/10 to-transparent",
+    priceColor: "text-neutral-900",
+    priceLabel: "text-neutral-500",
+    priceHighlight: "text-[#FF5A5F] font-bold",
+    badgePrimary: "bg-[#FFF8F8] text-[#FF5A5F] border-[#FFDADA]",
+    badgeSecondary: "bg-neutral-100 text-neutral-700 border-neutral-200",
+    badgeSuccess: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    badgeWarning: "bg-amber-50 text-amber-700 border-amber-200",
+    summaryBg: "bg-white",
+    summaryBorder: "border border-neutral-200",
+    summaryShadow: "shadow-xl shadow-black/10",
+    accentColor: "text-[#FF5A5F]",
+    accentBg: "bg-[#FFF8F8]",
+    accentBorder: "border-[#FFDADA]",
+    planCardBg: "bg-white",
+    planCardBorder: "border-2 border-neutral-200",
+    planCardSelected: "border-2 border-[#FF5A5F] bg-[#FFF8F8]",
+    planCardHover: "hover:border-[#FF5A5F]/50 hover:shadow-lg",
+    footerBg: "bg-neutral-100",
+    footerBorder: "border-t border-neutral-200",
+    footerText: "text-neutral-600",
+  },
 };
 
 const PublicReservation = () => {
@@ -526,15 +585,17 @@ const PublicReservation = () => {
 
   // Tema do motor de reservas (mesmo do booking engine)
   const themeKey: BookingThemeKey = useMemo(() => {
-    return (
+    const key = (
       (company?.booking_engine_theme as BookingThemeKey) ||
       (hotelSettings?.booking_engine_theme as BookingThemeKey) ||
       "default"
     ) as BookingThemeKey;
+    const validKeys: BookingThemeKey[] = ["default", "modern", "luxury", "minimal", "dark", "travel", "airbnb"];
+    return validKeys.includes(key) ? key : "default";
   }, [company?.booking_engine_theme, hotelSettings?.booking_engine_theme]);
 
   const theme = useMemo(() => {
-    return THEME_CONFIGS[themeKey];
+    return THEME_CONFIGS[themeKey] || THEME_CONFIGS.default;
   }, [themeKey]);
 
   // Título do motor de reservas (mesmo do booking engine)
@@ -1555,7 +1616,7 @@ const PublicReservation = () => {
         const results = await batchCalculateRatePrice(
           priceRequests,
           supabase,
-          3, // maxConcurrent: 3 requisições por vez
+          2, // maxConcurrent: evita ERR_FAILED / sobrecarga na API
           abortController.signal
         );
 
@@ -1717,7 +1778,7 @@ const PublicReservation = () => {
             const results = await batchCalculateRatePrice(
               priceRequests,
               supabase,
-              3, // maxConcurrent: 3 requisições por vez
+              2, // maxConcurrent: evita ERR_FAILED / sobrecarga na API
               abortController.signal
             );
 
@@ -3382,11 +3443,13 @@ const PublicReservation = () => {
         ) : null}
         <div className={`absolute inset-0 ${theme.heroImageOverlay} ${theme.heroOverlay}`} />
         
-        {/* Conteúdo do Hero */}
+        {/* Conteúdo do Hero - quando há imagem de fundo, forçar texto claro para contraste */}
         <div className="absolute inset-0 flex flex-col justify-end">
           <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pb-12">
             <div className="max-w-3xl">
-              <h1 className={`${theme.heroTitleSize} font-bold ${theme.heroTitle} mb-4 leading-tight`}>
+              <h1 className={`${theme.heroTitleSize} font-bold mb-4 leading-tight ${
+                heroImage ? "text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]" : theme.heroTitle
+              }`}>
                 {hotelSettings?.name || establishment.name || t("publicReservation.establishmentNotFound")}
               </h1>
               {hotelSettings?.street && (
@@ -3405,12 +3468,10 @@ const PublicReservation = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   className={`${
-                    themeKey === "modern" || themeKey === "luxury" || themeKey === "dark"
-                      ? "text-white/90"
-                      : themeKey === "travel"
+                    heroImage || themeKey === "modern" || themeKey === "luxury" || themeKey === "dark" || themeKey === "travel"
                       ? "text-white/90"
                       : `${theme.textInverse}/90`
-                  } text-lg flex items-center gap-2 mb-6 hover:opacity-100 transition-colors cursor-pointer`}
+                  } text-lg flex items-center gap-2 mb-6 hover:opacity-100 transition-colors cursor-pointer drop-shadow-sm`}
                 >
                   <MapPin className="w-5 h-5" />
                   {hotelSettings.street}
@@ -3418,10 +3479,8 @@ const PublicReservation = () => {
                   {hotelSettings.city && ` - ${hotelSettings.city}`}
                 </a>
               )}
-              <div className={`flex flex-wrap items-center gap-4 ${
-                themeKey === "modern" || themeKey === "luxury" || themeKey === "dark"
-                  ? "text-white/90"
-                  : themeKey === "travel"
+              <div className={`flex flex-wrap items-center gap-4 drop-shadow-sm ${
+                heroImage || themeKey === "modern" || themeKey === "luxury" || themeKey === "dark" || themeKey === "travel"
                   ? "text-white/90"
                   : `${theme.textInverse}/90`
               }`}>
@@ -3891,7 +3950,7 @@ const PublicReservation = () => {
                 {/* Datas */}
                 <div className="space-y-2">
                   <Label className={`text-sm font-semibold ${theme.textSecondary} flex items-center gap-2`}>
-                    <Calendar className="w-4 h-4" />
+                    <Calendar className={`w-4 h-4 ${theme.accentColor}`} />
                     {t("publicReservation.checkin")} e {t("publicReservation.checkout")}
                       </Label>
                   <DateRangePicker
@@ -3911,6 +3970,7 @@ const PublicReservation = () => {
                       searchInputText: theme.searchInputText,
                       searchInputFocus: theme.searchInputFocus,
                       textSecondary: theme.textSecondary,
+                      accentColor: theme.accentColor,
                       primaryButton: theme.primaryButton,
                       primaryButtonHover: theme.primaryButtonHover,
                       secondaryButton: theme.secondaryButton,
@@ -3931,7 +3991,7 @@ const PublicReservation = () => {
                       className={`w-full h-12 ${theme.searchInputBorder} ${theme.searchInputFocus} rounded-lg px-4 flex items-center justify-between transition-colors ${theme.searchInputBg}`}
                     >
                       <div className={`flex items-center gap-2 ${theme.searchInputText}`}>
-                        <Users className="w-5 h-5" />
+                        <Users className={`w-5 h-5 ${theme.accentColor}`} />
                         <span className="text-sm">
                           {adults} {adults === 1 ? t("publicReservation.adult") : t("publicReservation.adultsPlural")}
                           {children > 0 && (

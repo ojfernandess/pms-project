@@ -13,7 +13,8 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useCurrentEmployeeRole } from "@/hooks/useEmployees";
 import { formatCurrency, validateRoomAvailability, validateCategoryAvailability } from "@/lib/reservationUtils";
 import { Loader2, Calendar, Edit2, AlertTriangle, Ban } from "lucide-react";
-import { format, addDays, startOfDay, isBefore } from "date-fns";
+import { format, addDays, startOfDay, isBefore, differenceInDays } from "date-fns";
+import type { RateCalendarEntry } from "@/hooks/useRateSystem";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import {
@@ -48,6 +49,36 @@ interface QuickReservationDialogProps {
     category_id?: string;
     room_id?: string;
   };
+  /** rate_calendar do mapa (quando aberto a partir dele) para exibir preço imediato */
+  rateCalendar?: RateCalendarEntry[];
+}
+
+/** Soma base_price do rate_calendar para todas as noites da estadia (mesma lógica do mapa de tarifas) */
+function getInstantPriceFromRateCalendar(
+  rateCalendar: RateCalendarEntry[],
+  categoryId: string,
+  planId: string,
+  checkinDateStr: string,
+  checkoutDateStr: string
+): number | null {
+  if (!rateCalendar?.length || !categoryId || !planId || !checkinDateStr || !checkoutDateStr) return null;
+  const [cy, cm, cd] = checkinDateStr.split("-").map(Number);
+  const [ey, em, ed] = checkoutDateStr.split("-").map(Number);
+  const checkin = startOfDay(new Date(cy, cm - 1, cd));
+  const checkout = startOfDay(new Date(ey, em - 1, ed));
+  const nights = differenceInDays(checkout, checkin);
+  if (nights <= 0) return null;
+  let total = 0;
+  for (let i = 0; i < nights; i++) {
+    const d = addDays(checkin, i);
+    const dateStr = format(d, "yyyy-MM-dd");
+    const entry = rateCalendar.find(
+      (r) => r.pricing_plan_id === planId && r.category_id === categoryId && r.date === dateStr
+    );
+    if (!entry?.base_price || entry.base_price <= 0) return null;
+    total += entry.base_price;
+  }
+  return Math.round(total * 100) / 100;
 }
 
 export const QuickReservationDialog = ({
@@ -55,6 +86,7 @@ export const QuickReservationDialog = ({
   onOpenChange,
   onProceed,
   initialData,
+  rateCalendar,
 }: QuickReservationDialogProps) => {
   const { calculatePrice } = usePricing();
   const { channels } = useChannelManager();
@@ -188,10 +220,28 @@ export const QuickReservationDialog = ({
 
     let cancelled = false;
 
+    // Preço imediato do rate_calendar quando disponível (evita delay inicial)
+    const planId = formData.pricing_plan_id || "";
+    let hasInstantPrice = false;
+    if (rateCalendar && planId) {
+      const instant = getInstantPriceFromRateCalendar(
+        rateCalendar,
+        initialData.category_id,
+        planId,
+        formData.checkin_date,
+        formData.checkout_date
+      );
+      if (instant != null) {
+        hasInstantPrice = true;
+        setFormData((prev) => (prev.total_amount !== instant ? { ...prev, total_amount: instant } : prev));
+        setCalculatingPrice(false); // Desbloquear botões — preço já disponível
+      }
+    }
+
     const calculateTotal = async () => {
       if (cancelled) return;
-      
-      setCalculatingPrice(true);
+      // Só mostrar spinner se não temos preço instantâneo — evita bloquear botões quando rate_calendar já preencheu
+      if (!hasInstantPrice) setCalculatingPrice(true);
       try {
         let total = 0;
         
@@ -259,7 +309,7 @@ export const QuickReservationDialog = ({
       setCalculatingPrice(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialData.category_id, formData.checkin_date, formData.checkout_date, formData.pricing_plan_id, formData.adults, formData.children, isManualEdit, canOnlyBlock]);
+  }, [open, initialData.category_id, formData.checkin_date, formData.checkout_date, formData.pricing_plan_id, formData.adults, formData.children, isManualEdit, canOnlyBlock, rateCalendar]);
 
   // Resetar formulário quando abrir
   useEffect(() => {
@@ -285,22 +335,30 @@ export const QuickReservationDialog = ({
           }
         }
       }
-      
+      const planId = defaultPlanId || "";
+      const checkin = initialData.checkin_date || "";
+      const checkout = checkoutDate || "";
+
+      // Preço imediato do rate_calendar (alinhado ao mapa de tarifas) enquanto o batch calcula
+      const instantTotal = rateCalendar && initialData.category_id && planId
+        ? getInstantPriceFromRateCalendar(rateCalendar, initialData.category_id, planId, checkin, checkout)
+        : null;
+
       setFormData(prev => ({
         ...prev,
         channel: "direct",
-        pricing_plan_id: defaultPlanId || prev.pricing_plan_id || "",
-        checkin_date: initialData.checkin_date || prev.checkin_date || "",
-        checkout_date: checkoutDate || prev.checkout_date || "",
+        pricing_plan_id: planId || prev.pricing_plan_id || "",
+        checkin_date: checkin || prev.checkin_date || "",
+        checkout_date: checkout || prev.checkout_date || "",
         adults: prev.adults || 1,
         children: prev.children || 0,
-        total_amount: prev.total_amount || 0,
+        total_amount: instantTotal ?? prev.total_amount ?? 0,
       }));
       setCalculatingPrice(false); // Resetar estado de carregamento
       setIsManualEdit(false); // Resetar flag de edição manual
       setCalculatedPrice(0); // Resetar preço calculado
     }
-  }, [open, initialData.checkin_date, initialData.checkout_date, ratePlans]);
+  }, [open, initialData.checkin_date, initialData.checkout_date, initialData.category_id, ratePlans, rateCalendar]);
 
   const handleProceed = async (action: "confirmed" | "blocked" | "preregistration") => {
     // Verificar permissões antes de prosseguir

@@ -932,6 +932,7 @@ const BookingEngineSettings = () => {
                                   <SelectItem value="minimal">Minimal - Branco Minimalista</SelectItem>
                                   <SelectItem value="dark">Dark - Modo Escuro</SelectItem>
                                   <SelectItem value="travel">Travel Landing Page - Estilo Booking.com</SelectItem>
+                                  <SelectItem value="airbnb">Airbnb - Travel Landing Clean & Friendly</SelectItem>
                     </SelectContent>
                   </Select>
                             </div>
@@ -940,7 +941,7 @@ const BookingEngineSettings = () => {
                             <div className="space-y-3">
                               <Label className="text-sm font-medium text-slate-700">Preview dos Temas</Label>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                {(["default", "modern", "luxury", "minimal", "dark", "travel"] as const).map((themeKey) => {
+                                {(["default", "modern", "luxury", "minimal", "dark", "travel", "airbnb"] as const).map((themeKey) => {
                                   const isSelected = (company?.booking_engine_theme || "default") === themeKey;
                                   const themePreviews = {
                                     default: {
@@ -987,10 +988,17 @@ const BookingEngineSettings = () => {
                                       hero: "bg-gradient-to-br from-[#003580] via-[#0047a3] to-[#0059b3]",
                                       card: "bg-white border-slate-200",
                                       button: "bg-[#0071c2] text-white",
-                                      // Texto principal do hero em branco, combinando com o título/rodapé do tema
                                       text: "text-white",
                                       name: "Travel Landing",
                                       desc: "Estilo Booking.com"
+                                    },
+                                    airbnb: {
+                                      hero: "bg-gradient-to-br from-white via-neutral-50 to-neutral-100",
+                                      card: "bg-white border-neutral-200",
+                                      button: "bg-[#FF5A5F] text-white",
+                                      text: "text-neutral-900",
+                                      name: "Airbnb",
+                                      desc: "Clean & friendly"
                                     }
                                   };
 
@@ -1059,6 +1067,36 @@ const BookingEngineSettings = () => {
                         </div>
                       </Card>
                     )}
+
+                    {/* Modo de visualização da página de reservas */}
+                    <Card className="p-6 border-slate-200 shadow-sm">
+                      <div className="space-y-6">
+                        <div>
+                          <h3 className="text-lg font-semibold text-slate-900 mb-1">Visualização da Página de Reservas</h3>
+                          <p className="text-sm text-slate-500">Escolha como as categorias e planos tarifários são exibidos na lista de quartos</p>
+                        </div>
+                        <Separator />
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-slate-700">Modo de exibição</Label>
+                          <Select
+                            value={company?.booking_engine_rooms_view_mode || "by_category"}
+                            onValueChange={(value) => {
+                              updateCompanyMutation.mutate({
+                                booking_engine_rooms_view_mode: value,
+                              });
+                            }}
+                          >
+                            <SelectTrigger className="h-11">
+                              <SelectValue placeholder="Selecione o modo" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="by_category">Por categoria (grid 2x2 - 4 cards)</SelectItem>
+                              <SelectItem value="by_plan">Por plano tarifário (2 cards por categoria)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </Card>
 
                     <Card className="p-6 border-slate-200 shadow-sm">
                       <div className="space-y-6">

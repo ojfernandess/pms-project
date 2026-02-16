@@ -114,7 +114,7 @@ const animationStyles = `
   }
 `;
 
-type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel";
+type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel" | "airbnb";
 
 interface BookingThemeConfig {
   // Page & Layout
@@ -643,6 +643,80 @@ const THEME_CONFIGS: Record<BookingThemeKey, BookingThemeConfig> = {
     footerBorder: "border-t border-[#00224d]",
     footerText: "text-blue-100",
   },
+  airbnb: {
+    // Travel Landing Page - Estilo Airbnb: clean, coral accent, rounded, friendly
+    // Primary: #FF5A5F (Airbnb Rausch)
+    pageBg: "bg-neutral-50",
+    heroBg: "bg-white",
+    heroOverlay: "bg-black/15",
+    heroImageOverlay: "bg-gradient-to-t from-black/50 via-black/10 to-transparent",
+
+    headerBg: "bg-white",
+    headerText: "text-neutral-900",
+    headerSubtitle: "text-neutral-600",
+    headerButton: "bg-[#FF5A5F] hover:bg-[#E04550] text-white font-semibold",
+    headerBorder: "border-b border-neutral-200",
+
+    heroTitle: "text-neutral-900 font-semibold",
+    heroSubtitle: "text-neutral-600",
+    heroTitleSize: "text-4xl md:text-5xl lg:text-6xl",
+    heroSubtitleSize: "text-base md:text-lg",
+
+    searchCard: "bg-white",
+    searchCardShadow: "shadow-xl shadow-black/8",
+    searchCardBorder: "border border-neutral-200",
+    searchInputBg: "bg-white",
+    searchInputBorder: "border-neutral-300",
+    searchInputText: "text-neutral-900",
+    searchInputFocus: "focus:border-[#FF5A5F] focus:ring-2 focus:ring-[#FF5A5F]/15",
+
+    primaryButton: "bg-[#FF5A5F] text-white",
+    primaryButtonHover: "hover:bg-[#E04550] hover:shadow-lg hover:shadow-[#FF5A5F]/25",
+    secondaryButton: "bg-white text-neutral-900 border-2 border-neutral-900",
+    secondaryButtonHover: "hover:bg-neutral-50",
+
+    textPrimary: "text-neutral-900",
+    textSecondary: "text-neutral-700",
+    textMuted: "text-neutral-500",
+    textInverse: "text-white",
+
+    cardBg: "bg-white",
+    cardBorder: "border border-neutral-200",
+    cardShadow: "shadow-md shadow-black/6",
+    cardHover: "hover:shadow-lg hover:shadow-black/12",
+    cardHoverShadow: "hover:shadow-xl",
+
+    roomCardBg: "bg-white",
+    roomCardBorder: "border border-neutral-200",
+    roomCardShadow: "shadow-md shadow-black/6",
+    roomImageOverlay: "bg-gradient-to-t from-black/45 via-black/10 to-transparent",
+
+    priceColor: "text-neutral-900",
+    priceLabel: "text-neutral-500",
+    priceHighlight: "text-[#FF5A5F] font-bold",
+
+    badgePrimary: "bg-[#FFF8F8] text-[#FF5A5F] border-[#FFDADA]",
+    badgeSecondary: "bg-neutral-100 text-neutral-700 border-neutral-200",
+    badgeSuccess: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    badgeWarning: "bg-amber-50 text-amber-700 border-amber-200",
+
+    summaryBg: "bg-white",
+    summaryBorder: "border border-neutral-200",
+    summaryShadow: "shadow-xl shadow-black/10",
+
+    accentColor: "text-[#FF5A5F]",
+    accentBg: "bg-[#FFF8F8]",
+    accentBorder: "border-[#FFDADA]",
+
+    planCardBg: "bg-white",
+    planCardBorder: "border-2 border-neutral-200",
+    planCardSelected: "border-2 border-[#FF5A5F] bg-[#FFF8F8]",
+    planCardHover: "hover:border-[#FF5A5F]/50 hover:shadow-lg",
+
+    footerBg: "bg-neutral-100",
+    footerBorder: "border-t border-neutral-200",
+    footerText: "text-neutral-600",
+  },
 };
 
 const BookingEnginePage = () => {
@@ -691,6 +765,8 @@ const BookingEnginePage = () => {
   const [categoryPrices, setCategoryPrices] = useState<Record<string, number | null>>({});
   const [categoryPricesPlan1, setCategoryPricesPlan1] = useState<Record<string, number | null>>({});
   const [categoryPricesPlan2, setCategoryPricesPlan2] = useState<Record<string, number | null>>({});
+  // Preços por (categoria, plano) - alinhado ao mapa de tarifas e grid ARI
+  const [categoryPricesByPlan, setCategoryPricesByPlan] = useState<Record<string, Record<string, number | null>>>({});
   const [calculatingPrices, setCalculatingPrices] = useState(false);
   const [publicPricingPlan1Id, setPublicPricingPlan1Id] = useState<string | null>(null);
   const [publicPricingPlan1Title, setPublicPricingPlan1Title] = useState<string | null>(null);
@@ -1684,6 +1760,12 @@ const BookingEnginePage = () => {
     loadPricingPlansAndPolicies();
   }, [roomCategories, allHotelSettings]);
 
+  // Modo de visualização: by_category (grid 2x2 por categoria) ou by_plan (2 cards, cada um = 1 plano)
+  const roomsViewMode = useMemo(() => {
+    const mode = company?.booking_engine_rooms_view_mode || "by_category";
+    return mode === "by_plan" ? "by_plan" : "by_category";
+  }, [company?.booking_engine_rooms_view_mode]);
+
   const themeKey: BookingThemeKey = useMemo(() => {
     // Priorizar tema da empresa, depois do estabelecimento
     const key =
@@ -1691,7 +1773,7 @@ const BookingEnginePage = () => {
       (hotelSettings?.booking_engine_theme as BookingThemeKey) ||
       "default";
     const validKey = (
-      ["default", "modern", "luxury", "minimal", "dark", "travel"] as BookingThemeKey[]
+      ["default", "modern", "luxury", "minimal", "dark", "travel", "airbnb"] as BookingThemeKey[]
     ).includes(key)
       ? key
       : "default";
@@ -1763,6 +1845,7 @@ const BookingEnginePage = () => {
       const basePrice = cat.base_price || cat.min_price || null;
       const dynamicPricePlan1 = categoryPricesPlan1[cat.id as string];
       const dynamicPricePlan2 = categoryPricesPlan2[cat.id as string];
+      const pricesByPlan = categoryPricesByPlan[cat.id as string];
 
       // Buscar planos tarifários disponíveis no motor de reservas para esta categoria
       const establishmentId = cat.establishment_id;
@@ -1780,24 +1863,25 @@ const BookingEnginePage = () => {
       const availablePlans = pricingPlansByCategory[cat.id as string] || [];
       
       if (availablePlans.length > 0) {
-        // Usar planos do novo sistema
+        // Usar planos do novo sistema (preço por plano = mesma lógica do mapa de tarifas e grid ARI)
         availablePlans.forEach((plan: any) => {
           const planLabel = plan.label || plan.booking_engine_label || plan.name;
           const cancellationPolicy = plan.cancellation_policies || cancellationPoliciesMap[plan.id] || null;
           
-          // Determinar qual preço usar baseado no ID do plano
+          // Priorizar categoryPricesByPlan (calculado para cada plano), senão plan1/plan2
           let planPrice: number | null = null;
           let hasDynamicPrice = false;
-          
-          // Verificar se é plano 1 ou plano 2 baseado nos IDs configurados
-          if (plan.id === legacyPlan1Id || plan.id === publicPricingPlan1Id) {
+          if (pricesByPlan && plan.id && pricesByPlan[plan.id] != null && pricesByPlan[plan.id]! > 0) {
+            planPrice = pricesByPlan[plan.id];
+            hasDynamicPrice = true;
+          }
+          if (!hasDynamicPrice && (plan.id === legacyPlan1Id || plan.id === publicPricingPlan1Id)) {
             planPrice = dynamicPricePlan1;
             hasDynamicPrice = dynamicPricePlan1 !== null && dynamicPricePlan1 !== undefined;
-          } else if (plan.id === legacyPlan2Id || plan.id === publicPricingPlan2Id) {
+          } else if (!hasDynamicPrice && (plan.id === legacyPlan2Id || plan.id === publicPricingPlan2Id)) {
             planPrice = dynamicPricePlan2;
             hasDynamicPrice = dynamicPricePlan2 !== null && dynamicPricePlan2 !== undefined;
-          } else {
-            // Se não for plano 1 nem 2, tentar usar plano 1 como fallback
+          } else if (!hasDynamicPrice) {
             planPrice = dynamicPricePlan1;
             hasDynamicPrice = dynamicPricePlan1 !== null && dynamicPricePlan1 !== undefined;
           }
@@ -1889,7 +1973,7 @@ const BookingEnginePage = () => {
         plans,
       };
     });
-  }, [roomCategories, categoryPricesPlan1, categoryPricesPlan2, allHotelSettings, cancellationPoliciesMap, pricingPlansByCategory, publicPricingPlan1Id, publicPricingPlan2Id, nights]);
+  }, [roomCategories, categoryPricesPlan1, categoryPricesPlan2, categoryPricesByPlan, allHotelSettings, cancellationPoliciesMap, pricingPlansByCategory, publicPricingPlan1Id, publicPricingPlan2Id, nights]);
 
   const selectedRoom = useMemo(
     () => rooms.find((r) => r.id === selectedRoomId) || null,
@@ -1996,10 +2080,8 @@ const BookingEnginePage = () => {
           return;
         }
 
-        // Importar checkRateRestrictions para validar min/max stay, CTA, CTD
-        const { checkRateRestrictions } = await import("@/lib/ariAvailabilityUtils");
-
-        // Preparar todas as requisições
+        // Preparar requisições (mesma lógica do mapa de tarifas e grid ARI: calculate_rate_price)
+        // Usa planos de pricingPlansByCategory quando disponível, senão plan1/plan2 de hotel_settings
         const priceRequests: Array<{
           establishmentId: string;
           categoryId: string;
@@ -2007,8 +2089,8 @@ const BookingEnginePage = () => {
           date: string;
           adults: number;
           children: number;
-          categoryKey: string; // Para agrupar resultados
-          planType: 'plan1' | 'plan2'; // Identificar qual plano
+          categoryKey: string;
+          planIdForAgg: string;
         }> = [];
 
         for (const cat of roomCategories) {
@@ -2017,79 +2099,64 @@ const BookingEnginePage = () => {
           const plan1Id = settings?.public_pricing_plan_1_id || null;
           const plan2Id = settings?.public_pricing_plan_2_id || null;
 
-          // Verificar restrições (min/max stay, CTA, CTD) para cada plano
-          const checkoutDate = addDays(startDate, nightsCount);
-          const checkPlan1 = plan1Id ? await checkRateRestrictions(
-            establishmentId, cat.id, plan1Id, startDate, checkoutDate, nightsCount
-          ) : { allowed: false };
-          const checkPlan2 = plan2Id ? await checkRateRestrictions(
-            establishmentId, cat.id, plan2Id, startDate, checkoutDate, nightsCount
-          ) : { allowed: false };
+          // Planos a calcular: priorizar pricingPlansByCategory (sistema novo), senão plan1/plan2
+          const categoryPlans = pricingPlansByCategory[cat.id as string];
+          const plansToCalc: string[] = [];
+          if (categoryPlans && categoryPlans.length > 0) {
+            const seen = new Set<string>();
+            for (const p of categoryPlans) {
+              const pid = p.id;
+              if (pid && !seen.has(pid)) {
+                seen.add(pid);
+                plansToCalc.push(pid);
+              }
+            }
+          }
+          if (plansToCalc.length === 0 && (plan1Id || plan2Id)) {
+            if (plan1Id) plansToCalc.push(plan1Id);
+            if (plan2Id && plan2Id !== plan1Id) plansToCalc.push(plan2Id);
+          }
 
-          // Liga x1/x2/x3/x4: adultos/crianças devem ser POR QUARTO para o RPC
+          // Liga x1/x2/x3/x4: adultos/crianças por quarto (mesmo que mapa de tarifas e grid ARI)
           const requiredRooms = Math.ceil(adultsNum / (cat.capacity_adults || 1)) || 1;
           const categoryCapacity = cat.capacity_adults || 0;
           const adultsPerRoom = categoryCapacity > 0
             ? Math.min(categoryCapacity, Math.ceil(adultsNum / requiredRooms))
             : (requiredRooms > 0 ? Math.ceil(adultsNum / requiredRooms) : adultsNum);
           const childrenPerRoom = requiredRooms > 0 ? Math.ceil(childrenNum / requiredRooms) : childrenNum;
-          
-          // Adicionar requisições para plano 1 (apenas se passar nas restrições)
-          if (plan1Id && checkPlan1.allowed) {
+
+          for (const planId of plansToCalc) {
             for (let i = 0; i < nightsCount; i++) {
               const currentDate = addDays(startDate, i);
               const dateStr = formatDateLocal(currentDate);
-
               priceRequests.push({
                 establishmentId,
                 categoryId: cat.id,
-                planId: plan1Id,
+                planId,
                 date: dateStr,
                 adults: adultsPerRoom,
                 children: childrenPerRoom,
-                categoryKey: `${cat.id}-plan1`,
-                planType: 'plan1',
+                categoryKey: `${cat.id}::${planId}`,
+                planIdForAgg: planId,
               });
             }
-          } else {
-            pricesPlan1[cat.id] = null;
-          }
-
-          // Adicionar requisições para plano 2 (apenas se passar nas restrições)
-          if (plan2Id && checkPlan2.allowed) {
-            for (let i = 0; i < nightsCount; i++) {
-              const currentDate = addDays(startDate, i);
-              const dateStr = formatDateLocal(currentDate);
-
-              priceRequests.push({
-                establishmentId,
-                categoryId: cat.id,
-                planId: plan2Id,
-                date: dateStr,
-                adults: adultsPerRoom,
-                children: childrenPerRoom,
-                categoryKey: `${cat.id}-plan2`,
-                planType: 'plan2',
-              });
-            }
-          } else {
-            pricesPlan2[cat.id] = null;
           }
         }
 
         if (priceRequests.length === 0) {
           setCategoryPricesPlan1(pricesPlan1);
           setCategoryPricesPlan2(pricesPlan2);
+          setCategoryPricesByPlan({});
           setCategoryPrices(pricesPlan1);
           setCalculatingPrices(false);
           return;
         }
 
-        // Executar requisições em batch
+        // Executar requisições em batch (calculate_rate_price = mapa de tarifas + grid ARI)
         const results = await batchCalculateRatePrice(
           priceRequests,
           supabase,
-          3, // maxConcurrent: 3 requisições por vez
+          2, // maxConcurrent: evita ERR_FAILED / sobrecarga na API
           abortController.signal
         );
 
@@ -2098,58 +2165,40 @@ const BookingEnginePage = () => {
           return;
         }
 
-        // Agrupar resultados por categoria e plano (somar todas as noites)
-        const categoryTotalsPlan1: Record<string, number> = {};
-        const categoryTotalsPlan2: Record<string, number> = {};
-
+        // Agrupar por (categoria, plano): soma noites, depois * requiredRooms
+        const categoryPlanTotals: Record<string, Record<string, number>> = {};
         priceRequests.forEach((req, index) => {
           const result = results[index];
-          const baseCategoryId = req.categoryKey.replace('-plan1', '').replace('-plan2', '');
-          
-          if (req.planType === 'plan1') {
-            if (!categoryTotalsPlan1[baseCategoryId]) {
-              categoryTotalsPlan1[baseCategoryId] = 0;
-            }
-            categoryTotalsPlan1[baseCategoryId] += result.price;
-          } else if (req.planType === 'plan2') {
-            if (!categoryTotalsPlan2[baseCategoryId]) {
-              categoryTotalsPlan2[baseCategoryId] = 0;
-            }
-            categoryTotalsPlan2[baseCategoryId] += result.price;
-          }
+          const [catId, planId] = req.categoryKey.split("::");
+          if (!catId || !planId) return;
+          if (!categoryPlanTotals[catId]) categoryPlanTotals[catId] = {};
+          if (!categoryPlanTotals[catId][planId]) categoryPlanTotals[catId][planId] = 0;
+          categoryPlanTotals[catId][planId] += result.price;
         });
 
-        // Calcular preço total por categoria e plano, multiplicar pelo número de quartos necessários
-        // (mesma lógica da página pública de reservas: soma todas as noites, depois multiplica por requiredRooms)
-        
-        // Processar plano 1
-        Object.keys(categoryTotalsPlan1).forEach((categoryId) => {
-          const totalPriceForAllNights = categoryTotalsPlan1[categoryId];
-          
-          const category = roomCategories.find((cat: any) => cat.id === categoryId);
-          if (category) {
-            const requiredRooms = calculateRequiredRooms(adultsNum, category);
-            const finalPrice = totalPriceForAllNights * requiredRooms;
-            pricesPlan1[categoryId] = finalPrice > 0 ? finalPrice : null;
-          } else {
-            pricesPlan1[categoryId] = null;
-          }
-        });
+        const pricesByPlan: Record<string, Record<string, number | null>> = {};
+        const settings = hotelSettingsMap;
+        for (const cat of roomCategories) {
+          const catId = cat.id as string;
+          const category = roomCategories.find((c: any) => c.id === catId);
+          const requiredRooms = category ? calculateRequiredRooms(adultsNum, category) : 1;
+          const estSettings = settings[cat.establishment_id];
+          const plan1Id = estSettings?.public_pricing_plan_1_id || null;
+          const plan2Id = estSettings?.public_pricing_plan_2_id || null;
 
-        // Processar plano 2
-        Object.keys(categoryTotalsPlan2).forEach((categoryId) => {
-          const totalPriceForAllNights = categoryTotalsPlan2[categoryId];
-          
-          const category = roomCategories.find((cat: any) => cat.id === categoryId);
-          if (category) {
-            const requiredRooms = calculateRequiredRooms(adultsNum, category);
-            const finalPrice = totalPriceForAllNights * requiredRooms;
-            pricesPlan2[categoryId] = finalPrice > 0 ? finalPrice : null;
-          } else {
-            pricesPlan2[categoryId] = null;
+          pricesByPlan[catId] = {};
+          const totals = categoryPlanTotals[catId] || {};
+          for (const [planId, totalNights] of Object.entries(totals)) {
+            const finalPrice = totalNights * requiredRooms;
+            pricesByPlan[catId][planId] = finalPrice > 0 ? finalPrice : null;
           }
-        });
+          pricesPlan1[catId] = plan1Id && totals[plan1Id] ? (totals[plan1Id] * requiredRooms) : null;
+          if (pricesPlan1[catId] !== null && pricesPlan1[catId]! <= 0) pricesPlan1[catId] = null;
+          pricesPlan2[catId] = plan2Id && totals[plan2Id] ? (totals[plan2Id] * requiredRooms) : null;
+          if (pricesPlan2[catId] !== null && pricesPlan2[catId]! <= 0) pricesPlan2[catId] = null;
+        }
 
+        setCategoryPricesByPlan(pricesByPlan);
         setCategoryPricesPlan1(pricesPlan1);
         setCategoryPricesPlan2(pricesPlan2);
         setCategoryPrices(pricesPlan1);
@@ -2169,7 +2218,7 @@ const BookingEnginePage = () => {
     return () => {
       abortController.abort();
     };
-  }, [roomCategories, checkin, checkout, adults, children]);
+  }, [roomCategories, checkin, checkout, adults, children, pricingPlansByCategory]);
 
   // Função para calcular quartos necessários baseado na capacidade (mesma lógica da página de reserva pública)
   const calculateRequiredRooms = (adults: number, category: any): number => {
@@ -2179,7 +2228,7 @@ const BookingEnginePage = () => {
     return Math.ceil(adults / category.capacity_adults);
   };
 
-  const handleSubmit = (categoryId?: string) => {
+  const handleSubmit = (categoryId?: string, planIdForNav?: string) => {
     // Usar categoryId passado como parâmetro ou selectedRoomId
     const targetCategoryId = categoryId || selectedRoomId;
     if (!targetCategoryId) {
@@ -2237,9 +2286,8 @@ const BookingEnginePage = () => {
     if (children) params.set("children", children);
     if (coupon) params.set("coupon", coupon);
       params.set("category", targetCategoryId);
-      if (selectedPlanId && selectedPlan) {
-        params.set("plan", selectedPlan.planId || "");
-      }
+      const planToUse = planIdForNav || (selectedPlanId && selectedPlan ? selectedPlan.planId : null);
+      if (planToUse) params.set("plan", planToUse);
 
       navigate(`/reservar/${slug}?${params.toString()}`);
       return;
@@ -2255,9 +2303,8 @@ const BookingEnginePage = () => {
     if (children) params.set("children", children);
     if (coupon) params.set("coupon", coupon);
     params.set("category", targetCategoryId);
-    if (selectedPlanId && selectedPlan) {
-      params.set("plan", selectedPlan.planId || "");
-    }
+    const planToUse = planIdForNav || (selectedPlanId && selectedPlan ? selectedPlan.planId : null);
+    if (planToUse) params.set("plan", planToUse);
 
     navigate(`/reservar/${slug}?${params.toString()}`);
   };
@@ -2401,10 +2448,14 @@ const BookingEnginePage = () => {
         {/* Hero Content */}
         <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">
           <div className="max-w-4xl mx-auto text-center mb-8 md:mb-12 animate-fade-in-up">
-            <h1 className={`${theme.heroTitle} ${theme.heroTitleSize} font-bold mb-4 md:mb-6 leading-tight animate-fade-in`}>
+            <h1 className={`${theme.heroTitleSize} font-bold mb-4 md:mb-6 leading-tight animate-fade-in ${
+              (themeKey === 'airbnb' || themeKey === 'minimal') ? 'text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]' : theme.heroTitle
+            }`}>
               {heroTitle}
             </h1>
-            <p className={`${theme.heroSubtitle} ${theme.heroSubtitleSize} max-w-2xl mx-auto animate-fade-in-delay`}>
+            <p className={`${theme.heroSubtitleSize} max-w-2xl mx-auto animate-fade-in-delay ${
+              (themeKey === 'airbnb' || themeKey === 'minimal') ? 'text-white/95 drop-shadow-sm' : theme.heroSubtitle
+            }`}>
               {heroSubtitle}
             </p>
           </div>
@@ -2413,16 +2464,19 @@ const BookingEnginePage = () => {
           <div className="max-w-6xl mx-auto mb-4 flex flex-wrap gap-3 justify-center">
             <Button
               variant="outline"
-              className={`h-12 px-6 rounded-xl font-semibold text-sm flex items-center gap-2 border-2 ${
+                    className={`h-12 px-6 rounded-xl font-semibold text-sm flex items-center gap-2 border-2 ${
                 themeKey === 'default' ? 'border-blue-600 text-blue-600 hover:bg-blue-50' :
                 themeKey === 'modern' ? 'border-amber-500 text-amber-500 hover:bg-amber-500/10' :
                 themeKey === 'luxury' ? 'border-amber-400 text-amber-400 hover:bg-amber-400/10' :
                 themeKey === 'dark' ? 'border-blue-400 text-blue-400 hover:bg-blue-400/10' :
                 themeKey === 'travel' ? 'border-blue-500 text-blue-500 hover:bg-blue-50' :
+                themeKey === 'airbnb' ? 'border-[#FF5A5F] text-[#FF5A5F] hover:bg-[#FFF8F8]' :
                 'border-blue-600 text-blue-600 hover:bg-blue-50'
               } bg-white/90 backdrop-blur-sm`}
             >
-              <CalendarDays className="w-4 h-4" />
+              <CalendarDays className={`w-4 h-4 ${
+                themeKey === 'airbnb' ? 'text-[#FF5A5F]' : 'currentColor'
+              }`} />
               Disponibilidade
             </Button>
             <Button
@@ -2474,6 +2528,8 @@ const BookingEnginePage = () => {
                           themeKey === 'luxury' ? 'text-amber-400' :
                           themeKey === 'dark' ? 'text-blue-400' :
                           themeKey === 'travel' ? 'text-blue-500' :
+                          themeKey === 'airbnb' ? 'text-[#FF5A5F]' :
+                          themeKey === 'minimal' ? 'text-slate-900' :
                           'text-blue-600'
                         }`} />
                         <div className="flex-1 text-left">
@@ -2505,6 +2561,8 @@ const BookingEnginePage = () => {
                           themeKey === 'luxury' ? 'text-amber-400' :
                           themeKey === 'dark' ? 'text-blue-400' :
                           themeKey === 'travel' ? 'text-blue-500' :
+                          themeKey === 'airbnb' ? 'text-[#FF5A5F]' :
+                          themeKey === 'minimal' ? 'text-slate-900' :
                           'text-blue-600'
                         }`} />
                         <div className="flex-1 text-left">
@@ -2637,6 +2695,7 @@ const BookingEnginePage = () => {
                             themeKey === 'luxury' ? 'text-amber-400' :
                             themeKey === 'dark' ? 'text-blue-400' :
                             themeKey === 'travel' ? 'text-blue-500' :
+                            themeKey === 'airbnb' ? 'text-[#FF5A5F]' :
                             'text-blue-600'
                           }`} />
                           <div className="flex-1 text-left">
@@ -2689,6 +2748,7 @@ const BookingEnginePage = () => {
                     themeKey === 'luxury' ? 'text-amber-400' :
                     themeKey === 'dark' ? 'text-blue-400' :
                     themeKey === 'travel' ? 'text-blue-500' :
+                    themeKey === 'airbnb' ? 'text-[#FF5A5F]' :
                     'text-blue-600'
                   }`} />
                   <Input
@@ -2718,8 +2778,12 @@ const BookingEnginePage = () => {
                 onClick={() => setSelectedCity("all")}
                 className={`px-6 py-3 rounded-full font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
                   selectedCity === "all"
-                    ? "bg-black text-white shadow-md hover:shadow-lg"
-                    : "bg-white text-gray-700 border border-gray-300 hover:border-gray-400 hover:shadow-sm"
+                    ? themeKey === "airbnb"
+                      ? "bg-[#FF5A5F] text-white shadow-md hover:shadow-lg hover:bg-[#E04550]"
+                      : "bg-black text-white shadow-md hover:shadow-lg"
+                    : themeKey === "airbnb"
+                      ? "bg-white text-neutral-700 border border-neutral-300 hover:border-neutral-400 hover:shadow-sm"
+                      : "bg-white text-gray-700 border border-gray-300 hover:border-gray-400 hover:shadow-sm"
                 }`}
               >
                 <MapPin className="w-4 h-4" />
@@ -2738,8 +2802,12 @@ const BookingEnginePage = () => {
                     onClick={() => setSelectedCity(city)}
                     className={`px-6 py-3 rounded-full font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
                       isSelected
-                        ? "bg-black text-white shadow-md hover:shadow-lg"
-                        : "bg-white text-gray-700 border border-gray-300 hover:border-gray-400 hover:shadow-sm"
+                        ? themeKey === "airbnb"
+                          ? "bg-[#FF5A5F] text-white shadow-md hover:shadow-lg hover:bg-[#E04550]"
+                          : "bg-black text-white shadow-md hover:shadow-lg"
+                        : themeKey === "airbnb"
+                          ? "bg-white text-neutral-700 border border-neutral-300 hover:border-neutral-400 hover:shadow-sm"
+                          : "bg-white text-gray-700 border border-gray-300 hover:border-gray-400 hover:shadow-sm"
                     }`}
                   >
                     <MapPin className="w-4 h-4" />
@@ -2961,9 +3029,12 @@ const BookingEnginePage = () => {
 
                   {/* Categorias do Estabelecimento */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {establishmentRooms.map((room, index) => (
+                    {(roomsViewMode === "by_plan"
+                      ? establishmentRooms.flatMap((room) => room.plans.map((plan) => ({ room, plan, key: `${room.id}-${plan.id}` })))
+                      : establishmentRooms.map((room) => ({ room, plan: null, key: room.id }))
+                    ).map(({ room, plan, key }, index) => (
               <Card
-                key={room.id}
+                key={key}
                 className={`overflow-hidden ${theme.roomCardBg} ${theme.roomCardBorder} ${theme.roomCardShadow} ${theme.cardHover} ${theme.cardHoverShadow} transition-all duration-300 animate-fade-in-up`}
                 style={{ animationDelay: `${index * 100}ms` }}
               >
@@ -2986,15 +3057,15 @@ const BookingEnginePage = () => {
                     </div>
                   )}
 
-                  {/* Price Badge */}
-                  {room.plans[0] && (
+                  {/* Price Badge - por categoria mostra plan[0], por plano mostra o plan específico */}
+                  {(plan || room.plans[0]) && (
                     <div className="absolute bottom-4 right-4 z-10">
                       <div className={`${theme.cardBg} ${theme.cardBorder} border rounded-lg px-4 py-2 shadow-lg`}>
-                        {room.plans[0].pricePerNight > 0 ? (
+                        {((plan || room.plans[0]).pricePerNight > 0) ? (
                           <>
-                        <div className={`text-xs ${theme.textMuted} mb-0.5`}>A partir de</div>
+                        <div className={`text-xs ${theme.textMuted} mb-0.5`}>{plan ? (plan as any).name : "A partir de"}</div>
                         <div className={`${theme.priceColor} text-xl font-bold`}>
-                          R$ {room.plans[0].pricePerNight.toFixed(2)}
+                          R$ {(plan || room.plans[0]).pricePerNight.toFixed(2)}
                         </div>
                         <div className={`text-xs ${theme.priceLabel}`}>por noite</div>
                           </>
@@ -3019,6 +3090,11 @@ const BookingEnginePage = () => {
                       <div className="flex items-center gap-3 mb-2 flex-wrap">
                         <h3 className={`text-2xl md:text-3xl font-bold ${theme.textPrimary}`}>
                           {room.name}
+                          {plan && (
+                            <span className={`text-base md:text-lg font-semibold ${theme.textSecondary} normal-case ml-1`}>
+                              · {(plan as any).name}
+                            </span>
+                          )}
                         </h3>
                         {room.type && (
                           <Badge variant="secondary" className="text-xs px-2.5 py-1">
@@ -3071,12 +3147,65 @@ const BookingEnginePage = () => {
                     </div>
                   )}
 
+                  {/* No modo por plano: exibir info do plano em destaque */}
+                  {plan && (
+                    <div className={`mb-6 p-4 rounded-xl ${theme.planCardSelected} border`}>
+                      <div className="flex items-start justify-between gap-4 mb-2">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-lg font-bold ${theme.textPrimary}`}>{(plan as any).name}</span>
+                            {(plan as any).tag && (
+                              <Badge className={`${theme.badgePrimary} text-xs px-2 py-0.5`}>
+                                <Star className="w-3 h-3 mr-1" />
+                                {(plan as any).tag}
+                              </Badge>
+                            )}
+                          </div>
+                          {(plan as any).description && (
+                            <p className={`text-sm ${theme.textSecondary} line-clamp-2`}>{(plan as any).description}</p>
+                          )}
+                        </div>
+                        <div className={`text-right flex-shrink-0`}>
+                          <div className={`${theme.priceColor} text-xl font-bold`}>
+                            {(plan as any).pricePerNight > 0 && nights > 0 ? (
+                              <>R$ {(plan as any).pricePerNight.toFixed(2)}</>
+                            ) : (
+                              <span className="text-xs text-slate-400">Selecione datas</span>
+                            )}
+                          </div>
+                          <div className={`text-xs ${theme.priceLabel}`}>por noite</div>
+                          {(plan as any).pricePerNight > 0 && nights > 0 && (
+                            <div className={`text-xs ${theme.textMuted} mt-0.5`}>
+                              {nights} noite{nights > 1 ? "s" : ""}: R$ {((plan as any).pricePerNight * nights).toFixed(2)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {(plan as any).benefits?.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {(plan as any).benefits.slice(0, 4).map((benefit: string, idx: number) => (
+                            <div key={idx} className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full ${theme.badgeSecondary}`}>
+                              <CheckCircle2 className="w-2.5 h-2.5 flex-shrink-0" />
+                              <span className="truncate">{benefit}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Action Buttons */}
                   <div className="mb-6 space-y-3">
                     <Button
                       className={`w-full ${theme.primaryButton} ${theme.primaryButtonHover} border-2`}
                       onClick={() => {
-                        handleSubmit(room.categoryId);
+                        if (plan) {
+                          setSelectedRoomId(room.id);
+                          setSelectedPlanId(plan.id);
+                          handleSubmit(room.categoryId, plan.planId || undefined);
+                        } else {
+                          handleSubmit(room.categoryId);
+                        }
                       }}
                       disabled={!checkin || !checkout || nights <= 0}
                     >
@@ -3087,13 +3216,17 @@ const BookingEnginePage = () => {
                       variant="outline"
                       className={`w-full ${theme.secondaryButton} ${theme.secondaryButtonHover} border-2`}
                       onClick={() => {
+                        if (plan) {
+                          setSelectedRoomId(room.id);
+                          setSelectedPlanId(plan.id);
+                        }
                         const params = new URLSearchParams();
                         if (checkin) params.set("checkin", checkin);
                         if (checkout) params.set("checkout", checkout);
                         if (adults) params.set("adults", adults);
                         if (children) params.set("children", children);
                         if (coupon) params.set("coupon", coupon);
-                        // Se não houver companySlug (domínio personalizado), usar rota sem /motor/
+                        if (plan?.planId) params.set("plan", plan.planId);
                         const categoryPath = companySlug 
                           ? `/motor/${companySlug}/categoria/${room.categoryId}`
                           : `/categoria/${room.categoryId}`;
@@ -3105,7 +3238,8 @@ const BookingEnginePage = () => {
                     </Button>
                   </div>
 
-                  {/* Pricing Plans Accordion */}
+                  {/* Pricing Plans Accordion - apenas no modo por categoria */}
+                  {!plan && (
                   <div>
                     <Accordion type="single" collapsible className="w-full">
                       <AccordionItem value="plans" className="border-0">
@@ -3216,6 +3350,7 @@ const BookingEnginePage = () => {
                       </AccordionItem>
                     </Accordion>
                   </div>
+                  )}
                 </div>
               </Card>
             ))}

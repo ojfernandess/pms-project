@@ -4,6 +4,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { toast } from "sonner";
 import { format, startOfDay, addDays } from "date-fns";
+import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
 
 export const usePricing = () => {
   const queryClient = useQueryClient();
@@ -428,73 +429,36 @@ export const usePricing = () => {
       return 0;
     }
 
-    for (let i = 0; i < nights; i++) {
-      // Usar addDays para garantir que a data seja calculada corretamente no timezone local
+    // Batch: mesma lógica do mapa de tarifas e Grid ARI — requisições paralelas em vez de sequenciais
+    const requests = Array.from({ length: nights }, (_, i) => {
       const currentDate = startOfDay(addDays(checkin, i));
-      const dateStr = format(currentDate, "yyyy-MM-dd");
-      
-      try {
-        try {
-          const { data, error } = await supabase.rpc("calculate_rate_price", {
-            p_establishment_id: establishmentId,
-            p_category_id: categoryId,
-            p_pricing_plan_id: planId,
-            p_date: dateStr,
-            p_adults: adults,
-            p_children: children,
-          });
+      return {
+        establishmentId,
+        categoryId,
+        planId,
+        date: format(currentDate, "yyyy-MM-dd"),
+        adults,
+        children,
+      };
+    });
 
-          if (error) {
-            console.error(`Erro ao calcular preço para ${dateStr}:`, error);
-            hasError = true;
-            // Usar preço base como fallback
-            totalPrice += basePrice;
-          } else {
-            const price = Number(data || 0);
-            if (price > 0) {
-              totalPrice += price;
-            } else {
-              // Se retornou 0, usar preço base
-              totalPrice += basePrice;
-            }
-          }
-        } catch (rpcError: any) {
-          // Capturar erros de rede/CORS/502 e usar fallback silenciosamente
-          const isNetworkError = 
-            rpcError.message?.includes("CORS") || 
-            rpcError.message?.includes("Failed to fetch") || 
-            rpcError.message?.includes("502") ||
-            rpcError.message?.includes("Bad Gateway") ||
-            rpcError.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
-            rpcError.code === "PGRST301" || // Erro de RLS ou função não encontrada
-            rpcError.code === "PGRST116" || // Função não encontrada
-            (rpcError.error && (rpcError.error.code === "PGRST301" || rpcError.error.code === "PGRST116"));
-          
-          if (isNetworkError) {
-            // Usar preço base como fallback silenciosamente (não logar como erro)
-            totalPrice += basePrice;
-            hasError = true;
-          } else {
-            // Apenas logar erros não relacionados a rede
-            console.error(`Erro ao chamar RPC calculate_rate_price para ${dateStr}:`, rpcError);
-            totalPrice += basePrice;
-            hasError = true;
-          }
-        }
-      } catch (err: any) {
-        // Tratar erros de rede silenciosamente
-        const isNetworkError = 
-          err.message?.includes("Failed to fetch") || 
-          err.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
-          err.message?.includes("502") ||
-          err.message?.includes("CORS");
-        
-        if (!isNetworkError) {
-          console.error(`Erro ao calcular preço para ${dateStr}:`, err);
-        }
-        hasError = true;
-        totalPrice += basePrice;
+    try {
+      const batchResults = await batchCalculateRatePrice(requests, supabase);
+      for (const result of batchResults) {
+        totalPrice += result.price;
+        if (!result.success) hasError = true;
       }
+    } catch (err: any) {
+      const isNetworkError =
+        err.message?.includes("Failed to fetch") ||
+        err.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
+        err.message?.includes("502") ||
+        err.message?.includes("CORS");
+      if (!isNetworkError) {
+        console.error("Erro ao calcular preços em batch:", err);
+      }
+      hasError = true;
+      totalPrice = basePrice * nights;
     }
 
     // Garantir que sempre retorne um valor válido

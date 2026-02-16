@@ -1309,15 +1309,17 @@ export const ReservationDialog = ({
         // Criar uma data UTC de referência (meio-dia UTC do mesmo dia)
         const refUTC = new Date(`${year}-${monthStr}-${dayStr}T12:00:00Z`);
         
-        // Obter como essa data UTC aparece no timezone do hotel
-        const hotelTimeAtUTC12 = refUTC.toLocaleString('en-US', {
+        // Obter a hora no timezone do hotel (usar formatToParts para evitar bug de parsing)
+        // toLocaleString pode retornar "DD/MM/YYYY, HH:mm" - split(':')[0] extrairia a data, não a hora
+        const formatter = new Intl.DateTimeFormat('en-US', {
           timeZone: hotelTimezone,
           hour: '2-digit',
           minute: '2-digit',
-          hour12: false
+          hour12: false,
+          hourCycle: 'h23'
         });
-        
-        const hotelHourAtUTC12 = parseInt(hotelTimeAtUTC12.split(':')[0]);
+        const parts = formatter.formatToParts(refUTC);
+        const hotelHourAtUTC12 = parseInt(parts.find((p: { type: string }) => p.type === 'hour')?.value || '12', 10);
         
         // Calcular offset: se UTC 12:00 aparece como 09:00 no hotel
         // Isso significa: quando é 09:00 no hotel, é 12:00 em UTC
@@ -1402,31 +1404,22 @@ export const ReservationDialog = ({
             isBlocked,
             isPreReservation,
             expirationDate: isPreReservation && expirationDate && expirationTime ? (() => {
-              // Validar formato da hora antes de processar
+              // Mesma conversão do fluxo principal: timezone do hotel para UTC
               const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
               if (!timeRegex.test(expirationTime)) {
                 return null;
               }
-              
-              // Criar Date no timezone local do usuário
-              const [year, month, day] = expirationDate.split('-').map(Number);
-              const [hours, minutes] = expirationTime.split(':').map(Number);
-              
-              // Validar valores numéricos
-              if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hours) || isNaN(minutes)) {
-                return null;
-              }
-              
-              // Criar Date no timezone local
-              const expirationDateTimeObj = new Date(year, month - 1, day, hours, minutes, 0);
-              
-              // Validar se a data criada é válida
-              if (isNaN(expirationDateTimeObj.getTime())) {
-                return null;
-              }
-              
-              // Converter para ISO string (UTC) para salvar no PostgreSQL
-              return expirationDateTimeObj.toISOString();
+              const [y, m, d] = expirationDate.split('-').map(Number);
+              const [hr, min] = expirationTime.split(':').map(Number);
+              if (isNaN(y) || isNaN(m) || isNaN(d) || isNaN(hr) || isNaN(min)) return null;
+              const tz = hotelSettings?.timezone || 'America/Sao_Paulo';
+              const ref = new Date(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00Z`);
+              const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23' });
+              const hour12 = parseInt(fmt.formatToParts(ref).find((p: { type: string }) => p.type === 'hour')?.value || '12', 10);
+              const offsetH = hour12 - 12;
+              const localAsUTC = new Date(`${String(y).padStart(4)}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}:00Z`);
+              const utc = new Date(localAsUTC.getTime() - offsetH * 60 * 60 * 1000);
+              return isNaN(utc.getTime()) ? null : utc.toISOString();
             })() : null,
             blockReason: isBlocked ? blockReason : null,
           });

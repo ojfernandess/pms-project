@@ -1605,30 +1605,10 @@ export const useReservations = () => {
                 }
               }, 300); // Reduzir para 300ms para processar mais rapidamente
             } else if (expiredReservations.length > 0) {
-              console.warn(`⚠️ Função RPC retornou 0, mas encontramos ${expiredReservations.length} pré-reserva(s) expirada(s). Cancelando diretamente...`);
-              
-              // Cancelar diretamente se a função RPC não cancelou
-              let cancelledDirectly = 0;
-              for (const reservation of expiredReservations) {
-                const { error: updateError } = await supabase
-                  .from("reservations")
-                  .update({ 
-                    status: "cancelled",
-                    notes: (reservation.notes || "") + `\nCancelada automaticamente: pré-reserva expirada em ${reservation.expiration_date}`
-                  })
-                  .eq("id", reservation.id)
-                  .eq("status", "preregistration");
-                
-                if (!updateError) {
-                  cancelledDirectly++;
-                }
-              }
-              
-              if (cancelledDirectly > 0) {
-                console.log(`✅ ${cancelledDirectly} pré-reserva(s) cancelada(s) diretamente`);
-                queryClient.invalidateQueries({ queryKey: ["reservations"] });
-                queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-              }
+              // RPC retornou 0 mas temos "expiradas" - NÃO cancelar diretamente!
+              // A RPC usa grace period (2 min) e pode ter ignorado pré-reservas recém-criadas.
+              // Cancelar diretamente aqui quebraria o grace period (ex: pré-reserva criada há 1 min).
+              console.log(`ℹ️ RPC retornou 0 canceladas (grace period). ${expiredReservations.length} pré-reserva(s) podem estar no período de proteção.`);
             }
           }
         } else {
