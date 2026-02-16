@@ -247,6 +247,7 @@ export const useARISystem = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ari_sales_status'] });
+      queryClient.invalidateQueries({ queryKey: ['ari_sales_status_bulk'] });
       toast.success('Status de venda atualizado');
     },
     onError: (error: any) => {
@@ -318,6 +319,7 @@ export const useARISystem = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ari_sales_status'] });
+      queryClient.invalidateQueries({ queryKey: ['ari_sales_status_bulk'] });
       toast.success('Status atualizado em massa');
     },
     onError: (error: any) => {

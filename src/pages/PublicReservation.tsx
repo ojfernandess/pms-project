@@ -639,6 +639,7 @@ const PublicReservation = () => {
   };
 
   // Função auxiliar para calcular preços de uma categoria para um plano específico
+  // Liga x1/x2/x3/x4: adultos/crianças devem ser POR QUARTO para o RPC
   const calculateCategoryPriceForPlan = async (
     category: any,
     planId: string | null,
@@ -650,6 +651,32 @@ const PublicReservation = () => {
   ): Promise<number> => {
     const basePrice = Number(category.base_price || 0);
     let categoryTotal = 0;
+
+    // Verificar restrições (min/max stay, CTA, CTD) antes de calcular preço
+    if (planId && checkinDate && checkoutDate && establishment?.id) {
+      const { checkRateRestrictions } = await import("@/lib/ariAvailabilityUtils");
+      const checkin = new Date(checkinDate);
+      const checkout = new Date(checkoutDate);
+      const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+      const restrictionCheck = await checkRateRestrictions(
+        establishment.id,
+        category.id,
+        planId,
+        checkin,
+        checkout,
+        nights
+      );
+      if (!restrictionCheck.allowed) {
+        return 0; // Plano não disponível por restrições
+      }
+    }
+
+    // Adultos/crianças por quarto (liga x1/x2/x3/x4 usa ocupação por quarto)
+    const categoryCapacity = category?.capacity_adults || 0;
+    const adultsPerRoom = requiredRooms > 0
+      ? (categoryCapacity > 0 ? Math.min(categoryCapacity, Math.ceil(adults / requiredRooms)) : Math.ceil(adults / requiredRooms))
+      : adults;
+    const childrenPerRoom = requiredRooms > 0 ? Math.ceil(children / requiredRooms) : children;
 
     if (checkinDate && checkoutDate && checkinDate < checkoutDate) {
       const [checkinYear, checkinMonth, checkinDay] = checkinDate.split('-').map(Number);
@@ -669,8 +696,8 @@ const PublicReservation = () => {
               p_category_id: category.id,
               p_pricing_plan_id: planId,
               p_date: dateStr,
-              p_adults: adults,
-              p_children: children,
+              p_adults: adultsPerRoom,
+              p_children: childrenPerRoom,
             });
 
             if (error) {
@@ -699,8 +726,8 @@ const PublicReservation = () => {
           p_category_id: category.id,
           p_pricing_plan_id: planId,
           p_date: todayStr,
-          p_adults: adults,
-          p_children: children,
+          p_adults: adultsPerRoom,
+          p_children: childrenPerRoom,
         });
 
         if (error) {

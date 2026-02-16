@@ -288,7 +288,7 @@ export const RatePlanDialog = ({
               </div>
               <div>
                 <Label>
-                  Tarifa Base: <span className="text-red-500">*</span>
+                  Tarifa Base:
                 </Label>
                 <Select
                   value={basePlanId || "none"}
@@ -550,7 +550,8 @@ export const RatePlanDialog = ({
               !name.trim() || 
               !planType ||
               planType === '__no_type_available__' ||
-              selectedCategories.length === 0
+              selectedCategories.length === 0 ||
+              (!!basePlanId && (fluctuationValue.trim() === "" || isNaN(parseFloat(fluctuationValue))))
             }
             title={
               isLoadingData 
@@ -561,6 +562,8 @@ export const RatePlanDialog = ({
                 ? "Tipo de plano é obrigatório" 
                 : selectedCategories.length === 0 
                 ? "Selecione pelo menos uma acomodação" 
+                : !!basePlanId && (fluctuationValue.trim() === "" || isNaN(parseFloat(fluctuationValue)))
+                ? "Quando Tarifa Base está definida, informe a Flutuação (0 para manter o mesmo preço)"
                 : "Clique para salvar as alterações"
             }
           >

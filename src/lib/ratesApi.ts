@@ -39,7 +39,10 @@ export interface RatesDashboardResponse {
     is_active: boolean;
   }>;
   hotelSettings: {
-    rate_system_settings?: { auto_apply_dynamic_rules?: boolean | string };
+    rate_system_settings?: {
+      auto_apply_dynamic_rules?: boolean | string;
+      persist_dynamic_rates?: boolean | string;
+    };
   } | null;
 }
 
@@ -76,6 +79,46 @@ export interface RatesMapResponse {
     projected_occupancy?: number;
     pickup_rate?: number;
   }>;
+}
+
+/** POST /recalc-rates - recalcular preços dinâmicos em background */
+export async function invokeRecalcRates(
+  options?: { establishmentId?: string; daysAhead?: number }
+): Promise<{ success: boolean; total_updated: number; error?: string }> {
+  const url = getFunctionUrl("recalc-rates");
+  if (!url) {
+    return { success: false, total_updated: 0, error: "URL da função não configurada" };
+  }
+
+  try {
+    const params = new URLSearchParams();
+    if (options?.establishmentId) params.set("establishment_id", options.establishmentId);
+    if (options?.daysAhead != null) params.set("days_ahead", String(options.daysAhead));
+
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${url}?${params}`, {
+      method: "POST",
+      headers,
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      return {
+        success: false,
+        total_updated: 0,
+        error: data?.error || `Erro ${response.status}`,
+      };
+    }
+
+    return {
+      success: data.success === true,
+      total_updated: data.total_updated ?? 0,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Erro de conexão";
+    return { success: false, total_updated: 0, error: msg };
+  }
 }
 
 /** GET /rates/map - rate_calendar com filtros opcionais */

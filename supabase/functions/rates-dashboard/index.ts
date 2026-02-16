@@ -16,9 +16,12 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  console.log("[rates-dashboard] Iniciando...");
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
+      console.log("[rates-dashboard] Rejeitado: sem Authorization");
       return new Response(
         JSON.stringify({ error: "Autorização obrigatória" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -28,11 +31,14 @@ serve(async (req) => {
     const url = new URL(req.url);
     const establishmentId = url.searchParams.get("establishment_id");
     if (!establishmentId) {
+      console.log("[rates-dashboard] Rejeitado: establishment_id ausente");
       return new Response(
         JSON.stringify({ error: "establishment_id é obrigatório" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    console.log(`[rates-dashboard] establishment_id=${establishmentId}`);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -44,6 +50,7 @@ serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
+      console.log("[rates-dashboard] Rejeitado: token inválido");
       return new Response(
         JSON.stringify({ error: "Token inválido" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -88,6 +95,8 @@ serve(async (req) => {
       planTypes: planTypesRes.data ?? [],
       hotelSettings: hotelSettingsRes.data ?? null,
     };
+
+    console.log(`[rates-dashboard] OK: ${response.categories.length} categorias, ${response.ratePlans.length} planos`);
 
     return new Response(JSON.stringify(response), {
       status: 200,

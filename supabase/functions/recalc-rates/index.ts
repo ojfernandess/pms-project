@@ -22,9 +22,12 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  console.log("[recalc-rates] Iniciando...");
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
+      console.log("[recalc-rates] Rejeitado: sem Authorization");
       return new Response(
         JSON.stringify({ error: "Autorização obrigatória" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -46,6 +49,8 @@ serve(async (req) => {
     endDate.setDate(endDate.getDate() + daysAhead - 1);
     const endDateStr = endDate.toISOString().split("T")[0];
 
+    console.log(`[recalc-rates] Período: ${today} a ${endDateStr}, days_ahead=${daysAhead}`);
+
     let establishmentIds: string[] = [];
     if (establishmentIdParam) {
       establishmentIds = [establishmentIdParam];
@@ -57,18 +62,23 @@ serve(async (req) => {
       establishmentIds = (establishments || []).map((e: { id: string }) => e.id);
     }
 
+    console.log(`[recalc-rates] Seus estabelecimentos a processar: ${establishmentIds.length}`);
+
     let totalUpdated = 0;
     const results: { establishment_id: string; updated: number }[] = [];
 
     for (const estId of establishmentIds) {
       const { data: settings } = await supabase
         .from("hotel_settings")
-        .select("rate_system_settings")
+        .select("rate_system_settings, public_pricing_plan_1_id, public_pricing_plan_2_id")
         .eq("establishment_id", estId)
         .maybeSingle();
 
       const persistDynamic = settings?.rate_system_settings?.persist_dynamic_rates === true;
-      if (!persistDynamic) continue;
+      if (!persistDynamic) {
+        console.log(`[recalc-rates] Estabelecimento ${estId}: persist_dynamic_rates=false, pulando`);
+        continue;
+      }
 
       const { data: categories } = await supabase
         .from("room_categories")
@@ -82,17 +92,49 @@ serve(async (req) => {
         .eq("is_active", true);
 
       const catIds = (categories || []).map((c: { id: string }) => c.id);
-      const planIds = (plans || []).map((p: { id: string }) => p.id);
+      const allPlanIds = (plans || []).map((p: { id: string }) => p.id);
+      const publicPlan1 = (settings as { public_pricing_plan_1_id?: string })?.public_pricing_plan_1_id;
+      const publicPlan2 = (settings as { public_pricing_plan_2_id?: string })?.public_pricing_plan_2_id;
+      const planIds = [...new Set([
+        ...(publicPlan1 ? [publicPlan1] : []),
+        ...(publicPlan2 ? [publicPlan2] : []),
+        ...allPlanIds,
+      ])];
 
-      const entries: { establishment_id: string; category_id: string; pricing_plan_id: string; date: string; base_price: number }[] = [];
+      const resultsToPersist: {
+        establishment_id: string;
+        category_id: string;
+        rate_plan_id: string;
+        date: string;
+        base_price: number;
+        final_price: number;
+        dynamic_adjustment_percent: number;
+      }[] = [];
       const BATCH = 50;
 
-      for (const catId of catIds.slice(0, 5)) {
-        for (const planId of planIds.slice(0, 3)) {
+      for (const catId of catIds) {
+        for (const planId of planIds) {
           let d = new Date(today);
           const end = new Date(endDateStr);
           while (d <= end) {
             const dateStr = d.toISOString().split("T")[0];
+            const { data: rc } = await supabase
+              .from("rate_calendar")
+              .select("base_price")
+              .eq("establishment_id", estId)
+              .eq("category_id", catId)
+              .eq("pricing_plan_id", planId)
+              .eq("date", dateStr)
+              .maybeSingle();
+            let basePrice = Number(rc?.base_price ?? 0);
+            if (basePrice <= 0) {
+              const { data: cat } = await supabase
+                .from("room_categories")
+                .select("base_price")
+                .eq("id", catId)
+                .maybeSingle();
+              basePrice = Number(cat?.base_price ?? 0);
+            }
             const { data: price } = await supabase.rpc("calculate_rate_price", {
               p_establishment_id: estId,
               p_category_id: catId,
@@ -102,13 +144,16 @@ serve(async (req) => {
               p_children: 0,
             });
             const finalPrice = Number(price ?? 0);
-            if (finalPrice > 0) {
-              entries.push({
+            if (finalPrice > 0 && basePrice > 0) {
+              const adjPct = basePrice > 0 ? ((finalPrice - basePrice) / basePrice) * 100 : 0;
+              resultsToPersist.push({
                 establishment_id: estId,
                 category_id: catId,
-                pricing_plan_id: planId,
+                rate_plan_id: planId,
                 date: dateStr,
-                base_price: finalPrice,
+                base_price: basePrice,
+                final_price: finalPrice,
+                dynamic_adjustment_percent: Math.round(adjPct * 100) / 100,
               });
             }
             d.setDate(d.getDate() + 1);
@@ -116,16 +161,28 @@ serve(async (req) => {
         }
       }
 
-      for (let i = 0; i < entries.length; i += BATCH) {
-        const batch = entries.slice(i, i + BATCH);
-        await supabase.from("rate_calendar").upsert(batch, {
-          onConflict: "establishment_id,pricing_plan_id,category_id,date",
+      for (let i = 0; i < resultsToPersist.length; i += BATCH) {
+        const batch = resultsToPersist.slice(i, i + BATCH).map((r) => ({
+          establishment_id: r.establishment_id,
+          category_id: r.category_id,
+          rate_plan_id: r.rate_plan_id,
+          date: r.date,
+          base_price: r.base_price,
+          final_price: r.final_price,
+          dynamic_adjustment_percent: r.dynamic_adjustment_percent,
+          last_recalculated_at: new Date().toISOString(),
+        }));
+        await supabase.from("dynamic_pricing_results").upsert(batch, {
+          onConflict: "establishment_id,category_id,rate_plan_id,date",
         });
         totalUpdated += batch.length;
       }
 
-      results.push({ establishment_id: estId, updated: entries.length });
+      results.push({ establishment_id: estId, updated: resultsToPersist.length });
+      console.log(`[recalc-rates] Estabelecimento ${estId}: ${resultsToPersist.length} entradas persistidas`);
     }
+
+    console.log(`[recalc-rates] Concluído. Total: ${totalUpdated} entradas`);
 
     return new Response(
       JSON.stringify({

@@ -26,6 +26,7 @@ import { RestrictionsView } from "@/components/rate-system/RestrictionsView";
 import { RateAnalyticsView } from "@/components/rate-system/RateAnalyticsView";
 import { ChannelSyncDialog } from "@/components/rate-system/ChannelSyncDialog";
 import { RateSystemSettingsDialog } from "@/components/rate-system/RateSystemSettingsDialog";
+import { invokeRecalcRates } from "@/lib/ratesApi";
 import { PlanTypesView } from "@/components/rate-system/PlanTypesView";
 import { PriceDashboardView } from "@/components/rate-system/PriceDashboardView";
 import CancellationPolicies from "@/pages/CancellationPolicies";
@@ -36,10 +37,17 @@ const PMSRateSystem = () => {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedRatePlan, setSelectedRatePlan] = useState<string>('all');
   const [startDate, setStartDate] = useState(startOfDay(new Date()));
+  const [viewDays, setViewDays] = useState(30);
   const [channelSyncOpen, setChannelSyncOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [recalcLoading, setRecalcLoading] = useState(false);
   const [hasDynamicPricingAccess, setHasDynamicPricingAccess] = useState<boolean | null>(null);
   const { selectedEstablishment } = useEstablishment();
+
+  const dateRange = useMemo(() => ({
+    start: startDate,
+    end: addDays(startDate, viewDays - 1),
+  }), [startDate, viewDays]);
 
   const {
     ratePlans,
@@ -62,7 +70,7 @@ const PMSRateSystem = () => {
     calculateRatePrice,
     isLoading,
     refetch: refetchRateSystem,
-  } = useRateSystem();
+  } = useRateSystem({ dateRange });
 
   // Sincronização em tempo real: rate_calendar, regras dinâmicas, restrições
   useRateSystemRealtime();
@@ -175,6 +183,30 @@ const PMSRateSystem = () => {
     return ratePlans.filter(p => p.is_active);
   }, [ratePlans]);
 
+  const handleRecalcRates = async () => {
+    setRecalcLoading(true);
+    try {
+      const result = await invokeRecalcRates({
+        establishmentId: selectedEstablishment?.id ?? getSelectedEstablishmentId() ?? undefined,
+        daysAhead: 14,
+      });
+      if (result.success) {
+        toast.success(
+          result.total_updated > 0
+            ? `${result.total_updated} preços dinâmicos recalculados e persistidos.`
+            : "Recálculo concluído. Nenhuma atualização necessária (verifique se 'Persistir Preços Dinâmicos' está ativo)."
+        );
+        refetchRateSystem();
+      } else {
+        toast.error(result.error || "Erro ao recalcular preços dinâmicos");
+      }
+    } catch (e) {
+      toast.error("Erro ao recalcular preços dinâmicos");
+    } finally {
+      setRecalcLoading(false);
+    }
+  };
+
   const defaultPlan = useMemo(() => {
     if (selectedRatePlan) return selectedRatePlan;
     if (activePlans.length > 0) {
@@ -222,6 +254,17 @@ const PMSRateSystem = () => {
               <p className="text-sm text-gray-600 mt-1">Gestão completa de tarifas e revenue management</p>
             </div>
             <div className="flex items-center gap-3">
+              {hasDynamicPricingAccess && (
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  onClick={handleRecalcRates}
+                  disabled={recalcLoading}
+                >
+                  <RefreshCw className={`w-4 h-4 ${recalcLoading ? "animate-spin" : ""}`} />
+                  {recalcLoading ? "Recalculando..." : "Recalcular Agora"}
+                </Button>
+              )}
               <Button variant="outline" className="gap-2" onClick={() => setChannelSyncOpen(true)}>
                 <RefreshCw className="w-4 h-4" />
                 Sincronizar Canais
@@ -303,9 +346,12 @@ const PMSRateSystem = () => {
             <RateCalendarGrid
               ratePlans={ratePlans}
               categories={categories}
+              rateCalendar={rateCalendar}
               selectedCategory={selectedCategory}
               selectedRatePlan={defaultPlan}
               startDate={startDate}
+              viewDays={viewDays}
+              onViewDaysChange={setViewDays}
               onCategoryChange={setSelectedCategory}
               onPlanChange={setSelectedRatePlan}
               onStartDateChange={setStartDate}
@@ -321,9 +367,12 @@ const PMSRateSystem = () => {
             <ARIGrid
               ratePlans={ratePlans}
               categories={categories}
+              rateCalendar={rateCalendar}
               selectedCategory={selectedCategory}
               selectedRatePlan={defaultPlan}
               startDate={startDate}
+              viewDays={viewDays}
+              onViewDaysChange={setViewDays}
               onCategoryChange={setSelectedCategory}
               onPlanChange={setSelectedRatePlan}
               onStartDateChange={setStartDate}

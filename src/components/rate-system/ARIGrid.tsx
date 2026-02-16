@@ -13,7 +13,7 @@ import { ptBR } from "date-fns/locale";
 import { CalendarIcon, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, AlertCircle, Save, X, RefreshCw, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/reservationUtils";
-import { useRateSystem, RatePlan } from "@/hooks/useRateSystem";
+import { useRateSystem, RatePlan, type RateCalendarEntry } from "@/hooks/useRateSystem";
 import { useDynamicRatePrices } from "@/contexts/DynamicRatePricesContext";
 import { useARISystem } from "@/hooks/useARISystem";
 import { toast } from "sonner";
@@ -27,9 +27,12 @@ import { supabase } from "@/integrations/supabase/client";
 interface ARIGridProps {
   ratePlans: RatePlan[];
   categories: any[];
+  rateCalendar?: RateCalendarEntry[];
   selectedCategory: string;
   selectedRatePlan: string;
   startDate: Date;
+  viewDays?: number;
+  onViewDaysChange?: (days: number) => void;
   onCategoryChange: (category: string) => void;
   onPlanChange: (plan: string) => void;
   onStartDateChange: (date: Date) => void;
@@ -52,14 +55,22 @@ interface EditingCell {
 export const ARIGrid = ({
   ratePlans,
   categories,
+  rateCalendar: rateCalendarProp,
   selectedCategory,
   selectedRatePlan,
   startDate,
+  viewDays: viewDaysProp,
+  onViewDaysChange,
   onCategoryChange,
   onPlanChange,
   onStartDateChange,
 }: ARIGridProps) => {
-  const [viewDays, setViewDays] = useState(30);
+  const [viewDaysLocal, setViewDaysLocal] = useState(30);
+  const viewDays = viewDaysProp ?? viewDaysLocal;
+  const setViewDays = (d: number) => {
+    if (onViewDaysChange) onViewDaysChange(d);
+    else setViewDaysLocal(d);
+  };
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   /** Categoria em edição em massa: definida ao clicar em "Edição da categoria" no card (permite abrir mesmo com "Todas" selecionadas) */
   const [categoryBulkEditCategoryId, setCategoryBulkEditCategoryId] = useState<string | null>(null);
@@ -92,7 +103,11 @@ export const ARIGrid = ({
 
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
-  const { rateCalendar, isLoadingCalendar, upsertRateCalendar } = useRateSystem();
+  const dateRange = useMemo(
+    () => ({ start: startDate, end: addDays(startDate, viewDays - 1) }),
+    [startDate, viewDays]
+  );
+  const { rateCalendar, isLoadingCalendar, upsertRateCalendar } = useRateSystem({ dateRange });
   const dynamicPrices = useDynamicRatePrices();
   const {
     updateSalesStatus,
@@ -110,16 +125,6 @@ export const ARIGrid = ({
     if (selectedCategory === 'all') return categories;
     return categories.filter(c => c.id === selectedCategory);
   }, [categories, selectedCategory]);
-
-  // Debug: log quando categorias mudarem
-  useEffect(() => {
-    console.log('[ARIGrid] Categorias atualizadas:', {
-      total: categories?.length || 0,
-      filtered: filteredCategories?.length || 0,
-      selectedCategory,
-      categories: categories?.map(c => ({ id: c.id, name: c.name })) || [],
-    });
-  }, [categories, filteredCategories, selectedCategory]);
 
   // Filtrar planos ativos
   const activePlans = useMemo(() => {
@@ -312,7 +317,7 @@ export const ARIGrid = ({
     isLoading: isLoadingSalesStatus,
     error: salesStatusError,
   } = useQuery({
-    queryKey: ['ari_sales_status_bulk', selectedEstablishment?.id, categoryIds, startDateStr, endDateStr],
+    queryKey: ['ari_sales_status_bulk', selectedEstablishment?.id, categoryIds, startDateStr, endDateStr, refetchTrigger],
     queryFn: async () => {
       if (!selectedEstablishment?.id || categoryIds.length === 0) return [];
 
@@ -378,28 +383,6 @@ export const ARIGrid = ({
       }
     });
     
-    // Debug: log do mapeamento detalhado
-    if (allInventoryData.length > 0 || filteredCategories.length > 0) {
-      console.log('[ARIGrid] Inventory Maps Debug:', {
-        totalData: allInventoryData.length,
-        filteredCategories: filteredCategories.length,
-        categoryIds: filteredCategories.map(c => c.id),
-        dataCategoryIds: [...new Set(allInventoryData.map((inv: any) => inv.category_id))],
-        mapsDetails: Object.entries(maps).map(([catId, map]) => ({
-          categoryId: catId,
-          categoryName: filteredCategories.find(c => String(c.id) === catId)?.name || 'Unknown',
-          entriesCount: map.size,
-          sampleEntries: Array.from(map.entries()).slice(0, 2),
-        })),
-        sampleRawData: allInventoryData.slice(0, 3).map((inv: any) => ({
-          category_id: inv.category_id,
-          date: inv.date,
-          available_rooms: inv.available_rooms,
-          confirmed_reservations: inv.confirmed_reservations,
-        })),
-      });
-    }
-    
     return maps;
   }, [allInventoryData, filteredCategories]);
 
@@ -419,11 +402,14 @@ export const ARIGrid = ({
     return maps;
   }, [allSalesStatusData, filteredCategories]);
 
+  // Usar rateCalendar do parent quando disponível (exibição imediata, sem flash base→tarifário)
+  const rateCalendarToUse = rateCalendarProp !== undefined ? rateCalendarProp : rateCalendar;
+
   // Criar mapa de preços por plano e data
   const rateCalendarMap = useMemo(() => {
     const map = new Map<string, Map<string, Map<string, any>>>();
-    if (rateCalendar) {
-      rateCalendar.forEach((entry: any) => {
+    if (rateCalendarToUse && rateCalendarToUse.length > 0) {
+      rateCalendarToUse.forEach((entry: any) => {
         const categoryKey = entry.category_id;
         const dateKey = entry.date;
         const planKey = entry.pricing_plan_id;
@@ -440,22 +426,9 @@ export const ARIGrid = ({
         
         dateMap.set(planKey, entry);
       });
-      
-      // Verificar se há entradas com campos de flutuação
-      const entriesWithFluctuation = rateCalendar.filter((e: any) => 
-        e.occupancy_1_fluctuation_type || e.occupancy_3_fluctuation_type || e.occupancy_4_fluctuation_type
-      );
-      
-      console.log('[ARIGrid] rateCalendarMap recriado:', {
-        entriesCount: rateCalendar?.length || 0,
-        mapSize: map.size,
-        entriesWithFluctuation: entriesWithFluctuation.length,
-        sampleEntry: rateCalendar?.[0],
-        sampleWithFluctuation: entriesWithFluctuation[0],
-      });
     }
     return map;
-  }, [rateCalendar]);
+  }, [rateCalendarToUse]);
 
   // Função para obter status de venda de uma data
   const getSalesStatusForDate = (categoryId: string, date: Date): 'open' | 'closed' | 'no_price' => {
@@ -950,6 +923,80 @@ export const ARIGrid = ({
   };
 
   // Renderizar célula de preço editável
+  // Handler para resetar preço por ocupação ao padrão (adult_price=0, sem flutuação)
+  const handleResetOccupancyPrice = async (params?: {
+    categoryId: string;
+    categoryName: string;
+    planId: string;
+    planName: string;
+    occupancy: number;
+  }) => {
+    const p = params ?? occupancyPriceDialog;
+    if (!p.categoryId || !p.planId || !selectedEstablishment?.id) {
+      toast.error('Dados insuficientes para resetar');
+      return;
+    }
+
+    const occupancy = p.occupancy;
+    if (occupancy === 2) return; // x2 é o padrão, não precisa resetar
+
+    try {
+      const datesToUpdate = visibleDates.filter(date => date >= startOfDay(new Date()));
+      const updateDataArray: Record<string, unknown>[] = [];
+
+      for (const date of datesToUpdate) {
+        const entry = getRateCalendarEntry(
+          p.categoryId,
+          p.planId,
+          date
+        );
+        const basePrice = entry?.base_price || 0;
+        if (basePrice <= 0) continue;
+
+        const updateData: Record<string, unknown> = {
+          establishment_id: selectedEstablishment.id,
+          category_id: p.categoryId,
+          pricing_plan_id: p.planId,
+          date: format(date, 'yyyy-MM-dd'),
+          base_price: basePrice,
+          adult_price: 0,
+        };
+
+        // Limpar flutuações da ocupação
+        if (occupancy === 1) {
+          updateData.occupancy_1_fluctuation_type = null;
+          updateData.occupancy_1_fluctuation_value = null;
+        } else if (occupancy === 3) {
+          updateData.occupancy_3_fluctuation_type = null;
+          updateData.occupancy_3_fluctuation_value = null;
+        } else if (occupancy === 4) {
+          updateData.occupancy_4_fluctuation_type = null;
+          updateData.occupancy_4_fluctuation_value = null;
+        }
+
+        if (entry) {
+          updateData.min_stay = entry.min_stay ?? 0;
+          updateData.max_stay = entry.max_stay ?? 0;
+          updateData.closed_to_arrival = entry.closed_to_arrival ?? false;
+          updateData.closed_to_departure = entry.closed_to_departure ?? false;
+        }
+
+        updateDataArray.push(updateData);
+      }
+
+      if (updateDataArray.length > 0) {
+        await upsertRateCalendar(updateDataArray);
+        toast.success(`Preço x${occupancy} resetado ao padrão em ${updateDataArray.length} data(s)`);
+        if (!params) setOccupancyPriceDialog({ ...occupancyPriceDialog, open: false });
+      } else {
+        toast.info('Nenhuma data futura para resetar');
+      }
+    } catch (error) {
+      console.error('[ARIGrid] Erro ao resetar preço:', error);
+      toast.error('Erro ao resetar preço');
+    }
+  };
+
   // Handler para salvar preço por ocupação com flutuação
   const handleSaveOccupancyPrice = async (data: {
     fluctuationType: 'fixed' | 'percentage';
@@ -960,6 +1007,8 @@ export const ARIGrid = ({
       return;
     }
 
+    let updateDataArray: any[] = [];
+    let saveResult: any;
     try {
       // Para x1, x3, x4: sempre aplicar a todas as datas visíveis (edição em massa)
       // Para x2: aplicar apenas à data específica (edição inline)
@@ -977,7 +1026,7 @@ export const ARIGrid = ({
         fluctuationValue: data.fluctuationValue,
       });
 
-      const updateDataArray: any[] = [];
+      updateDataArray = [];
 
       for (const date of datesToUpdate) {
         const entry = getRateCalendarEntry(
@@ -1483,14 +1532,13 @@ export const ARIGrid = ({
       });
       
       // Salvar todas as atualizações de uma vez
-      let result;
       try {
-        result = await upsertRateCalendar(updateDataArray);
+        saveResult = await upsertRateCalendar(updateDataArray);
         
         console.log('[ARIGrid] Resultado do upsert:', {
-          resultLength: result?.length,
-          sampleResult: result?.[0],
-          hasFluctuationFields: result?.[0]?.occupancy_1_fluctuation_type !== undefined,
+          resultLength: saveResult?.length,
+          sampleResult: saveResult?.[0],
+          hasFluctuationFields: saveResult?.[0]?.occupancy_1_fluctuation_type !== undefined,
         });
       } catch (error: any) {
         console.error('[ARIGrid] Erro ao salvar no banco:', error);
@@ -1537,7 +1585,7 @@ export const ARIGrid = ({
         console.error('[ARIGrid] Erro relacionado a length:', {
           error,
           updateDataArrayLength: updateDataArray?.length,
-          result: result,
+          result: saveResult,
           stack: error?.stack,
         });
       }
@@ -2244,19 +2292,35 @@ export const ARIGrid = ({
                                       className="h-auto p-0 text-blue-600 hover:text-blue-800 text-xs font-normal"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        // Abrir modal para editar todas as datas desta ocupação
                                         setOccupancyPriceDialog({
                                           open: true,
                                           categoryId: category.id,
                                           categoryName: category.name,
                                           planId: plan.id,
                                           planName: plan.name,
-                                          date: null, // null indica edição em massa
+                                          date: null,
                                           occupancy,
                                         });
                                       }}
                                     >
                                       Editar
+                                    </Button>
+                                    <Button
+                                      variant="link"
+                                      size="sm"
+                                      className="h-auto p-0 text-amber-600 hover:text-amber-800 text-xs font-normal"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleResetOccupancyPrice({
+                                          categoryId: category.id,
+                                          categoryName: category.name,
+                                          planId: plan.id,
+                                          planName: plan.name,
+                                          occupancy,
+                                        });
+                                      }}
+                                    >
+                                      Resetar
                                     </Button>
                                   </>
                                 )}
@@ -2577,6 +2641,7 @@ export const ARIGrid = ({
             return null;
           })()}
           isBulkEdit={occupancyPriceDialog.occupancy !== 2 || occupancyPriceDialog.date === null}
+          onReset={occupancyPriceDialog.occupancy !== 2 ? () => handleResetOccupancyPrice() : undefined}
           onSave={handleSaveOccupancyPrice}
         />
       )}

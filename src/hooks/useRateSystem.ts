@@ -14,6 +14,7 @@ export interface RatePlan {
   description?: string;
   plan_type?: string; // Agora é uma string que referencia pricing_plan_types.name
   base_plan_id?: string;
+  base_plan_id_for_rate?: string; // DB column: plano base para Tarifa Base + Flutuação
   color?: string;
   is_active: boolean;
   sort_order?: number;
@@ -69,7 +70,12 @@ export interface RateRestriction {
   is_active: boolean;
 }
 
-export const useRateSystem = () => {
+export interface UseRateSystemOptions {
+  /** Período visível para fetch otimizado (rates-map enriquece só esse intervalo) */
+  dateRange?: { start: Date; end: Date };
+}
+
+export const useRateSystem = (options?: UseRateSystemOptions) => {
   const queryClient = useQueryClient();
   const { selectedEstablishment } = useEstablishment();
 
@@ -87,6 +93,32 @@ export const useRateSystem = () => {
     refetchOnWindowFocus: true,
     staleTime: 60 * 1000, // 1 minuto
   };
+
+  // ========== RATE SYSTEM SETTINGS ==========
+  const establishmentIdForSettings = selectedEstablishment?.id ?? getSelectedEstablishmentId();
+  const rateSettingsQuery = useQuery({
+    queryKey: ["rate_system_settings", establishmentIdForSettings],
+    ...rateQueryOptions,
+    queryFn: async () => {
+      const id = establishmentIdForSettings || getEstablishmentId();
+      if (!id) return null;
+      const { data } = await supabase
+        .from("hotel_settings")
+        .select("rate_system_settings")
+        .eq("establishment_id", id)
+        .maybeSingle();
+      return data?.rate_system_settings ?? null;
+    },
+    enabled: !!establishmentIdForSettings,
+  });
+
+  const persistDynamicRates =
+    rateSettingsQuery.data?.persist_dynamic_rates === true ||
+    rateSettingsQuery.data?.persist_dynamic_rates === "true";
+
+  const autoApplyDynamicRules =
+    rateSettingsQuery.data?.auto_apply_dynamic_rules === true ||
+    rateSettingsQuery.data?.auto_apply_dynamic_rules === "true";
 
   // ========== RATE PLANS ==========
   const ratePlansQuery = useQuery({
@@ -244,27 +276,46 @@ export const useRateSystem = () => {
   });
 
   // ========== RATE CALENDAR ==========
+  const dateRange = options?.dateRange;
   const rateCalendarQuery = useQuery({
-    queryKey: ["rate_calendar", selectedEstablishment?.id],
+    queryKey: [
+      "rate_calendar",
+      selectedEstablishment?.id,
+      dateRange?.start?.toISOString?.()?.slice(0, 10),
+      dateRange?.end?.toISOString?.()?.slice(0, 10),
+      autoApplyDynamicRules,
+    ],
     ...rateQueryOptions,
     queryFn: async () => {
       const establishmentId = getEstablishmentId();
       if (!establishmentId) return [];
 
-      const apiData = await fetchRatesMap(establishmentId);
+      const fetchOpts = dateRange ? {
+        startDate: format(dateRange.start, "yyyy-MM-dd"),
+        endDate: format(dateRange.end, "yyyy-MM-dd"),
+      } : undefined;
+      const apiData = await fetchRatesMap(establishmentId, fetchOpts);
       if (apiData?.rateCalendar?.length !== undefined) {
         return apiData.rateCalendar as RateCalendarEntry[];
       }
 
-      const { data, error } = await supabase
+      let query = supabase
         .from("rate_calendar")
         .select("*")
-        .eq("establishment_id", establishmentId)
-        .order("date", { ascending: true });
+        .eq("establishment_id", establishmentId);
+      if (dateRange) {
+        query = query.gte("date", format(dateRange.start, "yyyy-MM-dd")).lte("date", format(dateRange.end, "yyyy-MM-dd"));
+      }
+      const { data, error } = await query.order("date", { ascending: true });
 
       if (error) throw error;
       return (data || []) as RateCalendarEntry[];
     },
+    enabled: !!selectedEstablishment?.id,
+    staleTime: 2 * 60 * 1000, // 2 min - permite recalc/edições aparecerem sem delay excessivo
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
   });
 
   const getRateCalendarForPeriod = async (
@@ -1042,12 +1093,17 @@ export const useRateSystem = () => {
     // Loading states
     isLoading: ratePlansQuery.isLoading || rateCalendarQuery.isLoading || dynamicRulesQuery.isLoading || restrictionsQuery.isLoading,
     
+    // Settings
+    persistDynamicRates,
+    autoApplyDynamicRules,
+
     // Refetch functions
     refetch: () => {
       ratePlansQuery.refetch();
       rateCalendarQuery.refetch();
       dynamicRulesQuery.refetch();
       restrictionsQuery.refetch();
+      rateSettingsQuery.refetch();
     },
   };
 };

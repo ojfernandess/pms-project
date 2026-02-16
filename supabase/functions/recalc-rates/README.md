@@ -40,7 +40,7 @@ curl -X GET "https://SEU_PROJETO.supabase.co/functions/v1/recalc-rates?days_ahea
   -H "Authorization: Bearer SEU_SERVICE_ROLE_KEY"
 ```
 
-## Limites
+## Escopo
 
-- Processa até 5 categorias e 3 planos por estabelecimento (evitar timeout).
-- Ajuste os `.slice(0, 5)` e `.slice(0, 3)` no código para expandir.
+- Processa **todas** as categorias e **todos** os planos ativos do estabelecimento.
+- Prioriza os planos usados na reserva: `public_pricing_plan_1_id` e `public_pricing_plan_2_id` de `hotel_settings`, garantindo que o Mapa de Tarifas / Grade ARI exiba os mesmos valores que o motor de reservas e a página pública.

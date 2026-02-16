@@ -22,13 +22,14 @@ interface RateSystemSettingsDialogProps {
 
 export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSettingsDialogProps) => {
   const queryClient = useQueryClient();
-  const establishmentId = getSelectedEstablishmentId();
   const { selectedEstablishment } = useEstablishment();
+  const establishmentId = selectedEstablishment?.id ?? getSelectedEstablishmentId();
   const { settings: siteSettings } = useSiteSettings();
   const [hasDynamicPricingAccess, setHasDynamicPricingAccess] = useState<boolean | null>(null);
 
   const [settings, setSettings] = useState({
     auto_apply_dynamic_rules: false,
+    persist_dynamic_rates: false,
     auto_sync_channels: false,
     sync_interval_hours: 24,
     default_rate_plan: "",
@@ -47,20 +48,19 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
     date_format: "DD/MM/YYYY",
   });
 
-  // Buscar configurações existentes
+  // Buscar configurações existentes (query key distinta para evitar colisão de cache com useRateSystem)
   const { data: existingSettings, isLoading } = useQuery({
-    queryKey: ["rate_system_settings", establishmentId],
+    queryKey: ["hotel_settings", establishmentId],
     queryFn: async () => {
       if (!establishmentId) return null;
 
-      // Buscar configurações do estabelecimento (pode ser uma tabela específica ou usar hotel_settings)
       const { data, error } = await supabase
         .from("hotel_settings")
         .select("*")
         .eq("establishment_id", establishmentId)
-        .single();
+        .maybeSingle();
 
-      if (error && error.code !== "PGRST116") {
+      if (error) {
         console.error("Erro ao buscar configurações:", error);
       }
 
@@ -95,47 +95,52 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
   }, [selectedEstablishment?.id, open]);
 
   useEffect(() => {
-    if (existingSettings && existingSettings.rate_system_settings) {
-      console.log("RateSystemSettings: Carregando configurações existentes:", {
-        rate_system_settings: existingSettings.rate_system_settings,
-        auto_apply_dynamic_rules: existingSettings.rate_system_settings.auto_apply_dynamic_rules,
-        type: typeof existingSettings.rate_system_settings.auto_apply_dynamic_rules
-      });
-      setSettings((prev) => ({
-        ...prev,
-        ...existingSettings.rate_system_settings,
-      }));
-    }
+    if (!existingSettings) return;
+    const rs = (existingSettings.rate_system_settings ?? {}) as Record<string, unknown>;
+    const toBool = (v: unknown) => v === true || v === "true" || v === "1";
+    setSettings((prev) => ({
+      ...prev,
+      ...rs,
+      // Garantir que booleanos não se percam ao carregar do JSONB (normalizar explicitamente)
+      auto_apply_dynamic_rules: rs.auto_apply_dynamic_rules !== undefined ? toBool(rs.auto_apply_dynamic_rules) : prev.auto_apply_dynamic_rules,
+      persist_dynamic_rates: rs.persist_dynamic_rates !== undefined ? toBool(rs.persist_dynamic_rates) : prev.persist_dynamic_rates,
+    }));
   }, [existingSettings]);
 
   const updateSettings = useMutation({
     mutationFn: async (newSettings: typeof settings) => {
       if (!establishmentId) throw new Error("Establishment ID não encontrado");
 
-      // Verificar se já existe um registro para este estabelecimento
       const { data: existing, error: checkError } = await supabase
         .from("hotel_settings")
-        .select("id")
+        .select("id, rate_system_settings, name")
         .eq("establishment_id", establishmentId)
         .maybeSingle();
 
-      if (checkError && checkError.code !== "PGRST116") {
+      if (checkError) {
+        console.error("Erro ao buscar hotel_settings:", checkError);
         throw checkError;
       }
 
-      // Preparar dados para inserção/atualização
-      const updateData: any = {
-          establishment_id: establishmentId,
-          rate_system_settings: newSettings,
-          updated_at: new Date().toISOString(),
+      const existingRs = (existing?.rate_system_settings ?? {}) as Record<string, unknown>;
+      // Garantir que booleanos sejam enviados como true/false (evita problemas de serialização JSONB)
+      const mergedRateSettings = {
+        ...existingRs,
+        ...newSettings,
+        auto_apply_dynamic_rules: !!newSettings.auto_apply_dynamic_rules,
+        persist_dynamic_rates: !!newSettings.persist_dynamic_rates,
       };
 
-      // Se já existe, fazer update; caso contrário, fazer insert
-      if (existing) {
+      const payload = {
+        rate_system_settings: mergedRateSettings,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (existing?.id) {
         const { data, error } = await supabase
           .from("hotel_settings")
-          .update(updateData)
-          .eq("establishment_id", establishmentId)
+          .update(payload)
+          .eq("id", existing.id)
           .select()
           .single();
 
@@ -144,39 +149,43 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
           throw error;
         }
         return data;
-      } else {
-        // Buscar nome do estabelecimento para usar como name
-        const { data: establishment, error: estError } = await supabase
-          .from("establishments")
-          .select("name")
-          .eq("id", establishmentId)
-          .single();
+      }
 
-        // Adicionar campos obrigatórios para criação
-        updateData.name = establishment?.name || "Configurações do Estabelecimento";
-        updateData.created_at = new Date().toISOString();
+      const { data: establishment } = await supabase
+        .from("establishments")
+        .select("name")
+        .eq("id", establishmentId)
+        .maybeSingle();
 
-        const { data, error } = await supabase
-          .from("hotel_settings")
-          .insert(updateData)
+      const { data, error } = await supabase
+        .from("hotel_settings")
+        .insert({
+          establishment_id: establishmentId,
+          name: establishment?.name || "Configurações do Estabelecimento",
+          rate_system_settings: mergedRateSettings,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
         .select()
         .single();
 
-        if (error) {
-          console.error("Erro ao inserir hotel_settings:", error);
-          throw error;
-        }
-      return data;
+      if (error) {
+        console.error("Erro ao inserir hotel_settings:", error);
+        throw error;
       }
+      return data;
     },
-    onSuccess: (data) => {
-      console.log("RateSystemSettings: Configurações salvas:", {
-        rate_system_settings: data?.rate_system_settings,
-        auto_apply_dynamic_rules: data?.rate_system_settings?.auto_apply_dynamic_rules,
-        type: typeof data?.rate_system_settings?.auto_apply_dynamic_rules
-      });
+    onSuccess: (data, variables) => {
+      if (data?.rate_system_settings && establishmentId) {
+        queryClient.setQueryData(["rate_system_settings", establishmentId], data.rate_system_settings);
+      }
       queryClient.invalidateQueries({ queryKey: ["rate_system_settings"] });
+      queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
       toast.success("Configurações salvas com sucesso!");
+      if (variables.persist_dynamic_rates && variables.auto_apply_dynamic_rules) {
+        toast.info("Execute 'Recalcular Agora' no Mapa de Tarifas para popular os preços dinâmicos inicialmente.", { duration: 6000 });
+      }
       onOpenChange(false);
     },
     onError: (error: any) => {
@@ -291,7 +300,7 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
 
           <TabsContent value="automation" className="space-y-6 mt-6">
             <div className="space-y-4">
-              {hasDynamicPricingAccess ? (
+              {/* Opções de automação sempre visíveis para permitir configurar e salvar */}
               <div className="flex items-center justify-between">
                 <div>
                   <Label htmlFor="auto_apply_rules">Aplicar Regras Dinâmicas Automaticamente</Label>
@@ -303,26 +312,20 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
                   onCheckedChange={(checked) => setSettings({ ...settings, auto_apply_dynamic_rules: checked })}
                 />
               </div>
-              ) : (
-                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                  <div className="space-y-2">
-                    <p className="text-sm font-semibold text-amber-900">
-                      Funcionalidade Indisponível
-                    </p>
-                    <p className="text-sm text-amber-800">
-                      A <strong>Automação de Regras de Precificação Dinâmica</strong> não está habilitada para sua empresa no momento. 
-                      Esta funcionalidade permite ajustar automaticamente as tarifas com base em condições como ocupação, 
-                      demanda histórica e outros fatores, otimizando a receita do estabelecimento.
-                    </p>
-                    <p className="text-sm text-amber-800 mt-3">
-                      Para ativar esta funcionalidade e começar a utilizar a automação de precificação dinâmica, 
-                      entre em contato com o <strong>suporte do {siteSettings?.site_title || 'sistema'}</strong>.
-                    </p>
-                    <p className="text-sm text-amber-700 mt-2 italic">
-                      Nossa equipe de suporte está pronta para ajudá-lo a configurar e ativar esta funcionalidade 
-                      de forma adequada para o seu estabelecimento.
-                    </p>
-                  </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="persist_dynamic">Persistir Preços Dinâmicos no Banco</Label>
+                  <p className="text-sm text-gray-500">Gravar preços calculados no banco. Não recalcula ao abrir tela. Nível enterprise.</p>
+                </div>
+                <Switch
+                  id="persist_dynamic"
+                  checked={settings.persist_dynamic_rates}
+                  onCheckedChange={(checked) => setSettings({ ...settings, persist_dynamic_rates: checked })}
+                />
+              </div>
+              {hasDynamicPricingAccess === false && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                  A <strong>Automação de Regras de Precificação Dinâmica</strong> pode precisar ser habilitada para sua empresa. Entre em contato com o suporte para ativar.
                 </div>
               )}
 

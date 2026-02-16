@@ -19,6 +19,7 @@ interface OccupancyPriceEditDialogProps {
   savedFluctuationType?: 'fixed' | 'percentage' | null; // Tipo de flutuação salvo
   savedFluctuationValue?: number | null; // Valor de flutuação salvo
   isBulkEdit?: boolean; // Se true, aplica a alteração a todas as datas visíveis
+  onReset?: () => Promise<void>; // Resetar ao preço padrão (adult_price=0, sem flutuação)
   onSave: (data: {
     fluctuationType: 'fixed' | 'percentage';
     fluctuationValue: number;
@@ -37,6 +38,7 @@ export const OccupancyPriceEditDialog = ({
   savedFluctuationType,
   savedFluctuationValue,
   isBulkEdit = false,
+  onReset,
   onSave,
 }: OccupancyPriceEditDialogProps) => {
   const [fluctuationType, setFluctuationType] = useState<'fixed' | 'percentage'>('percentage');
@@ -341,21 +343,37 @@ export const OccupancyPriceEditDialog = ({
             )}
           </div>
 
-          <div className="flex justify-end gap-2 pt-4">
-            <Button
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              className="bg-red-50 hover:bg-red-100 text-red-600 border-red-200"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={!fluctuationValue || normalizeValue(fluctuationValue) === 0}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              Salvar Preço
-            </Button>
+          <div className="flex justify-between pt-4">
+            <div>
+              {onReset && occupancy !== 2 && (
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    await onReset();
+                    onOpenChange(false);
+                  }}
+                  className="text-amber-600 border-amber-200 hover:bg-amber-50"
+                >
+                  Resetar ao padrão
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                className="bg-red-50 hover:bg-red-100 text-red-600 border-red-200"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleSave}
+                disabled={!fluctuationValue || normalizeValue(fluctuationValue) === 0}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                Salvar Preço
+              </Button>
+            </div>
           </div>
         </div>
       </DialogContent>

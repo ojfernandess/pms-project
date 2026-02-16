@@ -12,7 +12,7 @@ import { CalendarIcon, ChevronLeft, ChevronRight, Filter, Download, Edit2, Dolla
 import { cn } from "@/lib/utils";
 import { formatCurrency, formatCurrencyWithoutZeroCents } from "@/lib/reservationUtils";
 import { RatePriceBreakdown } from "./RatePriceBreakdown";
-import { useRateSystem, RatePlan } from "@/hooks/useRateSystem";
+import { useRateSystem, RatePlan, type RateCalendarEntry } from "@/hooks/useRateSystem";
 import { useRateMetrics } from "@/hooks/useRateMetrics";
 import { toast } from "sonner";
 import { checkEstablishmentFeatureAccess } from "@/lib/featureAccess";
@@ -26,9 +26,12 @@ import { CreateRateDialog } from "./CreateRateDialog";
 interface RateCalendarGridProps {
   ratePlans: RatePlan[];
   categories: any[];
+  rateCalendar?: RateCalendarEntry[];
   selectedCategory: string;
   selectedRatePlan: string;
   startDate: Date;
+  viewDays?: number;
+  onViewDaysChange?: (days: number) => void;
   onCategoryChange: (category: string) => void;
   onPlanChange: (plan: string) => void;
   onStartDateChange: (date: Date) => void;
@@ -37,14 +40,25 @@ interface RateCalendarGridProps {
 export const RateCalendarGrid = ({
   ratePlans,
   categories,
+  rateCalendar: rateCalendarProp,
   selectedCategory,
   selectedRatePlan,
   startDate,
+  viewDays: viewDaysProp,
+  onViewDaysChange,
   onCategoryChange,
   onPlanChange,
   onStartDateChange,
 }: RateCalendarGridProps) => {
-  const [viewDays, setViewDays] = useState(30);
+  const [viewDaysLocal, setViewDaysLocal] = useState(30);
+  const viewDays = viewDaysProp ?? viewDaysLocal;
+  const setViewDays = (d: number) => {
+    if (viewDaysProp !== undefined) {
+      onViewDaysChange?.(d);
+    } else {
+      setViewDaysLocal(d);
+    }
+  };
   const [editingRate, setEditingRate] = useState<{
     planId: string;
     categoryId: string;
@@ -56,11 +70,16 @@ export const RateCalendarGrid = ({
   const [calculatedPrices, setCalculatedPrices] = useState<Map<string, number>>(new Map());
   const [categoryOccupancy, setCategoryOccupancy] = useState<Map<string, number>>(new Map()); // key: categoryId-dateStr, value: occupancy
   const [dynamicPriceKeys, setDynamicPriceKeys] = useState<Set<string>>(new Set()); // Rastrear quais preços foram alterados por regras dinâmicas
+  const [calculatingPriceKeys, setCalculatingPriceKeys] = useState<Set<string>>(new Set()); // Evitar overlay: não mostrar base enquanto calcula
   const [hasFeatureAccess, setHasFeatureAccess] = useState<boolean | null>(null); // null = ainda não verificado
 
   const { selectedEstablishment } = useEstablishment();
+  const dateRange = useMemo(
+    () => ({ start: startDate, end: addDays(startDate, viewDays - 1) }),
+    [startDate, viewDays]
+  );
   const {
-    rateCalendar,
+    rateCalendar: rateCalendarFromHook,
     isLoadingCalendar,
     getRateCalendarForPeriod,
     upsertRateCalendar,
@@ -68,7 +87,10 @@ export const RateCalendarGrid = ({
     refetch: refetchRateCalendar,
     calculateRatePrice,
     dynamicRules,
-  } = useRateSystem();
+    persistDynamicRates,
+    autoApplyDynamicRules,
+  } = useRateSystem({ dateRange });
+  const rateCalendar = rateCalendarProp !== undefined ? rateCalendarProp : rateCalendarFromHook;
 
   const { getMetricsForDate, calculateOccupancy, calculatePickupRate } = useRateMetrics();
   const dynamicPrices = useDynamicRatePrices();
@@ -128,10 +150,27 @@ export const RateCalendarGrid = ({
     return categories.filter(c => c.id === selectedCategory);
   }, [categories, selectedCategory]);
 
+  // Preencher calculatedPrices com rate_calendar assim que carregar (evita flash base → tarifário)
+  useEffect(() => {
+    if (filteredRateCalendar.length === 0) return;
+    setCalculatedPrices((prev) => {
+      const merged = new Map(prev);
+      for (const entry of filteredRateCalendar) {
+        const key = `${entry.pricing_plan_id}-${entry.category_id}-${entry.date}`;
+        const price = Number(entry.base_price ?? 0);
+        if (price > 0 && (!merged.has(key) || Math.abs((merged.get(key) ?? 0) - price) > 0.01)) {
+          merged.set(key, price);
+        }
+      }
+      return merged;
+    });
+  }, [filteredRateCalendar]);
+
   // Limpar cache quando o plano mudar
   useEffect(() => {
     setCalculatedPrices(new Map());
-    setDynamicPriceKeys(new Set()); // Limpar também os preços dinâmicos
+    setDynamicPriceKeys(new Set());
+    setCalculatingPriceKeys(new Set());
   }, [selectedRatePlan]);
 
   // Calcular preços quando o plano ou período mudar (apenas para datas sem entrada no calendário)
@@ -181,16 +220,58 @@ export const RateCalendarGrid = ({
       }
     }
     
-    // Limites para evitar ERR_INSUFFICIENT_RESOURCES no navegador
-    const categoriesToProcess = filteredCategories.slice(0, 4);
-    const plansToProcess = selectedRatePlan === 'all' ? activePlansToShow.slice(0, 3) : activePlansToShow;
+    // Limites para evitar ERR_INSUFFICIENT_RESOURCES (mais células para aplicar regras dinâmicas)
+    const categoriesToProcess = filteredCategories.slice(0, 8);
+    const plansToProcess = selectedRatePlan === 'all' ? activePlansToShow.slice(0, 6) : activePlansToShow;
     
     const calculateMissingPrices = async () => {
-        // Inicializar com os preços do rate_calendar para evitar flash
+      // Respeitar configuração do usuário: regras dinâmicas só quando "Aplicar Regras Dinâmicas Automaticamente" está ativo
+      const shouldApplyDynamicRules = autoApplyDynamicRules;
+      const hasEnrichedData = filteredRateCalendar.some(
+        (e) => e && "original_base_price" in e && (e as { original_base_price?: number }).original_base_price !== undefined
+      );
+      const needsClientCalculation = shouldApplyDynamicRules && (!persistDynamicRates || !hasEnrichedData) && !hasEnrichedData;
+
+      const keysToCalculate = new Set<string>();
+      // 1. Regras dinâmicas: calcular preços quando auto_apply está ativo
+      if (needsClientCalculation) {
+        for (const plan of plansToProcess) {
+          for (const category of categoriesToProcess) {
+            for (const date of datesToProcess) {
+              keysToCalculate.add(`${plan.id}-${category.id}-${format(date, "yyyy-MM-dd")}`);
+            }
+          }
+        }
+      }
+      // 2. Tarifa Base + Flutuação: planos com base_plan_id_for_rate sem entrada no rate_calendar
+      const tasksForBasePlan: Array<{ key: string; plan: typeof plansToProcess[0]; category: typeof categoriesToProcess[0]; date: Date }> = [];
+      const planHasBasePlan = (p: typeof plansToProcess[0]) =>
+        !!(p as { base_plan_id_for_rate?: string }).base_plan_id_for_rate;
+      for (const plan of plansToProcess) {
+        if (!planHasBasePlan(plan)) continue;
+        for (const category of categoriesToProcess) {
+          for (const date of datesToProcess) {
+            const dateStr = format(date, "yyyy-MM-dd");
+            const rateEntry = filteredRateCalendar.find(
+              (r) => r.pricing_plan_id === plan.id && r.category_id === category.id && r.date === dateStr
+            );
+            if (!rateEntry?.base_price || rateEntry.base_price <= 0) {
+              const key = `${plan.id}-${category.id}-${dateStr}`;
+              keysToCalculate.add(key);
+              tasksForBasePlan.push({ key, plan, category, date });
+            }
+          }
+        }
+      }
+      if (keysToCalculate.size > 0) {
+        const limited = Array.from(keysToCalculate).slice(0, 300);
+        keysToCalculate.clear();
+        limited.forEach((k) => keysToCalculate.add(k));
+        setCalculatingPriceKeys(new Set(keysToCalculate));
+      }
+
       const newPrices = new Map<string, number>();
-      
-        // Primeiro, preencher com os valores do cache compartilhado (sobrevive troca de aba)
-        if (dynamicPrices) {
+      if (dynamicPrices) {
           const snapshot = dynamicPrices.getPricesSnapshot();
           Object.entries(snapshot).forEach(([k, v]) => {
             if (v > 0) newPrices.set(k, v);
@@ -202,29 +283,32 @@ export const RateCalendarGrid = ({
             for (const date of datesToProcess) {
               const dateStr = format(date, "yyyy-MM-dd");
               const key = `${plan.id}-${category.id}-${dateStr}`;
-              
+              if (keysToCalculate.has(key)) continue;
               if (newPrices.has(key) && (newPrices.get(key) || 0) > 0) continue;
-              
               const cachedPrice = calculatedPrices.get(key);
               if (cachedPrice && cachedPrice > 0) {
                 newPrices.set(key, cachedPrice);
                 continue;
               }
               
-              // Se não está no cache, usar do rate_calendar
               const rateEntry = filteredRateCalendar.find(
                 r => r.pricing_plan_id === plan.id &&
                 r.category_id === category.id &&
                 r.date === dateStr
               );
-              
-              if (rateEntry?.base_price && rateEntry.base_price > 0) {
+              const entryEnriched = rateEntry && "original_base_price" in rateEntry && (rateEntry as { original_base_price?: number }).original_base_price !== undefined;
+              if (entryEnriched && rateEntry?.base_price && rateEntry.base_price > 0) {
+                // Se regras desativadas, usar tarifa base; senão usar preço dinâmico
+                const entry = rateEntry as { base_price?: number; original_base_price?: number };
+                const usePrice = autoApplyDynamicRules && Math.abs((entry.base_price ?? 0) - (entry.original_base_price ?? 0)) > 0.01
+                  ? entry.base_price!
+                  : (entry.original_base_price ?? entry.base_price ?? 0);
+                newPrices.set(key, usePrice);
+              } else if (rateEntry?.base_price && rateEntry.base_price > 0) {
                 newPrices.set(key, rateEntry.base_price);
               } else {
                 const basePrice = Number(category.base_price) || 0;
-                if (basePrice > 0) {
-                  newPrices.set(key, basePrice);
-                }
+                if (basePrice > 0) newPrices.set(key, basePrice);
               }
             }
           }
@@ -241,14 +325,34 @@ export const RateCalendarGrid = ({
           });
           return merged;
         });
-        
-        // Calcular preços com regras dinâmicas (evitar ERR_INSUFFICIENT_RESOURCES)
-        if (hasFeatureAccess === true) {
-          const hasEnrichedData = filteredRateCalendar.some(
-            (e) => e && "original_base_price" in e && (e as { original_base_price?: number }).original_base_price !== undefined
-          );
 
-          if (hasEnrichedData) {
+        if (persistDynamicRates && hasEnrichedData) {
+          // Usar preços persistidos SOMENTE quando auto_apply está ativo; se desativado, mostrar tarifa base
+          const enrichedKeys = new Set<string>();
+          for (const plan of plansToProcess) {
+            for (const category of categoriesToProcess) {
+              for (const date of datesToProcess) {
+                const dateStr = format(date, "yyyy-MM-dd");
+                const rateEntry = filteredRateCalendar.find(
+                  (r) => r.pricing_plan_id === plan.id && r.category_id === category.id && r.date === dateStr
+                );
+                const entry = rateEntry as { base_price?: number; original_base_price?: number } | undefined;
+                if (entry?.original_base_price !== undefined) {
+                  const key = `${plan.id}-${category.id}-${dateStr}`;
+                  const hasDynamicAdjustment = entry.base_price && Math.abs(entry.base_price - entry.original_base_price) > 0.01;
+                  // Quando regras desativadas: mostrar original; quando ativas: mostrar base_price (dinâmico)
+                  const priceToUse = autoApplyDynamicRules && hasDynamicAdjustment ? entry.base_price! : entry.original_base_price;
+                  newPrices.set(key, priceToUse);
+                  if (autoApplyDynamicRules && hasDynamicAdjustment) enrichedKeys.add(key);
+                }
+              }
+            }
+          }
+          if (enrichedKeys.size > 0) {
+            setDynamicPriceKeys((prev) => new Set([...prev, ...enrichedKeys]));
+          }
+        } else if (shouldApplyDynamicRules && (!persistDynamicRates || !hasEnrichedData)) {
+          if (hasEnrichedData && autoApplyDynamicRules) {
             const enrichedKeys = new Set<string>();
             for (const plan of plansToProcess) {
               for (const category of categoriesToProcess) {
@@ -269,10 +373,10 @@ export const RateCalendarGrid = ({
             if (enrichedKeys.size > 0) {
               setDynamicPriceKeys((prev) => new Set([...prev, ...enrichedKeys]));
             }
-          } else {
-            const BATCH_SIZE = 2;
-            const BATCH_DELAY_MS = 300;
-            const MAX_TASKS = 120;
+          } else if (!hasEnrichedData) {
+            const BATCH_SIZE = 12;
+            const BATCH_DELAY_MS = 50;
+            const MAX_TASKS = 300;
             const tasks: Array<{ key: string; plan: typeof plansToProcess[0]; category: typeof categoriesToProcess[0]; date: Date }> = [];
             for (const plan of plansToProcess) {
               for (const category of categoriesToProcess) {
@@ -312,12 +416,28 @@ export const RateCalendarGrid = ({
                   }
                 }
               });
+              // Atualizar UI progressivamente após cada batch (evita esperar todos os cálculos)
+              setCalculatedPrices((prev) => {
+                const merged = new Map(prev);
+                newPrices.forEach((value, key) => {
+                  const existing = merged.get(key);
+                  if (existing === undefined || Math.abs(existing - value) > 0.01) {
+                    merged.set(key, value);
+                  }
+                });
+                return merged;
+              });
+              if (dynamicPrices) {
+                const toSet: Record<string, number> = {};
+                newPrices.forEach((v, k) => { if (v > 0) toSet[k] = v; });
+                dynamicPrices.setPrices(toSet);
+              }
               if (i + BATCH_SIZE < tasksToRun.length) {
                 await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
               }
             }
           }
-          // Atualizar cache compartilhado para Grade ARI e persistir na troca de aba
+          setCalculatingPriceKeys(new Set());
           if (dynamicPrices) {
             const toSet: Record<string, number> = {};
             newPrices.forEach((v, k) => {
@@ -325,6 +445,52 @@ export const RateCalendarGrid = ({
             });
             dynamicPrices.setPrices(toSet);
           }
+        } else if (tasksForBasePlan.length > 0) {
+          // Tarifa Base + Flutuação: chamar calculate_rate_price para planos derivados sem rate_calendar
+          const BATCH_SIZE_BP = 12;
+          const BATCH_DELAY_MS_BP = 50;
+          const tasksToRun = tasksForBasePlan.slice(0, 300);
+          for (let i = 0; i < tasksToRun.length; i += BATCH_SIZE_BP) {
+            const batch = tasksToRun.slice(i, i + BATCH_SIZE_BP);
+            const results = await Promise.all(
+              batch.map(async ({ key, plan, category, date }) => {
+                try {
+                  const calculatedPrice = await calculateRatePrice(category.id, plan.id, date, 2, 0);
+                  if (calculatedPrice > 0) {
+                    return { key, price: calculatedPrice };
+                  }
+                } catch (error) {
+                  console.warn(`Erro ao calcular Tarifa Base para ${category.name} - ${plan.name}:`, error);
+                }
+                return null;
+              })
+            );
+            results.forEach((r) => {
+              if (r) newPrices.set(r.key, r.price);
+            });
+            // Atualizar UI progressivamente
+            setCalculatedPrices((prev) => {
+              const merged = new Map(prev);
+              newPrices.forEach((value, key) => {
+                const existing = merged.get(key);
+                if (existing === undefined || Math.abs(existing - value) > 0.01) {
+                  merged.set(key, value);
+                }
+              });
+              return merged;
+            });
+            if (dynamicPrices) {
+              const toSet: Record<string, number> = {};
+              newPrices.forEach((v, k) => { if (v > 0) toSet[k] = v; });
+              dynamicPrices.setPrices(toSet);
+            }
+            if (i + BATCH_SIZE_BP < tasksToRun.length) {
+              await new Promise((r) => setTimeout(r, BATCH_DELAY_MS_BP));
+            }
+          }
+          setCalculatingPriceKeys(new Set());
+        } else {
+          setCalculatingPriceKeys(new Set());
         }
       
       // Modo Preview Dinâmico: NÃO persistir no banco a cada acesso.
@@ -347,7 +513,7 @@ export const RateCalendarGrid = ({
     // Debounce para evitar muitas chamadas
     const timeoutId = setTimeout(calculateMissingPrices, 300);
     return () => clearTimeout(timeoutId);
-  }, [selectedRatePlan, filteredCategories, visibleDates, calculateRatePrice, activePlansToShow, dynamicRules, hasFeatureAccess, filteredRateCalendar, dynamicPrices]);
+  }, [selectedRatePlan, filteredCategories, visibleDates, calculateRatePrice, activePlansToShow, dynamicRules, hasFeatureAccess, autoApplyDynamicRules, filteredRateCalendar, dynamicPrices, persistDynamicRates]);
 
   const getRateForDate = async (planId: string, categoryId: string, date: Date) => {
     const dateStr = format(date, "yyyy-MM-dd");
@@ -763,7 +929,7 @@ export const RateCalendarGrid = ({
                       r.date === dateStr
                     );
                     
-                      // Determinar preço: cache calculado, calendário (ou enriched do Redis), base da categoria
+                      // Determinar preço: exibir imediatamente (rate_calendar ou base da categoria) e atualizar ao concluir cálculo
                       const cacheKey = `${plan.id}-${category.id}-${dateStr}`;
                       const entryEnriched = rateEntry && 'original_base_price' in rateEntry && rateEntry.original_base_price !== undefined;
                       let price = calculatedPrices.get(cacheKey);
@@ -775,11 +941,14 @@ export const RateCalendarGrid = ({
                         }
                       }
 
-                      // original_base_price = preços enriquecidos pelo rates-map (Redis)
+                      // Quando regras dinâmicas desativadas e temos dados enriquecidos: mostrar tarifa base
                       const originalPrice = entryEnriched
                         ? Number((rateEntry as { original_base_price?: number }).original_base_price)
                         : (rateEntry?.base_price ?? (Number(category.base_price) || 0));
-                      const isDynamicPrice = entryEnriched || dynamicPriceKeys.has(cacheKey);
+                      if (!autoApplyDynamicRules && entryEnriched && originalPrice > 0) {
+                        price = originalPrice; // Forçar preço base quando regras desativadas
+                      }
+                      const isDynamicPrice = autoApplyDynamicRules && (entryEnriched || dynamicPriceKeys.has(cacheKey));
                       const isActuallyDynamic = isDynamicPrice && price > 0 && Math.abs(price - originalPrice) > 0.01;
                     
                     // Usar ocupação do rate_calendar ou calcular em tempo real

@@ -106,14 +106,14 @@ export function RatePriceBreakdown({
             </span>
             {showBadge && hasDynamicAdjustment && (
               compact ? (
-                <TrendingUp className="h-3 w-3 flex-shrink-0 text-primary" title="Preço dinâmico ativo" />
+                <TrendingUp className="h-3 w-3 flex-shrink-0 text-purple-600" title="Preço Dinâmico Aplicado" />
               ) : (
                 <span
-                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary flex-shrink-0"
-                  title="Preço dinâmico ativo"
+                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 flex-shrink-0"
+                  title="Preço Dinâmico Aplicado"
                 >
                   <TrendingUp className="h-3 w-3" />
-                  Dinâmico
+                  Aplicado
                 </span>
               )
             )}

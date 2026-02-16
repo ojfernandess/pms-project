@@ -1996,6 +1996,9 @@ const BookingEnginePage = () => {
           return;
         }
 
+        // Importar checkRateRestrictions para validar min/max stay, CTA, CTD
+        const { checkRateRestrictions } = await import("@/lib/ariAvailabilityUtils");
+
         // Preparar todas as requisições
         const priceRequests: Array<{
           establishmentId: string;
@@ -2013,9 +2016,26 @@ const BookingEnginePage = () => {
           const settings = hotelSettingsMap[establishmentId];
           const plan1Id = settings?.public_pricing_plan_1_id || null;
           const plan2Id = settings?.public_pricing_plan_2_id || null;
+
+          // Verificar restrições (min/max stay, CTA, CTD) para cada plano
+          const checkoutDate = addDays(startDate, nightsCount);
+          const checkPlan1 = plan1Id ? await checkRateRestrictions(
+            establishmentId, cat.id, plan1Id, startDate, checkoutDate, nightsCount
+          ) : { allowed: false };
+          const checkPlan2 = plan2Id ? await checkRateRestrictions(
+            establishmentId, cat.id, plan2Id, startDate, checkoutDate, nightsCount
+          ) : { allowed: false };
+
+          // Liga x1/x2/x3/x4: adultos/crianças devem ser POR QUARTO para o RPC
+          const requiredRooms = Math.ceil(adultsNum / (cat.capacity_adults || 1)) || 1;
+          const categoryCapacity = cat.capacity_adults || 0;
+          const adultsPerRoom = categoryCapacity > 0
+            ? Math.min(categoryCapacity, Math.ceil(adultsNum / requiredRooms))
+            : (requiredRooms > 0 ? Math.ceil(adultsNum / requiredRooms) : adultsNum);
+          const childrenPerRoom = requiredRooms > 0 ? Math.ceil(childrenNum / requiredRooms) : childrenNum;
           
-          // Adicionar requisições para plano 1
-          if (plan1Id) {
+          // Adicionar requisições para plano 1 (apenas se passar nas restrições)
+          if (plan1Id && checkPlan1.allowed) {
             for (let i = 0; i < nightsCount; i++) {
               const currentDate = addDays(startDate, i);
               const dateStr = formatDateLocal(currentDate);
@@ -2025,8 +2045,8 @@ const BookingEnginePage = () => {
                 categoryId: cat.id,
                 planId: plan1Id,
                 date: dateStr,
-                adults: adultsNum,
-                children: childrenNum,
+                adults: adultsPerRoom,
+                children: childrenPerRoom,
                 categoryKey: `${cat.id}-plan1`,
                 planType: 'plan1',
               });
@@ -2035,8 +2055,8 @@ const BookingEnginePage = () => {
             pricesPlan1[cat.id] = null;
           }
 
-          // Adicionar requisições para plano 2
-          if (plan2Id) {
+          // Adicionar requisições para plano 2 (apenas se passar nas restrições)
+          if (plan2Id && checkPlan2.allowed) {
             for (let i = 0; i < nightsCount; i++) {
               const currentDate = addDays(startDate, i);
               const dateStr = formatDateLocal(currentDate);
@@ -2046,8 +2066,8 @@ const BookingEnginePage = () => {
                 categoryId: cat.id,
                 planId: plan2Id,
                 date: dateStr,
-                adults: adultsNum,
-                children: childrenNum,
+                adults: adultsPerRoom,
+                children: childrenPerRoom,
                 categoryKey: `${cat.id}-plan2`,
                 planType: 'plan2',
               });
@@ -3097,14 +3117,22 @@ const BookingEnginePage = () => {
                             {room.plans.map((plan) => {
                               const isSelected = selectedPlanId === plan.id && selectedRoomId === room.id;
                               return (
-                                <button
+                                <div
                                   key={plan.id}
-                                  type="button"
+                                  role="button"
+                                  tabIndex={0}
                                   onClick={() => {
                                     setSelectedRoomId(room.id);
                                     setSelectedPlanId(plan.id);
                                   }}
-                                  className={`w-full text-left p-4 sm:p-5 rounded-xl transition-all duration-200 ${
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      setSelectedRoomId(room.id);
+                                      setSelectedPlanId(plan.id);
+                                    }
+                                  }}
+                                  className={`w-full text-left p-4 sm:p-5 rounded-xl transition-all duration-200 cursor-pointer ${
                                     isSelected
                                       ? `${theme.planCardSelected}`
                                       : `${theme.planCardBg} ${theme.planCardBorder} border ${theme.planCardHover}`
@@ -3180,7 +3208,7 @@ const BookingEnginePage = () => {
                                       )}
                                     </div>
                                   </div>
-                                </button>
+                                </div>
                               );
                             })}
                           </div>

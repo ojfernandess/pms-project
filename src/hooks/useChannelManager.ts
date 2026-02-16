@@ -327,16 +327,21 @@ export const useChannelManager = () => {
       });
     });
 
-    // Preparar restrições (se houver no rate_calendar)
+    // Preparar restrições (rate_calendar: min_stay, max_stay, closed_to_arrival, closed_to_departure por plano)
     (rateCalendar || []).forEach(rate => {
-      if (rate.min_los || rate.cta || rate.ctd || rate.max_los) {
+      const minLOS = rate.min_stay ?? rate.min_los;
+      const maxLOS = rate.max_stay ?? rate.max_los;
+      const cta = rate.closed_to_arrival ?? rate.cta;
+      const ctd = rate.closed_to_departure ?? rate.ctd;
+      if (minLOS || cta || ctd || maxLOS) {
         restrictions.push({
           categoryId: rate.category_id,
+          planId: rate.pricing_plan_id,
           date: rate.date,
-          minLOS: rate.min_los,
-          cta: rate.cta,
-          ctd: rate.ctd,
-          maxLOS: rate.max_los,
+          minLOS,
+          cta: !!cta,
+          ctd: !!ctd,
+          maxLOS,
         });
       }
     });

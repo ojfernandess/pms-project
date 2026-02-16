@@ -117,15 +117,17 @@ export const useHotelSettings = (establishmentId?: string) => {
       
       // Função auxiliar para fazer UPDATE mesclando dados existentes com novos
       const performUpdate = async (existingRecord: any, newFields: any) => {
-        // Mesclar dados existentes com novos campos
-        // Preservar TODOS os campos existentes e apenas atualizar os fornecidos
+        // Excluir rate_system_settings dos newFields - a página Settings não deve sobrescrevê-lo
+        const { rate_system_settings: _rs, ...fieldsToMerge } = newFields;
+
         const mergedData: any = {
-          ...existingRecord, // Preservar todos os campos existentes
-          ...newFields,      // Sobrescrever apenas os campos fornecidos
-          establishment_id: currentEstablishmentId, // Sempre garantir o establishment_id correto
+          ...existingRecord,
+          ...fieldsToMerge,
+          establishment_id: currentEstablishmentId,
+          // Preservar sempre rate_system_settings do registro existente
+          rate_system_settings: existingRecord.rate_system_settings,
         };
-        
-        // Se name não foi fornecido, preservar o existente
+
         if (!mergedData.name && existingRecord.name) {
           mergedData.name = existingRecord.name;
         }
@@ -206,6 +208,7 @@ export const useHotelSettings = (establishmentId?: string) => {
       const currentEstablishmentId = establishmentId || localStorage.getItem("selectedEstablishmentId") || undefined;
       queryClient.invalidateQueries({ queryKey: ["hotel_settings", currentEstablishmentId] });
       queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
+      queryClient.invalidateQueries({ queryKey: ["rate_system_settings"] });
       
       // Se o nome foi alterado e há establishment_id, atualizar também na tabela establishments
       if (currentEstablishmentId && data?.name) {
