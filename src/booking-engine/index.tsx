@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, Linkedin, ArrowRight, Info, ChevronLeft, ChevronRight, SlidersHorizontal, ChevronDown, Minus, Plus, Loader2 } from "lucide-react";
+import { CalendarDays, Users, Percent, Search, Star, Crown, Sparkles, MapPin, CheckCircle2, Phone, Mail, MessageCircle, Globe2, Instagram, Facebook, Twitter, Youtube, Linkedin, ArrowRight, Info, ChevronLeft, ChevronRight, SlidersHorizontal, ChevronDown, Minus, Plus, Loader2, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -1760,10 +1760,10 @@ const BookingEnginePage = () => {
     loadPricingPlansAndPolicies();
   }, [roomCategories, allHotelSettings]);
 
-  // Modo de visualização: by_category (grid 2x2 por categoria) ou by_plan (2 cards, cada um = 1 plano)
+  // Modo de visualização: by_category (grid 2x2), by_category_single (1 card por categoria, largura total) ou by_plan (2 cards por categoria)
   const roomsViewMode = useMemo(() => {
     const mode = company?.booking_engine_rooms_view_mode || "by_category";
-    return mode === "by_plan" ? "by_plan" : "by_category";
+    return (mode === "by_plan" || mode === "by_category_single") ? mode : "by_category";
   }, [company?.booking_engine_rooms_view_mode]);
 
   const themeKey: BookingThemeKey = useMemo(() => {
@@ -3028,14 +3028,29 @@ const BookingEnginePage = () => {
                   </div>
 
                   {/* Categorias do Estabelecimento */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className={`grid gap-6 ${
+                    roomsViewMode === "by_category_single" ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"
+                  }`}>
                     {(roomsViewMode === "by_plan"
                       ? establishmentRooms.flatMap((room) => room.plans.map((plan) => ({ room, plan, key: `${room.id}-${plan.id}` })))
                       : establishmentRooms.map((room) => ({ room, plan: null, key: room.id }))
-                    ).map(({ room, plan, key }, index) => (
+                    ).map(({ room, plan, key }, index) => {
+                      const isPlanSelected = plan && selectedPlanId === plan.id && selectedRoomId === room.id;
+                      return (
               <Card
                 key={key}
-                className={`overflow-hidden ${theme.roomCardBg} ${theme.roomCardBorder} ${theme.roomCardShadow} ${theme.cardHover} ${theme.cardHoverShadow} transition-all duration-300 animate-fade-in-up`}
+                className={`overflow-hidden transition-all duration-300 animate-fade-in-up ${
+                    plan && isPlanSelected
+                    ? `${theme.roomCardBg} ${theme.roomCardShadow} ring-2 ring-offset-2 ${
+                        themeKey === "default" ? "ring-blue-500" :
+                        themeKey === "airbnb" ? "ring-[#FF5A5F]" :
+                        themeKey === "travel" ? "ring-[#0071c2]" :
+                        themeKey === "luxury" ? "ring-purple-500" :
+                        themeKey === "minimal" ? "ring-slate-800" :
+                        "ring-amber-500"
+                      }`
+                    : `${theme.roomCardBg} ${theme.roomCardBorder} ${theme.roomCardShadow} ${theme.cardHover} ${theme.cardHoverShadow}`
+                }`}
                 style={{ animationDelay: `${index * 100}ms` }}
               >
                 {/* Room Image - 16:9 Aspect Ratio */}
@@ -3054,6 +3069,22 @@ const BookingEnginePage = () => {
                         <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                         {room.highlight}
                       </Badge>
+                    </div>
+                  )}
+
+                  {/* Indicador de plano selecionado - modo 2 cards por categoria */}
+                  {plan && isPlanSelected && (
+                    <div className="absolute top-3 right-3 z-10">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg bg-white/95 dark:bg-slate-800/95">
+                        <CheckCircle2 className={`w-5 h-5 ${
+                          themeKey === "default" ? "text-blue-500" :
+                          themeKey === "airbnb" ? "text-[#FF5A5F]" :
+                          themeKey === "travel" ? "text-[#0071c2]" :
+                          themeKey === "luxury" ? "text-purple-500" :
+                          themeKey === "minimal" ? "text-slate-800" :
+                          "text-amber-500"
+                        }`} />
+                      </div>
                     </div>
                   )}
 
@@ -3091,7 +3122,7 @@ const BookingEnginePage = () => {
                         <h3 className={`text-2xl md:text-3xl font-bold ${theme.textPrimary}`}>
                           {room.name}
                           {plan && (
-                            <span className={`text-base md:text-lg font-semibold ${theme.textSecondary} normal-case ml-1`}>
+                            <span className={`text-base md:text-lg font-semibold tracking-tight ${theme.textSecondary} ml-1.5`}>
                               · {(plan as any).name}
                             </span>
                           )}
@@ -3147,48 +3178,76 @@ const BookingEnginePage = () => {
                     </div>
                   )}
 
-                  {/* No modo por plano: exibir info do plano em destaque */}
+                  {/* No modo por plano: exibir info do plano em destaque - clicável para seleção */}
                   {plan && (
-                    <div className={`mb-6 p-4 rounded-xl ${theme.planCardSelected} border`}>
-                      <div className="flex items-start justify-between gap-4 mb-2">
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className={`text-lg font-bold ${theme.textPrimary}`}>{(plan as any).name}</span>
-                            {(plan as any).tag && (
-                              <Badge className={`${theme.badgePrimary} text-xs px-2 py-0.5`}>
-                                <Star className="w-3 h-3 mr-1" />
-                                {(plan as any).tag}
-                              </Badge>
-                            )}
-                          </div>
-                          {(plan as any).description && (
-                            <p className={`text-sm ${theme.textSecondary} line-clamp-2`}>{(plan as any).description}</p>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        setSelectedRoomId(room.id);
+                        setSelectedPlanId(plan.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedRoomId(room.id);
+                          setSelectedPlanId(plan.id);
+                        }
+                      }}
+                      className={`mb-6 p-4 sm:p-5 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
+                        isPlanSelected ? theme.planCardSelected : `${theme.planCardBg} ${theme.planCardBorder} ${theme.planCardHover}`
+                      }`}
+                    >
+                      {/* Cabeçalho: nome do plano + indicador A partir de + preço */}
+                      <div className="space-y-3 mb-3">
+                        {/* Título do plano - linha exclusiva para destaque */}
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <span className={`text-base sm:text-lg font-semibold tracking-tight leading-snug ${theme.textPrimary}`}>
+                            {(plan as any).name}
+                          </span>
+                          {(plan as any).tag && (
+                            <span className={`inline-flex items-center gap-1 text-xs font-medium ${theme.textMuted}`}>
+                              <Star className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+                              {(plan as any).tag}
+                            </span>
                           )}
                         </div>
-                        <div className={`text-right flex-shrink-0`}>
-                          <div className={`${theme.priceColor} text-xl font-bold`}>
-                            {(plan as any).pricePerNight > 0 && nights > 0 ? (
-                              <>R$ {(plan as any).pricePerNight.toFixed(2)}</>
-                            ) : (
-                              <span className="text-xs text-slate-400">Selecione datas</span>
-                            )}
-                          </div>
-                          <div className={`text-xs ${theme.priceLabel}`}>por noite</div>
-                          {(plan as any).pricePerNight > 0 && nights > 0 && (
-                            <div className={`text-xs ${theme.textMuted} mt-0.5`}>
-                              {nights} noite{nights > 1 ? "s" : ""}: R$ {((plan as any).pricePerNight * nights).toFixed(2)}
+                        {/* Preço ou mensagem de seleção - em linha separada do título */}
+                        <div className={`${(plan as any).pricePerNight > 0 && nights > 0 ? "" : "pt-0.5"}`}>
+                          {(plan as any).pricePerNight > 0 && nights > 0 ? (
+                            <div>
+                              <div className={`${theme.priceColor} text-lg sm:text-xl font-bold`}>
+                                R$ {(plan as any).pricePerNight.toFixed(2)}
+                              </div>
+                              <div className={`text-xs ${theme.priceLabel}`}>por noite</div>
                             </div>
+                          ) : (
+                            <p className={`text-sm ${theme.textMuted}`}>
+                              Selecione datas por noite
+                            </p>
                           )}
                         </div>
                       </div>
+                      {/* Descrição */}
+                      {(plan as any).description && (
+                        <p className={`text-sm ${theme.textSecondary} mb-3 leading-relaxed`}>
+                          {(plan as any).description}
+                        </p>
+                      )}
+                      {/* Benefícios com ícone de relógio */}
                       {(plan as any).benefits?.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-2">
+                        <ul className="space-y-1.5">
                           {(plan as any).benefits.slice(0, 4).map((benefit: string, idx: number) => (
-                            <div key={idx} className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full ${theme.badgeSecondary}`}>
-                              <CheckCircle2 className="w-2.5 h-2.5 flex-shrink-0" />
-                              <span className="truncate">{benefit}</span>
-                            </div>
+                            <li key={idx} className={`flex items-center gap-2 text-xs ${theme.textSecondary}`}>
+                              <Clock className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                              <span>{benefit}</span>
+                            </li>
                           ))}
+                        </ul>
+                      )}
+                      {(plan as any).pricePerNight > 0 && nights > 0 && (
+                        <div className={`text-xs ${theme.textMuted} mt-2 pt-2 border-t border-slate-200/60 dark:border-slate-600/60`}>
+                          {nights} noite{nights > 1 ? "s" : ""}: R$ {((plan as any).pricePerNight * nights).toFixed(2)}
                         </div>
                       )}
                     </div>
@@ -3240,14 +3299,32 @@ const BookingEnginePage = () => {
 
                   {/* Pricing Plans Accordion - apenas no modo por categoria */}
                   {!plan && (
-                  <div>
+                  <div className={roomsViewMode === "by_category_single" ? `rounded-xl overflow-hidden ${theme.accentBg} ${theme.accentBorder} border` : ""}>
                     <Accordion type="single" collapsible className="w-full">
                       <AccordionItem value="plans" className="border-0">
-                        <AccordionTrigger className={`${theme.textPrimary} hover:no-underline py-4`}>
-                          <span className="text-base font-semibold">Ver planos tarifários e preços</span>
+                        <AccordionTrigger className={
+                          roomsViewMode === "by_category_single"
+                            ? `${theme.textPrimary} hover:no-underline px-4 sm:px-5 py-4 hover:opacity-90`
+                            : `${theme.textPrimary} hover:no-underline py-4`
+                        }>
+                          {roomsViewMode === "by_category_single" ? (
+                            <span className="flex items-center gap-3 text-base font-semibold tracking-tight">
+                              <span className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/80 dark:bg-slate-800/80 border shadow-sm">
+                                <Percent className={`w-4 h-4 ${theme.accentColor}`} />
+                              </span>
+                              Ver planos tarifários e preços
+                              <span className={`text-sm font-medium ${theme.textMuted}`}>
+                                ({room.plans.length} {room.plans.length === 1 ? "plano" : "planos"})
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-base font-semibold">Ver planos tarifários e preços</span>
+                          )}
                         </AccordionTrigger>
-                        <AccordionContent className="pt-2 sm:pt-4">
-                          <div className="space-y-3 sm:space-y-4">
+                        <AccordionContent className={roomsViewMode === "by_category_single" ? "px-4 sm:px-5 pb-5 pt-0" : "pt-2 sm:pt-4"}>
+                          <div className={roomsViewMode === "by_category_single" 
+                            ? "grid grid-cols-1 lg:grid-cols-2 gap-4" 
+                            : "space-y-3 sm:space-y-4"}>
                             {room.plans.map((plan) => {
                               const isSelected = selectedPlanId === plan.id && selectedRoomId === room.id;
                               return (
@@ -3275,7 +3352,7 @@ const BookingEnginePage = () => {
                                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                                     <div className="flex-1 space-y-2 sm:space-y-3">
                                       <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                                        <span className={`text-base sm:text-lg font-bold ${theme.textPrimary}`}>
+                                        <span className={`text-base sm:text-lg font-semibold tracking-tight leading-snug ${theme.textPrimary}`}>
                                           {plan.name}
                                         </span>
                                         {plan.tag && (
@@ -3353,7 +3430,8 @@ const BookingEnginePage = () => {
                   )}
                 </div>
               </Card>
-            ))}
+            );
+          })}
                   </div>
                 </div>
               );

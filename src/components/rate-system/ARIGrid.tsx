@@ -1007,6 +1007,9 @@ export const ARIGrid = ({
       return;
     }
 
+    const toastId = 'occupancy-price-save';
+    toast.loading('Salvando...', { id: toastId });
+
     let updateDataArray: any[] = [];
     let saveResult: any;
     try {
@@ -1016,15 +1019,6 @@ export const ARIGrid = ({
       const datesToUpdate = isBulkEdit 
         ? visibleDates.filter(date => date >= startOfDay(new Date())) // Apenas datas futuras
         : [occupancyPriceDialog.date!];
-
-      console.log('[ARIGrid] Aplicando alteração:', {
-        occupancy: occupancyPriceDialog.occupancy,
-        isBulkEdit,
-        datesCount: datesToUpdate.length,
-        dates: datesToUpdate.map(d => format(d, 'yyyy-MM-dd')),
-        fluctuationType: data.fluctuationType,
-        fluctuationValue: data.fluctuationValue,
-      });
 
       updateDataArray = [];
 
@@ -1045,22 +1039,6 @@ export const ARIGrid = ({
         
         // Se a entrada existe mas basePrice é 0, pode ser que esteja incorreto
         // Neste caso, tentar buscar de outra fonte
-        if (entry && basePrice === 0) {
-          console.warn(`[ARIGrid] Entrada existe mas basePrice é 0 para ${format(date, 'yyyy-MM-dd')}, tentando buscar de outra fonte...`);
-        }
-        
-        // Log para debug
-        console.log(`[ARIGrid] Data ${format(date, 'yyyy-MM-dd')}:`, {
-          hasEntry: !!entry,
-          basePrice,
-          adultPrice,
-          existingFluctuation: entry ? {
-            x1: { type: entry.occupancy_1_fluctuation_type, value: entry.occupancy_1_fluctuation_value },
-            x3: { type: entry.occupancy_3_fluctuation_type, value: entry.occupancy_3_fluctuation_value },
-            x4: { type: entry.occupancy_4_fluctuation_type, value: entry.occupancy_4_fluctuation_value },
-          } : null,
-        });
-        
         // Se não houver entrada ou basePrice for 0, buscar valores padrão
         if (!entry || basePrice === 0) {
           // Primeiro, tentar buscar de outra data próxima do mesmo plano (mesma categoria)
@@ -1108,7 +1086,6 @@ export const ARIGrid = ({
             if (checkEntry?.base_price && checkEntry.base_price > 0) {
               basePrice = checkEntry.base_price;
               adultPrice = checkEntry.adult_price || 0;
-              console.log(`[ARIGrid] Usando basePrice de ${format(checkDate, 'yyyy-MM-dd')} para ${format(date, 'yyyy-MM-dd')}:`, basePrice);
               break;
             }
           }
@@ -1119,7 +1096,6 @@ export const ARIGrid = ({
             if (category?.base_price && category.base_price > 0) {
               basePrice = category.base_price;
               adultPrice = 0;
-              console.log(`[ARIGrid] Usando basePrice da categoria para ${format(date, 'yyyy-MM-dd')}:`, basePrice);
             }
           }
         }
@@ -1185,16 +1161,6 @@ export const ARIGrid = ({
           currentPrice = basePrice;
         }
         
-        console.log(`[ARIGrid] Data ${format(date, 'yyyy-MM-dd')}:`, {
-          basePrice,
-          adultPrice,
-          occupancy: occupancyPriceDialog.occupancy,
-          currentPrice,
-          fluctuationType: data.fluctuationType,
-          fluctuationValue: data.fluctuationValue,
-          hasEntry: !!entry,
-        });
-
         // Calcular base_price e adult_price baseado na ocupação
         const updateData: any = {
           establishment_id: selectedEstablishment.id,
@@ -1506,59 +1472,22 @@ export const ARIGrid = ({
           }
         }
         
-        console.log(`[ARIGrid] Preparado updateData para ${format(date, 'yyyy-MM-dd')}:`, {
-          occupancy: occupancyPriceDialog.occupancy,
-          base_price: updateData.base_price,
-          adult_price: updateData.adult_price,
-          fluctuation_type: updateData[`occupancy_${occupancyPriceDialog.occupancy}_fluctuation_type`],
-          fluctuation_value: updateData[`occupancy_${occupancyPriceDialog.occupancy}_fluctuation_value`],
-          expectedPrices,
-          allFluctuationFields: {
-            x1: { type: updateData.occupancy_1_fluctuation_type, value: updateData.occupancy_1_fluctuation_value },
-            x3: { type: updateData.occupancy_3_fluctuation_type, value: updateData.occupancy_3_fluctuation_value },
-            x4: { type: updateData.occupancy_4_fluctuation_type, value: updateData.occupancy_4_fluctuation_value },
-          },
-        });
       }
 
       // Preservar referência às categorias antes da atualização
       const categoriesBeforeUpdate = [...categories];
       
-      console.log('[ARIGrid] Salvando atualizações:', {
-        totalUpdates: updateDataArray.length,
-        occupancy: occupancyPriceDialog.occupancy,
-        sampleUpdate: updateDataArray[0],
-        allDates: updateDataArray.map(u => u.date),
-      });
-      
-      // Salvar todas as atualizações de uma vez
+      // Salvar todas as atualizações de uma vez (skipSuccessToast: evita toast duplicado)
       try {
-        saveResult = await upsertRateCalendar(updateDataArray);
+        saveResult = await upsertRateCalendar({ entries: updateDataArray, skipSuccessToast: true });
         
-        console.log('[ARIGrid] Resultado do upsert:', {
-          resultLength: saveResult?.length,
-          sampleResult: saveResult?.[0],
-          hasFluctuationFields: saveResult?.[0]?.occupancy_1_fluctuation_type !== undefined,
-        });
       } catch (error: any) {
         console.error('[ARIGrid] Erro ao salvar no banco:', error);
         throw error;
       }
       
-      // O upsertRateCalendar já invalida o cache no onSuccess, mas vamos garantir o refetch
-      // Aguardar um pouco mais para garantir que o banco processou e a invalidação foi processada
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Forçar refetch explícito do rate_calendar e aguardar
-      const refetchResult = await queryClient.refetchQueries({ 
-        queryKey: ["rate_calendar"],
-        exact: false 
-      });
-      
-      console.log('[ARIGrid] Refetch concluído:', {
-        refetchCount: Array.isArray(refetchResult) ? refetchResult.length : 0,
-        rateCalendarLength: rateCalendar?.length || 0,
-      });
+      // Invalidar cache imediatamente — refetch em background (evita delay de 500ms)
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"], exact: false });
       
       // Fechar o modal após salvar
       setOccupancyPriceDialog({ ...occupancyPriceDialog, open: false });
@@ -1574,7 +1503,8 @@ export const ARIGrid = ({
       toast.success(
         isBulkEdit 
           ? `Preço x${occupancyPriceDialog.occupancy} atualizado para ${updateDataArray.length} data(s)` 
-          : 'Preço atualizado com sucesso'
+          : 'Preço atualizado com sucesso',
+        { id: toastId }
       );
     } catch (error: any) {
       console.error('[ARIGrid] Erro ao salvar preço por ocupação:', error);
@@ -1590,7 +1520,7 @@ export const ARIGrid = ({
         });
       }
       
-      toast.error(`Erro ao salvar: ${errorMessage}`);
+      toast.error(`Erro ao salvar: ${errorMessage}`, { id: toastId });
     }
   };
 
@@ -2460,25 +2390,21 @@ export const ARIGrid = ({
         </Card>
       ))}
 
-      {/* Dialog de edição em massa / edição de categoria (abre pelo toolbar ou pelo botão "Edição da categoria" de cada card) */}
-      {(() => {
-        const effectiveCategoryId = categoryBulkEditCategoryId ?? (selectedCategory !== 'all' ? selectedCategory : null);
-        return effectiveCategoryId ? (
-          <ARIBulkEditDialog
-            open={bulkEditOpen}
-            onOpenChange={(open) => {
-              setBulkEditOpen(open);
-              if (!open) setCategoryBulkEditCategoryId(null);
-            }}
-            categoryId={effectiveCategoryId}
-            startDate={startDate}
-            endDate={addDays(startDate, viewDays - 1)}
-            onSuccess={() => {
-              setRefetchTrigger(prev => prev + 1);
-            }}
-          />
-        ) : null;
-      })()}
+      {/* Dialog de edição em massa — abre pelo toolbar ou botão "Edição da categoria" no card */}
+      <ARIBulkEditDialog
+        open={bulkEditOpen}
+        onOpenChange={(open) => {
+          setBulkEditOpen(open);
+          if (!open) setCategoryBulkEditCategoryId(null);
+        }}
+        categoryId={categoryBulkEditCategoryId ?? (selectedCategory !== 'all' ? selectedCategory : null)}
+        categories={filteredCategories}
+        startDate={startDate}
+        endDate={addDays(startDate, viewDays - 1)}
+        onSuccess={() => {
+          setRefetchTrigger(prev => prev + 1);
+        }}
+      />
 
       {/* Dialog de edição de status */}
       <Dialog open={statusEditDialog.open} onOpenChange={(open) => setStatusEditDialog({ ...statusEditDialog, open })}>

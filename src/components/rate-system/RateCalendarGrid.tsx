@@ -1124,41 +1124,65 @@ export const RateCalendarGrid = ({
               r => dates.includes(r.date)
             );
 
+            // Tarifa Base + Flutuação: aplicar somente ao criar tarifário em massa
+            const applyPlanFluctuation = (basePrice: number, plan: RatePlan): number => {
+              if (!plan.base_plan_id_for_rate || !plan.fluctuation_type || plan.fluctuation_value == null) return basePrice;
+              if (plan.fluctuation_type === 'percentage') {
+                return basePrice * (1 + Number(plan.fluctuation_value) / 100);
+              }
+              return basePrice + Number(plan.fluctuation_value);
+            };
+
             // Para cada combinação categoria/plano, calcular os novos preços
             for (const item of data.categoryPlans) {
               const category = filteredCategories.find(c => c.id === item.categoryId);
+              const plan = ratePlans.find(p => p.id === item.planId);
+              const basePlanId = plan?.base_plan_id_for_rate;
               
               for (const dateStr of dates) {
-                // Buscar preço atual
+                let currentPrice: number;
+                
+                // Tarifa Base + Flutuação: usar preço do plano base quando o plano derivado tem base_plan_id_for_rate
+                if (basePlanId && plan?.fluctuation_type && plan.fluctuation_value != null) {
+                  const basePlanEntry = filteredRateCalendar.find(
+                    r => r.pricing_plan_id === basePlanId &&
+                    r.category_id === item.categoryId &&
+                    r.date === dateStr
+                  );
+                  const basePrice = Number(basePlanEntry?.base_price ?? category?.base_price ?? 0) || 0;
+                  currentPrice = applyPlanFluctuation(Number(basePrice), plan!);
+                } else {
+                  const existingEntry = filteredRateCalendar.find(
+                    r => r.pricing_plan_id === item.planId &&
+                    r.category_id === item.categoryId &&
+                    r.date === dateStr
+                  );
+                  currentPrice = Number(existingEntry?.base_price ?? category?.base_price ?? 0) || 0;
+                }
+                
+                let newBasePrice: number;
+                if (item.adjustmentType === 'percentage') {
+                  newBasePrice = currentPrice * (1 + item.adjustmentValue / 100);
+                } else if (item.adjustmentType === 'fixed') {
+                  newBasePrice = currentPrice + item.adjustmentValue;
+                } else {
+                  newBasePrice = item.adjustmentValue;
+                }
+                
+                if (newBasePrice < 0) newBasePrice = 0;
+                newBasePrice = Math.round(newBasePrice * 100) / 100;
+
                 const existingEntry = filteredRateCalendar.find(
                   r => r.pricing_plan_id === item.planId &&
                   r.category_id === item.categoryId &&
                   r.date === dateStr
                 );
-                
-                let newBasePrice: number;
-                const currentPrice = existingEntry?.base_price || Number(category?.base_price) || 0;
-                
-                // Calcular novo preço baseado no tipo de ajuste
-                if (item.adjustmentType === 'percentage') {
-                  newBasePrice = currentPrice * (1 + item.adjustmentValue / 100);
-                } else if (item.adjustmentType === 'fixed') {
-                  newBasePrice = currentPrice + item.adjustmentValue;
-                } else { // replace
-                  newBasePrice = item.adjustmentValue;
-            }
-                
-                // Garantir que o preço não seja negativo
-                if (newBasePrice < 0) {
-                  newBasePrice = 0;
-                }
 
                 entries.push({
                   pricing_plan_id: item.planId,
                   category_id: item.categoryId,
                   date: dateStr,
                   base_price: newBasePrice,
-                  // Manter adult_price e child_price se existirem
                   adult_price: existingEntry?.adult_price,
                   child_price: existingEntry?.child_price,
                 });

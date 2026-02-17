@@ -1,3 +1,4 @@
+import { useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
@@ -6,6 +7,19 @@ import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { toast } from "sonner";
 import { format, eachDayOfInterval, startOfDay, addDays } from "date-fns";
 import { logActivity } from "@/lib/activityLogger";
+import {
+  getCalendarRange,
+  MAX_DAYS_PER_REQUEST,
+  MAX_TOTAL_DAYS_ALLOWED,
+  getRequestQueue,
+  getFromCache,
+  setInCache,
+  invalidateCalendarCache,
+  createPerfMonitor,
+  createDebouncedInvalidate,
+  useStaggerPhase1,
+  useStaggerPhase2,
+} from "@/lib/rateSystem";
 
 export interface RatePlan {
   id: string;
@@ -15,6 +29,8 @@ export interface RatePlan {
   plan_type?: string; // Agora é uma string que referencia pricing_plan_types.name
   base_plan_id?: string;
   base_plan_id_for_rate?: string; // DB column: plano base para Tarifa Base + Flutuação
+  fluctuation_type?: 'percentage' | 'fixed' | null;
+  fluctuation_value?: number | null;
   color?: string;
   is_active: boolean;
   sort_order?: number;
@@ -86,6 +102,18 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
     return getSelectedEstablishmentId();
   };
 
+  const establishmentReady = !!selectedEstablishment?.id || !!getEstablishmentId();
+  const enablePhase1 = useStaggerPhase1(establishmentReady);
+  const enablePhase2 = useStaggerPhase2(establishmentReady);
+
+  // Debounce invalidação do rate_calendar para evitar múltiplos reloads em sequência
+  const debouncedCalendarInvalidate = useRef(
+    createDebouncedInvalidate(() => {
+      invalidateCalendarCache(getEstablishmentId() ?? undefined);
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+    }, 500)
+  ).current;
+
   // Configuração de resiliência para queries tarifárias (retry, refetch automático)
   const rateQueryOptions = {
     retry: 3,
@@ -94,20 +122,22 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
     staleTime: 60 * 1000, // 1 minuto
   };
 
-  // ========== RATE SYSTEM SETTINGS ==========
+  // ========== RATE SYSTEM SETTINGS (via queue) ==========
   const establishmentIdForSettings = selectedEstablishment?.id ?? getSelectedEstablishmentId();
   const rateSettingsQuery = useQuery({
     queryKey: ["rate_system_settings", establishmentIdForSettings],
     ...rateQueryOptions,
     queryFn: async () => {
-      const id = establishmentIdForSettings || getEstablishmentId();
-      if (!id) return null;
-      const { data } = await supabase
-        .from("hotel_settings")
-        .select("rate_system_settings")
-        .eq("establishment_id", id)
-        .maybeSingle();
-      return data?.rate_system_settings ?? null;
+      return getRequestQueue().addRequest(async () => {
+        const id = establishmentIdForSettings || getEstablishmentId();
+        if (!id) return null;
+        const { data } = await supabase
+          .from("hotel_settings")
+          .select("rate_system_settings")
+          .eq("establishment_id", id)
+          .maybeSingle();
+        return data?.rate_system_settings ?? null;
+      });
     },
     enabled: !!establishmentIdForSettings,
   });
@@ -120,26 +150,28 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
     rateSettingsQuery.data?.auto_apply_dynamic_rules === true ||
     rateSettingsQuery.data?.auto_apply_dynamic_rules === "true";
 
-  // ========== RATE PLANS ==========
+  // ========== RATE PLANS (via queue) ==========
   const ratePlansQuery = useQuery({
     queryKey: ["rate_plans", selectedEstablishment?.id],
     ...rateQueryOptions,
     queryFn: async () => {
-      const establishmentId = getEstablishmentId();
-      let query = supabase
-        .from("pricing_plans")
-        .select("*")
-        .order("sort_order", { ascending: true })
-        .order("name", { ascending: true });
+      return getRequestQueue().addRequest(async () => {
+        const establishmentId = getEstablishmentId();
+        let query = supabase
+          .from("pricing_plans")
+          .select("*")
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true });
 
-      if (establishmentId) {
-        query = query.eq("establishment_id", establishmentId);
-      }
+        if (establishmentId) {
+          query = query.eq("establishment_id", establishmentId);
+        }
 
-      const { data, error } = await query;
+        const { data, error } = await query.range(0, 499);
 
-      if (error) throw error;
-      return (data || []) as RatePlan[];
+        if (error) throw error;
+        return (data || []) as RatePlan[];
+      });
     },
   });
 
@@ -183,7 +215,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
 
   const updateRatePlan = useMutation({
     mutationFn: async ({ id, ...updates }: { id: string } & Partial<RatePlan>) => {
-      // Buscar valores antigos antes de atualizar
+      const establishmentId = getEstablishmentId();
       const { data: oldData } = await supabase
         .from("pricing_plans")
         .select("*")
@@ -198,8 +230,72 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
         .single();
 
       if (error) throw error;
-      
-      // Registrar log de atividade
+
+      const baseOrFluctuationChanged =
+        "base_plan_id_for_rate" in updates ||
+        "fluctuation_type" in updates ||
+        "fluctuation_value" in updates;
+      const hasBasePlan = data?.base_plan_id_for_rate && (data?.fluctuation_type || data?.fluctuation_value != null);
+
+      if (establishmentId && baseOrFluctuationChanged && hasBasePlan) {
+        const basePlanId = data.base_plan_id_for_rate as string;
+        const fType = data.fluctuation_type as "percentage" | "fixed" | null;
+        const fVal = data.fluctuation_value as number | null;
+
+        const { data: derivedEntries } = await supabase
+          .from("rate_calendar")
+          .select("id, category_id, date, establishment_id")
+          .eq("establishment_id", establishmentId)
+          .eq("pricing_plan_id", id);
+
+        if (derivedEntries?.length) {
+          const categoryDates = derivedEntries.map((e: { category_id: string; date: string }) => ({ category_id: e.category_id, date: e.date }));
+          const categoryIds = [...new Set(categoryDates.map((c: { category_id: string }) => c.category_id))];
+          const dates = [...new Set(categoryDates.map((c: { date: string }) => c.date))];
+
+          const { data: baseEntries } = await supabase
+            .from("rate_calendar")
+            .select("category_id, date, base_price")
+            .eq("establishment_id", establishmentId)
+            .eq("pricing_plan_id", basePlanId)
+            .in("category_id", categoryIds)
+            .in("date", dates);
+
+          const baseMap = new Map<string, number>();
+          (baseEntries || []).forEach((e: { category_id: string; date: string; base_price: number }) => {
+            baseMap.set(`${e.category_id}::${e.date}`, Number(e.base_price || 0));
+          });
+
+          const toUpsert: Partial<RateCalendarEntry>[] = [];
+          for (const e of derivedEntries) {
+            const basePrice = baseMap.get(`${e.category_id}::${e.date}`) ?? 0;
+            if (basePrice <= 0) continue;
+            let newPrice = basePrice;
+            if (fType === "percentage" && fVal != null) newPrice = basePrice * (1 + fVal / 100);
+            else if (fType === "fixed" && fVal != null) newPrice = basePrice + fVal;
+            toUpsert.push({
+              establishment_id: establishmentId,
+              pricing_plan_id: id,
+              category_id: e.category_id,
+              date: e.date,
+              base_price: Math.round(Math.max(0, newPrice) * 100) / 100,
+            });
+          }
+
+          if (toUpsert.length > 0) {
+            const chunkSize = 200;
+            for (let i = 0; i < toUpsert.length; i += chunkSize) {
+              const chunk = toUpsert.slice(i, i + chunkSize);
+              await supabase.from("rate_calendar").upsert(chunk, {
+                onConflict: "establishment_id,pricing_plan_id,category_id,date",
+              });
+            }
+            invalidateCalendarCache(establishmentId);
+            debouncedCalendarInvalidate();
+          }
+        }
+      }
+
       await logActivity({
         actionType: "updated",
         entityType: "pricing_plan",
@@ -219,7 +315,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
           is_active: data.is_active,
         },
       });
-      
+
       return data;
     },
     onSuccess: () => {
@@ -266,8 +362,9 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       }
     },
     onSuccess: () => {
+      invalidateCalendarCache(getEstablishmentId() ?? undefined);
       queryClient.invalidateQueries({ queryKey: ["rate_plans"] });
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      debouncedCalendarInvalidate();
       toast.success("Plano tarifário excluído com sucesso!");
     },
     onError: (error: any) => {
@@ -277,6 +374,19 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
 
   // ========== RATE CALENDAR ==========
   const dateRange = options?.dateRange;
+  const { effectiveDateRange, exceedsLimit, exceedsMaxAllowed, chunks } = useMemo(() => {
+    if (!dateRange?.start || !dateRange?.end) {
+      return { effectiveDateRange: dateRange, exceedsLimit: false, exceedsMaxAllowed: false, chunks: [] as { start: Date; end: Date }[] };
+    }
+    const result = getCalendarRange(dateRange.start, dateRange.end);
+    return {
+      effectiveDateRange: { start: result.effective.start, end: result.effective.end },
+      exceedsLimit: result.exceedsLimit,
+      exceedsMaxAllowed: result.exceedsMaxAllowed,
+      chunks: result.chunks,
+    };
+  }, [dateRange]);
+
   const rateCalendarQuery = useQuery({
     queryKey: [
       "rate_calendar",
@@ -290,33 +400,80 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       const establishmentId = getEstablishmentId();
       if (!establishmentId) return [];
 
-      const fetchOpts = dateRange ? {
-        startDate: format(dateRange.start, "yyyy-MM-dd"),
-        endDate: format(dateRange.end, "yyyy-MM-dd"),
-      } : undefined;
-      const apiData = await fetchRatesMap(establishmentId, fetchOpts);
-      if (apiData?.rateCalendar?.length !== undefined) {
-        return apiData.rateCalendar as RateCalendarEntry[];
-      }
+      if (!effectiveDateRange || exceedsMaxAllowed || chunks.length === 0) return [];
 
-      let query = supabase
-        .from("rate_calendar")
-        .select("*")
-        .eq("establishment_id", establishmentId);
-      if (dateRange) {
-        query = query.gte("date", format(dateRange.start, "yyyy-MM-dd")).lte("date", format(dateRange.end, "yyyy-MM-dd"));
-      }
-      const { data, error } = await query.order("date", { ascending: true });
+      const perf = createPerfMonitor("rate_calendar");
+      const queue = getRequestQueue();
+      const PAGE_SIZE = 1000;
 
-      if (error) throw error;
-      return (data || []) as RateCalendarEntry[];
+      const fetchChunk = async (range: { start: Date; end: Date }): Promise<RateCalendarEntry[]> => {
+        const cached = getFromCache<RateCalendarEntry[]>(establishmentId, range);
+        if (cached) return cached;
+
+        const startStr = format(range.start, "yyyy-MM-dd");
+        const endStr = format(range.end, "yyyy-MM-dd");
+        const apiData = await fetchRatesMap(establishmentId, { startDate: startStr, endDate: endStr });
+        if (apiData?.rateCalendar?.length !== undefined) {
+          setInCache(establishmentId, range, apiData.rateCalendar as RateCalendarEntry[]);
+          return apiData.rateCalendar as RateCalendarEntry[];
+        }
+        const allRows: RateCalendarEntry[] = [];
+        let from = 0;
+        let hasMore = true;
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from("rate_calendar")
+            .select("*")
+            .eq("establishment_id", establishmentId)
+            .gte("date", startStr)
+            .lte("date", endStr)
+            .order("date", { ascending: true })
+            .range(from, from + PAGE_SIZE - 1);
+          if (error) throw error;
+          const chunk = (data || []) as RateCalendarEntry[];
+          allRows.push(...chunk);
+          hasMore = chunk.length >= PAGE_SIZE;
+          from += PAGE_SIZE;
+        }
+        setInCache(establishmentId, range, allRows);
+        return allRows;
+      };
+
+      const doFetch = async (): Promise<RateCalendarEntry[]> => {
+        const merged: RateCalendarEntry[] = [];
+        for (const chunk of chunks) {
+          const rows = await fetchChunk(chunk);
+          merged.push(...rows);
+        }
+        return merged;
+      };
+
+      try {
+        const results = await queue.addRequest(doFetch);
+        perf.finish(results.length);
+        return results;
+      } catch (err) {
+        perf.finish(undefined, err instanceof Error ? err.message : "Unknown error");
+        throw err;
+      }
     },
-    enabled: !!selectedEstablishment?.id,
-    staleTime: 2 * 60 * 1000, // 2 min - permite recalc/edições aparecerem sem delay excessivo
+    enabled: !!selectedEstablishment?.id && !!effectiveDateRange && !exceedsMaxAllowed && chunks.length > 0,
+    staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnMount: true,
   });
+
+  const calendarExceedsLimit = exceedsLimit;
+  const calendarExceedsMaxAllowed = exceedsMaxAllowed;
+
+  useEffect(() => {
+    if (calendarExceedsMaxAllowed) {
+      toast.error(`Intervalo muito grande (máx. ${MAX_TOTAL_DAYS_ALLOWED} dias) — refine o período.`, { duration: 6000 });
+    } else if (calendarExceedsLimit) {
+      toast.warning(`Intervalo grande — carregando em lotes de ${MAX_DAYS_PER_REQUEST} dias.`, { duration: 4000 });
+    }
+  }, [calendarExceedsLimit, calendarExceedsMaxAllowed]);
 
   const getRateCalendarForPeriod = async (
     planId: string,
@@ -327,18 +484,30 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
     const establishmentId = getEstablishmentId();
     if (!establishmentId) return [];
 
-    const { data, error } = await supabase
-      .from("rate_calendar")
-      .select("*")
-      .eq("establishment_id", establishmentId)
-      .eq("pricing_plan_id", planId)
-      .eq("category_id", categoryId)
-      .gte("date", format(startDate, "yyyy-MM-dd"))
-      .lte("date", format(endDate, "yyyy-MM-dd"))
-      .order("date", { ascending: true });
-
-    if (error) throw error;
-    return (data || []) as RateCalendarEntry[];
+    const allRows: RateCalendarEntry[] = [];
+    let from = 0;
+    const pageSize = 500;
+    let hasMore = true;
+    const startStr = format(startDate, "yyyy-MM-dd");
+    const endStr = format(endDate, "yyyy-MM-dd");
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from("rate_calendar")
+        .select("*")
+        .eq("establishment_id", establishmentId)
+        .eq("pricing_plan_id", planId)
+        .eq("category_id", categoryId)
+        .gte("date", startStr)
+        .lte("date", endStr)
+        .order("date", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const chunk = (data || []) as RateCalendarEntry[];
+      allRows.push(...chunk);
+      hasMore = chunk.length >= pageSize;
+      from += pageSize;
+    }
+    return allRows;
   };
 
   // Buscar preço base da categoria (fallback quando não há entrada no rate_calendar)
@@ -357,12 +526,13 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
 
   type UpsertRateCalendarInput =
     | Partial<RateCalendarEntry>[]
-    | { entries: Partial<RateCalendarEntry>[]; update_source?: RateUpdateSource };
+    | { entries: Partial<RateCalendarEntry>[]; update_source?: RateUpdateSource; skipSuccessToast?: boolean };
 
   const upsertRateCalendar = useMutation({
     mutationFn: async (input: UpsertRateCalendarInput) => {
       const entries = Array.isArray(input) ? input : input.entries;
       const updateSource = Array.isArray(input) ? 'manual' : (input.update_source ?? 'manual');
+      const skipSuccessToast = !Array.isArray(input) && input.skipSuccessToast === true;
 
       const establishmentId = getEstablishmentId();
       if (!establishmentId) throw new Error("Establishment ID não encontrado");
@@ -372,28 +542,8 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
         establishment_id: establishmentId,
       }));
 
-      // Buscar informações das categorias e planos para o log
       const categoryIds = [...new Set(entries.map(e => e.category_id).filter(Boolean))];
       const planIds = [...new Set(entries.map(e => e.pricing_plan_id).filter(Boolean))];
-      
-      let categories: any[] = [];
-      let plans: any[] = [];
-      
-      if (categoryIds.length > 0) {
-        const { data: categoriesData } = await supabase
-          .from("room_categories")
-          .select("id, name")
-          .in("id", categoryIds);
-        categories = categoriesData || [];
-      }
-      
-      if (planIds.length > 0) {
-        const { data: plansData } = await supabase
-          .from("pricing_plans")
-          .select("id, name, code")
-          .in("id", planIds);
-        plans = plansData || [];
-      }
 
       const { data, error } = await supabase
         .from("rate_calendar")
@@ -404,48 +554,34 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
 
       if (error) throw error;
       
-      // Registrar log de atividade
+      // Registrar log em background (sem aguardar, não bloqueia resposta)
       const dates = [...new Set(entries.map(e => e.date))].sort();
-      const dateRange = dates.length > 0 
-        ? dates.length === 1 
-          ? dates[0] 
-          : `${dates[0]} até ${dates[dates.length - 1]}`
-        : "";
-      
-      const categoryNames = (categories && categories.length > 0) ? categories.map(c => c.name).join(", ") : "";
-      const planNames = (plans && plans.length > 0) ? plans.map(p => p.code || p.name).join(", ") : "";
-      
-      // Só registrar log se tivermos dados válidos
-      try {
-        await logActivity({
-          actionType: "updated",
-          entityType: "rate_calendar",
-          description: `Tarifas atualizadas: ${categoryNames || 'N/A'} - ${planNames || 'N/A'} (${entries.length} entrada(s), ${dateRange || 'N/A'})`,
-          newValues: {
-            entries_count: entries.length,
-            categories: categoryNames || "N/A",
-            plans: planNames || "N/A",
-            date_range: dateRange || "N/A",
-          },
-          metadata: {
-            categories_count: categoryIds.length,
-            plans_count: planIds.length,
-            dates_count: dates.length,
-            update_source: updateSource,
-          },
-        });
-      } catch (logError: any) {
-        // Não falhar a operação se o log falhar
-        console.warn('[useRateSystem] Erro ao registrar log de atividade:', logError);
-      }
+      const dateRangeStr = dates.length > 0 ? (dates.length === 1 ? dates[0] : `${dates[0]} até ${dates[dates.length - 1]}`) : "";
+      logActivity({
+        actionType: "updated",
+        entityType: "rate_calendar",
+        description: `Tarifas atualizadas (${entries.length} entrada(s), ${dateRangeStr || 'N/A'})`,
+        newValues: {
+          entries_count: entries.length,
+          date_range: dateRangeStr || "N/A",
+        },
+        metadata: {
+          categories_count: categoryIds.length,
+          plans_count: planIds.length,
+          dates_count: dates.length,
+          update_source: updateSource,
+        },
+      }).catch((logErr: unknown) => console.warn('[useRateSystem] Log em background falhou:', logErr));
       
       return data;
     },
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      invalidateCalendarCache(getEstablishmentId() ?? undefined);
+      debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
-      const updateSource = Array.isArray(variables) ? 'manual' : (variables.update_source ?? 'manual');
-      if (updateSource === 'manual') {
+      const skipToast = !Array.isArray(variables) && (variables as { skipSuccessToast?: boolean }).skipSuccessToast;
+      const updateSource = Array.isArray(variables) ? 'manual' : (variables as { update_source?: RateUpdateSource }).update_source ?? 'manual';
+      if (updateSource === 'manual' && !skipToast) {
         toast.success("Tarifário atualizado");
       }
     },
@@ -560,9 +696,8 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
         },
       });
       
-      // Invalidar cache (incluindo establishment_id para garantir)
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar", establishmentId] });
+      invalidateCalendarCache(establishmentId);
+      debouncedCalendarInvalidate();
       
       return data;
     },
@@ -575,23 +710,45 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
     },
   });
 
-  // ========== DYNAMIC RULES ==========
+  // ========== DYNAMIC RULES (Phase 1 - carrega após 400ms) ==========
   const dynamicRulesQuery = useQuery({
     queryKey: ["dynamic_pricing_rules", selectedEstablishment?.id],
     ...rateQueryOptions,
+    enabled: enablePhase1,
     queryFn: async () => {
       const establishmentId = getEstablishmentId();
       if (!establishmentId) return [];
 
-      const { data, error } = await supabase
-        .from("dynamic_pricing_rules")
-        .select("*")
-        .eq("establishment_id", establishmentId)
-        .order("priority", { ascending: true })
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      return (data || []) as DynamicPricingRule[];
+      return getRequestQueue().addRequest(async () => {
+        const perf = createPerfMonitor("dynamic_pricing_rules");
+        try {
+          const allData: DynamicPricingRule[] = [];
+          let from = 0;
+          const pageSize = 1000;
+          let hasMore = true;
+          while (hasMore) {
+            const { data, error } = await supabase
+              .from("dynamic_pricing_rules")
+              .select("*")
+              .eq("establishment_id", establishmentId)
+              .order("priority", { ascending: true })
+              .order("created_at", { ascending: false })
+              .range(from, from + pageSize - 1);
+            if (error) {
+              perf.finish(undefined, error.message);
+              throw error;
+            }
+            allData.push(...((data || []) as DynamicPricingRule[]));
+            hasMore = (data?.length ?? 0) >= pageSize;
+            from += pageSize;
+          }
+          perf.finish(allData.length);
+          return allData;
+        } catch (e) {
+          perf.finish(undefined, e instanceof Error ? e.message : "Unknown");
+          throw e;
+        }
+      });
     },
   });
 
@@ -628,8 +785,9 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       return data;
     },
     onSuccess: () => {
+      invalidateCalendarCache(getEstablishmentId() ?? undefined);
       queryClient.invalidateQueries({ queryKey: ["dynamic_pricing_rules"] });
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["hotel_settings_rate_system"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica criada com sucesso!");
@@ -685,8 +843,9 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       return data;
     },
     onSuccess: () => {
+      invalidateCalendarCache(getEstablishmentId() ?? undefined);
       queryClient.invalidateQueries({ queryKey: ["dynamic_pricing_rules"] });
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["hotel_settings_rate_system"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica atualizada com sucesso!");
@@ -732,8 +891,9 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       }
     },
     onSuccess: () => {
+      invalidateCalendarCache(getEstablishmentId() ?? undefined);
       queryClient.invalidateQueries({ queryKey: ["dynamic_pricing_rules"] });
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["hotel_settings_rate_system"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica excluída com sucesso!");
@@ -743,22 +903,44 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
     },
   });
 
-  // ========== RESTRICTIONS ==========
+  // ========== RESTRICTIONS (Phase 2 - carrega após 700ms) ==========
   const restrictionsQuery = useQuery({
     queryKey: ["rate_restrictions", selectedEstablishment?.id],
     ...rateQueryOptions,
+    enabled: enablePhase2,
     queryFn: async () => {
       const establishmentId = getEstablishmentId();
       if (!establishmentId) return [];
 
-      const { data, error } = await supabase
-        .from("rate_restrictions")
-        .select("*")
-        .eq("establishment_id", establishmentId)
-        .order("start_date", { ascending: true });
-
-      if (error) throw error;
-      return (data || []) as RateRestriction[];
+      return getRequestQueue().addRequest(async () => {
+        const perf = createPerfMonitor("rate_restrictions");
+        try {
+          const allData: RateRestriction[] = [];
+          let from = 0;
+          const pageSize = 1000;
+          let hasMore = true;
+          while (hasMore) {
+            const { data, error } = await supabase
+              .from("rate_restrictions")
+              .select("*")
+              .eq("establishment_id", establishmentId)
+              .order("start_date", { ascending: true })
+              .range(from, from + pageSize - 1);
+            if (error) {
+              perf.finish(undefined, error.message);
+              throw error;
+            }
+            allData.push(...((data || []) as RateRestriction[]));
+            hasMore = (data?.length ?? 0) >= pageSize;
+            from += pageSize;
+          }
+          perf.finish(allData.length);
+          return allData;
+        } catch (e) {
+          perf.finish(undefined, e instanceof Error ? e.message : "Unknown");
+          throw e;
+        }
+      });
     },
   });
 
@@ -793,8 +975,9 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       return data;
     },
     onSuccess: () => {
+      invalidateCalendarCache(getEstablishmentId() ?? undefined);
       queryClient.invalidateQueries({ queryKey: ["rate_restrictions"] });
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição criada com sucesso!");
     },
@@ -846,8 +1029,9 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       return data;
     },
     onSuccess: () => {
+      invalidateCalendarCache(getEstablishmentId() ?? undefined);
       queryClient.invalidateQueries({ queryKey: ["rate_restrictions"] });
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição atualizada com sucesso!");
     },
@@ -890,8 +1074,9 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       }
     },
     onSuccess: () => {
+      invalidateCalendarCache(getEstablishmentId() ?? undefined);
       queryClient.invalidateQueries({ queryKey: ["rate_restrictions"] });
-      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição excluída com sucesso!");
     },
@@ -1105,6 +1290,10 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       restrictionsQuery.refetch();
       rateSettingsQuery.refetch();
     },
+
+    // Limite de intervalo
+    calendarExceedsLimit,
+    maxCalendarDays: MAX_DAYS_PER_REQUEST,
   };
 };
 

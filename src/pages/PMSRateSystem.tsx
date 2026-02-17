@@ -27,6 +27,7 @@ import { RateAnalyticsView } from "@/components/rate-system/RateAnalyticsView";
 import { ChannelSyncDialog } from "@/components/rate-system/ChannelSyncDialog";
 import { RateSystemSettingsDialog } from "@/components/rate-system/RateSystemSettingsDialog";
 import { invokeRecalcRates } from "@/lib/ratesApi";
+import { getRequestQueue, useStaggerPhase1 } from "@/lib/rateSystem";
 import { PlanTypesView } from "@/components/rate-system/PlanTypesView";
 import { PriceDashboardView } from "@/components/rate-system/PriceDashboardView";
 import CancellationPolicies from "@/pages/CancellationPolicies";
@@ -79,8 +80,10 @@ const PMSRateSystem = () => {
   // Usar o mesmo establishment do contexto (selectedEstablishment) para evitar perda de categorias
   // após salvar preço no grid ARI (invalidação de rate_calendar não deve afetar esta query).
   const establishmentIdForCategories = selectedEstablishment?.id ?? getSelectedEstablishmentId();
+  const enableCategoriesLoad = useStaggerPhase1(!!establishmentIdForCategories);
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ["rate_system_categories", establishmentIdForCategories],
+    enabled: enableCategoriesLoad,
     staleTime: 5 * 60 * 1000, // 5 minutos - evitar refetch desnecessário
     gcTime: 10 * 60 * 1000, // 10 minutos - manter em cache
     refetchOnWindowFocus: false, // Não refazer fetch ao focar na janela
@@ -89,64 +92,58 @@ const PMSRateSystem = () => {
       const establishmentId = establishmentIdForCategories;
       if (!establishmentId) return [];
 
-      // Buscar quartos com suas categorias
-      const { data: roomsData, error: roomsError } = await supabase
-        .from("rooms")
-        .select(`
-          *,
-          room_categories (*)
-        `)
-        .eq("establishment_id", establishmentId)
-        .order("room_number");
+      return getRequestQueue().addRequest(async () => {
+        // Buscar quartos com suas categorias (paginado)
+        const { data: roomsData, error: roomsError } = await supabase
+          .from("rooms")
+          .select(`*, room_categories (*)`)
+          .eq("establishment_id", establishmentId)
+          .order("room_number")
+          .range(0, 999);
 
-      if (roomsError) {
-        console.error("❌ Erro ao buscar quartos:", roomsError);
-        throw roomsError;
-      }
+        if (roomsError) {
+          console.error("❌ Erro ao buscar quartos:", roomsError);
+          throw roomsError;
+        }
 
-      // Buscar categorias
-      const { data: categoriesData, error: categoriesError } = await supabase
-        .from("room_categories")
-        .select("*")
-        .eq("establishment_id", establishmentId)
-        .order("name");
+        // Buscar categorias (paginado)
+        const { data: categoriesData, error: categoriesError } = await supabase
+          .from("room_categories")
+          .select("*")
+          .eq("establishment_id", establishmentId)
+          .order("name")
+          .range(0, 999);
       
-      if (categoriesError) {
-        console.error("❌ Erro ao buscar categorias:", categoriesError);
-        throw categoriesError;
-      }
+        if (categoriesError) {
+          console.error("❌ Erro ao buscar categorias:", categoriesError);
+          throw categoriesError;
+        }
 
-      // Agrupar quartos por categoria
-      const categoriesMap = new Map();
-      (categoriesData || []).forEach((category: any) => {
-        categoriesMap.set(category.id, {
-          ...category,
-          rooms: []
+        // Agrupar quartos por categoria
+        const categoriesMap = new Map();
+        (categoriesData || []).forEach((category: any) => {
+          categoriesMap.set(category.id, {
+            ...category,
+            rooms: []
+          });
         });
+
+        (roomsData || []).forEach((room: any) => {
+          if (room.is_active === false) return;
+          const categoryId = room.category_id;
+          if (categoryId && categoriesMap.has(categoryId)) {
+            categoriesMap.get(categoryId).rooms.push(room);
+          }
+        });
+
+        return Array.from(categoriesMap.values())
+          .map((category: any) => ({
+            ...category,
+            rooms: category.rooms.sort((a: any, b: any) =>
+              a.room_number.localeCompare(b.room_number, undefined, { numeric: true })
+            )
+          }));
       });
-
-      (roomsData || []).forEach((room: any) => {
-        // Filtrar quartos inativos se a coluna existir
-        if (room.is_active === false) {
-          return;
-        }
-        
-        const categoryId = room.category_id;
-        if (categoryId && categoriesMap.has(categoryId)) {
-          categoriesMap.get(categoryId).rooms.push(room);
-        }
-      });
-
-      // Converter para array e ordenar quartos
-      const categoriesWithRooms = Array.from(categoriesMap.values())
-        .map((category: any) => ({
-          ...category,
-          rooms: category.rooms.sort((a: any, b: any) => 
-            a.room_number.localeCompare(b.room_number, undefined, { numeric: true })
-          )
-        }));
-
-      return categoriesWithRooms;
     },
   });
   

@@ -110,10 +110,10 @@ export const useAutoNoShowProcessor = (intervalMinutes: number = 60) => {
       processNoShowsViaRPC(establishmentId || undefined);
     }, intervalMinutes * 60 * 1000);
 
-    // Processar após 2.5s ao montar (evitar ERR_INSUFFICIENT_RESOURCES com batch de calculate_rate_price)
+    // Processar após 5s ao montar (evitar ERR_INSUFFICIENT_RESOURCES com requisições concorrentes)
     const firstRun = setTimeout(() => {
       processNoShowsViaRPC(establishmentId || undefined);
-    }, 2500);
+    }, 5000);
 
     return () => {
       clearInterval(interval);

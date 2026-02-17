@@ -1091,6 +1091,7 @@ const BookingEngineSettings = () => {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="by_category">Por categoria (grid 2x2 - 4 cards)</SelectItem>
+                              <SelectItem value="by_category_single">Por categoria (1 card por categoria - largura total)</SelectItem>
                               <SelectItem value="by_plan">Por plano tarifário (2 cards por categoria)</SelectItem>
                             </SelectContent>
                           </Select>
