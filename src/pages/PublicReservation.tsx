@@ -573,6 +573,8 @@ const PublicReservation = () => {
   const [lastAvailabilityWarning, setLastAvailabilityWarning] = useState<string | null>(null); // Para evitar avisos repetidos
   const [categoryTotalRooms, setCategoryTotalRooms] = useState<Record<string, number>>({}); // Total de quartos por categoria (geral)
   const [categoryAvailableRooms, setCategoryAvailableRooms] = useState<Record<string, number>>({}); // Quartos disponíveis por categoria para o período selecionado
+  const [isPeriodClosedForSale, setIsPeriodClosedForSale] = useState<boolean | null>(null); // Período fechado no ARI (rate_sales_status)
+  const [restrictionBlockReason, setRestrictionBlockReason] = useState<{ reason: string; restriction?: string; minNights?: number } | null>(null); // Restrições (min_stay, etc.)
   const [establishmentPolicies, setEstablishmentPolicies] = useState<any>(null); // Políticas do estabelecimento
   const [buildingPolicies, setBuildingPolicies] = useState<any>(null); // Políticas do prédio
   const [buildingName, setBuildingName] = useState<string | null>(null); // Nome do prédio
@@ -712,6 +714,21 @@ const PublicReservation = () => {
   ): Promise<number> => {
     const basePrice = Number(category.base_price || 0);
     let categoryTotal = 0;
+
+    // Verificar rate_sales_status (tarifa fechada) antes de calcular preço
+    if (planId && checkinDate && checkoutDate && establishment?.id) {
+      const { checkPeriodAvailabilityForSale, parseLocalDate } = await import("@/lib/ariAvailabilityUtils");
+      const periodCheck = await checkPeriodAvailabilityForSale(
+        establishment.id,
+        category.id,
+        parseLocalDate(checkinDate),
+        parseLocalDate(checkoutDate),
+        "booking_engine"
+      );
+      if (!periodCheck.available) {
+        return 0; // Período fechado para venda (rate_sales_status = closed)
+      }
+    }
 
     // Verificar restrições (min/max stay, CTA, CTD) antes de calcular preço
     if (planId && checkinDate && checkoutDate && establishment?.id) {
@@ -1010,12 +1027,15 @@ const PublicReservation = () => {
         }
 
         // Verificar se o período está disponível para venda (ARI)
-        const { checkPeriodAvailabilityForSale, checkInventoryAvailability } = await import("@/lib/ariAvailabilityUtils");
+        const { checkPeriodAvailabilityForSale, checkInventoryAvailability, parseLocalDate } = await import("@/lib/ariAvailabilityUtils");
+        const checkinLocal = parseLocalDate(formData.checkinDate);
+        const checkoutLocal = parseLocalDate(formData.checkoutDate);
+
         const periodCheck = await checkPeriodAvailabilityForSale(
           establishment.id,
           selectedCategory,
-          new Date(formData.checkinDate),
-          new Date(formData.checkoutDate),
+          checkinLocal,
+          checkoutLocal,
           'booking_engine'
         );
 
@@ -1026,8 +1046,8 @@ const PublicReservation = () => {
         }
 
         // Verificar inventário para cada data do período
-        const checkin = new Date(formData.checkinDate);
-        const checkout = new Date(formData.checkoutDate);
+        const checkin = checkinLocal;
+        const checkout = checkoutLocal;
         let minAvailableRooms = Infinity;
         
         const current = new Date(checkin);
@@ -1118,9 +1138,27 @@ const PublicReservation = () => {
       try {
         const availabilityByCategory: Record<string, number> = {};
 
+        // Importar verificação ARI (rate_sales_status) para respeitar "tarifa fechada"
+        const { checkPeriodAvailabilityForSale, parseLocalDate } = await import("@/lib/ariAvailabilityUtils");
+        const checkinLocal = parseLocalDate(formData.checkinDate);
+        const checkoutLocal = parseLocalDate(formData.checkoutDate);
+
         // Para cada categoria, verificar disponibilidade no período
         for (const category of categories) {
-          // Buscar todos os quartos da categoria que estão disponíveis
+          // 1. Verificar se o período está aberto para venda (rate_sales_status: closed = indisponível)
+          const periodCheck = await checkPeriodAvailabilityForSale(
+            establishment.id,
+            category.id,
+            checkinLocal,
+            checkoutLocal,
+            "booking_engine"
+          );
+          if (!periodCheck.available) {
+            availabilityByCategory[category.id] = 0;
+            continue;
+          }
+
+          // 2. Buscar todos os quartos da categoria que estão disponíveis
           const { data: rooms, error: roomsError } = await supabase
             .from("rooms")
             .select("id")
@@ -1135,7 +1173,7 @@ const PublicReservation = () => {
             continue;
           }
 
-          // Buscar reservas que conflitam com o período
+          // 3. Buscar reservas que conflitam com o período
           const { data: conflictingReservations, error: reservationsError } = await supabase
             .from("reservations")
             .select("room_id")
@@ -1170,6 +1208,128 @@ const PublicReservation = () => {
     const timeoutId = setTimeout(checkCategoryAvailability, 500);
     return () => clearTimeout(timeoutId);
   }, [formData.checkinDate, formData.checkoutDate, establishment?.id, categories]);
+
+  // Verificação explícita de período fechado no ARI (rate_sales_status) — usado no Resumo e botão Reservar
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkPeriodClosed = async () => {
+      if (!formData.checkinDate || !formData.checkoutDate || !establishment?.id) {
+        if (!cancelled) setIsPeriodClosedForSale(null);
+        return;
+      }
+
+      const categoryIdsToCheck = selectedCategories.length > 0
+        ? selectedCategories.map((c) => c.categoryId)
+        : selectedCategory
+          ? [selectedCategory]
+          : [];
+
+      if (categoryIdsToCheck.length === 0) {
+        if (!cancelled) setIsPeriodClosedForSale(null);
+        return;
+      }
+
+      try {
+        const { checkPeriodAvailabilityForSale, parseLocalDate } = await import("@/lib/ariAvailabilityUtils");
+        const checkinLocal = parseLocalDate(formData.checkinDate);
+        const checkoutLocal = parseLocalDate(formData.checkoutDate);
+
+        for (const catId of categoryIdsToCheck) {
+          if (cancelled) return;
+          const periodCheck = await checkPeriodAvailabilityForSale(
+            establishment.id,
+            catId,
+            checkinLocal,
+            checkoutLocal,
+            "booking_engine"
+          );
+          if (!periodCheck.available) {
+            if (!cancelled) setIsPeriodClosedForSale(true);
+            return;
+          }
+        }
+        if (!cancelled) setIsPeriodClosedForSale(false);
+      } catch (error) {
+        console.error("Erro ao verificar período fechado ARI:", error);
+        if (!cancelled) setIsPeriodClosedForSale(true); // Em erro, bloquear reserva (fail closed)
+      }
+    };
+
+    const timeoutId = setTimeout(checkPeriodClosed, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [formData.checkinDate, formData.checkoutDate, establishment?.id, selectedCategory, selectedCategories]);
+
+  // Verificar restrições (min_stay, max_stay, CTA, CTD) que bloqueiam reserva
+  useEffect(() => {
+    const checkRestrictions = async () => {
+      if (!formData.checkinDate || !formData.checkoutDate || !establishment?.id) {
+        setRestrictionBlockReason(null);
+        return;
+      }
+
+      const categoryIdsToCheck = selectedCategories.length > 0
+        ? selectedCategories.map((c) => c.categoryId)
+        : selectedCategory
+          ? [selectedCategory]
+          : [];
+
+      if (categoryIdsToCheck.length === 0) {
+        setRestrictionBlockReason(null);
+        return;
+      }
+
+      try {
+        const { checkRateRestrictions, parseLocalDate } = await import("@/lib/ariAvailabilityUtils");
+        const checkin = parseLocalDate(formData.checkinDate);
+        const checkout = parseLocalDate(formData.checkoutDate);
+        const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (nights <= 0) {
+          setRestrictionBlockReason(null);
+          return;
+        }
+        for (const catId of categoryIdsToCheck) {
+          const selectedPlan = selectedPlanByCategory[catId];
+          const planId = selectedPlan === "plan1"
+            ? publicPricingPlan1Id
+            : selectedPlan === "plan2"
+              ? publicPricingPlan2Id
+              : publicPricingPlan1Id || publicPricingPlan2Id || publicPricingPlanId;
+
+          if (!planId) continue;
+
+          const result = await checkRateRestrictions(
+            establishment.id,
+            catId,
+            planId,
+            checkin,
+            checkout,
+            nights
+          );
+
+          if (!result.allowed) {
+            setRestrictionBlockReason({
+              reason: result.reason || "Restrição aplicada a este período",
+              restriction: result.restriction,
+              minNights: result.minNights,
+            });
+            return;
+          }
+        }
+        setRestrictionBlockReason(null);
+      } catch (error) {
+        console.error("Erro ao verificar restrições:", error);
+        setRestrictionBlockReason(null);
+      }
+    };
+
+    const t = setTimeout(checkRestrictions, 400);
+    return () => clearTimeout(t);
+  }, [formData.checkinDate, formData.checkoutDate, establishment?.id, selectedCategory, selectedCategories, selectedPlanByCategory, publicPricingPlan1Id, publicPricingPlan2Id, publicPricingPlanId]);
 
   // Distribuir adultos entre categorias quando categoria selecionada ou adultos mudarem
   useEffect(() => {
@@ -1375,6 +1535,18 @@ const PublicReservation = () => {
         selectedCategory,
         categoryAvailableRooms
       );
+
+      // Se a categoria selecionada está esgotada e a distribuição caiu em outras categorias,
+      // não usar essa distribuição — manter selectedCategories vazio para não mostrar resumo
+      // de categoria diferente da selecionada (ex: Deluxe selecionado, mas Resumo mostrando Standard)
+      const distributionIncludesSelected = distribution.some((d) => d.categoryId === selectedCategory);
+      if (!distributionIncludesSelected && distribution.length > 0) {
+        const primaryAvailable = categoryAvailableRooms[selectedCategory] ?? 0;
+        if (primaryAvailable === 0) {
+          setSelectedCategories([]);
+          return;
+        }
+      }
 
       // Se há categorias com planos selecionados que não estão na distribuição, adicioná-las
       // MAS apenas se não foram removidas manualmente pelo usuário
@@ -3031,6 +3203,19 @@ const PublicReservation = () => {
       return false;
     }
 
+    // Período fechado no ARI (rate_sales_status = closed) — jamais permitir reserva
+    if (isPeriodClosedForSale === true) {
+      return false;
+    }
+    // Restrições (min_stay, max_stay, CTA, CTD) bloqueiam reserva
+    if (restrictionBlockReason) {
+      return false;
+    }
+    // Enquanto verificação de período fechado estiver em andamento, não permitir (evita race)
+    if (isPeriodClosedForSale === null) {
+      return false;
+    }
+
     // Se há categorias selecionadas, verificar disponibilidade de cada uma
     if (selectedCategories.length > 0) {
       return selectedCategories.every((cat) => {
@@ -3071,6 +3256,19 @@ const PublicReservation = () => {
     }
 
     try {
+      // Verificar rate_sales_status (tarifa fechada) antes de retornar quartos
+      const { checkPeriodAvailabilityForSale, parseLocalDate } = await import("@/lib/ariAvailabilityUtils");
+      const periodCheck = await checkPeriodAvailabilityForSale(
+        establishment.id,
+        categoryId,
+        parseLocalDate(checkinDate),
+        parseLocalDate(checkoutDate),
+        "booking_engine"
+      );
+      if (!periodCheck.available) {
+        return []; // Período fechado para venda
+      }
+
       // Buscar todos os quartos da categoria que estão disponíveis
       const { data: rooms, error: roomsError } = await supabase
         .from("rooms")
@@ -3130,6 +3328,19 @@ const PublicReservation = () => {
     }
 
     try {
+      // Verificar rate_sales_status (tarifa fechada) primeiro
+      const { checkPeriodAvailabilityForSale, parseLocalDate } = await import("@/lib/ariAvailabilityUtils");
+      const periodCheck = await checkPeriodAvailabilityForSale(
+        establishment.id,
+        categoryId,
+        parseLocalDate(checkinDate),
+        parseLocalDate(checkoutDate),
+        "booking_engine"
+      );
+      if (!periodCheck.available) {
+        return { available: false, availableRooms: 0, reason: "Período fechado para venda" };
+      }
+
       // Buscar todos os quartos da categoria que estão disponíveis
       const { data: rooms, error: roomsError } = await supabase
         .from("rooms")
@@ -4907,7 +5118,13 @@ const PublicReservation = () => {
                       {t("publicReservation.noAvailability", "Indisponível")}
                     </AlertTitle>
                     <AlertDescription className={`${theme.textSecondary} text-sm mt-1`}>
-                      {selectedCategories.length > 0
+                      {restrictionBlockReason?.restriction === "min_stay" && restrictionBlockReason?.minNights
+                        ? t("publicReservation.minStayRequired", "O mínimo de diárias para reservar é {{minNights}}. Por favor, selecione um período de pelo menos {{minNights}} {{noites}}.", { minNights: restrictionBlockReason.minNights, noites: t(restrictionBlockReason.minNights === 1 ? "publicReservation.night" : "publicReservation.nights") })
+                        : restrictionBlockReason?.reason
+                        ? restrictionBlockReason.reason
+                        : isPeriodClosedForSale
+                        ? t("publicReservation.periodClosedForSale", "As datas selecionadas estão fechadas para reservas no tarifário. Por favor, selecione outras datas.")
+                        : selectedCategories.length > 0
                         ? t("publicReservation.noAvailabilityForDates", "Não há disponibilidade suficiente para as datas informadas. Algumas categorias selecionadas não possuem quartos disponíveis no período solicitado.")
                         : availableRoomsCount === 0
                         ? t("publicReservation.noRoomsAvailableForDates", "Não há quartos disponíveis para as datas informadas. Por favor, selecione outras datas.")

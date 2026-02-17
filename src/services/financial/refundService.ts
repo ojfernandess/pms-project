@@ -7,7 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 export interface Refund {
   id: string;
   establishment_id: string;
-  payment_id: string;
+  payment_id?: string | null;
   accounts_receivable_id?: string;
   invoice_id?: string;
   reservation_id?: string;
@@ -35,6 +35,17 @@ export interface CreateRefundParams {
   payment_id: string;
   accounts_receivable_id?: string;
   invoice_id?: string;
+  reservation_id?: string;
+  amount: number;
+  reason: string;
+  refund_method?: Refund['refund_method'];
+  notes?: string;
+  metadata?: any;
+}
+
+export interface RecordProcessedRefundParams {
+  establishment_id: string;
+  payment_id: string;
   reservation_id?: string;
   amount: number;
   reason: string;
@@ -98,6 +109,62 @@ export async function createRefund(
   } catch (error: any) {
     console.error("Erro ao criar estorno:", error);
     return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Registrar estorno já processado (estorno imediato da tela de reserva).
+ * O pagamento será deletado em seguida; com ON DELETE SET NULL, payment_id ficará null.
+ */
+export async function recordProcessedRefund(
+  params: RecordProcessedRefundParams
+): Promise<{ success: boolean; data?: Refund; error?: string }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    const now = new Date().toISOString();
+    const today = now.split('T')[0];
+
+    const { data, error } = await supabase
+      .from("financial_refunds")
+      .insert({
+        establishment_id: params.establishment_id,
+        payment_id: params.payment_id,
+        reservation_id: params.reservation_id,
+        amount: params.amount,
+        reason: params.reason,
+        status: 'processed',
+        refund_method: params.refund_method || 'original',
+        refund_date: today,
+        processed_by: user?.id,
+        processed_at: now,
+        created_by: user?.id,
+        notes: params.notes,
+        metadata: params.metadata,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === '42P01') {
+        return { success: false, error: "Sistema de estornos não configurado (tabela financial_refunds não existe)" };
+      }
+      return { success: false, error: error.message || error.details || String(error) };
+    }
+
+    await logFinancialAudit({
+      establishment_id: params.establishment_id,
+      action: 'refund_recorded_processed',
+      entity_type: 'refund',
+      entity_id: data.id,
+      old_value: null,
+      new_value: data,
+      user_id: user?.id,
+    });
+
+    return { success: true, data };
+  } catch (error: any) {
+    console.error("Erro ao registrar estorno processado:", error);
+    return { success: false, error: error?.message || String(error) };
   }
 }
 

@@ -12,6 +12,15 @@ import { CalendarIcon } from "lucide-react";
 import { RatePlan } from "@/hooks/useRateSystem";
 import { toast } from "sonner";
 
+/** Aplica flutuação ao preço base (mesma lógica da Grade ARI e Edição em lote). */
+function applyPlanFluctuation(basePrice: number, plan: RatePlan): number {
+  if (!plan.base_plan_id_for_rate || !plan.fluctuation_type || plan.fluctuation_value == null) return basePrice;
+  if (plan.fluctuation_type === "percentage") {
+    return basePrice * (1 + Number(plan.fluctuation_value) / 100);
+  }
+  return basePrice + Number(plan.fluctuation_value);
+}
+
 interface CreateRateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -152,6 +161,21 @@ export const CreateRateDialog = ({
     return `${categoryId}-${planId}`;
   };
 
+  /** Retorna preço base calculado para plano derivado (Tarifa Base + Flutuação). */
+  const getDerivedPlanBasePrice = (categoryId: string, plan: RatePlan): number | null => {
+    if (!plan.base_plan_id_for_rate || !plan.fluctuation_type || plan.fluctuation_value == null) return null;
+    const basePlan = ratePlans.find((p) => p.id === plan.base_plan_id_for_rate);
+    if (!basePlan) return null;
+    const planIds = categoryPlans[categoryId] || [];
+    if (!planIds.includes(basePlan.id)) return null;
+    const key = getPriceKey(categoryId, basePlan.id);
+    const priceData = prices[key];
+    const basePriceStr = (priceData?.basePrice || "").replace(",", ".");
+    const basePrice = parseFloat(basePriceStr);
+    if (isNaN(basePrice) || basePrice <= 0) return null;
+    return Math.round(applyPlanFluctuation(basePrice, plan) * 100) / 100;
+  };
+
   const handlePriceChange = (categoryId: string, planId: string, field: 'basePrice' | 'adultPrice' | 'childPrice', value: string) => {
     const key = getPriceKey(categoryId, planId);
     setPrices((prev) => {
@@ -181,18 +205,27 @@ export const CreateRateDialog = ({
       return;
     }
 
-    // Validar que todos os preços base foram preenchidos
+    // Validar que todos os preços base foram preenchidos (ou calculados para planos com Tarifa Base)
     const missingPrices: string[] = [];
     for (const categoryId of selectedCategories) {
       const planIds = categoryPlans[categoryId] || [];
       for (const planId of planIds) {
+        const plan = ratePlans.find((p) => p.id === planId);
+        const derivedPrice = plan ? getDerivedPlanBasePrice(categoryId, plan) : null;
+        if (derivedPrice !== null && derivedPrice > 0) {
+          // Plano derivado: preço calculado pela Tarifa Base + Flutuação
+          continue;
+        }
         const key = getPriceKey(categoryId, planId);
         const priceData = prices[key];
-        const basePriceValue = priceData?.basePrice?.replace(',', '.') || '';
+        const basePriceValue = priceData?.basePrice?.replace(",", ".") || "";
         if (!basePriceValue || parseFloat(basePriceValue) <= 0 || isNaN(parseFloat(basePriceValue))) {
           const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
           const planName = ratePlans.find((p) => p.id === planId)?.name || planId;
-          missingPrices.push(`${categoryName} - ${planName}`);
+          const hint = plan?.base_plan_id_for_rate
+            ? " (preencha o preço do plano base primeiro)"
+            : "";
+          missingPrices.push(`${categoryName} - ${planName}${hint}`);
         }
       }
     }
@@ -210,11 +243,20 @@ export const CreateRateDialog = ({
         const planIds = categoryPlans[categoryId] || [];
         for (const planId of planIds) {
           try {
+            const plan = ratePlans.find((p) => p.id === planId);
             const key = getPriceKey(categoryId, planId);
             const priceData = prices[key];
-            const basePriceStr = (priceData?.basePrice || '0').replace(',', '.');
-            const base = parseFloat(basePriceStr);
-            
+
+            // Tarifa Base + Flutuação (mesma lógica da Grade ARI): usar preço calculado do plano base
+            let base: number;
+            const derivedPrice = plan ? getDerivedPlanBasePrice(categoryId, plan) : null;
+            if (derivedPrice !== null && derivedPrice > 0) {
+              base = derivedPrice;
+            } else {
+              const basePriceStr = (priceData?.basePrice || "0").replace(",", ".");
+              base = parseFloat(basePriceStr);
+            }
+
             if (isNaN(base) || base <= 0) {
               const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
               const planName = ratePlans.find((p) => p.id === planId)?.name || planId;
@@ -222,11 +264,11 @@ export const CreateRateDialog = ({
               continue;
             }
 
-            const adultPriceValue = priceData?.adultPrice 
-              ? parseFloat(priceData.adultPrice.replace(',', '.')) 
+            const adultPriceValue = priceData?.adultPrice
+              ? parseFloat(priceData.adultPrice.replace(",", "."))
               : undefined;
-            const childPriceValue = priceData?.childPrice 
-              ? parseFloat(priceData.childPrice.replace(',', '.')) 
+            const childPriceValue = priceData?.childPrice
+              ? parseFloat(priceData.childPrice.replace(",", "."))
               : undefined;
 
             await onSave({
@@ -507,76 +549,145 @@ export const CreateRateDialog = ({
                           {category?.name}
                         </div>
                         <div className="space-y-3 ml-5">
-                          {planIds.map((planId) => {
-                            const plan = ratePlans.find((p) => p.id === planId);
-                            const key = getPriceKey(categoryId, planId);
-                            const priceData = prices[key] || { basePrice: '', adultPrice: '', childPrice: '' };
-                            
-                            return (
-                              <div key={planId} className="border rounded-md p-3 bg-white">
-                                <div className="font-medium text-xs text-muted-foreground mb-2">
-                                  {plan?.name} {plan?.code && `(${plan.code})`}
-                                </div>
-                                <div className="space-y-2">
-                                  <div>
-                                    <Label className="text-xs">Preço Base *</Label>
-                                    <Input
-                                      type="text"
-                                      inputMode="decimal"
-                                      value={priceData.basePrice}
-                                      onChange={(e) => {
-                                        const value = e.target.value;
-                                        // Permitir apenas números, ponto e vírgula
-                                        const cleanValue = value.replace(/[^\d.,]/g, '').replace(',', '.');
-                                        // Permitir apenas um ponto decimal
-                                        const parts = cleanValue.split('.');
-                                        const finalValue = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : cleanValue;
-                                        handlePriceChange(categoryId, planId, 'basePrice', finalValue);
-                                      }}
-                                      placeholder="0.00"
-                                      className="h-9"
-                                    />
+                          {(() => {
+                            // Ordenar: planos base primeiro, depois derivados (Tarifa Base + Flutuação)
+                            const sortedPlanIds = [...planIds].sort((a, b) => {
+                              const planA = ratePlans.find((p) => p.id === a);
+                              const planB = ratePlans.find((p) => p.id === b);
+                              const hasBaseA = planA?.base_plan_id_for_rate ? 1 : 0;
+                              const hasBaseB = planB?.base_plan_id_for_rate ? 1 : 0;
+                              return hasBaseA - hasBaseB;
+                            });
+                            return sortedPlanIds.map((planId) => {
+                              const plan = ratePlans.find((p) => p.id === planId);
+                              const key = getPriceKey(categoryId, planId);
+                              const priceData = prices[key] || { basePrice: "", adultPrice: "", childPrice: "" };
+                              const derivedBasePrice = plan ? getDerivedPlanBasePrice(categoryId, plan) : null;
+                              const isDerivedWithBase = derivedBasePrice !== null;
+                              const basePlan = plan?.base_plan_id_for_rate
+                                ? ratePlans.find((p) => p.id === plan.base_plan_id_for_rate)
+                                : null;
+                              const fluctuationLabel =
+                                plan?.fluctuation_type && plan.fluctuation_value != null
+                                  ? plan.fluctuation_type === "percentage"
+                                    ? `${Number(plan.fluctuation_value)}%`
+                                    : `R$ ${Number(plan.fluctuation_value)}`
+                                  : "";
+
+                              return (
+                                <div key={planId} className="border rounded-md p-3 bg-white">
+                                  <div className="font-medium text-xs text-muted-foreground mb-2">
+                                    {plan?.name} {plan?.code && `(${plan.code})`}
                                   </div>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <div>
-                                      <Label className="text-xs">Adulto Extra</Label>
-                                      <Input
-                                        type="text"
-                                        inputMode="decimal"
-                                        value={priceData.adultPrice}
-                                        onChange={(e) => {
-                                          const value = e.target.value;
-                                          const cleanValue = value.replace(/[^\d.,]/g, '').replace(',', '.');
-                                          const parts = cleanValue.split('.');
-                                          const finalValue = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : cleanValue;
-                                          handlePriceChange(categoryId, planId, 'adultPrice', finalValue);
-                                        }}
-                                        placeholder="0.00"
-                                        className="h-9"
-                                      />
+                                  {isDerivedWithBase && basePlan ? (
+                                    <div className="space-y-2 text-sm">
+                                      <div className="rounded bg-muted/60 p-2">
+                                        <p className="text-xs font-medium text-muted-foreground">Tarifa Base: {basePlan.name}</p>
+                                        {fluctuationLabel && (
+                                          <p className="text-xs text-muted-foreground mt-0.5">Flutuação: {fluctuationLabel}</p>
+                                        )}
+                                        <p className="text-sm font-semibold mt-1">
+                                          Preço calculado: R$ {derivedBasePrice.toFixed(2)}
+                                        </p>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                          <Label className="text-xs">Adulto Extra</Label>
+                                          <Input
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={priceData.adultPrice}
+                                            onChange={(e) => {
+                                              const value = e.target.value;
+                                              const cleanValue = value.replace(/[^\d.,]/g, "").replace(",", ".");
+                                              const parts = cleanValue.split(".");
+                                              const finalValue = parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : cleanValue;
+                                              handlePriceChange(categoryId, planId, "adultPrice", finalValue);
+                                            }}
+                                            placeholder="0.00"
+                                            className="h-9"
+                                          />
+                                        </div>
+                                        <div>
+                                          <Label className="text-xs">Criança Extra</Label>
+                                          <Input
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={priceData.childPrice}
+                                            onChange={(e) => {
+                                              const value = e.target.value;
+                                              const cleanValue = value.replace(/[^\d.,]/g, "").replace(",", ".");
+                                              const parts = cleanValue.split(".");
+                                              const finalValue = parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : cleanValue;
+                                              handlePriceChange(categoryId, planId, "childPrice", finalValue);
+                                            }}
+                                            placeholder="0.00"
+                                            className="h-9"
+                                          />
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <Label className="text-xs">Criança Extra</Label>
-                                      <Input
-                                        type="text"
-                                        inputMode="decimal"
-                                        value={priceData.childPrice}
-                                        onChange={(e) => {
-                                          const value = e.target.value;
-                                          const cleanValue = value.replace(/[^\d.,]/g, '').replace(',', '.');
-                                          const parts = cleanValue.split('.');
-                                          const finalValue = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : cleanValue;
-                                          handlePriceChange(categoryId, planId, 'childPrice', finalValue);
-                                        }}
-                                        placeholder="0.00"
-                                        className="h-9"
-                                      />
+                                  ) : (
+                                    <div className="space-y-2">
+                                      <div>
+                                        <Label className="text-xs">Preço Base *</Label>
+                                        <Input
+                                          type="text"
+                                          inputMode="decimal"
+                                          value={priceData.basePrice}
+                                          onChange={(e) => {
+                                            const value = e.target.value;
+                                            const cleanValue = value.replace(/[^\d.,]/g, "").replace(",", ".");
+                                            const parts = cleanValue.split(".");
+                                            const finalValue = parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : cleanValue;
+                                            handlePriceChange(categoryId, planId, "basePrice", finalValue);
+                                          }}
+                                          placeholder="0.00"
+                                          className="h-9"
+                                        />
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                          <Label className="text-xs">Adulto Extra</Label>
+                                          <Input
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={priceData.adultPrice}
+                                            onChange={(e) => {
+                                              const value = e.target.value;
+                                              const cleanValue = value.replace(/[^\d.,]/g, "").replace(",", ".");
+                                              const parts = cleanValue.split(".");
+                                              const finalValue = parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : cleanValue;
+                                              handlePriceChange(categoryId, planId, "adultPrice", finalValue);
+                                            }}
+                                            placeholder="0.00"
+                                            className="h-9"
+                                          />
+                                        </div>
+                                        <div>
+                                          <Label className="text-xs">Criança Extra</Label>
+                                          <Input
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={priceData.childPrice}
+                                            onChange={(e) => {
+                                              const value = e.target.value;
+                                              const cleanValue = value.replace(/[^\d.,]/g, "").replace(",", ".");
+                                              const parts = cleanValue.split(".");
+                                              const finalValue = parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : cleanValue;
+                                              handlePriceChange(categoryId, planId, "childPrice", finalValue);
+                                            }}
+                                            placeholder="0.00"
+                                            className="h-9"
+                                          />
+                                        </div>
+                                      </div>
                                     </div>
-                                  </div>
+                                  )}
                                 </div>
-                              </div>
-                            );
-                          })}
+                              );
+                            });
+                          })()}
                         </div>
                       </div>
                     );

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,6 +22,7 @@ import { RateEditDialog } from "./RateEditDialog";
 import { BulkEditDialog } from "./BulkEditDialog";
 import { RateMetricsSummary } from "./RateMetricsSummary";
 import { CreateRateDialog } from "./CreateRateDialog";
+import { useLazyCalendarRange } from "@/lib/rateSystem";
 
 interface RateCalendarGridProps {
   ratePlans: RatePlan[];
@@ -74,9 +75,17 @@ export const RateCalendarGrid = ({
   const [hasFeatureAccess, setHasFeatureAccess] = useState<boolean | null>(null); // null = ainda não verificado
 
   const { selectedEstablishment } = useEstablishment();
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const [lazyState, { loadRight, loadLeft, reset: resetLazy }] = useLazyCalendarRange({
+    initialStart: startDate,
+    totalCalendarDays: viewDays,
+    initialWindowDays: Math.min(31, viewDays),
+  });
+
   const dateRange = useMemo(
-    () => ({ start: startDate, end: addDays(startDate, viewDays - 1) }),
-    [startDate, viewDays]
+    () => ({ start: lazyState.loadedStart, end: lazyState.loadedEnd }),
+    [lazyState.loadedStart, lazyState.loadedEnd]
   );
   const {
     rateCalendar: rateCalendarFromHook,
@@ -91,6 +100,20 @@ export const RateCalendarGrid = ({
     autoApplyDynamicRules,
   } = useRateSystem({ dateRange });
   const rateCalendar = rateCalendarProp !== undefined ? rateCalendarProp : rateCalendarFromHook;
+
+  useEffect(() => {
+    resetLazy();
+  }, [startDate, viewDays, resetLazy]);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const threshold = 150;
+    const nearRight = el.scrollLeft + el.clientWidth >= el.scrollWidth - threshold;
+    const nearLeft = el.scrollLeft <= threshold;
+    if (nearRight && lazyState.hasMoreRight) loadRight();
+    if (nearLeft && lazyState.hasMoreLeft) loadLeft();
+  }, [lazyState.hasMoreRight, lazyState.hasMoreLeft, loadRight, loadLeft]);
 
   const { getMetricsForDate, calculateOccupancy, calculatePickupRate } = useRateMetrics();
   const dynamicPrices = useDynamicRatePrices();
@@ -120,10 +143,10 @@ export const RateCalendarGrid = ({
 
   const visibleDates = useMemo(() => {
     return eachDayOfInterval({
-      start: startDate,
-      end: addDays(startDate, viewDays - 1),
+      start: lazyState.loadedStart,
+      end: lazyState.loadedEnd,
     });
-  }, [startDate, viewDays]);
+  }, [lazyState.loadedStart, lazyState.loadedEnd]);
 
   // Determinar quais planos mostrar
   const activePlansToShow = useMemo(() => {
@@ -740,7 +763,11 @@ export const RateCalendarGrid = ({
         const cellMinPx = viewDays <= 14 ? 90 : viewDays <= 30 ? 70 : viewDays <= 60 ? 50 : 40;
         const gridMinWidth = visibleDates.length * cellMinPx;
         return (
-      <Card className="p-0 overflow-x-auto overflow-y-visible max-w-full">
+      <Card
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="p-0 overflow-x-auto overflow-y-visible max-w-full"
+      >
         <div className="pr-12 pb-2" style={{ minWidth: Math.max(gridMinWidth + 208, 0), width: 'max-content' }}>
           {/* Indicador do Plano no Topo do Grid */}
           {selectedRatePlan && selectedRatePlan !== 'all' && (() => {

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ARIBulkEditDialog } from "./ARIBulkEditDialog";
 import { OccupancyPriceEditDialog } from "./OccupancyPriceEditDialog";
 import { supabase } from "@/integrations/supabase/client";
+import { useLazyCalendarRange } from "@/lib/rateSystem";
 
 interface ARIGridProps {
   ratePlans: RatePlan[];
@@ -103,11 +104,33 @@ export const ARIGrid = ({
 
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const [lazyState, { loadRight, loadLeft, reset: resetLazy }] = useLazyCalendarRange({
+    initialStart: startDate,
+    totalCalendarDays: viewDays,
+    initialWindowDays: Math.min(31, viewDays),
+  });
+
   const dateRange = useMemo(
-    () => ({ start: startDate, end: addDays(startDate, viewDays - 1) }),
-    [startDate, viewDays]
+    () => ({ start: lazyState.loadedStart, end: lazyState.loadedEnd }),
+    [lazyState.loadedStart, lazyState.loadedEnd]
   );
   const { rateCalendar, isLoadingCalendar, upsertRateCalendar } = useRateSystem({ dateRange });
+
+  useEffect(() => {
+    resetLazy();
+  }, [startDate, viewDays, resetLazy]);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const threshold = 150;
+    const nearRight = el.scrollLeft + el.clientWidth >= el.scrollWidth - threshold;
+    const nearLeft = el.scrollLeft <= threshold;
+    if (nearRight && lazyState.hasMoreRight) loadRight();
+    if (nearLeft && lazyState.hasMoreLeft) loadLeft();
+  }, [lazyState.hasMoreRight, lazyState.hasMoreLeft, loadRight, loadLeft]);
   const dynamicPrices = useDynamicRatePrices();
   const {
     updateSalesStatus,
@@ -131,18 +154,17 @@ export const ARIGrid = ({
     return ratePlans.filter(p => p.is_active);
   }, [ratePlans]);
 
-  // Datas visíveis
+  // Datas visíveis (do lazy range para carregamento progressivo no scroll)
   const visibleDates = useMemo(() => {
     return eachDayOfInterval({
-      start: startDate,
-      end: addDays(startDate, viewDays - 1),
+      start: lazyState.loadedStart,
+      end: lazyState.loadedEnd,
     });
-  }, [startDate, viewDays]);
+  }, [lazyState.loadedStart, lazyState.loadedEnd]);
 
   // Buscar inventário e status para todas as categorias visíveis
-  // Usar uma única query que busca todas as categorias de uma vez
-  const endDate = useMemo(() => addDays(startDate, viewDays - 1), [startDate, viewDays]);
-  const startDateStr = useMemo(() => format(startDate, 'yyyy-MM-dd'), [startDate]);
+  const endDate = useMemo(() => lazyState.loadedEnd, [lazyState.loadedEnd]);
+  const startDateStr = useMemo(() => format(lazyState.loadedStart, 'yyyy-MM-dd'), [lazyState.loadedStart]);
   const endDateStr = useMemo(() => format(endDate, 'yyyy-MM-dd'), [endDate]);
   const categoryIds = useMemo(() => filteredCategories.map(c => c.id), [filteredCategories]);
 
@@ -779,14 +801,13 @@ export const ARIGrid = ({
           updateData.adult_price = newAdultPrice;
         }
       } else {
-        // Outros campos (restrições)
-        updateData[currentEditingCell.field] = currentEditingCell.value;
+        // Outros campos (restrições: min_stay, max_stay, etc.)
+        const val = currentEditingCell.value;
+        updateData[currentEditingCell.field] = (typeof val === 'string' ? parseInt(val, 10) : Number(val)) || 0;
       }
 
-      // Se já existe entrada, manter outros campos
-      // IMPORTANTE: Não sobrescrever base_price e adult_price se já foram definidos acima
+      // rate_calendar exige base_price NOT NULL — incluir sempre (obrigatório para upsert/insert)
       if (entry) {
-        // Manter base_price e adult_price apenas se não foram definidos acima
         if (updateData.base_price === undefined) {
           updateData.base_price = entry.base_price;
         }
@@ -797,6 +818,15 @@ export const ARIGrid = ({
         updateData.max_stay = updateData.max_stay ?? entry.max_stay;
         updateData.closed_to_arrival = updateData.closed_to_arrival ?? entry.closed_to_arrival;
         updateData.closed_to_departure = updateData.closed_to_departure ?? entry.closed_to_departure;
+      } else {
+        // Sem entrada existente: criar nova — base_price e adult_price são obrigatórios
+        const category = currentCategories.find((c: { id: string }) => c.id === currentEditingCell.categoryId);
+        updateData.base_price = Number(category?.base_price) || 0;
+        updateData.adult_price = 0;
+        if (updateData.min_stay === undefined) updateData.min_stay = 0;
+        if (updateData.max_stay === undefined) updateData.max_stay = 0;
+        updateData.closed_to_arrival = updateData.closed_to_arrival ?? false;
+        updateData.closed_to_departure = updateData.closed_to_departure ?? false;
       }
 
       // Salvar e aguardar conclusão antes de limpar o estado
@@ -1651,8 +1681,13 @@ export const ARIGrid = ({
                 if (entry) {
                   updateData.base_price = entry.base_price;
                   updateData.adult_price = entry.adult_price;
-                  updateData.min_stay = entry.min_stay;
-                  updateData.max_stay = entry.max_stay;
+                  updateData.min_stay = entry.min_stay ?? 0;
+                  updateData.max_stay = entry.max_stay ?? 0;
+                } else {
+                  updateData.base_price = Number(category?.base_price) || 0;
+                  updateData.adult_price = 0;
+                  updateData.min_stay = 0;
+                  updateData.max_stay = 0;
                 }
 
                 try {
@@ -1987,7 +2022,7 @@ export const ARIGrid = ({
       </Card>
 
       {/* Grid ARI - Uma seção por categoria */}
-      {filteredCategories.map((category) => (
+      {filteredCategories.map((category, categoryIndex) => (
         <Card key={category.id} className="overflow-hidden">
           {/* Cabeçalho da categoria */}
           <div className="bg-gray-50 p-4 border-b">
@@ -2020,8 +2055,12 @@ export const ARIGrid = ({
             </div>
           </div>
 
-          {/* Grid da categoria */}
-          <div className="overflow-x-auto">
+          {/* Grid da categoria - ref e onScroll no primeiro para lazy load no scroll horizontal */}
+          <div
+            ref={categoryIndex === 0 ? scrollContainerRef : undefined}
+            onScroll={categoryIndex === 0 ? handleScroll : undefined}
+            className="overflow-x-auto"
+          >
             <div className="inline-block min-w-full">
               {/* Header com datas */}
               <div className="border-b border-gray-200 bg-white sticky top-0 z-10">

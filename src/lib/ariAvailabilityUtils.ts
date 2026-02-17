@@ -2,6 +2,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 
 /**
+ * Converte string YYYY-MM-DD em Date local (evita bug de timezone: new Date("YYYY-MM-DD") = UTC)
+ */
+export const parseLocalDate = (dateStr: string): Date => {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+};
+
+/**
  * Verifica se uma data está disponível para venda considerando status ARI
  */
 export const checkDateAvailabilityForSale = async (
@@ -20,8 +28,8 @@ export const checkDateAvailabilityForSale = async (
 
     if (error) {
       console.error('Erro ao verificar disponibilidade ARI:', error);
-      // Em caso de erro, permitir venda (fallback)
-      return { available: true };
+      // Em caso de erro, NÃO permitir venda (fail closed — evita reserva indevida)
+      return { available: false };
     }
 
     if (!data) {
@@ -31,8 +39,8 @@ export const checkDateAvailabilityForSale = async (
     return { available: data, reason: data ? undefined : 'Data fechada para venda', status: data ? 'open' : 'closed' };
   } catch (error) {
     console.error('Erro ao verificar disponibilidade ARI:', error);
-    // Em caso de erro, permitir venda (fallback)
-    return { available: true };
+    // Em caso de erro, NÃO permitir venda (fail closed — evita reserva indevida)
+    return { available: false };
   }
 };
 
@@ -171,7 +179,7 @@ export const checkRateRestrictions = async (
   checkinDate: Date,
   checkoutDate: Date,
   nights: number
-): Promise<{ allowed: boolean; reason?: string; restriction?: string }> => {
+): Promise<{ allowed: boolean; reason?: string; restriction?: string; minNights?: number }> => {
   try {
     const dates: Date[] = [];
     const current = new Date(checkinDate);
@@ -210,6 +218,7 @@ export const checkRateRestrictions = async (
         allowed: false,
         reason: `Período mínimo de ${firstDateRestriction.min_stay} ${firstDateRestriction.min_stay === 1 ? 'noite' : 'noites'} necessário`,
         restriction: 'min_stay',
+        minNights: firstDateRestriction.min_stay,
       };
     }
 

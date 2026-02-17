@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { fetchRatesDashboard } from "@/lib/ratesApi";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { toast } from "sonner";
@@ -61,7 +62,8 @@ interface PlanType {
 
 export const PriceDashboardView = () => {
   const queryClient = useQueryClient();
-  const establishmentId = getSelectedEstablishmentId();
+  const { selectedEstablishment } = useEstablishment();
+  const establishmentId = selectedEstablishment?.id ?? getSelectedEstablishmentId();
   const [basePrice, setBasePrice] = useState<number | null>(null);
   const [isBasePriceInitialized, setIsBasePriceInitialized] = useState(false);
   const [startDate, setStartDate] = useState<Date>(startOfDay(new Date()));
@@ -76,11 +78,12 @@ export const PriceDashboardView = () => {
   const [showDynamicRulesWarning, setShowDynamicRulesWarning] = useState(false);
   const [pendingApply, setPendingApply] = useState(false);
 
-  // Configuração de resiliência: retry, refetch ao focar janela, auto-fetch
+  // Configuração de resiliência: retry, refetch ao focar/montar para evitar estado vazio ao voltar à aba
   const dashboardQueryOptions = {
     retry: 3,
     retryDelay: (i: number) => Math.min(1000 * 2 ** i, 8000),
     refetchOnWindowFocus: true,
+    refetchOnMount: "always",
     staleTime: 60 * 1000,
   };
 
@@ -92,7 +95,6 @@ export const PriceDashboardView = () => {
       if (!establishmentId) {
         return { categories: [], ratePlans: [], planTypes: [], hotelSettings: null };
       }
-
       const apiData = await fetchRatesDashboard(establishmentId);
       if (apiData) {
         return apiData;
@@ -667,6 +669,7 @@ export const PriceDashboardView = () => {
       queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
       queryClient.invalidateQueries({ queryKey: ["room_categories"] });
       queryClient.invalidateQueries({ queryKey: ["rate_system_categories"] });
+      queryClient.invalidateQueries({ queryKey: ["rates_dashboard", establishmentId] });
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao aplicar preços");
@@ -706,7 +709,11 @@ export const PriceDashboardView = () => {
     setPendingApply(false);
   };
 
-  if (isLoadingCategories || isLoadingRatePlans || isLoadingPlanTypes) {
+  // Evitar exibir "nenhuma categoria/plano" quando a query está desabilitada (sem estabelecimento)
+  // ou ainda carregando pela primeira vez ao voltar para a aba
+  const isWaitingEstablishment = !establishmentId;
+  const isInitialLoad = isLoadingDashboard && !dashboardData;
+  if (isWaitingEstablishment || isInitialLoad || isLoadingCategories || isLoadingRatePlans || isLoadingPlanTypes) {
     return (
       <div className="space-y-6 animate-in fade-in duration-300">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -720,7 +727,9 @@ export const PriceDashboardView = () => {
         </div>
         <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
           <RefreshCw className="h-5 w-5 animate-spin" />
-          <span className="text-sm">Carregando tarifas...</span>
+          <span className="text-sm">
+            {isWaitingEstablishment ? "Selecione um estabelecimento..." : "Carregando tarifas..."}
+          </span>
         </div>
       </div>
     );

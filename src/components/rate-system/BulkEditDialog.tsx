@@ -343,6 +343,15 @@ export const BulkEditDialog = memo(({
                             <div className="grid grid-cols-2 gap-2">
                               {activePlans.map((plan) => {
                                 const isPlanSelected = categoryPlansList.includes(plan.id);
+                                const basePlan = plan.base_plan_id_for_rate
+                                  ? ratePlans.find((p) => p.id === plan.base_plan_id_for_rate)
+                                  : null;
+                                const fluctuationLabel =
+                                  plan.fluctuation_type && plan.fluctuation_value != null
+                                    ? plan.fluctuation_type === "percentage"
+                                      ? `${Number(plan.fluctuation_value)}%`
+                                      : `R$ ${Number(plan.fluctuation_value)}`
+                                    : "";
                                 return (
                                   <div key={plan.id} className="flex items-center space-x-2">
                                     <Checkbox
@@ -357,6 +366,11 @@ export const BulkEditDialog = memo(({
                                       className="text-xs font-medium leading-none cursor-pointer flex-1"
                                     >
                                       {plan.name} {plan.code && `(${plan.code})`}
+                                      {basePlan && fluctuationLabel && (
+                                        <span className="block text-muted-foreground font-normal mt-0.5">
+                                          Tarifa Base: {basePlan.name} · Flutuação: {fluctuationLabel}
+                                        </span>
+                                      )}
                                     </label>
                                   </div>
                                 );
@@ -536,10 +550,25 @@ export const BulkEditDialog = memo(({
                               }
                             };
                             
+                            const basePlan = plan?.base_plan_id_for_rate
+                              ? ratePlans.find((p) => p.id === plan.base_plan_id_for_rate)
+                              : null;
+                            const fluctuationLabel =
+                              plan?.fluctuation_type != null && plan?.fluctuation_value != null
+                                ? plan.fluctuation_type === "percentage"
+                                  ? `${Number(plan.fluctuation_value)}%`
+                                  : `R$ ${Number(plan.fluctuation_value)}`
+                                : "";
+
                             return (
                               <div key={planId} className="border rounded-md p-3 bg-white">
                                 <div className="font-medium text-xs text-muted-foreground mb-2">
                                   {plan?.name} {plan?.code && `(${plan.code})`}
+                                  {basePlan && fluctuationLabel && (
+                                    <span className="block text-muted-foreground font-normal mt-1">
+                                      Tarifa Base: {basePlan.name} · Flutuação: {fluctuationLabel}
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="space-y-2">
                                   <div>

@@ -710,6 +710,8 @@
     "onlyRoomsLeft": "¡Solo quedan {count} habitaciones!",
     "soldOut": "Agotado",
     "noAvailability": "No disponible",
+    "periodClosedForSale": "Las fechas seleccionadas están cerradas para reservas. Por favor, seleccione otras fechas.",
+    "minStayRequired": "El mínimo de noches para reservar es {{minNights}}. Por favor, seleccione un período de al menos {{minNights}} {{noites}}.",
     "noAvailabilityForDates": "No hay disponibilidad suficiente para las fechas informadas. Algunas categorías seleccionadas no tienen habitaciones disponibles en el período solicitado.",
     "noRoomsAvailableForDates": "No hay habitaciones disponibles para las fechas informadas. Por favor, seleccione otras fechas.",
     "insufficientRoomsForDates": "No hay suficientes habitaciones disponibles para las fechas informadas. Disponible: {available}, Necesario: {required}. Por favor, seleccione otras fechas o reduzca la cantidad de habitaciones.",

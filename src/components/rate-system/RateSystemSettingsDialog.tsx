@@ -11,7 +11,6 @@ import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
-import { checkEstablishmentFeatureAccess } from "@/lib/featureAccess";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 
@@ -25,7 +24,6 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
   const { selectedEstablishment } = useEstablishment();
   const establishmentId = selectedEstablishment?.id ?? getSelectedEstablishmentId();
   const { settings: siteSettings } = useSiteSettings();
-  const [hasDynamicPricingAccess, setHasDynamicPricingAccess] = useState<boolean | null>(null);
 
   const [settings, setSettings] = useState({
     auto_apply_dynamic_rules: false,
@@ -68,31 +66,6 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
     },
     enabled: open && !!establishmentId,
   });
-
-  // Verificar se a empresa tem acesso à funcionalidade de automação de regras dinâmicas
-  useEffect(() => {
-    const checkAccess = async () => {
-      if (!selectedEstablishment?.id) {
-        setHasDynamicPricingAccess(false);
-        return;
-      }
-
-      try {
-        const access = await checkEstablishmentFeatureAccess(
-          'dynamic_pricing_automation',
-          selectedEstablishment.id
-        );
-        setHasDynamicPricingAccess(access);
-      } catch (error) {
-        console.error('Erro ao verificar acesso à funcionalidade:', error);
-        setHasDynamicPricingAccess(false);
-      }
-    };
-
-    if (open) {
-      checkAccess();
-    }
-  }, [selectedEstablishment?.id, open]);
 
   useEffect(() => {
     if (!existingSettings) return;
@@ -299,36 +272,7 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
           </TabsContent>
 
           <TabsContent value="automation" className="space-y-6 mt-6">
-            <div className="space-y-4">
-              {/* Opções de automação sempre visíveis para permitir configurar e salvar */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="auto_apply_rules">Aplicar Regras Dinâmicas Automaticamente</Label>
-                  <p className="text-sm text-gray-500">Aplicar regras dinâmicas quando as condições forem atendidas</p>
-                </div>
-                <Switch
-                  id="auto_apply_rules"
-                  checked={settings.auto_apply_dynamic_rules}
-                  onCheckedChange={(checked) => setSettings({ ...settings, auto_apply_dynamic_rules: checked })}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="persist_dynamic">Persistir Preços Dinâmicos no Banco</Label>
-                  <p className="text-sm text-gray-500">Gravar preços calculados no banco. Não recalcula ao abrir tela. Nível enterprise.</p>
-                </div>
-                <Switch
-                  id="persist_dynamic"
-                  checked={settings.persist_dynamic_rates}
-                  onCheckedChange={(checked) => setSettings({ ...settings, persist_dynamic_rates: checked })}
-                />
-              </div>
-              {hasDynamicPricingAccess === false && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                  A <strong>Automação de Regras de Precificação Dinâmica</strong> pode precisar ser habilitada para sua empresa. Entre em contato com o suporte para ativar.
-                </div>
-              )}
-
+            <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
                   <Label htmlFor="auto_sync">Sincronização Automática com Canais</Label>

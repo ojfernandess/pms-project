@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Plus, Edit2, Trash2, GripVertical, AlertCircle } from "lucide-react";
 import { DynamicPricingRule } from "@/hooks/useRateSystem";
 import { DynamicRuleDialog } from "./DynamicRuleDialog";
@@ -19,6 +22,10 @@ import {
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { supabase } from "@/integrations/supabase/client";
+import { checkEstablishmentFeatureAccess } from "@/lib/featureAccess";
 
 interface DynamicRulesViewProps {
   rules: DynamicPricingRule[];
@@ -29,6 +36,12 @@ interface DynamicRulesViewProps {
   onCreate: (rule: Partial<DynamicPricingRule>) => void;
   onUpdate: (id: string, rule: Partial<DynamicPricingRule>) => void;
   onDelete: (id: string) => void;
+}
+
+function toBool(v: unknown): boolean {
+  if (v === true || v === "true") return true;
+  if (v === false || v === "false") return false;
+  return !!v;
 }
 
 export const DynamicRulesView = ({
@@ -45,6 +58,97 @@ export const DynamicRulesView = ({
   const [selectedRule, setSelectedRule] = useState<DynamicPricingRule | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [ruleToDelete, setRuleToDelete] = useState<string | null>(null);
+
+  const { selectedEstablishment } = useEstablishment();
+  const establishmentId = selectedEstablishment?.id ?? getSelectedEstablishmentId();
+  const queryClient = useQueryClient();
+  const [hasDynamicPricingAccess, setHasDynamicPricingAccess] = useState<boolean | null>(null);
+
+  const [settings, setSettings] = useState({
+    auto_apply_dynamic_rules: false,
+    persist_dynamic_rates: false,
+  });
+
+  const { data: existingSettings } = useQuery({
+    queryKey: ["hotel_settings", establishmentId],
+    queryFn: async () => {
+      if (!establishmentId) return null;
+      const { data, error } = await supabase
+        .from("hotel_settings")
+        .select("id, rate_system_settings")
+        .eq("establishment_id", establishmentId)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!establishmentId,
+  });
+
+  useEffect(() => {
+    if (!existingSettings?.rate_system_settings) return;
+    const rs = existingSettings.rate_system_settings as Record<string, unknown>;
+    setSettings((prev) => ({
+      auto_apply_dynamic_rules: rs.auto_apply_dynamic_rules !== undefined ? toBool(rs.auto_apply_dynamic_rules) : prev.auto_apply_dynamic_rules,
+      persist_dynamic_rates: rs.persist_dynamic_rates !== undefined ? toBool(rs.persist_dynamic_rates) : prev.persist_dynamic_rates,
+    }));
+  }, [existingSettings?.rate_system_settings]);
+
+  const saveSettingsMutation = useMutation({
+    mutationFn: async (newSettings: { auto_apply_dynamic_rules: boolean; persist_dynamic_rates: boolean }) => {
+      if (!establishmentId) throw new Error("Estabelecimento não selecionado");
+      const { data: existing, error: checkError } = await supabase
+        .from("hotel_settings")
+        .select("id, rate_system_settings, name")
+        .eq("establishment_id", establishmentId)
+        .maybeSingle();
+      if (checkError) throw checkError;
+      const existingRs = (existing?.rate_system_settings ?? {}) as Record<string, unknown>;
+      const mergedRateSettings = {
+        ...existingRs,
+        auto_apply_dynamic_rules: !!newSettings.auto_apply_dynamic_rules,
+        persist_dynamic_rates: !!newSettings.persist_dynamic_rates,
+      };
+      if (existing?.id) {
+        const { error } = await supabase
+          .from("hotel_settings")
+          .update({ rate_system_settings: mergedRateSettings })
+          .eq("id", existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("hotel_settings").insert({
+          establishment_id: establishmentId,
+          rate_system_settings: mergedRateSettings,
+        });
+        if (error) throw error;
+      }
+      return { rate_system_settings: mergedRateSettings };
+    },
+    onSuccess: (data) => {
+      if (data?.rate_system_settings && establishmentId) {
+        queryClient.setQueryData(["rate_system_settings", establishmentId], data.rate_system_settings);
+      }
+      queryClient.invalidateQueries({ queryKey: ["rate_system_settings"] });
+      queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
+      toast.success("Configurações salvas");
+    },
+    onError: () => toast.error("Erro ao salvar configurações"),
+  });
+
+  useEffect(() => {
+    const checkAccess = async () => {
+      if (!establishmentId) {
+        setHasDynamicPricingAccess(false);
+        return;
+      }
+      try {
+        const access = await checkEstablishmentFeatureAccess("dynamic_pricing_automation", establishmentId);
+        setHasDynamicPricingAccess(access);
+      } catch {
+        setHasDynamicPricingAccess(false);
+      }
+    };
+    checkAccess();
+  }, [establishmentId]);
 
   const handleCreate = () => {
     setSelectedRule(null);
@@ -145,6 +249,45 @@ export const DynamicRulesView = ({
           Nova Regra
         </Button>
       </div>
+
+      <Card className="p-4 space-y-4">
+        <h3 className="text-sm font-semibold text-gray-900">Configuração das regras</h3>
+        {hasDynamicPricingAccess === false && (
+          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+            Acesso à precificação dinâmica não habilitado para este estabelecimento. Entre em contato para habilitar.
+          </div>
+        )}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label className="text-base">Aplicar Regras Dinâmicas Automaticamente</Label>
+              <p className="text-sm text-gray-500">Aplicar regras dinâmicas quando as condições forem atendidas</p>
+            </div>
+            <Switch
+              checked={settings.auto_apply_dynamic_rules}
+              disabled={hasDynamicPricingAccess === false}
+              onCheckedChange={(checked) => {
+                setSettings((s) => ({ ...s, auto_apply_dynamic_rules: checked }));
+                saveSettingsMutation.mutate({ ...settings, auto_apply_dynamic_rules: checked });
+              }}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label className="text-base">Persistir Preços Dinâmicos no Banco</Label>
+              <p className="text-sm text-gray-500">Gravar preços calculados no banco. Não recalcula ao abrir tela. Nível enterprise.</p>
+            </div>
+            <Switch
+              checked={settings.persist_dynamic_rates}
+              disabled={hasDynamicPricingAccess === false}
+              onCheckedChange={(checked) => {
+                setSettings((s) => ({ ...s, persist_dynamic_rates: checked }));
+                saveSettingsMutation.mutate({ ...settings, persist_dynamic_rates: checked });
+              }}
+            />
+          </div>
+        </div>
+      </Card>
 
       {rateCalendar.length > 0 && rules.filter((r) => r.is_active).length > 0 && (
         <RuleImpactSummary

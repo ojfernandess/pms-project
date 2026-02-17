@@ -15,7 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { BarChart3, TrendingUp, DollarSign, Users, Download, Calendar as CalendarIcon, FileSpreadsheet, FileText, ChevronDown, CheckCircle2, Loader2 } from "lucide-react";
-import { format, subDays, startOfDay, endOfDay, startOfMonth, endOfMonth } from "date-fns";
+import { format, subDays, subYears, startOfDay, endOfDay, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useRateMetrics } from "@/hooks/useRateMetrics";
@@ -42,6 +42,7 @@ import {
   PieChart,
   Pie,
   Cell,
+  ComposedChart,
 } from "recharts";
 
 interface RateAnalyticsViewProps {
@@ -364,6 +365,32 @@ export const RateAnalyticsView = ({
 
       return reservationsWithPlans;
     },
+  });
+
+  // Período do ano anterior (mesmo intervalo de dias) para Forecast vs Actual
+  const dateRangeLastYear = useMemo(() => ({
+    start: subYears(dateRange.start, 1),
+    end: subYears(dateRange.end, 1),
+  }), [dateRange.start, dateRange.end]);
+
+  const { data: reservationsDataLastYear } = useQuery({
+    queryKey: ["analytics_reservations_last_year", getSelectedEstablishmentId(), dateRangeLastYear.start, dateRangeLastYear.end],
+    queryFn: async () => {
+      const establishmentId = getSelectedEstablishmentId();
+      if (!establishmentId) return [];
+
+      const { data: reservations, error } = await supabase
+        .from("reservations")
+        .select("id, checkin_date, checkout_date, paid_amount, total_amount, status, category_id, pricing_plan_id")
+        .eq("establishment_id", establishmentId)
+        .gte("checkin_date", format(dateRangeLastYear.start, "yyyy-MM-dd"))
+        .lte("checkout_date", format(dateRangeLastYear.end, "yyyy-MM-dd"))
+        .neq("status", "cancelled");
+
+      if (error) throw error;
+      return reservations || [];
+    },
+    enabled: !!establishmentId,
   });
 
   // Preparar dados para exportação
@@ -706,6 +733,61 @@ export const RateAnalyticsView = ({
       dailyData,
     };
   }, [reservationsData, categories, ratePlans, selectedCategory, selectedPlan]);
+
+  // Helper: agregar receita e reservas por dia a partir de uma lista de reservas
+  const buildRevenueByDay = (reservations: any[], filter: { category?: string; plan?: string }) => {
+    const filtered = (reservations || []).filter((r: any) => {
+      if (filter.category && filter.category !== "all" && r.category_id !== filter.category) return false;
+      if (filter.plan && filter.plan !== "all" && r.pricing_plan_id !== filter.plan) return false;
+      return true;
+    });
+    const byDay: Record<string, { revenue: number; reservations: number }> = {};
+    filtered.forEach((r: any) => {
+      const checkin = new Date(r.checkin_date);
+      const checkout = new Date(r.checkout_date);
+      const nights = Math.max(1, Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24)));
+      const dailyRevenue = (Number(r.paid_amount || r.total_amount) || 0) / nights;
+      for (let i = 0; i < nights; i++) {
+        const d = new Date(checkin);
+        d.setDate(checkin.getDate() + i);
+        const dateStr = format(d, "yyyy-MM-dd");
+        if (!byDay[dateStr]) byDay[dateStr] = { revenue: 0, reservations: 0 };
+        byDay[dateStr].revenue += dailyRevenue;
+        if (i === 0) byDay[dateStr].reservations += 1;
+      }
+    });
+    return byDay;
+  };
+
+  // Dados para Forecast vs Actual: Realizado (período atual) vs Ano anterior (mesmo período)
+  const forecastVsActualData = useMemo(() => {
+    const filter = { category: selectedCategory, plan: selectedPlan };
+    const thisYearByDay = buildRevenueByDay(reservationsData || [], filter);
+    const lastYearByDay = buildRevenueByDay(reservationsDataLastYear || [], filter);
+
+    const days = eachDayOfInterval({ start: dateRange.start, end: dateRange.end });
+    return days.map((day) => {
+      const fullDate = format(day, "yyyy-MM-dd");
+      const lastYearDate = format(subYears(day, 1), "yyyy-MM-dd");
+      const actual = thisYearByDay[fullDate] || { revenue: 0, reservations: 0 };
+      const forecast = lastYearByDay[lastYearDate] || { revenue: 0, reservations: 0 };
+      return {
+        dateLabel: format(day, "dd/MM", { locale: ptBR }),
+        fullDate,
+        actualRevenue: actual.revenue,
+        actualReservations: actual.reservations,
+        forecastRevenue: forecast.revenue,
+        forecastReservations: forecast.reservations,
+      };
+    });
+  }, [reservationsData, reservationsDataLastYear, dateRange.start, dateRange.end, selectedCategory, selectedPlan]);
+
+  const forecastVsActualSummary = useMemo(() => {
+    const totalActual = forecastVsActualData.reduce((s, row) => s + row.actualRevenue, 0);
+    const totalForecast = forecastVsActualData.reduce((s, row) => s + row.forecastRevenue, 0);
+    const variation = totalForecast > 0 ? ((totalActual - totalForecast) / totalForecast) * 100 : 0;
+    return { totalActual, totalForecast, variation };
+  }, [forecastVsActualData]);
 
   if (reservationsLoading) {
     return <div className="text-center p-8">Carregando analytics...</div>;
@@ -1223,30 +1305,33 @@ export const RateAnalyticsView = ({
             </Card>
 
             {/* Performance por Plano */}
-            <Card className="p-6">
+            <Card className="p-6 overflow-hidden">
               <h3 className="font-semibold text-gray-900 mb-4">Performance por Plano Tarifário</h3>
               {metrics && metrics.revenueByPlan.length > 0 ? (
-                <div className="space-y-4">
-                  {metrics.revenueByPlan.map((plan, idx) => (
-                    <div key={idx}>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span className="text-gray-600">{plan.name}</span>
-                        <span className="font-semibold text-gray-900">{formatCurrency(plan.revenue)}</span>
+                <div className="space-y-4 min-w-0">
+                  {(() => {
+                    const maxRevenue = Math.max(...metrics.revenueByPlan.map((p) => p.revenue), 1);
+                    return metrics.revenueByPlan.map((plan, idx) => (
+                      <div key={idx} className="min-w-0">
+                        <div className="flex justify-between items-baseline gap-2 text-sm mb-1">
+                          <span className="text-gray-600 truncate">{plan.name}</span>
+                          <span className="font-semibold text-gray-900 shrink-0">{formatCurrency(plan.revenue)}</span>
+                        </div>
+                        <div className="w-full min-w-0 bg-gray-200 rounded-full h-2 overflow-hidden">
+                          <div
+                            className="bg-blue-600 h-2 rounded-full max-w-full"
+                            style={{
+                              width: `${Math.min((plan.revenue / maxRevenue) * 100, 100)}%`,
+                            }}
+                          />
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-500 mt-1">
+                          <span>{plan.reservations} reservas</span>
+                          <span>ADR: {formatCurrency(plan.adr)}</span>
+                        </div>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div
-                          className="bg-blue-600 h-2 rounded-full"
-                          style={{
-                            width: `${(plan.revenue / (metrics.revenueByPlan[0]?.revenue || 1)) * 100}%`,
-                          }}
-                        ></div>
-                      </div>
-                      <div className="flex justify-between text-xs text-gray-500 mt-1">
-                        <span>{plan.reservations} reservas</span>
-                        <span>ADR: {formatCurrency(plan.adr)}</span>
-                      </div>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               ) : (
                 <div className="h-300 flex items-center justify-center text-gray-500">
@@ -1319,16 +1404,74 @@ export const RateAnalyticsView = ({
 
         <TabsContent value="forecast" className="space-y-4">
           <Card className="p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">Forecast vs Actual</h3>
-            <div className="h-400 flex items-center justify-center text-gray-500">
-              <div className="text-center">
-                <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400" />
-                <div>Gráfico de comparação Forecast vs Actual seria renderizado aqui</div>
-                <p className="text-sm text-gray-400 mt-2">
-                  Esta funcionalidade requer dados históricos e modelos preditivos
-                </p>
+            <h3 className="font-semibold text-gray-900 mb-2">Forecast vs Actual</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Comparação da receita realizada no período com o mesmo período do ano anterior (baseline).
+            </p>
+            {forecastVsActualData.length > 0 ? (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                  <div className="rounded-lg border bg-muted/30 p-4">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Realizado</p>
+                    <p className="text-xl font-bold text-gray-900 mt-1">{formatCurrency(forecastVsActualSummary.totalActual)}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Receita no período selecionado</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-4">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Ano anterior</p>
+                    <p className="text-xl font-bold text-gray-900 mt-1">{formatCurrency(forecastVsActualSummary.totalForecast)}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Mesmo período, ano passado</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-4">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Variação</p>
+                    <p className={cn(
+                      "text-xl font-bold mt-1",
+                      forecastVsActualSummary.variation > 0 ? "text-green-600" : forecastVsActualSummary.variation < 0 ? "text-red-600" : "text-gray-900"
+                    )}>
+                      {forecastVsActualSummary.variation > 0 ? "+" : ""}{forecastVsActualSummary.variation.toFixed(1)}%
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Realizado vs ano anterior</p>
+                  </div>
+                </div>
+                <div className="h-[400px] w-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart
+                      data={forecastVsActualData}
+                      margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="dateLabel" tick={{ fontSize: 11 }} />
+                      <YAxis tickFormatter={(v) => `R$${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
+                      <Tooltip
+                        formatter={(value: number) => formatCurrency(value)}
+                        labelFormatter={(label) => `Data: ${label}`}
+                        content={({ active, payload, label }) => {
+                          if (!active || !payload?.length) return null;
+                          const row = forecastVsActualData.find((d) => d.dateLabel === label);
+                          return (
+                            <div className="rounded-lg border bg-background p-3 shadow-md text-sm">
+                              <p className="font-medium mb-2">{label}</p>
+                              <p className="text-blue-600">Realizado: {formatCurrency(row?.actualRevenue ?? 0)}</p>
+                              <p className="text-slate-500">Ano anterior: {formatCurrency(row?.forecastRevenue ?? 0)}</p>
+                            </div>
+                          );
+                        }}
+                      />
+                      <Legend />
+                      <Bar dataKey="actualRevenue" name="Realizado" fill="#3B82F6" radius={[2, 2, 0, 0]} />
+                      <Bar dataKey="forecastRevenue" name="Ano anterior" fill="#94A3B8" radius={[2, 2, 0, 0]} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-gray-500">
+                <div className="text-center">
+                  <BarChart3 className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                  <p>Nenhum dado no período selecionado.</p>
+                  <p className="text-sm text-gray-400 mt-1">Altere o período no seletor de datas para comparar realizado vs ano anterior.</p>
+                </div>
               </div>
-            </div>
+            )}
           </Card>
         </TabsContent>
       </Tabs>

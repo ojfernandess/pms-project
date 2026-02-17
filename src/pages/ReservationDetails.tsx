@@ -59,15 +59,19 @@ import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { logActivity } from "@/lib/activityLogger";
+import { recordProcessedRefund } from "@/services/financial/refundService";
 import { useActivityLogs, ActivityLog } from "@/hooks/useActivityLogs";
 import { Activity, Clock as ClockIcon } from "lucide-react";
 import { ManualCheckinDialog } from "@/components/reservations/ManualCheckinDialog";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 
 const ReservationDetails = () => {
-  const { reservationCode } = useParams<{ reservationCode: string }>();
+  const { reservationCode } = useParams<{ establishmentId?: string; reservationCode?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { selectedEstablishment } = useEstablishment();
   const [currentStep, setCurrentStep] = useState(1);
   const [isBasicInfoOpen, setIsBasicInfoOpen] = useState(false);
   const { cancelReservation, updateReservation, confirmPreregistration } = useReservations();
@@ -972,6 +976,32 @@ const ReservationDetails = () => {
         newPaymentStatus = "partial";
       }
 
+      // Registrar em financial_refunds ANTES de deletar o pagamento (para exibir na aba Estornos)
+      // Usar sempre UUID: reservation.establishment_id, contexto ou localStorage (a URL tem numeric_id, não UUID)
+      const establishmentId = reservation.establishment_id ?? selectedEstablishment?.id ?? getSelectedEstablishmentId();
+      if (establishmentId) {
+        const refundResult = await recordProcessedRefund({
+          establishment_id: establishmentId,
+          payment_id: paymentToRefund.id,
+          reservation_id: reservation.id,
+          amount: paymentAmount,
+          reason: `Estorno imediato - reserva ${reservation.reservation_code || reservation.id.substring(0, 8)}`,
+          notes: paymentToRefund.notes || undefined,
+          metadata: {
+            reservation_code: reservation.reservation_code,
+            payment_method: paymentToRefund.payment_method,
+            payment_date: paymentToRefund.payment_date,
+          },
+        });
+        if (!refundResult.success) {
+          console.error("Erro ao registrar estorno no financeiro:", refundResult.error);
+          toast.error(`Estorno realizado, mas não foi possível registrar no Financeiro: ${refundResult.error}`);
+        }
+      } else {
+        console.error("establishment_id não encontrado na reserva, URL ou contexto");
+        toast.error("Estorno realizado, mas não foi possível registrar no Financeiro: establishment não identificado.");
+      }
+
       // Remover o pagamento
       const { error: deleteError } = await supabase
         .from("payments")
@@ -1037,6 +1067,7 @@ const ReservationDetails = () => {
       queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
       queryClient.invalidateQueries({ queryKey: ["reservation_service_fees", reservation.id] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
+      queryClient.invalidateQueries({ queryKey: ["refunds"] });
       
       // Refetch para atualizar os dados imediatamente
       await Promise.all([

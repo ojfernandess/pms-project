@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Plus, Edit, Trash2, Eye, Search, HelpCircle } from "lucide-react";
+import { Plus, Edit, Trash2, Eye, Search, HelpCircle, RefreshCw } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -46,6 +46,7 @@ export const RatePlansView = ({
   const [categoriesMap, setCategoriesMap] = useState<Record<string, any[]>>({});
   const [basePlansMap, setBasePlansMap] = useState<Record<string, any>>({});
   const [searchTerm, setSearchTerm] = useState("");
+  const [detailsLoading, setDetailsLoading] = useState(true);
   const { policies } = useCancellationPolicies();
 
   // Buscar categorias
@@ -69,8 +70,11 @@ export const RatePlansView = ({
   useEffect(() => {
     const loadPlanData = async () => {
       const planIds = ratePlans.map(p => p.id);
-      if (planIds.length === 0) return;
-
+      if (planIds.length === 0) {
+        setDetailsLoading(false);
+        return;
+      }
+      setDetailsLoading(true);
       try {
         // Buscar políticas de cancelamento
         const { data: plansData } = await supabase
@@ -127,6 +131,8 @@ export const RatePlansView = ({
         setCategoriesMap(categoriesMap);
       } catch (error) {
         console.error("Erro ao carregar dados dos planos:", error);
+      } finally {
+        setDetailsLoading(false);
       }
     };
 
@@ -162,8 +168,37 @@ export const RatePlansView = ({
     plan.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  if (isLoading) {
-    return <div className="text-center p-8">Carregando planos tarifários...</div>;
+  const showingLoading = isLoading || (ratePlans.length > 0 && detailsLoading);
+  if (showingLoading) {
+    return (
+      <div className="space-y-4 animate-in fade-in duration-300">
+        <div className="flex justify-between items-center">
+          <div className="h-8 w-48 rounded-md bg-muted/50 animate-pulse" />
+          <div className="h-10 w-40 rounded-md bg-muted/50 animate-pulse" />
+        </div>
+        <div className="flex gap-2">
+          <div className="h-10 flex-1 rounded-md bg-muted/50 animate-pulse" />
+          <div className="h-10 w-24 rounded-md bg-muted/50 animate-pulse" />
+        </div>
+        <Card className="p-6">
+          <div className="space-y-4">
+            <div className="h-10 rounded-md bg-muted/50 animate-pulse w-full" />
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="flex gap-4">
+                <div className="h-10 flex-1 rounded-md bg-muted/50 animate-pulse" />
+                <div className="h-10 flex-1 rounded-md bg-muted/50 animate-pulse" />
+                <div className="h-10 w-24 rounded-md bg-muted/50 animate-pulse" />
+                <div className="h-10 w-24 rounded-md bg-muted/50 animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </Card>
+        <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+          <RefreshCw className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Carregando planos tarifários...</span>
+        </div>
+      </div>
+    );
   }
 
   return (

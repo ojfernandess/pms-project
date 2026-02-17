@@ -28,7 +28,7 @@ export const calculateReservationTotal = (
   return basePrice * nights;
 };
 
-import { checkDateAvailabilityForSale, checkPeriodAvailabilityForSale, checkInventoryAvailability } from "./ariAvailabilityUtils";
+import { checkDateAvailabilityForSale, checkPeriodAvailabilityForSale, checkInventoryAvailability, parseLocalDate } from "./ariAvailabilityUtils";
 
 /**
  * Busca quartos disponíveis para um período
@@ -65,8 +65,8 @@ export const getAvailableRooms = async (
     const periodCheck = await checkPeriodAvailabilityForSale(
       establishmentId,
       categoryId,
-      new Date(checkinDate),
-      new Date(checkoutDate),
+      parseLocalDate(checkinDate),
+      parseLocalDate(checkoutDate),
       'booking_engine'
     );
 

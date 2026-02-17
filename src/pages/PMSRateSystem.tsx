@@ -1,8 +1,16 @@
 import { useState, useMemo, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar, DollarSign, Settings, BarChart3, Users, RefreshCw, AlertCircle, TrendingUp, Package, Lock, Plus, Edit, Trash2, Copy, Download, Upload, Search, Filter, Eye, Check, X, Tag } from "lucide-react";
+import { Calendar, DollarSign, Settings, BarChart3, LineChart, Users, RefreshCw, AlertCircle, TrendingUp, Package, Lock, Plus, Edit, Trash2, Copy, Download, Upload, Search, Filter, Eye, Check, X, Tag, ChevronDown, ShieldCheck } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -14,6 +22,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { checkEstablishmentFeatureAccess } from "@/lib/featureAccess";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { cn } from "@/lib/utils";
 import { format, addDays, eachDayOfInterval, startOfDay, isSameDay, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { formatCurrency } from "@/lib/reservationUtils";
@@ -93,31 +102,51 @@ const PMSRateSystem = () => {
       if (!establishmentId) return [];
 
       return getRequestQueue().addRequest(async () => {
-        // Buscar quartos com suas categorias (paginado)
-        const { data: roomsData, error: roomsError } = await supabase
-          .from("rooms")
-          .select(`*, room_categories (*)`)
-          .eq("establishment_id", establishmentId)
-          .order("room_number")
-          .range(0, 999);
+        const PAGE_SIZE = 1000;
 
-        if (roomsError) {
-          console.error("❌ Erro ao buscar quartos:", roomsError);
-          throw roomsError;
-        }
+        // Buscar quartos com suas categorias (paginado em loop para > 1000)
+        const allRooms: any[] = [];
+        let roomsFrom = 0;
+        let roomsHasMore = true;
+        while (roomsHasMore) {
+          const { data: roomsChunk, error: roomsError } = await supabase
+            .from("rooms")
+            .select(`*, room_categories (*)`)
+            .eq("establishment_id", establishmentId)
+            .order("room_number")
+            .range(roomsFrom, roomsFrom + PAGE_SIZE - 1);
 
-        // Buscar categorias (paginado)
-        const { data: categoriesData, error: categoriesError } = await supabase
-          .from("room_categories")
-          .select("*")
-          .eq("establishment_id", establishmentId)
-          .order("name")
-          .range(0, 999);
-      
-        if (categoriesError) {
-          console.error("❌ Erro ao buscar categorias:", categoriesError);
-          throw categoriesError;
+          if (roomsError) {
+            console.error("❌ Erro ao buscar quartos:", roomsError);
+            throw roomsError;
+          }
+          allRooms.push(...(roomsChunk || []));
+          roomsHasMore = (roomsChunk?.length ?? 0) >= PAGE_SIZE;
+          roomsFrom += PAGE_SIZE;
         }
+        const roomsData = allRooms;
+
+        // Buscar categorias (paginado em loop para > 1000)
+        const allCategories: any[] = [];
+        let categoriesFrom = 0;
+        let categoriesHasMore = true;
+        while (categoriesHasMore) {
+          const { data: categoriesChunk, error: categoriesError } = await supabase
+            .from("room_categories")
+            .select("*")
+            .eq("establishment_id", establishmentId)
+            .order("name")
+            .range(categoriesFrom, categoriesFrom + PAGE_SIZE - 1);
+
+          if (categoriesError) {
+            console.error("❌ Erro ao buscar categorias:", categoriesError);
+            throw categoriesError;
+          }
+          allCategories.push(...(categoriesChunk || []));
+          categoriesHasMore = (categoriesChunk?.length ?? 0) >= PAGE_SIZE;
+          categoriesFrom += PAGE_SIZE;
+        }
+        const categoriesData = allCategories;
 
         // Agrupar quartos por categoria
         const categoriesMap = new Map();
@@ -274,49 +303,72 @@ const PMSRateSystem = () => {
           </div>
         </div>
 
-        {/* Navigation Tabs */}
+        {/* Navigation Tabs — Estrutura alinhada a melhores práticas PMS: operação primeiro, depois configuração */}
         <div className="px-6">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className={`grid w-full ${hasDynamicPricingAccess ? 'grid-cols-9' : 'grid-cols-8'}`}>
-              <TabsTrigger 
-                value="pricing-dashboard" 
-                className="gap-2 data-[state=active]:bg-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md"
-              >
-                <DollarSign className="w-4 h-4" />
-                Dashboard de Preços
+            <TabsList className="h-auto flex flex-wrap gap-1 bg-muted/60 p-1.5 w-full justify-start">
+              <TabsTrigger value="pricing-dashboard" className="gap-2 data-[state=active]:bg-purple-600 data-[state=active]:text-white data-[state=active]:shadow-sm">
+                <DollarSign className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">Dashboard</span>
               </TabsTrigger>
               <TabsTrigger value="calendar" className="gap-2">
-                <Calendar className="w-4 h-4" />
+                <Calendar className="w-4 h-4 shrink-0" />
                 Mapa de Tarifas
               </TabsTrigger>
               <TabsTrigger value="ari-grid" className="gap-2">
-                <BarChart3 className="w-4 h-4" />
+                <BarChart3 className="w-4 h-4 shrink-0" />
                 Grade ARI
               </TabsTrigger>
               <TabsTrigger value="rateplans" className="gap-2">
-                <Package className="w-4 h-4" />
-                Planos Tarifários
+                <Package className="w-4 h-4 shrink-0" />
+                Planos
               </TabsTrigger>
-              <TabsTrigger value="plantypes" className="gap-2">
-                <Tag className="w-4 h-4" />
-                Tipos de Planos
-              </TabsTrigger>
-              <TabsTrigger value="cancellation-policies" className="gap-2">
-                <Settings className="w-4 h-4" />
-                Políticas de Cancelamento
-              </TabsTrigger>
-              {hasDynamicPricingAccess && (
-              <TabsTrigger value="dynamic" className="gap-2">
-                <TrendingUp className="w-4 h-4" />
-                Regras Dinâmicas
-              </TabsTrigger>
-              )}
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className={cn(
+                      "gap-2 h-9 px-3 rounded-md text-sm font-medium transition-colors",
+                      ["plantypes", "cancellation-policies", "dynamic"].includes(activeTab)
+                        ? "bg-background text-foreground shadow-sm"
+                        : "hover:bg-muted hover:text-foreground"
+                    )}
+                  >
+                    <Settings className="w-4 h-4 shrink-0" />
+                    Configuração
+                    <ChevronDown className="w-4 h-4 shrink-0 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56">
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">Tarifário e políticas</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setActiveTab("plantypes")} className="gap-2">
+                    <Tag className="w-4 h-4" />
+                    Tipos de Planos
+                    {activeTab === "plantypes" && <Check className="w-4 h-4 ml-auto" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("cancellation-policies")} className="gap-2">
+                    <ShieldCheck className="w-4 h-4" />
+                    Políticas de Cancelamento
+                    {activeTab === "cancellation-policies" && <Check className="w-4 h-4 ml-auto" />}
+                  </DropdownMenuItem>
+                  {hasDynamicPricingAccess && (
+                    <DropdownMenuItem onClick={() => setActiveTab("dynamic")} className="gap-2">
+                      <TrendingUp className="w-4 h-4" />
+                      Regras Dinâmicas
+                      {activeTab === "dynamic" && <Check className="w-4 h-4 ml-auto" />}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
               <TabsTrigger value="restrictions" className="gap-2">
-                <Lock className="w-4 h-4" />
+                <Lock className="w-4 h-4 shrink-0" />
                 Restrições
               </TabsTrigger>
               <TabsTrigger value="analytics" className="gap-2">
-                <BarChart3 className="w-4 h-4" />
+                <LineChart className="w-4 h-4 shrink-0" />
                 Analytics
               </TabsTrigger>
             </TabsList>

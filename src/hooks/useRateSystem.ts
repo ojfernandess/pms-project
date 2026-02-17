@@ -89,6 +89,27 @@ export interface RateRestriction {
 export interface UseRateSystemOptions {
   /** Período visível para fetch otimizado (rates-map enriquece só esse intervalo) */
   dateRange?: { start: Date; end: Date };
+  /** Usar rate_calendar_summary (MV) para leituras - melhora performance em cenários complexos */
+  useMaterializedView?: boolean;
+}
+
+const USE_RATE_CALENDAR_SUMMARY =
+  import.meta.env.VITE_USE_RATE_CALENDAR_SUMMARY === "true" || import.meta.env.VITE_USE_RATE_CALENDAR_SUMMARY === "1";
+
+function mapMvRowToEntry(row: Record<string, unknown>): RateCalendarEntry {
+  return {
+    id: row.id as string,
+    establishment_id: row.establishment_id as string,
+    pricing_plan_id: (row.rate_plan_id ?? row.pricing_plan_id) as string,
+    category_id: row.category_id as string,
+    date: row.date as string,
+    base_price: Number(row.final_price ?? row.base_price ?? 0),
+    projected_occupancy: row.projected_occupancy as number | undefined,
+    pickup_rate: row.pickup_rate as number | undefined,
+    adult_price: row.adult_price as number | undefined,
+    child_price: row.child_price as number | undefined,
+    occupancy_percentage: row.occupancy_percentage as number | undefined,
+  };
 }
 
 export const useRateSystem = (options?: UseRateSystemOptions) => {
@@ -406,23 +427,29 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       const queue = getRequestQueue();
       const PAGE_SIZE = 1000;
 
+      const useMv = options?.useMaterializedView ?? USE_RATE_CALENDAR_SUMMARY;
+      const tableName = useMv ? "rate_calendar_summary" : "rate_calendar";
+
       const fetchChunk = async (range: { start: Date; end: Date }): Promise<RateCalendarEntry[]> => {
         const cached = getFromCache<RateCalendarEntry[]>(establishmentId, range);
         if (cached) return cached;
 
         const startStr = format(range.start, "yyyy-MM-dd");
         const endStr = format(range.end, "yyyy-MM-dd");
-        const apiData = await fetchRatesMap(establishmentId, { startDate: startStr, endDate: endStr });
-        if (apiData?.rateCalendar?.length !== undefined) {
-          setInCache(establishmentId, range, apiData.rateCalendar as RateCalendarEntry[]);
-          return apiData.rateCalendar as RateCalendarEntry[];
+        if (!useMv) {
+          const apiData = await fetchRatesMap(establishmentId, { startDate: startStr, endDate: endStr });
+          if (apiData?.rateCalendar?.length !== undefined) {
+            setInCache(establishmentId, range, apiData.rateCalendar as RateCalendarEntry[]);
+            return apiData.rateCalendar as RateCalendarEntry[];
+          }
         }
         const allRows: RateCalendarEntry[] = [];
         let from = 0;
         let hasMore = true;
         while (hasMore) {
-          const { data, error } = await supabase
-            .from("rate_calendar")
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rate_calendar_summary MV existe mas não está nos tipos gerados
+          const { data, error } = await (supabase as any)
+            .from(tableName)
             .select("*")
             .eq("establishment_id", establishmentId)
             .gte("date", startStr)
@@ -430,8 +457,9 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
             .order("date", { ascending: true })
             .range(from, from + PAGE_SIZE - 1);
           if (error) throw error;
-          const chunk = (data || []) as RateCalendarEntry[];
-          allRows.push(...chunk);
+          const chunk = (data || []) as Record<string, unknown>[];
+          const mapped = useMv ? chunk.map(mapMvRowToEntry) : (chunk as RateCalendarEntry[]);
+          allRows.push(...mapped);
           hasMore = chunk.length >= PAGE_SIZE;
           from += PAGE_SIZE;
         }
@@ -579,6 +607,15 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       invalidateCalendarCache(getEstablishmentId() ?? undefined);
       debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
+      if (USE_RATE_CALENDAR_SUMMARY) {
+        void (async () => {
+          try {
+            await (supabase.rpc as (name: string) => Promise<unknown>)("refresh_rate_calendar_summary");
+          } catch (err) {
+            console.warn("[useRateSystem] refresh_rate_calendar_summary falhou:", err);
+          }
+        })();
+      }
       const skipToast = !Array.isArray(variables) && (variables as { skipSuccessToast?: boolean }).skipSuccessToast;
       const updateSource = Array.isArray(variables) ? 'manual' : (variables as { update_source?: RateUpdateSource }).update_source ?? 'manual';
       if (updateSource === 'manual' && !skipToast) {
@@ -702,7 +739,17 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       return data;
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
+      if (USE_RATE_CALENDAR_SUMMARY) {
+        void (async () => {
+          try {
+            await (supabase.rpc as (name: string) => Promise<unknown>)("refresh_rate_calendar_summary");
+          } catch (err) {
+            console.warn("[useRateSystem] refresh_rate_calendar_summary falhou:", err);
+          }
+        })();
+      }
       toast.success("Tarifas atualizadas com sucesso!");
     },
     onError: (error: any) => {
@@ -1293,7 +1340,9 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
 
     // Limite de intervalo
     calendarExceedsLimit,
+    calendarExceedsMaxAllowed,
     maxCalendarDays: MAX_DAYS_PER_REQUEST,
+    maxTotalDaysAllowed: MAX_TOTAL_DAYS_ALLOWED,
   };
 };
 

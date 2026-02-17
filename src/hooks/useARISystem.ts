@@ -203,14 +203,14 @@ export const useARISystem = () => {
 
       const dateStr = format(date, 'yyyy-MM-dd');
 
-      // Verificar se já existe
+      // Verificar se já existe (maybeSingle evita 406 quando não há registro)
       const { data: existing } = await supabase
         .from('rate_sales_status')
         .select('id')
         .eq('establishment_id', selectedEstablishment.id)
         .eq('category_id', categoryId)
         .eq('date', dateStr)
-        .single();
+        .maybeSingle();
 
       if (existing) {
         // Atualizar
@@ -344,14 +344,14 @@ export const useARISystem = () => {
 
       const dateStr = format(date, 'yyyy-MM-dd');
 
-      // Verificar se já existe
+      // Verificar se já existe (maybeSingle evita 406 quando não há registro)
       const { data: existing } = await supabase
         .from('rate_inventory')
         .select('id')
         .eq('establishment_id', selectedEstablishment.id)
         .eq('category_id', categoryId)
         .eq('date', dateStr)
-        .single();
+        .maybeSingle();
 
       const updateData: any = {};
       if (available_rooms !== undefined) updateData.available_rooms = available_rooms;
@@ -374,7 +374,7 @@ export const useARISystem = () => {
           .from('room_categories')
           .select('id')
           .eq('id', categoryId)
-          .single();
+          .maybeSingle();
 
         if (!category) throw new Error('Categoria não encontrada');
 

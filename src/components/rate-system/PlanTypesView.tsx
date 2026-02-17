@@ -2,9 +2,14 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Edit, Trash2 } from "lucide-react";
+import { Plus, Edit, Trash2, HelpCircle } from "lucide-react";
 import { usePlanTypes, PlanType } from "@/hooks/usePlanTypes";
 import { PlanTypeDialog } from "./PlanTypeDialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -68,7 +73,34 @@ export const PlanTypesView = () => {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Tipos de Planos Tarifários</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold text-gray-900">Tipos de Planos Tarifários</h2>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <HelpCircle className="h-5 w-5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-96 p-4" align="start">
+                <h4 className="font-semibold text-sm mb-2">O que são Tipos de Planos Tarifários?</h4>
+                <p className="text-sm text-muted-foreground mb-3">
+                  São categorias que agrupam seus planos tarifários (ex: Reembolsável, Não Reembolsável, Group, Standard).
+                  Servem para organizar, filtrar e aplicar ajustes em lote no sistema tarifário.
+                </p>
+                <h4 className="font-semibold text-sm mb-2">Como usar?</h4>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Crie os tipos que fizerem sentido (ex: &quot;Flexível&quot;, &quot;Promocional&quot;, &quot;Corporativo&quot;).
+                  Ao criar ou editar um <strong>Plano de Tarifas</strong>, associe-o a um tipo. No <strong>Dashboard de Preços</strong>
+                  você pode aplicar ajustes percentuais por tipo de plano (todos os planos daquele tipo recebem o mesmo ajuste).
+                </p>
+                <h4 className="font-semibold text-sm mb-2">Para que serve?</h4>
+                <p className="text-sm text-muted-foreground">
+                  Organização dos planos, relatórios por tipo, e aplicação rápida de descontos ou acréscimos por categoria
+                  (ex: +10% em todos os planos &quot;Não Reembolsável&quot;) no mapa de tarifas e no dashboard.
+                </p>
+              </PopoverContent>
+            </Popover>
+          </div>
           <p className="text-sm text-gray-600 mt-1">
             Gerencie os tipos de planos tarifários (Group, Standard, etc)
           </p>

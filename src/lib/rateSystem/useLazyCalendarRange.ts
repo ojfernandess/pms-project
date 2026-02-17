@@ -27,6 +27,8 @@ export interface UseLazyCalendarRangeOptions {
   initialStart: Date;
   /** Extensão total do calendário em dias (ex: 365) */
   totalCalendarDays: number;
+  /** Dias iniciais a carregar (default: min(31, totalCalendarDays)) */
+  initialWindowDays?: number;
   /** Callback chamado quando o usuário precisa carregar mais à direita */
   onLoadMoreRight?: (start: Date, end: Date) => void;
   /** Callback chamado quando o usuário precisa carregar mais à esquerda */
@@ -40,15 +42,21 @@ export interface UseLazyCalendarRangeOptions {
 export function useLazyCalendarRange({
   initialStart,
   totalCalendarDays,
+  initialWindowDays: initialWindowDaysProp,
   onLoadMoreRight,
   onLoadMoreLeft,
 }: UseLazyCalendarRangeOptions): [
   LazyCalendarRangeState,
   { loadRight: () => void; loadLeft: () => void; reset: () => void }
 ] {
+  const initialWindowDays = Math.min(
+    initialWindowDaysProp ?? INITIAL_WINDOW_DAYS,
+    totalCalendarDays,
+    INITIAL_WINDOW_DAYS
+  );
   const [loadedStart, setLoadedStart] = useState(() => startOfDay(initialStart));
   const [loadedEnd, setLoadedEnd] = useState(() =>
-    addDays(startOfDay(initialStart), INITIAL_WINDOW_DAYS - 1)
+    addDays(startOfDay(initialStart), initialWindowDays - 1)
   );
 
   const calendarEnd = useMemo(
@@ -83,9 +91,10 @@ export function useLazyCalendarRange({
   }, [hasMoreLeft, onLoadMoreLeft, loadedStart, calendarStart]);
 
   const reset = useCallback(() => {
-    setLoadedStart(startOfDay(initialStart));
-    setLoadedEnd(addDays(startOfDay(initialStart), INITIAL_WINDOW_DAYS - 1));
-  }, [initialStart]);
+    const start = startOfDay(initialStart);
+    setLoadedStart(start);
+    setLoadedEnd(addDays(start, initialWindowDays - 1));
+  }, [initialStart, initialWindowDays]);
 
   const state: LazyCalendarRangeState = {
     loadedStart,

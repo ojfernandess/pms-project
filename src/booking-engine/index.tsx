@@ -2080,6 +2080,9 @@ const BookingEnginePage = () => {
           return;
         }
 
+        // Verificar rate_sales_status (tarifa fechada) antes de calcular preços
+        const { checkPeriodAvailabilityForSale } = await import("@/lib/ariAvailabilityUtils");
+
         // Preparar requisições (mesma lógica do mapa de tarifas e grid ARI: calculate_rate_price)
         // Usa planos de pricingPlansByCategory quando disponível, senão plan1/plan2 de hotel_settings
         const priceRequests: Array<{
@@ -2095,6 +2098,25 @@ const BookingEnginePage = () => {
 
         for (const cat of roomCategories) {
           const establishmentId = cat.establishment_id;
+
+          // Se há datas selecionadas, verificar se período está aberto para venda (rate_sales_status)
+          if (checkin && checkout && checkin < checkout) {
+            const [cy, cm, cd] = checkin.split("-").map(Number);
+            const [coy, com, cod] = checkout.split("-").map(Number);
+            const periodCheck = await checkPeriodAvailabilityForSale(
+              establishmentId,
+              cat.id,
+              new Date(cy, cm - 1, cd),
+              new Date(coy, com - 1, cod),
+              "booking_engine"
+            );
+            if (!periodCheck.available) {
+              pricesPlan1[cat.id] = null;
+              pricesPlan2[cat.id] = null;
+              continue; // Período fechado - não calcular preço
+            }
+          }
+
           const settings = hotelSettingsMap[establishmentId];
           const plan1Id = settings?.public_pricing_plan_1_id || null;
           const plan2Id = settings?.public_pricing_plan_2_id || null;

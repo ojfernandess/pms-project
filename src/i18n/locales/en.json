@@ -663,6 +663,8 @@
     "onlyRoomsLeft": "Only {count} rooms left!",
     "soldOut": "Sold Out",
     "noAvailability": "Unavailable",
+    "periodClosedForSale": "The selected dates are closed for reservations. Please select other dates.",
+    "minStayRequired": "The minimum stay to reserve is {{minNights}}. Please select a period of at least {{minNights}} {{noites}}.",
     "noAvailabilityForDates": "There is not enough availability for the selected dates. Some selected categories do not have available rooms for the requested period.",
     "noRoomsAvailableForDates": "No rooms available for the selected dates. Please select other dates.",
     "insufficientRoomsForDates": "There are not enough rooms available for the selected dates. Available: {available}, Required: {required}. Please select other dates or reduce the number of rooms.",

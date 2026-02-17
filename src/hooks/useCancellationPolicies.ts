@@ -1,7 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { calculateNights } from "@/lib/reservationUtils";
 import { toast } from "sonner";
+
+export interface PolicyStats {
+  totalNights: number;
+  totalRevenue: number;
+}
 
 export interface CancellationPolicy {
   id: string;
@@ -19,15 +26,12 @@ export interface CancellationPolicy {
 
 export const useCancellationPolicies = () => {
   const queryClient = useQueryClient();
-
-  const getEstablishmentId = (): string | null => {
-    return getSelectedEstablishmentId();
-  };
+  const { selectedEstablishment } = useEstablishment();
+  const establishmentId = selectedEstablishment?.id ?? getSelectedEstablishmentId();
 
   const policiesQuery = useQuery({
-    queryKey: ["cancellation_policies", getEstablishmentId()],
+    queryKey: ["cancellation_policies", establishmentId],
     queryFn: async () => {
-      const establishmentId = getEstablishmentId();
       if (!establishmentId) return [];
 
       const { data, error } = await supabase
@@ -39,7 +43,42 @@ export const useCancellationPolicies = () => {
       if (error) throw error;
       return (data || []) as CancellationPolicy[];
     },
+    enabled: !!establishmentId,
+    refetchOnMount: "always",
   });
+
+  // Estatísticas por política: diárias e faturamento de reservas que usam planos com essa política
+  const statsQuery = useQuery({
+    queryKey: ["cancellation_policy_stats", establishmentId],
+    queryFn: async (): Promise<Record<string, PolicyStats>> => {
+      if (!establishmentId) return {};
+      const { data: reservations, error } = await supabase
+        .from("reservations")
+        .select("id, checkin_date, checkout_date, total_amount, pricing_plans(cancellation_policy_id)")
+        .eq("establishment_id", establishmentId)
+        .in("status", ["confirmed", "checkedin", "checkedout"])
+        .not("pricing_plan_id", "is", null);
+
+      if (error) throw error;
+      const byPolicy: Record<string, PolicyStats> = {};
+      for (const r of reservations || []) {
+        const policyId = (r as any).pricing_plans?.cancellation_policy_id ?? null;
+        if (!policyId) continue;
+        if (!byPolicy[policyId]) byPolicy[policyId] = { totalNights: 0, totalRevenue: 0 };
+        const checkin = (r as any).checkin_date;
+        const checkout = (r as any).checkout_date;
+        if (checkin && checkout) {
+          byPolicy[policyId].totalNights += calculateNights(checkin, checkout);
+        }
+        byPolicy[policyId].totalRevenue += Number((r as any).total_amount || 0);
+      }
+      return byPolicy;
+    },
+    enabled: !!establishmentId,
+    refetchOnMount: "always",
+  });
+
+  const policyStats = statsQuery.data ?? {};
 
   const createPolicyMutation = useMutation({
     mutationFn: async (policyData: Omit<CancellationPolicy, "id" | "created_at" | "updated_at">) => {
@@ -114,7 +153,9 @@ export const useCancellationPolicies = () => {
 
   return {
     policies: policiesQuery.data || [],
+    policyStats,
     isLoading: policiesQuery.isLoading,
+    isWaitingEstablishment: !establishmentId,
     error: policiesQuery.error,
     refetch: policiesQuery.refetch,
     createPolicy: createPolicyMutation.mutate,

@@ -35,17 +35,18 @@ import { NoShowProcessor } from "@/components/cancellation/NoShowProcessor";
 import { NoShowSelector } from "@/components/cancellation/NoShowSelector";
 import { NoShowScheduleConfig } from "@/components/cancellation/NoShowScheduleConfig";
 import { useNoShowMigrations } from "@/hooks/useNoShowMigrations";
-import { formatDate } from "@/lib/reservationUtils";
+import { formatDate, formatCurrency } from "@/lib/reservationUtils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const CancellationPolicies = () => {
-  const { policies, isLoading, refetch, deletePolicy } = useCancellationPolicies();
+  const { policies, policyStats, isLoading, isWaitingEstablishment, refetch, deletePolicy } = useCancellationPolicies();
   const { rpcFunctionExists, isLoading: migrationsLoading } = useNoShowMigrations();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedPolicyId, setSelectedPolicyId] = useState<string | undefined>();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [policyToDelete, setPolicyToDelete] = useState<string | null>(null);
   const [selectedPolicyForSimulator, setSelectedPolicyForSimulator] = useState<any>(null);
+  const [policiesTab, setPoliciesTab] = useState("list");
 
   const handleDelete = async () => {
     if (!policyToDelete) return;
@@ -135,9 +136,11 @@ const CancellationPolicies = () => {
         </Button>
       </div>
 
-      {isLoading ? (
+      {(isWaitingEstablishment || isLoading) ? (
         <Card className="p-8 text-center">
-          <p className="text-muted-foreground">Carregando políticas...</p>
+          <p className="text-muted-foreground">
+            {isWaitingEstablishment ? "Selecione um estabelecimento..." : "Carregando políticas..."}
+          </p>
         </Card>
       ) : policies.length === 0 ? (
         <Card className="p-8 text-center">
@@ -153,7 +156,7 @@ const CancellationPolicies = () => {
           </Button>
         </Card>
       ) : (
-        <Tabs defaultValue="list" className="space-y-4">
+        <Tabs value={policiesTab} onValueChange={setPoliciesTab} className="space-y-4">
           <TabsList>
             <TabsTrigger value="list">Lista de Políticas</TabsTrigger>
             <TabsTrigger value="simulator">Simulador</TabsTrigger>
@@ -197,8 +200,8 @@ const CancellationPolicies = () => {
                       )}
                       <div className="text-xs text-muted-foreground">
                         <p>Dados de: {formatDate(policy.created_at)} a {formatDate(policy.updated_at)}</p>
-                        <p>Total de diárias: 0</p>
-                        <p>Faturamento total: R$ 0,00</p>
+                        <p>Total de diárias: {policyStats[policy.id]?.totalNights ?? 0}</p>
+                        <p>Faturamento total: {formatCurrency(policyStats[policy.id]?.totalRevenue ?? 0)}</p>
                       </div>
                     </div>
                     <div className="flex gap-2">
@@ -216,7 +219,10 @@ const CancellationPolicies = () => {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setSelectedPolicyForSimulator(policy)}
+                        onClick={() => {
+                          setSelectedPolicyForSimulator(policy);
+                          setPoliciesTab("simulator");
+                        }}
                       >
                         <HelpCircle className="h-4 w-4 mr-2" />
                         Simular
@@ -240,7 +246,10 @@ const CancellationPolicies = () => {
             {selectedPolicyForSimulator ? (
               <CancellationPolicySimulator 
                 policy={selectedPolicyForSimulator} 
-                onBack={() => setSelectedPolicyForSimulator(null)}
+                onBack={() => {
+                  setSelectedPolicyForSimulator(null);
+                  setPoliciesTab("list");
+                }}
               />
             ) : policies.length > 0 ? (
               <Card className="p-6">

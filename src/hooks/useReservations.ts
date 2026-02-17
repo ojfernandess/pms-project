@@ -8,6 +8,7 @@ import { logActivity, createReservationUpdateDescription } from "@/lib/activityL
 import { useEffect } from "react";
 import { format } from "date-fns";
 import { recalculatePolicyAfterDateChange } from "@/utils/cancellationPolicyDateChange";
+import { recordProcessedRefund } from "@/services/financial/refundService";
 
 type ReservationInsert = TablesInsert<"reservations">;
 type ReservationUpdate = TablesUpdate<"reservations">;
@@ -836,6 +837,44 @@ export const useReservations = () => {
         if (paymentsError) {
           console.error("Erro ao buscar pagamentos:", paymentsError);
         } else if (payments && payments.length > 0) {
+          // Registrar estornos financeiros para cada pagamento antes de remover
+          const establishmentIdForRefund =
+            reservationData.establishment_id || getEstablishmentId();
+
+          if (!establishmentIdForRefund) {
+            console.error(
+              "Não foi possível identificar establishment_id para registrar estornos financeiros da reserva cancelada",
+              { reservationId: id, reservationCode: reservationData.reservation_code }
+            );
+          } else {
+            for (const payment of payments) {
+              const amount = Number(payment.amount || 0);
+              if (!payment.id || !amount) continue;
+
+              const refundResult = await recordProcessedRefund({
+                establishment_id: establishmentIdForRefund,
+                payment_id: payment.id,
+                reservation_id: reservationData.id,
+                amount,
+                reason: reason
+                  ? `Estorno por cancelamento da reserva ${reservationData.reservation_code}: ${reason}`
+                  : `Estorno por cancelamento da reserva ${reservationData.reservation_code}`,
+                metadata: {
+                  cancellation_reason: reason || null,
+                  reservation_code: reservationData.reservation_code,
+                },
+              });
+
+              if (!refundResult.success) {
+                console.error(
+                  "Erro ao registrar estorno financeiro ao cancelar reserva:",
+                  refundResult.error
+                );
+                // Não bloquear o cancelamento; apenas logar o erro
+              }
+            }
+          }
+
           // Remover todos os pagamentos
           const { error: deleteError } = await supabase
             .from("payments")
@@ -909,10 +948,11 @@ export const useReservations = () => {
         }
       }
       
-          queryClient.invalidateQueries({ queryKey: ["reservations"] });
-          queryClient.invalidateQueries({ queryKey: ["rooms"] });
-          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-          queryClient.invalidateQueries({ queryKey: ["reservation_payments"] });
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["reservation_payments"] });
+      queryClient.invalidateQueries({ queryKey: ["refunds"] });
       
       // Criar notificação se for pré-reserva cancelada
       // Usar originalStatus que foi guardado antes do cancelamento
