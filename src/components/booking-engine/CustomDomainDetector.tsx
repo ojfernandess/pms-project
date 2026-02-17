@@ -126,27 +126,13 @@ const CustomDomainDetector = () => {
     );
   }
 
-  // Se for um domínio personalizado, mostrar o booking engine diretamente
+  // Mostrar o motor apenas quando for domínio personalizado configurado (companies ou hotel_settings).
+  // No domínio principal do PMS (ex.: app.agentslabs.cloud), não é custom domain → redirecionar para o dashboard.
   if (isCustomDomain) {
     return <BookingEnginePage />;
   }
 
-  // Se não for domínio personalizado, verificar se é o domínio principal do Vercel
-  // Se não for, pode ser um domínio personalizado que ainda não foi detectado
-  // Nesse caso, mostrar o booking engine mesmo assim (o BookingEnginePage fará a verificação)
-  const isVercelDomain = typeof window !== "undefined" && 
-    (window.location.host.includes("vercel.app") || 
-     window.location.host.includes("localhost") ||
-     window.location.host.includes("127.0.0.1"));
-  
-  if (!isVercelDomain) {
-    // Se não for domínio do Vercel, pode ser um domínio personalizado
-    // Mostrar o booking engine e deixar ele fazer a verificação
-    console.log("[CustomDomainDetector] Domínio não-Vercel detectado, mostrando booking engine:", window.location.host);
-    return <BookingEnginePage />;
-  }
-
-  // Se for domínio do Vercel e não for personalizado, redirecionar para user-dashboard (com proteção de rota)
+  // Não é domínio personalizado do motor: redirecionar para o dashboard do sistema PMS.
   return (
     <ProtectedRoute>
       <Navigate to="/user-dashboard" replace />
