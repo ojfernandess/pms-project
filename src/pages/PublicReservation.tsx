@@ -730,24 +730,9 @@ const PublicReservation = () => {
       }
     }
 
-    // Verificar restrições (min/max stay, CTA, CTD) antes de calcular preço
-    if (planId && checkinDate && checkoutDate && establishment?.id) {
-      const { checkRateRestrictions } = await import("@/lib/ariAvailabilityUtils");
-      const checkin = new Date(checkinDate);
-      const checkout = new Date(checkoutDate);
-      const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
-      const restrictionCheck = await checkRateRestrictions(
-        establishment.id,
-        category.id,
-        planId,
-        checkin,
-        checkout,
-        nights
-      );
-      if (!restrictionCheck.allowed) {
-        return 0; // Plano não disponível por restrições
-      }
-    }
+    // Não zerar o preço por restrições (min/max stay, CTA, CTD) aqui: o resumo usa o mesmo
+    // RPC sem essa checagem, então o card mostraria 0 e o resumo o valor correto. Exibimos
+    // o preço calculado; as restrições são validadas no fluxo de reserva.
 
     // Adultos/crianças por quarto (liga x1/x2/x3/x4 usa ocupação por quarto)
     const categoryCapacity = category?.capacity_adults || 0;

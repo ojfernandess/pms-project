@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { improveSlug, slugFromName } from "@/lib/slugUtils";
 
 export const useEstablishments = (companyId?: string) => {
   const queryClient = useQueryClient();
@@ -33,6 +34,7 @@ export const useEstablishments = (companyId?: string) => {
       type: string;
       is_active?: boolean;
       manager_user_id?: string;
+      slug?: string | null;
     }) => {
       // Buscar usuário logado (será usado como padrão se manager_user_id não for fornecido)
       const { data: { user } } = await supabase.auth.getUser();
@@ -44,7 +46,20 @@ export const useEstablishments = (companyId?: string) => {
       const managerUserId = establishment.manager_user_id || user.id;
 
       // Remover manager_user_id do objeto antes de inserir (não é uma coluna da tabela)
-      const { manager_user_id, ...establishmentData } = establishment;
+      const { manager_user_id, slug: rawSlug, ...rest } = establishment;
+      let slug: string | null = rawSlug?.trim() ? improveSlug(rawSlug) : (establishment.name ? slugFromName(establishment.name) : null) || null;
+      if (slug) {
+        const { data: existing } = await supabase.from("establishments").select("id").eq("slug", slug).maybeSingle();
+        if (existing) {
+          let n = 2;
+          while (true) {
+            const { data: dup } = await supabase.from("establishments").select("id").eq("slug", `${slug}-${n}`).maybeSingle();
+            if (!dup) { slug = `${slug}-${n}`; break; }
+            n++;
+          }
+        }
+      }
+      const establishmentData = { ...rest, slug: slug || null };
 
       const { data, error } = await supabase
         .from("establishments")
@@ -163,6 +178,20 @@ export const useEstablishments = (companyId?: string) => {
 
   const updateEstablishment = useMutation({
     mutationFn: async ({ id, ...updates }: { id: string } & any) => {
+      if (updates.slug !== undefined) {
+        updates.slug = updates.slug?.trim() ? improveSlug(updates.slug) : null;
+        if (updates.slug) {
+          const { data: existing } = await supabase.from("establishments").select("id").eq("slug", updates.slug).neq("id", id).maybeSingle();
+          if (existing) {
+            let n = 2;
+            while (true) {
+              const { data: dup } = await supabase.from("establishments").select("id").eq("slug", `${updates.slug}-${n}`).neq("id", id).maybeSingle();
+              if (!dup) { updates.slug = `${updates.slug}-${n}`; break; }
+              n++;
+            }
+          }
+        }
+      }
       const { data, error } = await supabase
         .from("establishments")
         .update(updates)

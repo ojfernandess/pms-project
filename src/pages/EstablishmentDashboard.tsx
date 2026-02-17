@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { slugFromName } from "@/lib/slugUtils";
+import { useSlugValidation } from "@/hooks/useSlugValidation";
 
 const EstablishmentDashboard = () => {
   const navigate = useNavigate();
@@ -29,9 +31,15 @@ const EstablishmentDashboard = () => {
   const [establishmentDialogOpen, setEstablishmentDialogOpen] = useState(false);
   const [establishmentFormData, setEstablishmentFormData] = useState({ 
     name: "", 
+    slug: "",
     type: "hotel",
     company_id: "",
     manager_user_id: "__current_user__"
+  });
+  const { isUnique, isDuplicate, isLoading: slugChecking } = useSlugValidation({
+    entityType: "establishment",
+    slug: establishmentFormData.slug,
+    excludeId: null,
   });
   
   // Buscar usuários da empresa selecionada para seleção de gerente
@@ -110,15 +118,21 @@ const EstablishmentDashboard = () => {
       toast.error("Selecione uma empresa");
       return;
     }
+    const slugToSave = establishmentFormData.slug?.trim() ? establishmentFormData.slug : undefined;
+    if (slugToSave && isDuplicate) {
+      toast.error("Esta URL amigável já está em uso. Escolha outra.");
+      return;
+    }
     try {
       const establishment = await createEstablishment({
         company_id: establishmentFormData.company_id,
         name: establishmentFormData.name,
         type: establishmentFormData.type,
         manager_user_id: establishmentFormData.manager_user_id === "__current_user__" ? undefined : (establishmentFormData.manager_user_id || undefined),
+        slug: slugToSave || undefined,
       });
       setEstablishmentDialogOpen(false);
-      setEstablishmentFormData({ name: "", type: "hotel", company_id: "", manager_user_id: "__current_user__" });
+      setEstablishmentFormData({ name: "", slug: "", type: "hotel", company_id: "", manager_user_id: "__current_user__" });
       
       // Selecionar o estabelecimento criado e navegar para o PMS
       setSelectedEstablishment(establishment);
@@ -228,6 +242,30 @@ const EstablishmentDashboard = () => {
                 onChange={(e) => setEstablishmentFormData({ ...establishmentFormData, name: e.target.value })}
                 required
               />
+            </div>
+            <div>
+              <Label htmlFor="establishment_slug">URL amigável (slug)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="establishment_slug"
+                  value={establishmentFormData.slug}
+                  onChange={(e) => setEstablishmentFormData({ ...establishmentFormData, slug: e.target.value })}
+                  placeholder="ex: meu-hotel"
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEstablishmentFormData((prev) => ({ ...prev, slug: slugFromName(prev.name || "") }))}
+                >
+                  Gerar do nome
+                </Button>
+              </div>
+              {establishmentFormData.slug && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {slugChecking ? "Verificando..." : isDuplicate ? "Esta URL já está em uso." : "URL disponível."}
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="establishment_type">Tipo *</Label>

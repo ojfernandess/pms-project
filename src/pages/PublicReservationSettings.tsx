@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
@@ -9,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Building2, ExternalLink, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { useNavigate } from "react-router-dom";
 
 const PublicReservationSettings = () => {
@@ -387,7 +385,7 @@ const PublicReservationSettings = () => {
                       </div>
                       <div className="text-sm text-muted-foreground">
                         {est.type === 'hotel' ? 'Hotel' : est.type === 'apartment' ? 'Apartamento' : 'Outro'}
-                        {isPublic && est.slug && (
+                        {isPublic && (est.slug || est.numeric_id != null) && (
                           <>
                             {" · "}
                             <a

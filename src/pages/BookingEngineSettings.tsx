@@ -12,12 +12,14 @@ import { Switch } from "@/components/ui/switch";
 import { 
   Loader2, Settings2, HelpCircle, ArrowUp, ArrowDown, Building2, Upload, X, 
   Eye, Save, Globe, Palette, Image as ImageIcon, Phone, Share2, Zap, 
-  Code, Search, GripVertical, ExternalLink, CheckCircle2, AlertCircle
+  Code, Search, GripVertical, ExternalLink, CheckCircle2, AlertCircle, FileText, Map
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
+import { generateSlug as slugFromName, improveSlug } from "@/lib/slugUtils";
+import { useSlugValidation } from "@/hooks/useSlugValidation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
@@ -29,7 +31,7 @@ const BookingEngineSettings = () => {
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { settings: siteSettings, uploadImage } = useSiteSettings();
+  const { settings: siteSettings, uploadImage, updateSettings: updateSiteSettings } = useSiteSettings();
   const [showDnsHelp, setShowDnsHelp] = useState(false);
   const [localTitle, setLocalTitle] = useState<string>("");
   const [localCustomDomain, setLocalCustomDomain] = useState<string>("");
@@ -46,6 +48,8 @@ const BookingEngineSettings = () => {
   const [dnsStatus, setDnsStatus] = useState<"checking" | "active" | "pending" | "inactive">("inactive");
   const [sslStatus, setSslStatus] = useState<"checking" | "active" | "pending" | "inactive">("inactive");
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [localSlug, setLocalSlug] = useState<string>("");
+  const [localRobotsTxt, setLocalRobotsTxt] = useState<string>("");
 
   // Buscar empresa atual
   const { data: company, isLoading: isLoadingCompany } = useQuery({
@@ -111,6 +115,14 @@ const BookingEngineSettings = () => {
       setLocalCustomDomain(company.booking_engine_custom_domain || "");
     }
   }, [company?.booking_engine_custom_domain]);
+
+  useEffect(() => {
+    setLocalSlug(company?.booking_engine_slug || "");
+  }, [company?.booking_engine_slug]);
+
+  useEffect(() => {
+    setLocalRobotsTxt(siteSettings?.robots_txt ?? "");
+  }, [siteSettings?.robots_txt]);
 
   // Função para verificar status DNS e SSL
   const checkDomainStatus = async (domain: string) => {
@@ -350,20 +362,15 @@ const BookingEngineSettings = () => {
   })();
 
   const generateSlug = (title: string): string => {
-    if (!title) return "";
-    let slug = title
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-    
-    if (!slug) {
-      slug = "motor-reservas";
-    }
-    
-    return slug;
+    const s = slugFromName(title);
+    return s || "motor-reservas";
   };
+
+  const { isUnique: slugIsUnique, isDuplicate: slugIsDuplicate } = useSlugValidation({
+    entityType: "company",
+    slug: localSlug,
+    excludeId: company?.id,
+  });
 
   const updateCompanyMutation = useMutation({
     mutationFn: async (updates: any) => {
@@ -382,26 +389,45 @@ const BookingEngineSettings = () => {
               .eq("booking_engine_slug", finalSlug)
               .neq("id", company.id)
               .maybeSingle();
-            
-            if (!existing) {
-              break;
-            }
-            
+            if (!existing) break;
             finalSlug = `${generatedSlug}-${suffix}`;
             suffix++;
-            
             if (suffix > 100) {
               finalSlug = `${generatedSlug}-${Date.now()}`;
               break;
             }
           }
-          
           updates.booking_engine_slug = finalSlug;
         } else {
           updates.booking_engine_slug = null;
         }
       }
-      
+      if (updates.booking_engine_slug !== undefined) {
+        const raw = updates.booking_engine_slug?.trim() || null;
+        if (raw) {
+          const normalized = improveSlug(raw);
+          let finalSlug = normalized;
+          let suffix = 1;
+          while (true) {
+            const { data: existing } = await supabase
+              .from("companies")
+              .select("id")
+              .eq("booking_engine_slug", finalSlug)
+              .neq("id", company.id)
+              .maybeSingle();
+            if (!existing) break;
+            finalSlug = `${normalized}-${suffix}`;
+            suffix++;
+            if (suffix > 100) {
+              finalSlug = `${normalized}-${Date.now()}`;
+              break;
+            }
+          }
+          updates.booking_engine_slug = finalSlug;
+        } else {
+          updates.booking_engine_slug = null;
+        }
+      }
       const { data, error } = await supabase
         .from("companies")
         .update(updates)
@@ -809,6 +835,10 @@ const BookingEngineSettings = () => {
                   <Code className="w-4 h-4" />
                   <span className="hidden sm:inline">Avançado</span>
                 </TabsTrigger>
+                <TabsTrigger value="seo" className="flex items-center gap-2 data-[state=active]:bg-slate-900 data-[state=active]:text-white">
+                  <Search className="w-4 h-4" />
+                  <span className="hidden sm:inline">SEO</span>
+                </TabsTrigger>
               </TabsList>
               </div>
 
@@ -863,6 +893,46 @@ const BookingEngineSettings = () => {
                             </Badge>
                           )}
                         </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700">
+                          URL amigável (slug)
+                        </Label>
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="ex: motor-reservas"
+                            value={localSlug}
+                            onChange={(e) => setLocalSlug(improveSlug(e.target.value))}
+                            onBlur={() => {
+                              const improved = improveSlug(localSlug);
+                              if (improved && slugIsUnique && improved !== (company?.booking_engine_slug || "")) {
+                                updateCompanyMutation.mutate({ booking_engine_slug: improved });
+                              }
+                            }}
+                            className="h-11 flex-1"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const fromTitle = generateSlug(localTitle);
+                              if (fromTitle) {
+                                setLocalSlug(fromTitle);
+                                updateCompanyMutation.mutate({ booking_engine_slug: fromTitle });
+                              }
+                            }}
+                          >
+                            Gerar do título
+                          </Button>
+                        </div>
+                        {localSlug && slugIsDuplicate && (
+                          <p className="text-xs text-amber-600">Esta URL já está em uso. Escolha outra.</p>
+                        )}
+                        {localSlug && slugIsUnique && (
+                          <p className="text-xs text-slate-500">URL: /motor/{localSlug}</p>
+                        )}
                       </div>
 
                       <div className="space-y-2">
@@ -2181,6 +2251,78 @@ const BookingEngineSettings = () => {
                       <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
                         <p className="text-sm text-slate-600">
                           As configurações avançadas estarão disponíveis em breve. Esta seção permitirá adicionar scripts personalizados, pixels de rastreamento (Meta, Google), CSS customizado e webhooks.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="seo" className="space-y-6 mt-0">
+                <Card className="p-6 border-slate-200 shadow-sm">
+                  <div className="space-y-6">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-900 mb-1">SEO e indexação</h3>
+                      <p className="text-sm text-slate-500">Sitemap e robots.txt para mecanismos de busca</p>
+                    </div>
+                    <Separator />
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                          <Map className="w-4 h-4" />
+                          Sitemap (URLs indexáveis)
+                        </Label>
+                        <p className="text-xs text-slate-500 mt-1 mb-2">
+                          O sitemap é gerado automaticamente com todas as URLs públicas do motor de reservas e da página de reserva. Use a URL abaixo no Google Search Console e em outros mecanismos de busca.
+                        </p>
+                        <div className="flex gap-2 items-center">
+                          <Input
+                            readOnly
+                            value={typeof window !== "undefined" ? `${window.location.origin}/api/sitemap.xml` : ""}
+                            className="font-mono text-sm"
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const url = typeof window !== "undefined" ? `${window.location.origin}/api/sitemap.xml` : "";
+                              if (url) {
+                                window.open(url, "_blank");
+                                navigator.clipboard.writeText(url).then(() => toast.success("URL copiada"));
+                              }
+                            }}
+                          >
+                            Abrir / Copiar
+                          </Button>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">
+                          Dica: configure no seu servidor (Vercel, Netlify, etc.) um redirect ou função que sirva o sitemap em /api/sitemap.xml ou /sitemap.xml apontando para a Edge Function do Supabase.
+                        </p>
+                      </div>
+                      <Separator />
+                      <div>
+                        <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                          <FileText className="w-4 h-4" />
+                          robots.txt
+                        </Label>
+                        <p className="text-xs text-slate-500 mt-1 mb-2">
+                          Conteúdo do arquivo robots.txt (instruções para rastreadores). Deixe em branco para não alterar o comportamento padrão do servidor.
+                        </p>
+                        <Textarea
+                          placeholder={"User-agent: *\nAllow: /\nDisallow: /admin\n\nSitemap: https://seu-dominio.com/sitemap.xml"}
+                          value={localRobotsTxt}
+                          onChange={(e) => setLocalRobotsTxt(e.target.value)}
+                          onBlur={() => {
+                            const value = localRobotsTxt.trim() || null;
+                            if (value !== (siteSettings?.robots_txt ?? null)) {
+                              updateSiteSettings({ robots_txt: value });
+                            }
+                          }}
+                          rows={10}
+                          className="font-mono text-sm"
+                        />
+                        <p className="text-xs text-slate-500 mt-2">
+                          O robots.txt deve ser servido em /robots.txt. Configure no seu host um endpoint que retorne este conteúdo com Content-Type: text/plain.
                         </p>
                       </div>
                     </div>

@@ -10,6 +10,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { toast } from "sonner";
+import { slugFromName } from "@/lib/slugUtils";
+import { useSlugValidation } from "@/hooks/useSlugValidation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Save, Trash2 } from "lucide-react";
 import { RoomsTable } from "./RoomsTable";
@@ -29,8 +31,10 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
   const [showRoomsTable, setShowRoomsTable] = useState(false);
   const [createdRooms, setCreatedRooms] = useState<any[]>([]);
   const [savedCategoryId, setSavedCategoryId] = useState<string | null>(null);
+  const establishmentId = getSelectedEstablishmentId();
   const [formData, setFormData] = useState({
     name: "",
+    slug: "",
     type: "Double",
     building_id: "",
     abbreviation: "",
@@ -49,6 +53,12 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
     base_price: "0,00",
     rich_description: "",
   });
+  const slugValidation = useSlugValidation({
+    entityType: "room_category",
+    slug: formData.slug,
+    excludeId: categoryId ?? null,
+    establishmentId: establishmentId ?? null,
+  });
 
   // Carregar dados da categoria se estiver editando
   useEffect(() => {
@@ -60,6 +70,7 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
       // Resetar formulário para nova categoria
       setFormData({
         name: "",
+        slug: "",
         type: "Double",
         building_id: "",
         abbreviation: "",
@@ -124,6 +135,7 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
       if (data) {
         setFormData({
           name: data.name || "",
+          slug: data.slug ?? "",
           type: data.type || "Double",
           building_id: data.building_id || "",
           abbreviation: data.abbreviation || "",
@@ -169,13 +181,17 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
     setLoading(true);
 
     try {
-      const establishmentId = getSelectedEstablishmentId();
-      
       // Converter valores
       const basePriceValue = parseFloat(formData.base_price.replace(',', '.')) || 0;
 
+      if (formData.slug?.trim() && slugValidation.isDuplicate) {
+        toast.error("Esta URL amigável já está em uso neste estabelecimento. Escolha outra.");
+        setLoading(false);
+        return;
+      }
       const categoryData: any = {
         name: formData.name,
+        slug: formData.slug?.trim() || null,
         type: formData.type || "Double",
         building_id: formData.building_id || null,
         abbreviation: formData.abbreviation || null,
@@ -520,6 +536,35 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
                       disabled={loading}
                       className="mt-2"
                     />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="slug" className="text-sm font-medium">
+                      URL amigável (slug)
+                    </Label>
+                    <div className="flex gap-2 mt-2">
+                      <Input
+                        id="slug"
+                        value={formData.slug}
+                        onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
+                        placeholder="suite-executiva"
+                        disabled={loading}
+                        className="flex-1"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setFormData((prev) => ({ ...prev, slug: slugFromName(prev.name || "") }))}
+                      >
+                        Gerar do nome
+                      </Button>
+                    </div>
+                    {formData.slug && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {slugValidation.isLoading ? "Verificando..." : slugValidation.isDuplicate ? "Esta URL já está em uso neste estabelecimento." : "URL disponível."}
+                      </p>
+                    )}
                   </div>
 
                   <div>

@@ -14,6 +14,7 @@ export interface SiteSettings {
   og_image: string | null;
   pms_base_url?: string | null;
   console_logs_enabled?: boolean;
+  robots_txt?: string | null;
   features_enabled?: {
     api_integrations?: boolean;
     stripe?: boolean;

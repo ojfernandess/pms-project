@@ -82,6 +82,8 @@ import { EmailLogsManager } from "@/components/email/EmailLogsManager";
 import { EmailQueueManager } from "@/components/email/EmailQueueManager";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { Textarea } from "@/components/ui/textarea";
+import { slugFromName } from "@/lib/slugUtils";
+import { useSlugValidation } from "@/hooks/useSlugValidation";
 import { StripeGlobalConfigDialog } from "@/components/stripe/StripeGlobalConfigDialog";
 import { useStripe } from "@/hooks/useStripe";
 import { CreditCard, Settings, Zap, Key, Star, Map as MapIcon, LayoutTemplate } from "lucide-react";
@@ -624,7 +626,13 @@ const SuperAdmin = () => {
   const [establishmentFormData, setEstablishmentFormData] = useState({
     company_id: "",
     name: "",
+    slug: "",
     type: "hotel",
+  });
+  const establishmentSlugValidation = useSlugValidation({
+    entityType: "establishment",
+    slug: establishmentFormData.slug,
+    excludeId: selectedEstablishmentForEdit?.id ?? null,
   });
 
   // Buscar todas as associações de usuários e empresas
@@ -1144,6 +1152,10 @@ const SuperAdmin = () => {
 
   const handleSubmitEstablishment = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (establishmentFormData.slug?.trim() && establishmentSlugValidation.isDuplicate) {
+      toast.error("Esta URL amigável já está em uso. Escolha outra.");
+      return;
+    }
     try {
       if (selectedEstablishmentForEdit) {
         await updateEstablishment({
@@ -1156,7 +1168,7 @@ const SuperAdmin = () => {
         toast.success("Estabelecimento criado com sucesso!");
       }
       setEstablishmentDialogOpen(false);
-      setEstablishmentFormData({ company_id: "", name: "", type: "hotel" });
+      setEstablishmentFormData({ company_id: "", name: "", slug: "", type: "hotel" });
       setSelectedEstablishmentForEdit(null);
     } catch (error: any) {
       toast.error(error.message || "Erro ao salvar estabelecimento");
@@ -2288,7 +2300,7 @@ const SuperAdmin = () => {
               </div>
               <Button onClick={() => {
                 setSelectedEstablishmentForEdit(null);
-                setEstablishmentFormData({ company_id: "", name: "", type: "hotel" });
+                setEstablishmentFormData({ company_id: "", name: "", slug: "", type: "hotel" });
                 setEstablishmentDialogOpen(true);
               }}>
                 <Plus className="h-4 w-4 mr-2" />
@@ -2365,6 +2377,7 @@ const SuperAdmin = () => {
                                   setEstablishmentFormData({
                                     company_id: establishment.company_id,
                                     name: establishment.name,
+                                    slug: establishment.slug ?? "",
                                     type: establishment.type,
                                   });
                                   setEstablishmentDialogOpen(true);
@@ -2887,7 +2900,7 @@ const SuperAdmin = () => {
           setEstablishmentDialogOpen(open);
           if (!open) {
             setSelectedEstablishmentForEdit(null);
-            setEstablishmentFormData({ company_id: "", name: "", type: "hotel" });
+            setEstablishmentFormData({ company_id: "", name: "", slug: "", type: "hotel" });
           }
         }}
       >
@@ -2924,6 +2937,30 @@ const SuperAdmin = () => {
                 required
                 placeholder="Ex: Hotel Central, Apartamento Praia"
               />
+            </div>
+            <div>
+              <Label htmlFor="establishment_slug">URL amigável (slug)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="establishment_slug"
+                  value={establishmentFormData.slug}
+                  onChange={(e) => setEstablishmentFormData({ ...establishmentFormData, slug: e.target.value })}
+                  placeholder="ex: meu-hotel"
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEstablishmentFormData((prev) => ({ ...prev, slug: slugFromName(prev.name || "") }))}
+                >
+                  Gerar do nome
+                </Button>
+              </div>
+              {establishmentFormData.slug && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {establishmentSlugValidation.isLoading ? "Verificando..." : establishmentSlugValidation.isDuplicate ? "Esta URL já está em uso." : "URL disponível."}
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="establishment_type">Tipo *</Label>
