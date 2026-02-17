@@ -1,12 +1,32 @@
 import { useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { useSiteSettings } from "./useSiteSettings";
+
+/** Favicon neutro (data URI): evita que o navegador recaia em /favicon.ico ao remover ícones nas rotas do motor */
+const NEUTRAL_FAVICON =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23f0f0f0'/%3E%3C/svg%3E";
+
+/** Rotas do motor de reservas / páginas white-label: o favicon é controlado pelo motor, não pelo sistema */
+function isBookingEngineRoute(pathname: string): boolean {
+  const p = pathname.toLowerCase();
+  return (
+    p.startsWith("/motor") ||
+    p.startsWith("/reservar") ||
+    p.startsWith("/categoria") ||
+    p.startsWith("/reserva") ||
+    p.startsWith("/politica")
+  );
+}
 
 /**
  * Hook para atualizar dinamicamente o título e meta tags do site
  * Atualiza imediatamente ao carregar, garantindo que apenas as configurações do SuperAdmin sejam válidas
+ * Nas rotas do motor de reservas, NÃO aplica favicon do sistema (evita flash; o motor aplica o do cliente).
  */
 export const useSiteMeta = () => {
+  const { pathname } = useLocation();
   const { settings } = useSiteSettings();
+  const isMotor = isBookingEngineRoute(pathname);
 
   useEffect(() => {
     // Se não houver configurações ainda, aguardar
@@ -33,16 +53,21 @@ export const useSiteMeta = () => {
     }
     metaAuthor.setAttribute("content", settings.site_title || "");
 
-    // Atualizar ou criar favicon
-    if (settings.favicon_url) {
-      // Remover favicons antigos
-      const oldFavicons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
+    // Favicon: nas rotas do motor (white-label) NUNCA usar o do sistema — só o motor aplica o do cliente.
+    // Nas rotas do PMS: usar favicon do SuperAdmin ou fallback para /favicon.ico (public).
+    const oldFavicons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]');
+    if (isMotor) {
       oldFavicons.forEach(fav => fav.remove());
-
-      // Criar novo favicon
+      const placeholder = document.createElement("link");
+      placeholder.setAttribute("rel", "icon");
+      placeholder.setAttribute("href", NEUTRAL_FAVICON);
+      document.head.appendChild(placeholder);
+    } else {
+      oldFavicons.forEach(fav => fav.remove());
+      const pmsFaviconUrl = settings.favicon_url?.trim() || `${window.location.origin}/favicon.ico`;
       const favicon = document.createElement("link");
       favicon.setAttribute("rel", "icon");
-      favicon.setAttribute("href", settings.favicon_url);
+      favicon.setAttribute("href", pmsFaviconUrl);
       document.head.appendChild(favicon);
     }
 
@@ -131,6 +156,6 @@ export const useSiteMeta = () => {
         existingTwitterImage.remove();
       }
     }
-  }, [settings]);
+  }, [settings, pathname, isMotor]);
 };
 

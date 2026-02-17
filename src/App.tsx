@@ -100,8 +100,6 @@ const queryClient = new QueryClient({
 });
 
 const AppContent = () => {
-  useSiteMeta(); // Atualizar título e meta tags dinamicamente
-  
   // Iniciar monitoramento do sistema
   useEffect(() => {
     // Iniciar monitoramento periódico (a cada 5 minutos)
@@ -115,6 +113,14 @@ const AppContent = () => {
   
   return (
     <BrowserRouter>
+      <AppRoutesWithMeta />
+    </BrowserRouter>
+  );
+};
+
+const AppRoutesWithMeta = () => {
+  useSiteMeta();
+  return (
           <Routes>
             <Route path="/login" element={<Auth />} />
             <Route path="/login/reset-password" element={<ResetPassword />} />
@@ -197,7 +203,6 @@ const AppContent = () => {
             <Route path="/funcionarios" element={<ProtectedRoute><Navigate to="/user-dashboard" replace /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
-        </BrowserRouter>
   );
 };
 
