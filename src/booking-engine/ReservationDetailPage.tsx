@@ -34,6 +34,8 @@ import { ptBR } from "date-fns/locale";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { useMotorMeta } from "@/hooks/useMotorMeta";
+import { useMotorAdvanced } from "@/hooks/useMotorAdvanced";
 
 type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel" | "airbnb";
 
@@ -303,6 +305,9 @@ export default function ReservationDetailPage() {
     console.log("[ReservationDetailPage] Nenhuma empresa encontrada");
     return null;
   }, [companyFromSettings, company, siteSettings]);
+
+  useMotorMeta(finalCompany, siteSettings ?? undefined);
+  useMotorAdvanced(finalCompany);
 
   // Buscar tema da empresa (mesma lógica do motor de reservas e detalhes da categoria)
   const themeKey: BookingThemeKey = useMemo(() => {

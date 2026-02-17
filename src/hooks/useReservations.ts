@@ -515,6 +515,32 @@ export const useReservations = () => {
                   // Não bloquear a criação da reserva se o e-mail falhar
                 }
               }
+
+              // Disparar webhook da empresa (Configurações Avançadas do motor), se configurado
+              if (newReservation.establishment_id) {
+                try {
+                  const payload = {
+                    reservation_id: newReservation.id,
+                    reservation_code: newReservation.reservation_code,
+                    checkin_date: newReservation.checkin_date,
+                    checkout_date: newReservation.checkout_date,
+                    total_amount: newReservation.total_amount,
+                    status: newReservation.status,
+                    payment_status: newReservation.payment_status,
+                    guest_name: newReservation.guest?.full_name ?? newReservation.financial_responsible?.full_name ?? null,
+                    guest_email: newReservation.guest?.email ?? newReservation.financial_responsible?.email ?? null,
+                  };
+                  await supabase.functions.invoke("call-company-webhook", {
+                    body: {
+                      establishment_id: newReservation.establishment_id,
+                      event: "reservation.created",
+                      payload,
+                    },
+                  });
+                } catch (webhookError) {
+                  console.error("Erro ao disparar webhook da empresa:", webhookError);
+                }
+              }
             }
           } catch (error) {
             console.error("Erro ao criar web check-in:", error);

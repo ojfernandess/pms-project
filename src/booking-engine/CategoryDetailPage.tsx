@@ -33,6 +33,8 @@ import { ptBR } from "date-fns/locale";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { useMotorMeta } from "@/hooks/useMotorMeta";
+import { useMotorAdvanced } from "@/hooks/useMotorAdvanced";
 import { DateRangePicker } from "@/components/booking-engine/DateRangePicker";
 
 type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel" | "airbnb";
@@ -223,6 +225,8 @@ const CategoryDetailPage = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { settings: siteSettings } = useSiteSettings();
+  useMotorMeta(company, siteSettings ?? undefined);
+  useMotorAdvanced(company);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

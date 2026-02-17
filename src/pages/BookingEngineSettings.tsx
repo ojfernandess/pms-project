@@ -50,6 +50,21 @@ const BookingEngineSettings = () => {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [localSlug, setLocalSlug] = useState<string>("");
   const [localRobotsTxt, setLocalRobotsTxt] = useState<string>("");
+  const [localMetaDescription, setLocalMetaDescription] = useState<string>("");
+  const [localOgTitle, setLocalOgTitle] = useState<string>("");
+  const [localOgDescription, setLocalOgDescription] = useState<string>("");
+  const [localOgImage, setLocalOgImage] = useState<string>("");
+  const [ogImagePreview, setOgImagePreview] = useState<string>("");
+  const [ogImageFile, setOgImageFile] = useState<File | null>(null);
+  const [isUploadingOgImage, setIsUploadingOgImage] = useState(false);
+  // Configurações avançadas (scripts, pixels, CSS, webhooks)
+  const [localScriptsHead, setLocalScriptsHead] = useState<string>("");
+  const [localScriptsBody, setLocalScriptsBody] = useState<string>("");
+  const [localMetaPixelId, setLocalMetaPixelId] = useState<string>("");
+  const [localGoogleAnalyticsId, setLocalGoogleAnalyticsId] = useState<string>("");
+  const [localCustomCss, setLocalCustomCss] = useState<string>("");
+  const [localWebhookUrl, setLocalWebhookUrl] = useState<string>("");
+  const [localWebhookSecret, setLocalWebhookSecret] = useState<string>("");
 
   // Buscar empresa atual
   const { data: company, isLoading: isLoadingCompany } = useQuery({
@@ -250,6 +265,25 @@ const BookingEngineSettings = () => {
       setFaviconPreview(company.booking_engine_favicon);
     }
   }, [company?.booking_engine_logo, company?.booking_engine_favicon]);
+
+  useEffect(() => {
+    setLocalMetaDescription(company?.booking_engine_meta_description ?? "");
+    setLocalOgTitle(company?.booking_engine_og_title ?? "");
+    setLocalOgDescription(company?.booking_engine_og_description ?? "");
+    setLocalOgImage(company?.booking_engine_og_image ?? "");
+    setOgImagePreview(company?.booking_engine_og_image ?? "");
+  }, [company?.booking_engine_meta_description, company?.booking_engine_og_title, company?.booking_engine_og_description, company?.booking_engine_og_image]);
+
+  useEffect(() => {
+    const c = company as Record<string, unknown> | null | undefined;
+    setLocalScriptsHead((c?.booking_engine_custom_scripts_head as string) ?? "");
+    setLocalScriptsBody((c?.booking_engine_custom_scripts_body as string) ?? "");
+    setLocalMetaPixelId((c?.booking_engine_meta_pixel_id as string) ?? "");
+    setLocalGoogleAnalyticsId((c?.booking_engine_google_analytics_id as string) ?? "");
+    setLocalCustomCss((c?.booking_engine_custom_css as string) ?? "");
+    setLocalWebhookUrl((c?.booking_engine_webhook_url as string) ?? "");
+    setLocalWebhookSecret((c?.booking_engine_webhook_secret as string) ?? "");
+  }, [company]);
 
   const { data: engineEstablishments, isLoading: isLoadingEngine } = useQuery({
     queryKey: ["company_booking_engine_establishments", company?.id],
@@ -683,6 +717,43 @@ const BookingEngineSettings = () => {
       toast.success("Favicon removido com sucesso!");
     } catch (error: any) {
       toast.error(error.message || "Erro ao remover favicon");
+    }
+  };
+
+  const handleOgImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !uploadImage) return;
+    setIsUploadingOgImage(true);
+    setOgImageFile(file);
+    try {
+      const uploadedUrl = await uploadImage(file, "og_image");
+      if (uploadedUrl) {
+        await updateCompanyMutation.mutateAsync({
+          booking_engine_og_image: uploadedUrl,
+        });
+        setLocalOgImage(uploadedUrl);
+        setOgImagePreview(uploadedUrl);
+        toast.success("Imagem OG atualizada!");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Erro ao fazer upload da imagem OG");
+    } finally {
+      setIsUploadingOgImage(false);
+      setOgImageFile(null);
+      e.target.value = "";
+    }
+  };
+
+  const handleRemoveOgImage = async () => {
+    try {
+      await updateCompanyMutation.mutateAsync({
+        booking_engine_og_image: null,
+      });
+      setLocalOgImage("");
+      setOgImagePreview("");
+      toast.success("Imagem OG removida.");
+    } catch (error: any) {
+      toast.error(error.message || "Erro ao remover imagem OG");
     }
   };
 
@@ -2243,15 +2314,152 @@ const BookingEngineSettings = () => {
                   <div className="space-y-6">
                     <div>
                       <h3 className="text-lg font-semibold text-slate-900 mb-1">Configurações Avançadas</h3>
-                      <p className="text-sm text-slate-500">Scripts personalizados e configurações técnicas</p>
+                      <p className="text-sm text-slate-500">Scripts personalizados, pixels de rastreamento, CSS customizado e webhooks para o motor de reservas</p>
                     </div>
                     <Separator />
 
+                    {/* Scripts personalizados */}
                     <div className="space-y-4">
-                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                        <p className="text-sm text-slate-600">
-                          As configurações avançadas estarão disponíveis em breve. Esta seção permitirá adicionar scripts personalizados, pixels de rastreamento (Meta, Google), CSS customizado e webhooks.
-                        </p>
+                      <h4 className="text-sm font-medium text-slate-800 flex items-center gap-2">
+                        <Code className="h-4 w-4" /> Scripts personalizados
+                      </h4>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700">Script no &lt;head&gt;</Label>
+                        <Textarea
+                          placeholder="Código HTML/JS injetado no &lt;head&gt; (ex.: analytics, tags)"
+                          value={localScriptsHead}
+                          onChange={(e) => setLocalScriptsHead(e.target.value)}
+                          onBlur={() => {
+                            const v = localScriptsHead.trim() || null;
+                            if (v !== ((company as Record<string, unknown>)?.booking_engine_custom_scripts_head ?? null)) {
+                              updateCompanyMutation.mutate({ booking_engine_custom_scripts_head: v });
+                            }
+                          }}
+                          rows={4}
+                          className="font-mono text-sm resize-y"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700">Script antes do &lt;/body&gt;</Label>
+                        <Textarea
+                          placeholder="Código HTML/JS injetado antes do fechamento do &lt;body&gt;"
+                          value={localScriptsBody}
+                          onChange={(e) => setLocalScriptsBody(e.target.value)}
+                          onBlur={() => {
+                            const v = localScriptsBody.trim() || null;
+                            if (v !== ((company as Record<string, unknown>)?.booking_engine_custom_scripts_body ?? null)) {
+                              updateCompanyMutation.mutate({ booking_engine_custom_scripts_body: v });
+                            }
+                          }}
+                          rows={4}
+                          className="font-mono text-sm resize-y"
+                        />
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Pixels de rastreamento */}
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-medium text-slate-800 flex items-center gap-2">
+                        <Share2 className="h-4 w-4" /> Pixels de rastreamento
+                      </h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-slate-700">Meta (Facebook) Pixel ID</Label>
+                          <Input
+                            placeholder="Ex.: 1234567890123456"
+                            value={localMetaPixelId}
+                            onChange={(e) => setLocalMetaPixelId(e.target.value)}
+                            onBlur={() => {
+                              const v = localMetaPixelId.trim() || null;
+                              if (v !== ((company as Record<string, unknown>)?.booking_engine_meta_pixel_id ?? null)) {
+                                updateCompanyMutation.mutate({ booking_engine_meta_pixel_id: v });
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-slate-700">Google Analytics (GA4)</Label>
+                          <Input
+                            placeholder="Ex.: G-XXXXXXXXXX"
+                            value={localGoogleAnalyticsId}
+                            onChange={(e) => setLocalGoogleAnalyticsId(e.target.value)}
+                            onBlur={() => {
+                              const v = localGoogleAnalyticsId.trim() || null;
+                              if (v !== ((company as Record<string, unknown>)?.booking_engine_google_analytics_id ?? null)) {
+                                updateCompanyMutation.mutate({ booking_engine_google_analytics_id: v });
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* CSS customizado */}
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-medium text-slate-800 flex items-center gap-2">
+                        <Palette className="h-4 w-4" /> CSS customizado
+                      </h4>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700">Regras CSS</Label>
+                        <Textarea
+                          placeholder=".minha-classe { color: red; }"
+                          value={localCustomCss}
+                          onChange={(e) => setLocalCustomCss(e.target.value)}
+                          onBlur={() => {
+                            const v = localCustomCss.trim() || null;
+                            if (v !== ((company as Record<string, unknown>)?.booking_engine_custom_css ?? null)) {
+                              updateCompanyMutation.mutate({ booking_engine_custom_css: v });
+                            }
+                          }}
+                          rows={6}
+                          className="font-mono text-sm resize-y"
+                        />
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Webhooks */}
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-medium text-slate-800 flex items-center gap-2">
+                        <Zap className="h-4 w-4" /> Webhook
+                      </h4>
+                      <p className="text-sm text-slate-600">
+                        URL chamada quando eventos ocorrem (ex.: reserva criada, reserva paga). O payload é enviado em POST com JSON.
+                      </p>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700">URL do webhook</Label>
+                        <Input
+                          placeholder="https://seu-servidor.com/webhook"
+                          value={localWebhookUrl}
+                          onChange={(e) => setLocalWebhookUrl(e.target.value)}
+                          onBlur={() => {
+                            const v = localWebhookUrl.trim() || null;
+                            if (v !== ((company as Record<string, unknown>)?.booking_engine_webhook_url ?? null)) {
+                              updateCompanyMutation.mutate({ booking_engine_webhook_url: v });
+                            }
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700">Secret (opcional)</Label>
+                        <Input
+                          type="password"
+                          autoComplete="off"
+                          placeholder="Secret para assinar o payload (header X-Webhook-Signature)"
+                          value={localWebhookSecret}
+                          onChange={(e) => setLocalWebhookSecret(e.target.value)}
+                          onBlur={() => {
+                            const v = localWebhookSecret.trim() || null;
+                            if (v !== ((company as Record<string, unknown>)?.booking_engine_webhook_secret ?? null)) {
+                              updateCompanyMutation.mutate({ booking_engine_webhook_secret: v });
+                            }
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -2259,6 +2467,122 @@ const BookingEngineSettings = () => {
               </TabsContent>
 
               <TabsContent value="seo" className="space-y-6 mt-0">
+                <Card className="p-6 border-slate-200 shadow-sm">
+                  <div className="space-y-6">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-900 mb-1">Meta e Open Graph (página do motor)</h3>
+                      <p className="text-sm text-slate-500">Meta description e tags para redes sociais (Facebook, WhatsApp, etc.) da página do motor de reservas</p>
+                    </div>
+                    <Separator />
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700">Meta Description</Label>
+                        <Textarea
+                          placeholder="Descrição para mecanismos de busca (até ~160 caracteres)"
+                          value={localMetaDescription}
+                          onChange={(e) => setLocalMetaDescription(e.target.value)}
+                          onBlur={() => {
+                            const v = localMetaDescription.trim() || null;
+                            if (v !== (company?.booking_engine_meta_description ?? null)) {
+                              updateCompanyMutation.mutate({ booking_engine_meta_description: v });
+                            }
+                          }}
+                          rows={2}
+                          className="resize-none"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700">Título Open Graph (og:title)</Label>
+                        <Input
+                          placeholder="Título ao compartilhar link nas redes sociais"
+                          value={localOgTitle}
+                          onChange={(e) => setLocalOgTitle(e.target.value)}
+                          onBlur={() => {
+                            const v = localOgTitle.trim() || null;
+                            if (v !== (company?.booking_engine_og_title ?? null)) {
+                              updateCompanyMutation.mutate({ booking_engine_og_title: v });
+                            }
+                          }}
+                          className="h-11"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700">Descrição Open Graph (og:description)</Label>
+                        <Textarea
+                          placeholder="Descrição ao compartilhar link nas redes sociais"
+                          value={localOgDescription}
+                          onChange={(e) => setLocalOgDescription(e.target.value)}
+                          onBlur={() => {
+                            const v = localOgDescription.trim() || null;
+                            if (v !== (company?.booking_engine_og_description ?? null)) {
+                              updateCompanyMutation.mutate({ booking_engine_og_description: v });
+                            }
+                          }}
+                          rows={2}
+                          className="resize-none"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700">Imagem Open Graph (og:image)</Label>
+                        <p className="text-xs text-slate-500">Recomendado: 1200×630 px. Usada ao compartilhar o link do motor.</p>
+                        <div className="flex flex-wrap items-start gap-4">
+                          {ogImagePreview && (
+                            <div className="relative flex-shrink-0">
+                              <img
+                                src={ogImagePreview}
+                                alt="Preview OG"
+                                className="h-24 w-auto object-cover border border-slate-200 rounded-lg"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-red-500 hover:bg-red-600 text-white"
+                                onClick={handleRemoveOgImage}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <Input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleOgImageUpload}
+                              disabled={isUploadingOgImage}
+                              className="cursor-pointer h-11"
+                            />
+                            <Input
+                              placeholder="Ou cole a URL da imagem"
+                              value={localOgImage}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setLocalOgImage(v);
+                                if (v.trim().startsWith("http")) setOgImagePreview(v.trim());
+                                else if (!v.trim()) setOgImagePreview("");
+                              }}
+                              onBlur={() => {
+                                const v = localOgImage.trim() || null;
+                                if (v !== (company?.booking_engine_og_image ?? null)) {
+                                  updateCompanyMutation.mutate({ booking_engine_og_image: v });
+                                }
+                              }}
+                              className="h-11"
+                            />
+                            {isUploadingOgImage && (
+                              <div className="flex items-center gap-2 text-sm text-slate-600">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Enviando...
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+
                 <Card className="p-6 border-slate-200 shadow-sm">
                   <div className="space-y-6">
                     <div>

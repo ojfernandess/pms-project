@@ -26,7 +26,7 @@ export const NoShowScheduleConfig = () => {
   const queryClient = useQueryClient();
   const establishmentId = getSelectedEstablishmentId();
   const [scheduleTime, setScheduleTime] = useState("19:00");
-  const [isActive, setIsActive] = useState(true);
+  const [isActive, setIsActive] = useState(false);
   const [saving, setSaving] = useState(false);
   const { scheduleTableExists } = useNoShowMigrations();
 
@@ -51,12 +51,19 @@ export const NoShowScheduleConfig = () => {
     enabled: !!establishmentId,
   });
 
+  // Ao trocar de estabelecimento, resetar para valores neutros até carregar a config do novo estabelecimento
   useEffect(() => {
-    if (config) {
-      setScheduleTime(config.schedule_time || "19:00");
-      setIsActive(config.is_active ?? true);
+    setScheduleTime("19:00");
+    setIsActive(false);
+  }, [establishmentId]);
+
+  // Sincronizar estado local apenas após o carregamento (fonte única de verdade: evita flash "ligado" antes de ler o backend)
+  useEffect(() => {
+    if (!isLoading) {
+      setScheduleTime(config?.schedule_time ?? "19:00");
+      setIsActive(config?.is_active ?? false);
     }
-  }, [config]);
+  }, [isLoading, config]);
 
   const saveMutation = useMutation({
     mutationFn: async (configData: ScheduleConfig) => {

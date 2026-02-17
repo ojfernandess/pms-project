@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { useMotorMeta } from "@/hooks/useMotorMeta";
+import { useMotorAdvanced } from "@/hooks/useMotorAdvanced";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
 
@@ -729,6 +731,9 @@ const BookingEnginePage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [company, setCompany] = useState<any>(null);
+
+  useMotorMeta(company, siteSettings ?? undefined);
+  useMotorAdvanced(company);
   const [establishment, setEstablishment] = useState<any>(null);
   const [companyEstablishments, setCompanyEstablishments] = useState<any[]>([]);
   const [establishmentsWithCities, setEstablishmentsWithCities] = useState<any[]>([]);
