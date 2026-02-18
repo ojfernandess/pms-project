@@ -1,0 +1,1971 @@
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import type { Locale } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { supabase } from "@/integrations/supabase/client";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
+import {
+  CreditCard,
+  Loader2,
+  Save,
+  Plus,
+  Pencil,
+  Trash2,
+  Star,
+  HelpCircle,
+  Send,
+  CalendarCheck,
+  Wallet,
+  MessageSquare,
+  FileText,
+  Bell,
+} from "lucide-react";
+import { toast } from "sonner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+const TEMPLATE_VARS = [
+  "guest_name",
+  "reservation_code",
+  "localizador",
+  "checkin_date",
+  "checkout_date",
+  "amount",
+  "payment_link",
+  "web_checkin_link",
+  "establishment_name",
+  "establishment_address",
+] as const;
+
+const TEMPLATE_VAR_INFO: Record<string, { label: string; description: string }> = {
+  guest_name: { label: "Nome do hóspede", description: "Nome completo do cliente" },
+  reservation_code: { label: "Código da reserva", description: "Localizador/código" },
+  localizador: { label: "Localizador", description: "Mesmo que código da reserva" },
+  checkin_date: { label: "Data check-in", description: "Data de entrada" },
+  checkout_date: { label: "Data check-out", description: "Data de saída" },
+  amount: { label: "Valor", description: "Valor da cobrança" },
+  payment_link: { label: "Link de pagamento", description: "URL para pagar" },
+  web_checkin_link: { label: "Link web check-in", description: "URL do check-in online" },
+  establishment_name: { label: "Nome do estabelecimento", description: "Nome do hotel/estabelecimento" },
+  establishment_address: { label: "Endereço do estabelecimento", description: "Endereço completo do estabelecimento" },
+};
+
+/** Template padrão: cobrança de check-in (reserva confirmada + link pagamento/check-in). */
+const DEFAULT_TEMPLATE_CHECKIN = `Olá {{guest_name}} 👋
+
+Sua reserva está confirmada!
+
+📌 Localizador: {{reservation_code}}
+Check-in: {{checkin_date}}
+Check-out: {{checkout_date}}
+
+Para garantir sua entrada, realize o pagamento e check-in online no link abaixo:
+
+🔗 {{payment_link}}
+
+Qualquer dúvida, responda esta mensagem.`;
+
+/** Template alternativo: lembrete de pagamento pendente. */
+const DEFAULT_TEMPLATE_PAGAMENTO = `Olá {{guest_name}} 👋
+
+Lembrete: sua reserva ({{reservation_code}}) possui valor pendente de R$ {{amount}}.
+
+Check-in: {{checkin_date}} | Check-out: {{checkout_date}}
+
+Pague e faça seu check-in online pelo link:
+
+🔗 {{payment_link}}
+
+Responda esta mensagem se tiver dúvidas.`;
+
+/** Template: lembrete de checkout. */
+const DEFAULT_TEMPLATE_CHECKOUT = `Olá {{guest_name}} 👋
+
+Lembrete: seu check-out está previsto para {{checkout_date}}.
+
+Localizador: {{reservation_code}}
+
+Qualquer dúvida, responda esta mensagem. Até breve!`;
+
+type SendTiming = "after_confirmation" | "days_before_checkin" | "after_ota" | "manual";
+type AmountType = "total" | "percent" | "fixed";
+type ChannelType = "whatsapp_cloud" | "chatwoot" | "evolution_api" | "webhook";
+type TemplateSource = "internal" | "meta" | "chatwoot";
+
+type TemplateType = "checkin_reminder" | "payment_pending" | "checkout_reminder" | "custom";
+
+interface CheckinChargeConfigRow {
+  id: string;
+  establishment_id: string;
+  enabled: boolean;
+  send_timing: SendTiming;
+  days_before_checkin: number | null;
+  amount_type: AmountType;
+  amount_value: number | null;
+  due_date_days: number;
+  channel: ChannelType;
+  channel_config: Record<string, unknown>;
+  template_id: string | null;
+  template_id_reminder?: string | null;
+  template_id_payment?: string | null;
+  template_id_checkout?: string | null;
+  payment_link_expires_days: number;
+  template_source?: TemplateSource;
+  meta_template_name?: string | null;
+  meta_template_language?: string | null;
+  meta_template_body_variables?: string[] | null;
+  chatwoot_canned_response_id?: number | null;
+  chatwoot_canned_response_short_code?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CheckinChargeTemplateRow {
+  id: string;
+  establishment_id: string;
+  name: string;
+  body: string;
+  variables: string[];
+  is_default: boolean;
+  template_type?: TemplateType | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const CHANNEL_LABELS: Record<ChannelType, string> = {
+  whatsapp_cloud: "WhatsApp Cloud API",
+  chatwoot: "Chatwoot",
+  evolution_api: "Evolution API",
+  webhook: "Webhook (URL)",
+};
+
+function formatCurrency(value: number): string {
+  return Number(value).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Converte string de data (YYYY-MM-DD) para Date em horário local, evitando deslocamento de 1 dia por UTC. */
+function parseLocalDate(dateStr: string): Date {
+  const part = String(dateStr).split("T")[0];
+  const [y, m, d] = part.split("-").map(Number);
+  if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return new Date(dateStr);
+  return new Date(y, m - 1, d);
+}
+
+interface PendingReservationRow {
+  id: string;
+  reservation_code: string;
+  checkin_date: string;
+  checkout_date?: string;
+  total_amount: number;
+  paid_amount: number;
+  status: string;
+  client_id: string;
+  guest_name: string | null;
+  guest_phone: string | null;
+  charge_id?: string | null;
+  charge_status?: string | null;
+  charge_sent_at?: string | null;
+}
+
+type PaymentListView = "recent_and_future" | "today_only" | "all";
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Pendente",
+  confirmed: "Confirmada",
+  checkedin: "Check-in realizado",
+};
+
+function ReservationsChargeTable({
+  list,
+  selectedIds,
+  onToggleOne,
+  onToggleAll,
+  onSendOne,
+  sendingCharge,
+  formatCurrency: fmt,
+  format: fmtDate,
+  ptBR,
+  showStatus,
+  showPhone,
+  phoneOverrides,
+  onPhoneOverride,
+  useCheckoutDate,
+}: {
+  list: PendingReservationRow[];
+  selectedIds: string[];
+  onToggleOne: (id: string) => void;
+  onToggleAll: () => void;
+  onSendOne: (id: string) => void;
+  sendingCharge: boolean;
+  formatCurrency: (n: number) => string;
+  format: (d: Date, s: string, o?: { locale: Locale }) => string;
+  ptBR: Locale;
+  showStatus?: boolean;
+  showPhone?: boolean;
+  phoneOverrides?: Record<string, string>;
+  onPhoneOverride?: (reservationId: string, phone: string) => void;
+  useCheckoutDate?: boolean;
+}) {
+  const dateLabel = useCheckoutDate ? "Check-out" : "Check-in";
+  const dateField = useCheckoutDate ? "checkout_date" : "checkin_date";
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow className="bg-muted/40">
+          <TableHead className="w-10">
+            <Checkbox checked={list.length > 0 && selectedIds.length >= list.length} onCheckedChange={onToggleAll} />
+          </TableHead>
+          <TableHead>Código</TableHead>
+          <TableHead>Hóspede</TableHead>
+          {showPhone && (
+            <TableHead className="min-w-[140px]">Telefone</TableHead>
+          )}
+          {showStatus && <TableHead>Status reserva</TableHead>}
+          <TableHead>{dateLabel}</TableHead>
+          <TableHead className="text-right">Total</TableHead>
+          <TableHead className="text-right">Pago</TableHead>
+          <TableHead className="text-right">Pendente</TableHead>
+          <TableHead>Cobrança</TableHead>
+          <TableHead className="w-32">Ações</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {list.map((r) => {
+          const pending = Math.max(0, Number(r.total_amount || 0) - Number(r.paid_amount || 0));
+          const dateVal = r[dateField as keyof PendingReservationRow] as string | undefined;
+          const phoneVal = (phoneOverrides && phoneOverrides[r.id] !== undefined) ? phoneOverrides[r.id] : (r.guest_phone ?? "");
+          return (
+            <TableRow key={r.id} className="hover:bg-muted/20">
+              <TableCell>
+                <Checkbox checked={selectedIds.includes(r.id)} onCheckedChange={() => onToggleOne(r.id)} />
+              </TableCell>
+              <TableCell className="font-medium">{r.reservation_code}</TableCell>
+              <TableCell>{r.guest_name ?? "—"}</TableCell>
+              {showPhone && (
+                <TableCell className="p-1">
+                  <Input
+                    type="tel"
+                    placeholder="Telefone"
+                    value={phoneVal}
+                    onChange={(e) => onPhoneOverride?.(r.id, e.target.value)}
+                    className="h-8 text-sm font-mono"
+                  />
+                </TableCell>
+              )}
+              {showStatus && (
+                <TableCell>
+                  <span className={r.status === "checkedin" ? "text-green-600 font-medium" : "text-muted-foreground"}>
+                    {STATUS_LABELS[r.status] ?? r.status}
+                  </span>
+                </TableCell>
+              )}
+              <TableCell>{dateVal ? fmtDate(parseLocalDate(dateVal), "dd/MM/yyyy", { locale: ptBR }) : "—"}</TableCell>
+              <TableCell className="text-right">R$ {fmt(r.total_amount ?? 0)}</TableCell>
+              <TableCell className="text-right">R$ {fmt(r.paid_amount ?? 0)}</TableCell>
+              <TableCell className="text-right">R$ {fmt(pending)}</TableCell>
+              <TableCell>
+                {r.charge_sent_at ? (
+                  r.charge_status === "paid" ? (
+                    <span className="text-green-600 font-medium">Pago</span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Enviada em {fmtDate(new Date(r.charge_sent_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                    </span>
+                  )
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </TableCell>
+              <TableCell>
+                <Button variant="outline" size="sm" onClick={() => onSendOne(r.id)} disabled={sendingCharge} className="shadow-sm">
+                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Send className="h-4 w-4 mr-1" /> Enviar</>}
+                </Button>
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}
+
+/** Retorna início e fim do dia no fuso local do usuário para filtrar checkin_date (timestamptz) por data. */
+function getCheckinDateRange(dateStr: string): { start: string; end: string } {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const start = new Date(y, m - 1, d, 0, 0, 0, 0);
+  const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+export default function CheckinChargeSettings() {
+  const { establishmentId } = useParams<{ establishmentId?: string }>();
+  const { selectedEstablishment } = useEstablishment();
+  const { settings: siteSettings } = useSiteSettings();
+  const queryClient = useQueryClient();
+  const establishmentUuid = selectedEstablishment?.id ?? establishmentId;
+
+  const isEnabled = isFeatureEnabledForEstablishment(
+    siteSettings?.features_enabled?.checkin_charge_enabled,
+    selectedEstablishment?.company_id,
+    true
+  );
+
+  // --- Config state
+  const [enabled, setEnabled] = useState(false);
+  const [sendTiming, setSendTiming] = useState<SendTiming>("after_confirmation");
+  const [daysBeforeCheckin, setDaysBeforeCheckin] = useState<number>(3);
+  const [amountType, setAmountType] = useState<AmountType>("total");
+  const [amountValue, setAmountValue] = useState<string>("");
+  const [dueDateDays, setDueDateDays] = useState(3);
+  const [channel, setChannel] = useState<ChannelType>("whatsapp_cloud");
+  const [channelConfig, setChannelConfig] = useState<Record<string, unknown>>({});
+  const [templateId, setTemplateId] = useState<string | null>(null);
+  const [templateSource, setTemplateSource] = useState<TemplateSource>("internal");
+  const [metaTemplateName, setMetaTemplateName] = useState("");
+  const [metaTemplateLanguage, setMetaTemplateLanguage] = useState("pt_BR");
+  const [metaTemplateBodyVariables, setMetaTemplateBodyVariables] = useState("guest_name, reservation_code, checkin_date, amount, payment_link, web_checkin_link");
+  const [chatwootCannedResponseId, setChatwootCannedResponseId] = useState<number | null>(null);
+  const [chatwootCannedResponseShortCode, setChatwootCannedResponseShortCode] = useState("");
+  const [paymentLinkExpiresDays, setPaymentLinkExpiresDays] = useState(7);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [templateIdReminder, setTemplateIdReminder] = useState<string | null>(null);
+  const [templateIdPayment, setTemplateIdPayment] = useState<string | null>(null);
+  const [templateIdCheckout, setTemplateIdCheckout] = useState<string | null>(null);
+
+  // --- Templates
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<CheckinChargeTemplateRow | null>(null);
+  const [templateName, setTemplateName] = useState("");
+  const [templateBody, setTemplateBody] = useState("");
+  const [templateType, setTemplateType] = useState<TemplateType>("custom");
+  const [templateIsDefault, setTemplateIsDefault] = useState(false);
+  const [deleteTemplateId, setDeleteTemplateId] = useState<string | null>(null);
+  const templateBodyRef = useRef<HTMLTextAreaElement>(null);
+
+  // Reservas: filtro por data (padrão = hoje) e opção de incluir já com check-in realizado
+  const [checkinDateFilter, setCheckinDateFilter] = useState<string>(() => format(new Date(), "yyyy-MM-dd"));
+  const [onlyWithoutPayment, setOnlyWithoutPayment] = useState(false);
+  const [selectedReservationIds, setSelectedReservationIds] = useState<string[]>([]);
+  const [sendingCharge, setSendingCharge] = useState(false);
+  const [phoneOverrides, setPhoneOverrides] = useState<Record<string, string>>({});
+  const [selectedTemplateIdForMessage, setSelectedTemplateIdForMessage] = useState<string | null>(null);
+  const [messageDateFilter, setMessageDateFilter] = useState<string>(() => format(new Date(), "yyyy-MM-dd"));
+  const [includeCheckedInMessage, setIncludeCheckedInMessage] = useState(false);
+  const [onlyPendingPaymentMessage, setOnlyPendingPaymentMessage] = useState(false);
+  const [checkoutDateFilter, setCheckoutDateFilter] = useState<string>(() => format(new Date(), "yyyy-MM-dd"));
+  const [paymentListView, setPaymentListView] = useState<PaymentListView>("recent_and_future");
+  const [includeCheckedInPayment, setIncludeCheckedInPayment] = useState(false);
+
+  const { data: config, isLoading: configLoading } = useQuery({
+    queryKey: ["checkin_charge_config", establishmentUuid],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("checkin_charge_config")
+        .select("*")
+        .eq("establishment_id", establishmentUuid)
+        .maybeSingle();
+      if (error) throw error;
+      return data as CheckinChargeConfigRow | null;
+    },
+    enabled: !!establishmentUuid && isEnabled,
+  });
+
+  const { data: templates = [], isLoading: templatesLoading } = useQuery({
+    queryKey: ["checkin_charge_templates", establishmentUuid],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("checkin_charge_templates")
+        .select("*")
+        .eq("establishment_id", establishmentUuid)
+        .order("name");
+      if (error) throw error;
+      return (data ?? []) as CheckinChargeTemplateRow[];
+    },
+    enabled: !!establishmentUuid && isEnabled,
+  });
+
+  // Lembrete de check-in: apenas reservas SEM check-in (pending, confirmed) e sem web_checkin concluído
+  const { data: pendingReservationsRaw = [], isLoading: pendingLoading } = useQuery({
+    queryKey: ["checkin_charge_pending_reservations", establishmentUuid, onlyWithoutPayment, checkinDateFilter],
+    queryFn: async () => {
+      const range = getCheckinDateRange(checkinDateFilter);
+      const { data: reservations, error } = await supabase
+        .from("reservations")
+        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id, web_checkin(status)")
+        .eq("establishment_id", establishmentUuid)
+        .gte("checkin_date", range.start)
+        .lt("checkin_date", range.end)
+        .in("status", ["pending", "confirmed"])
+        .order("checkin_date", { ascending: true });
+      if (error) throw error;
+      if (!reservations?.length) return [];
+      const withCheckin = (reservations as { id: string; web_checkin?: { status: string }[] | { status: string } }[]).filter(
+        (r) => !(Array.isArray(r.web_checkin) ? r.web_checkin : r.web_checkin ? [r.web_checkin] : []).some((w) => w?.status === "completed")
+      );
+      const ids = (withCheckin as { id: string }[]).map((r) => r.id);
+      const clientIds = [...new Set((withCheckin as { client_id: string }[]).map((r) => r.client_id))];
+      const [clientsRes, chargesRes] = await Promise.all([
+        supabase.from("clients").select("id, full_name, phone").in("id", clientIds),
+        supabase.from("checkin_charges").select("reservation_id, id, status, sent_at").in("reservation_id", ids),
+      ]);
+      const clientsMap = new Map((clientsRes.data ?? []).map((c: { id: string; full_name: string; phone?: string | null }) => [c.id, { name: c.full_name, phone: c.phone ?? null }]));
+      const chargesMap = new Map(
+        (chargesRes.data ?? []).map((c: { reservation_id: string; id: string; status: string; sent_at: string | null }) => [
+          c.reservation_id,
+          { id: c.id, status: c.status, sent_at: c.sent_at },
+        ])
+      );
+      const list: PendingReservationRow[] = withCheckin.map((r) => {
+        const { web_checkin: _wc, ...rest } = r as { web_checkin?: unknown; [k: string]: unknown };
+        const charge = chargesMap.get(r.id);
+        const client = clientsMap.get(r.client_id);
+        return {
+          ...rest,
+          guest_name: client?.name ?? null,
+          guest_phone: client?.phone ?? null,
+          charge_id: charge?.id ?? null,
+          charge_status: charge?.status ?? null,
+          charge_sent_at: charge?.sent_at ?? null,
+        } as PendingReservationRow;
+      });
+      return list;
+    },
+    enabled: !!establishmentUuid && isEnabled && !!checkinDateFilter,
+  });
+
+  const pendingReservations = useMemo(() => {
+    if (!onlyWithoutPayment) return pendingReservationsRaw;
+    return pendingReservationsRaw.filter((r) => Number(r.paid_amount || 0) < Number(r.total_amount || 0));
+  }, [pendingReservationsRaw, onlyWithoutPayment]);
+
+  // Cobrar pagamentos pendentes: quando "Incluir reservas com check-in já realizado" está desmarcado = só sem check-in; marcado = só com check-in
+  const { data: pendingPaymentsRaw = [], isLoading: pendingPaymentsLoading } = useQuery({
+    queryKey: ["checkin_charge_pending_payments", establishmentUuid, paymentListView, includeCheckedInPayment],
+    queryFn: async () => {
+      const todayStr = format(new Date(), "yyyy-MM-dd");
+      const withCheckIn = includeCheckedInPayment;
+      let query = supabase
+        .from("reservations")
+        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id, web_checkin(status)")
+        .eq("establishment_id", establishmentUuid)
+        .in("status", withCheckIn ? ["pending", "unpaid", "confirmed", "checkedin"] : ["pending", "unpaid", "confirmed"]);
+      if (paymentListView === "recent_and_future") {
+        const range = getCheckinDateRange(todayStr);
+        query = query.gte("checkin_date", range.start).order("checkin_date", { ascending: true });
+      } else if (paymentListView === "today_only") {
+        const range = getCheckinDateRange(todayStr);
+        query = query.gte("checkin_date", range.start).lt("checkin_date", range.end).order("checkin_date", { ascending: true });
+      } else {
+        query = query.order("checkin_date", { ascending: false });
+      }
+      const { data: reservations, error } = await query;
+      if (error) throw error;
+      if (!reservations?.length) return [];
+
+      type RowWithWebCheckin = PendingReservationRow & { web_checkin?: { status: string }[] | { status: string } };
+      const hasCheckinDone = (r: RowWithWebCheckin) =>
+        r.status === "checkedin" ||
+        (Array.isArray(r.web_checkin) ? r.web_checkin : r.web_checkin ? [r.web_checkin] : []).some((w) => w?.status === "completed");
+
+      const byPayment = (reservations as RowWithWebCheckin[]).filter(
+        (r) => Number(r.paid_amount ?? 0) < Number(r.total_amount ?? 0)
+      );
+      const list = withCheckIn
+        ? byPayment.filter(hasCheckinDone)
+        : byPayment.filter((r) => !hasCheckinDone(r));
+
+      const ids = list.map((r) => r.id);
+      const clientIds = [...new Set(list.map((r) => r.client_id))];
+      const [clientsRes, chargesRes] = await Promise.all([
+        supabase.from("clients").select("id, full_name, phone").in("id", clientIds),
+        supabase.from("checkin_charges").select("reservation_id, id, status, sent_at").in("reservation_id", ids),
+      ]);
+      const clientsMap = new Map((clientsRes.data ?? []).map((c: { id: string; full_name: string; phone?: string | null }) => [c.id, { name: c.full_name, phone: c.phone ?? null }]));
+      const chargesMap = new Map(
+        (chargesRes.data ?? []).map((c: { reservation_id: string; id: string; status: string; sent_at: string | null }) => [
+          c.reservation_id,
+          { id: c.id, status: c.status, sent_at: c.sent_at },
+        ])
+      );
+      return list.map((r) => {
+        const { web_checkin: _wc, ...rest } = r as RowWithWebCheckin;
+        const charge = chargesMap.get(r.id);
+        const client = clientsMap.get(r.client_id);
+        return {
+          ...rest,
+          guest_name: client?.name ?? null,
+          guest_phone: client?.phone ?? null,
+          charge_id: charge?.id ?? null,
+          charge_status: charge?.status ?? null,
+          charge_sent_at: charge?.sent_at ?? null,
+        } as PendingReservationRow;
+      });
+    },
+    enabled: !!establishmentUuid && isEnabled,
+  });
+
+  const pendingPaymentsOnlyReservations = pendingPaymentsRaw;
+
+  // Mensagem personalizada: desmarcado = só sem check-in; marcado = só com check-in (status checkedin ou web_checkin concluído)
+  const { data: messageReservationsRaw = [], isLoading: messageLoading } = useQuery({
+    queryKey: ["checkin_charge_message_reservations", establishmentUuid, messageDateFilter, includeCheckedInMessage, onlyPendingPaymentMessage],
+    queryFn: async () => {
+      const range = getCheckinDateRange(messageDateFilter);
+      const withCheckIn = includeCheckedInMessage;
+      const { data: reservations, error } = await supabase
+        .from("reservations")
+        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id, web_checkin(status)")
+        .eq("establishment_id", establishmentUuid)
+        .gte("checkin_date", range.start)
+        .lt("checkin_date", range.end)
+        .in("status", withCheckIn ? ["pending", "unpaid", "confirmed", "checkedin"] : ["pending", "unpaid", "confirmed"])
+        .order("checkin_date", { ascending: true });
+      if (error) throw error;
+      if (!reservations?.length) return [];
+
+      type RowWithWebCheckinMsg = PendingReservationRow & { web_checkin?: { status: string }[] | { status: string } };
+      const hasCheckinDone = (r: RowWithWebCheckinMsg) =>
+        r.status === "checkedin" ||
+        (Array.isArray(r.web_checkin) ? r.web_checkin : r.web_checkin ? [r.web_checkin] : []).some((w) => w?.status === "completed");
+
+      let list = (reservations as RowWithWebCheckinMsg[]).filter((r) =>
+        withCheckIn ? hasCheckinDone(r) : !hasCheckinDone(r)
+      );
+      if (onlyPendingPaymentMessage) {
+        list = list.filter((r) => Number(r.paid_amount ?? 0) < Number(r.total_amount ?? 0));
+      }
+      const ids = list.map((r) => r.id);
+      const clientIds = [...new Set(list.map((r) => r.client_id))];
+      const [clientsRes, chargesRes] = await Promise.all([
+        supabase.from("clients").select("id, full_name, phone").in("id", clientIds),
+        supabase.from("checkin_charges").select("reservation_id, id, status, sent_at").in("reservation_id", ids),
+      ]);
+      const clientsMap = new Map((clientsRes.data ?? []).map((c: { id: string; full_name: string; phone?: string | null }) => [c.id, { name: c.full_name, phone: c.phone ?? null }]));
+      const chargesMap = new Map(
+        (chargesRes.data ?? []).map((c: { reservation_id: string; id: string; status: string; sent_at: string | null }) => [
+          c.reservation_id,
+          { id: c.id, status: c.status, sent_at: c.sent_at },
+        ])
+      );
+      return list.map((r) => {
+        const { web_checkin: _wc, ...rest } = r as RowWithWebCheckinMsg;
+        const charge = chargesMap.get(r.id);
+        const client = clientsMap.get(r.client_id);
+        return {
+          ...rest,
+          guest_name: client?.name ?? null,
+          guest_phone: client?.phone ?? null,
+          charge_id: charge?.id ?? null,
+          charge_status: charge?.status ?? null,
+          charge_sent_at: charge?.sent_at ?? null,
+        } as PendingReservationRow;
+      });
+    },
+    enabled: !!establishmentUuid && isEnabled && !!messageDateFilter,
+  });
+
+  // Reservas com checkout na data selecionada (aba Lembrete de checkout)
+  const { data: checkoutReservationsRaw = [], isLoading: checkoutLoading } = useQuery({
+    queryKey: ["checkin_charge_checkout_reservations", establishmentUuid, checkoutDateFilter],
+    queryFn: async () => {
+      const range = getCheckinDateRange(checkoutDateFilter);
+      const { data: reservations, error } = await supabase
+        .from("reservations")
+        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id")
+        .eq("establishment_id", establishmentUuid)
+        .gte("checkout_date", range.start)
+        .lt("checkout_date", range.end)
+        .in("status", ["confirmed", "checkedin"])
+        .order("checkout_date", { ascending: true });
+      if (error) throw error;
+      if (!reservations?.length) return [];
+      const ids = (reservations as { id: string }[]).map((r) => r.id);
+      const clientIds = [...new Set((reservations as { client_id: string }[]).map((r) => r.client_id))];
+      const [clientsRes, chargesRes] = await Promise.all([
+        supabase.from("clients").select("id, full_name, phone").in("id", clientIds),
+        supabase.from("checkin_charges").select("reservation_id, id, status, sent_at").in("reservation_id", ids),
+      ]);
+      const clientsMap = new Map((clientsRes.data ?? []).map((c: { id: string; full_name: string; phone?: string | null }) => [c.id, { name: c.full_name, phone: c.phone ?? null }]));
+      const chargesMap = new Map(
+        (chargesRes.data ?? []).map((c: { reservation_id: string; id: string; status: string; sent_at: string | null }) => [
+          c.reservation_id,
+          { id: c.id, status: c.status, sent_at: c.sent_at },
+        ])
+      );
+      return (reservations as PendingReservationRow[]).map((r) => {
+        const charge = chargesMap.get(r.id);
+        const client = clientsMap.get(r.client_id);
+        return {
+          ...r,
+          guest_name: client?.name ?? null,
+          guest_phone: client?.phone ?? null,
+          charge_id: charge?.id ?? null,
+          charge_status: charge?.status ?? null,
+          charge_sent_at: charge?.sent_at ?? null,
+        };
+      });
+    },
+    enabled: !!establishmentUuid && isEnabled && !!checkoutDateFilter,
+  });
+
+  useEffect(() => {
+    if (!config) return;
+    setEnabled(config.enabled);
+    setSendTiming(config.send_timing as SendTiming);
+    setDaysBeforeCheckin(config.days_before_checkin ?? 3);
+    setAmountType(config.amount_type as AmountType);
+    setAmountValue(config.amount_value != null ? String(config.amount_value) : "");
+    setDueDateDays(config.due_date_days ?? 3);
+    setChannel(config.channel as ChannelType);
+    setChannelConfig((config.channel_config as Record<string, unknown>) ?? {});
+    setTemplateId(config.template_id);
+    setTemplateSource((config.template_source as TemplateSource) ?? "internal");
+    setMetaTemplateName(config.meta_template_name ?? "");
+    setMetaTemplateLanguage(config.meta_template_language ?? "pt_BR");
+    setMetaTemplateBodyVariables(
+      Array.isArray(config.meta_template_body_variables)
+        ? config.meta_template_body_variables.join(", ")
+        : "guest_name, reservation_code, checkin_date, amount, payment_link, web_checkin_link"
+    );
+    setChatwootCannedResponseId(config.chatwoot_canned_response_id ?? null);
+    setChatwootCannedResponseShortCode(config.chatwoot_canned_response_short_code ?? "");
+    setPaymentLinkExpiresDays(config.payment_link_expires_days ?? 7);
+    setTemplateIdReminder(config.template_id_reminder ?? null);
+    setTemplateIdPayment(config.template_id_payment ?? null);
+    setTemplateIdCheckout(config.template_id_checkout ?? null);
+  }, [config]);
+
+  const { data: channelTemplates, isLoading: channelTemplatesLoading } = useQuery({
+    queryKey: ["list-channel-templates", establishmentUuid, channel],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("list-channel-templates", {
+        body: { establishment_id: establishmentUuid },
+      });
+      if (error) throw error;
+      return (data ?? { internal: [], meta: [], chatwoot: [] }) as {
+        internal: Array<{ id: string; name: string; body: string }>;
+        meta?: Array<{ name: string; language: string; status?: string }>;
+        chatwoot?: Array<{ id: number; short_code: string; content: string }>;
+      };
+    },
+    enabled: !!establishmentUuid && !!config && (channel === "whatsapp_cloud" || channel === "chatwoot"),
+  });
+
+  const saveConfig = async () => {
+    if (!establishmentUuid) return;
+    setConfigSaving(true);
+    try {
+      const payload = {
+        establishment_id: establishmentUuid,
+        enabled,
+        send_timing: sendTiming,
+        days_before_checkin: sendTiming === "days_before_checkin" ? daysBeforeCheckin : null,
+        amount_type: amountType,
+        amount_value: amountType === "total" ? null : (amountValue ? Number(amountValue) : null),
+        due_date_days: dueDateDays,
+        channel,
+        channel_config: channelConfig,
+        template_id: templateSource === "internal" ? (templateId || null) : null,
+        template_source: templateSource,
+        meta_template_name: templateSource === "meta" ? metaTemplateName || null : null,
+        meta_template_language: templateSource === "meta" ? metaTemplateLanguage || null : null,
+        meta_template_body_variables:
+          templateSource === "meta"
+            ? metaTemplateBodyVariables
+                .split(/[,;\n]+/)
+                .map((s) => s.trim())
+                .filter(Boolean)
+            : null,
+        chatwoot_canned_response_id: templateSource === "chatwoot" ? chatwootCannedResponseId : null,
+        chatwoot_canned_response_short_code: templateSource === "chatwoot" ? (chatwootCannedResponseShortCode || null) : null,
+        payment_link_expires_days: paymentLinkExpiresDays,
+        template_id_reminder: templateSource === "internal" ? (templateIdReminder || null) : null,
+        template_id_payment: templateSource === "internal" ? (templateIdPayment || null) : null,
+        template_id_checkout: templateSource === "internal" ? (templateIdCheckout || null) : null,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supabase
+        .from("checkin_charge_config")
+        .upsert(payload, { onConflict: "establishment_id" });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["checkin_charge_config", establishmentUuid] });
+      toast.success("Configuração salva.");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setConfigSaving(false);
+    }
+  };
+
+  const openNewTemplate = () => {
+    setEditingTemplate(null);
+    setTemplateName("");
+    setTemplateBody(DEFAULT_TEMPLATE_CHECKIN);
+    setTemplateType("checkin_reminder");
+    setTemplateIsDefault(templates.length === 0);
+    setTemplateDialogOpen(true);
+  };
+
+  const openEditTemplate = (t: CheckinChargeTemplateRow) => {
+    setEditingTemplate(t);
+    setTemplateName(t.name);
+    setTemplateBody(t.body);
+    setTemplateType((t.template_type as TemplateType) || "custom");
+    setTemplateIsDefault(t.is_default);
+    setTemplateDialogOpen(true);
+  };
+
+  const insertTemplateVariable = (varName: string) => {
+    const placeholder = `{{${varName}}}`;
+    const ta = templateBodyRef.current;
+    if (ta) {
+      const start = ta.selectionStart ?? templateBody.length;
+      const end = ta.selectionEnd ?? start;
+      const next = templateBody.slice(0, start) + placeholder + templateBody.slice(end);
+      setTemplateBody(next);
+      setTimeout(() => { ta.focus(); ta.setSelectionRange(start + placeholder.length, start + placeholder.length); }, 0);
+    } else {
+      setTemplateBody((prev) => prev + placeholder);
+    }
+  };
+
+  const saveTemplate = async () => {
+    if (!establishmentUuid || !templateName.trim() || !templateBody.trim()) {
+      toast.error("Preencha nome e corpo do template.");
+      return;
+    }
+    try {
+      if (editingTemplate) {
+        const updates: Partial<CheckinChargeTemplateRow> = {
+          name: templateName.trim(),
+          body: templateBody.trim(),
+          template_type: templateType,
+          is_default: templateIsDefault,
+          updated_at: new Date().toISOString(),
+        };
+        if (templateIsDefault) {
+          await supabase
+            .from("checkin_charge_templates")
+            .update({ is_default: false })
+            .eq("establishment_id", establishmentUuid);
+        }
+        const { error } = await supabase
+          .from("checkin_charge_templates")
+          .update(updates)
+          .eq("id", editingTemplate.id);
+        if (error) throw error;
+        toast.success("Template atualizado.");
+      } else {
+        if (templateIsDefault) {
+          await supabase
+            .from("checkin_charge_templates")
+            .update({ is_default: false })
+            .eq("establishment_id", establishmentUuid);
+        }
+        const { error } = await supabase.from("checkin_charge_templates").insert({
+          establishment_id: establishmentUuid,
+          name: templateName.trim(),
+          body: templateBody.trim(),
+          template_type: templateType,
+          is_default: templateIsDefault,
+        });
+        if (error) throw error;
+        toast.success("Template criado.");
+      }
+      setTemplateDialogOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["checkin_charge_templates", establishmentUuid] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  const deleteTemplate = async (id: string) => {
+    try {
+      const { error } = await supabase.from("checkin_charge_templates").delete().eq("id", id);
+      if (error) throw error;
+      toast.success("Template removido.");
+      setDeleteTemplateId(null);
+      queryClient.invalidateQueries({ queryKey: ["checkin_charge_templates", establishmentUuid] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  const setDefaultTemplate = async (id: string) => {
+    if (!establishmentUuid) return;
+    try {
+      await supabase
+        .from("checkin_charge_templates")
+        .update({ is_default: false })
+        .eq("establishment_id", establishmentUuid);
+      const { error } = await supabase
+        .from("checkin_charge_templates")
+        .update({ is_default: true, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (error) throw error;
+      toast.success("Template definido como padrão.");
+      queryClient.invalidateQueries({ queryKey: ["checkin_charge_templates", establishmentUuid] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  const handlePhoneOverride = (reservationId: string, phone: string) => {
+    setPhoneOverrides((prev) => {
+      const next = { ...prev };
+      if (phone.trim()) next[reservationId] = phone.trim();
+      else delete next[reservationId];
+      return next;
+    });
+  };
+
+  const sendChargeForReservations = async (
+    reservationIds: string[],
+    intent?: "checkin_reminder" | "payment_pending" | "checkout_reminder",
+    options?: { template_id_override?: string | null; phone_overrides?: Record<string, string> }
+  ) => {
+    if (!reservationIds.length) {
+      toast.error("Selecione ao menos uma reserva.");
+      return;
+    }
+    setSendingCharge(true);
+    try {
+      const body: { reservation_ids: string[]; intent?: string; template_id_override?: string; phone_overrides?: Record<string, string> } = { reservation_ids: reservationIds };
+      if (intent) body.intent = intent;
+      if (options?.template_id_override) body.template_id_override = options.template_id_override;
+      if (options?.phone_overrides && Object.keys(options.phone_overrides).length > 0) body.phone_overrides = options.phone_overrides;
+      const { data, error } = await supabase.functions.invoke("send-checkin-charge", {
+        body,
+      });
+      if (error) throw error;
+      const results = (data as { results?: Array<{ reservation_id: string; success: boolean; error?: string }> })?.results ?? [];
+      const ok = results.filter((r) => r.success).length;
+      const fail = results.filter((r) => !r.success);
+      const successMsg =
+        intent === "checkin_reminder"
+          ? `Lembrete de check-in enviado para ${ok} reserva(s). O template configurado foi usado com o link de pagamento/check-in.`
+          : intent === "payment_pending"
+            ? `Cobrança enviada para ${ok} reserva(s). O template configurado foi usado com o link de pagamento.`
+            : intent === "checkout_reminder"
+              ? `Lembrete de checkout enviado para ${ok} reserva(s).`
+              : `Mensagem enviada para ${ok} reserva(s). O template selecionado foi usado.`;
+      if (fail.length > 0) {
+        toast.warning(`${ok} enviada(s). Falha(s): ${fail.map((f) => f.error).join("; ")}`);
+      } else {
+        toast.success(successMsg);
+      }
+      setSelectedReservationIds([]);
+      setPhoneOverrides({});
+      queryClient.invalidateQueries({ queryKey: ["checkin_charge_pending_reservations", establishmentUuid, onlyWithoutPayment, checkinDateFilter] });
+      queryClient.invalidateQueries({ queryKey: ["checkin_charge_pending_payments", establishmentUuid, paymentListView, includeCheckedInPayment] });
+      queryClient.invalidateQueries({ queryKey: ["checkin_charge_checkout_reservations", establishmentUuid, checkoutDateFilter] });
+      queryClient.invalidateQueries({ queryKey: ["checkin_charge_message_reservations", establishmentUuid, messageDateFilter, includeCheckedInMessage, onlyPendingPaymentMessage] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSendingCharge(false);
+    }
+  };
+
+  const toggleReservationSelection = (id: string) => {
+    setSelectedReservationIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+  const toggleSelectAllReservations = () => {
+    if (selectedReservationIds.length >= pendingReservations.length) {
+      setSelectedReservationIds([]);
+    } else {
+      setSelectedReservationIds(pendingReservations.map((r) => r.id));
+    }
+  };
+
+  const setChannelConfigField = (key: string, value: string | number) => {
+    setChannelConfig((prev) => ({ ...prev, [key]: value }));
+  };
+
+  if (!isEnabled) {
+    return (
+      <div className="p-6">
+        <Card className="p-6">
+          <p className="text-muted-foreground">
+            Mensagens & Cobranças não está habilitado para esta empresa. Entre em contato com o administrador do sistema.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <TooltipProvider>
+    <div className="p-6 space-y-6">
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-xl bg-[#25D366]/10 ring-1 ring-[#25D366]/30 flex items-center justify-center">
+          <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" fill="#25D366" aria-hidden>
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+          </svg>
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Mensagens & Cobranças</h1>
+          <p className="text-sm text-muted-foreground">
+            Configure lembretes de check-in, cobranças e mensagens por WhatsApp, Chatwoot ou Evolution API.
+          </p>
+        </div>
+      </div>
+
+      <Tabs defaultValue="config" className="space-y-6">
+        <TabsList className="flex flex-wrap h-auto gap-1 p-1.5 rounded-xl bg-muted/60 border border-border/60">
+          <TabsTrigger value="config" className="rounded-lg data-[state=active]:shadow-sm">
+            Configuração
+          </TabsTrigger>
+          <TabsTrigger value="reservas" className="rounded-lg data-[state=active]:shadow-sm gap-2">
+            <Bell className="h-4 w-4" />
+            Lembrete de check-in
+          </TabsTrigger>
+          <TabsTrigger value="pendentes" className="rounded-lg data-[state=active]:shadow-sm gap-2">
+            <Wallet className="h-4 w-4" />
+            Pagamentos pendentes
+          </TabsTrigger>
+          <TabsTrigger value="checkout" className="rounded-lg data-[state=active]:shadow-sm gap-2">
+            <CalendarCheck className="h-4 w-4" />
+            Lembrete de checkout
+          </TabsTrigger>
+          <TabsTrigger value="mensagem" className="rounded-lg data-[state=active]:shadow-sm gap-2">
+            <MessageSquare className="h-4 w-4" />
+            Mensagem personalizada
+          </TabsTrigger>
+          <TabsTrigger value="templates" className="rounded-lg data-[state=active]:shadow-sm gap-2">
+            <FileText className="h-4 w-4" />
+            Templates
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="config" className="space-y-4">
+          <Card className="p-6">
+            {configLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Ativar Mensagens & Cobranças</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Quando ativo, o sistema pode enviar cobrança e link de pagamento ao hóspede conforme a regra de envio.
+                    </p>
+                  </div>
+                  <Switch checked={enabled} onCheckedChange={setEnabled} />
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Momento do envio</Label>
+                    <Select value={sendTiming} onValueChange={(v) => setSendTiming(v as SendTiming)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="after_confirmation">Após confirmação da reserva</SelectItem>
+                        <SelectItem value="days_before_checkin">X dias antes do check-in</SelectItem>
+                        <SelectItem value="after_ota">Após reserva OTA</SelectItem>
+                        <SelectItem value="manual">Apenas manual</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {sendTiming === "days_before_checkin" && (
+                    <div className="space-y-2">
+                      <Label>Dias antes do check-in</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={daysBeforeCheckin}
+                        onChange={(e) => setDaysBeforeCheckin(Number(e.target.value) || 1)}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Tipo de valor</Label>
+                    <Select value={amountType} onValueChange={(v) => setAmountType(v as AmountType)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="total">Total da reserva</SelectItem>
+                        <SelectItem value="percent">Percentual do total</SelectItem>
+                        <SelectItem value="fixed">Valor fixo</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {(amountType === "percent" || amountType === "fixed") && (
+                    <div className="space-y-2">
+                      <Label>{amountType === "percent" ? "Percentual (%)" : "Valor fixo (R$)"}</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={amountType === "percent" ? 1 : 0.01}
+                        value={amountValue}
+                        onChange={(e) => setAmountValue(e.target.value)}
+                        placeholder={amountType === "percent" ? "Ex: 30" : "Ex: 150.00"}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Dias para vencimento</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={dueDateDays}
+                      onChange={(e) => setDueDateDays(Number(e.target.value) || 1)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Link de pagamento expira em (dias)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={paymentLinkExpiresDays}
+                      onChange={(e) => setPaymentLinkExpiresDays(Number(e.target.value) || 7)}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Canal de envio</Label>
+                  <Select value={channel} onValueChange={(v) => setChannel(v as ChannelType)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(CHANNEL_LABELS) as ChannelType[]).map((ch) => (
+                        <SelectItem key={ch} value={ch}>
+                          {CHANNEL_LABELS[ch]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Meta: templates oficiais WhatsApp (variáveis: nome, localizador, link check-in / cobrança: link pagamento). Chatwoot pode usar inbox conectado à Evolution API para enviar WhatsApp sem Meta.
+                  </p>
+                </div>
+
+                {/* Channel-specific config */}
+                {channel === "whatsapp_cloud" && (
+                  <div className="rounded-lg border p-4 space-y-4">
+                    <Label className="text-base">WhatsApp Cloud API</Label>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Phone ID</Label>
+                        <Input
+                          placeholder="ID do número de telefone (Meta)"
+                          value={(channelConfig.phone_id as string) ?? ""}
+                          onChange={(e) => setChannelConfigField("phone_id", e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>WhatsApp Business Account ID (WABA)</Label>
+                        <Input
+                          placeholder="ID da conta Business (para listar templates)"
+                          value={(channelConfig.waba_id as string) ?? ""}
+                          onChange={(e) => setChannelConfigField("waba_id", e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">Obrigatório para usar templates oficiais da Meta.</p>
+                      </div>
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label>Access Token</Label>
+                        <Input
+                          type="password"
+                          placeholder="Token de acesso permanente"
+                          value={(channelConfig.access_token as string) ?? ""}
+                          onChange={(e) => setChannelConfigField("access_token", e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {channel === "chatwoot" && (
+                  <div className="rounded-lg border p-4 space-y-4">
+                    <Label className="text-base">Chatwoot</Label>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>URL base</Label>
+                        <Input
+                          placeholder="https://app.chatwoot.com"
+                          value={(channelConfig.base_url as string) ?? ""}
+                          onChange={(e) => setChannelConfigField("base_url", e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Account ID</Label>
+                        <Input
+                          type="number"
+                          placeholder="ID da conta"
+                          value={channelConfig.account_id != null ? String(channelConfig.account_id) : ""}
+                          onChange={(e) => setChannelConfigField("account_id", e.target.value ? Number(e.target.value) : 0)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Inbox ID</Label>
+                        <Input
+                          type="number"
+                          placeholder="ID do inbox"
+                          value={channelConfig.inbox_id != null ? String(channelConfig.inbox_id) : ""}
+                          onChange={(e) => setChannelConfigField("inbox_id", e.target.value ? Number(e.target.value) : 0)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>API Key</Label>
+                        <Input
+                          type="password"
+                          placeholder="api_access_token"
+                          value={(channelConfig.api_key as string) ?? ""}
+                          onChange={(e) => setChannelConfigField("api_key", e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {channel === "evolution_api" && (
+                  <div className="rounded-lg border p-4 space-y-4">
+                    <Label className="text-base">Evolution API</Label>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>URL base</Label>
+                        <Input
+                          placeholder="https://sua-instancia.evolution-api.com"
+                          value={(channelConfig.base_url as string) ?? ""}
+                          onChange={(e) => setChannelConfigField("base_url", e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Nome da instância</Label>
+                        <Input
+                          placeholder="nome-da-instancia"
+                          value={(channelConfig.instance as string) ?? ""}
+                          onChange={(e) => setChannelConfigField("instance", e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {channel === "webhook" && (
+                  <div className="rounded-lg border p-4 space-y-4">
+                    <Label className="text-base">Webhook</Label>
+                    <div className="space-y-2">
+                      <Label>URL (POST)</Label>
+                      <Input
+                        placeholder="https://seu-servidor.com/webhook"
+                        value={(channelConfig.url as string) ?? ""}
+                        onChange={(e) => setChannelConfigField("url", e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        O webhook receberá POST com: to, message, reservation_id
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <Label className="text-base">Origem do template</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Internal/Evolution: templates criados aqui. Meta: templates aprovados no WhatsApp. Chatwoot: Canned Responses da conta.
+                  </p>
+                  <Select value={templateSource} onValueChange={(v) => setTemplateSource(v as TemplateSource)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="internal">Sistema / Evolution API (criar templates abaixo)</SelectItem>
+                      <SelectItem value="meta" disabled={channel !== "whatsapp_cloud"}>Meta (WhatsApp oficial)</SelectItem>
+                      <SelectItem value="chatwoot" disabled={channel !== "chatwoot"}>Chatwoot (Canned Responses)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {templateSource === "internal" && (
+                    <div className="space-y-4 rounded-lg border p-4 bg-muted/20">
+                      <p className="text-sm text-muted-foreground">
+                        Escolha o template para cada tipo de ação (Chatwoot/Evolution: use templates com tipo correspondente).
+                      </p>
+                      <div className="grid gap-4 sm:grid-cols-1">
+                        <div className="space-y-2">
+                          <Label>Lembrete de check-in</Label>
+                          <Select value={templateIdReminder ?? "none"} onValueChange={(v) => setTemplateIdReminder(v === "none" ? null : v)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Padrão do sistema" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Padrão do sistema</SelectItem>
+                              {templates.filter((t) => !t.template_type || t.template_type === "checkin_reminder" || t.template_type === "custom").map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.name} {t.is_default ? "(padrão)" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Pagamento pendente</Label>
+                          <Select value={templateIdPayment ?? "none"} onValueChange={(v) => setTemplateIdPayment(v === "none" ? null : v)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Padrão do sistema" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Padrão do sistema</SelectItem>
+                              {templates.filter((t) => !t.template_type || t.template_type === "payment_pending" || t.template_type === "custom").map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.name} {t.is_default ? "(padrão)" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Lembrete de checkout</Label>
+                          <Select value={templateIdCheckout ?? "none"} onValueChange={(v) => setTemplateIdCheckout(v === "none" ? null : v)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Padrão do sistema" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Padrão do sistema</SelectItem>
+                              {templates.filter((t) => !t.template_type || t.template_type === "checkout_reminder" || t.template_type === "custom").map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.name} {t.is_default ? "(padrão)" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Template geral (fallback)</Label>
+                        <Select value={templateId ?? "none"} onValueChange={(v) => setTemplateId(v === "none" ? null : v)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Template padrão do sistema" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Template padrão do sistema</SelectItem>
+                            {templates.map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.name} {t.is_default ? "(padrão)" : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+                  {templateSource === "meta" && channel === "whatsapp_cloud" && (
+                    <div className="space-y-4">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Template Meta</Label>
+                          <Select
+                            value={metaTemplateName ? `${metaTemplateName}|${metaTemplateLanguage || "pt_BR"}` : "none"}
+                            onValueChange={(v) => {
+                              if (v === "none") { setMetaTemplateName(""); return; }
+                              const [name, lang] = v.split("|");
+                              setMetaTemplateName(name || "");
+                              setMetaTemplateLanguage(lang || "pt_BR");
+                            }}
+                            disabled={channelTemplatesLoading}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Carregar templates..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Selecione um template</SelectItem>
+                              {(channelTemplates?.meta ?? []).map((t) => (
+                                <SelectItem key={`${t.name}-${t.language}`} value={`${t.name}|${t.language || "pt_BR"}`}>
+                                  {t.name} ({t.language})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Idioma do template</Label>
+                          <Input
+                            value={metaTemplateLanguage}
+                            onChange={(e) => setMetaTemplateLanguage(e.target.value)}
+                            placeholder="pt_BR"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Ordem dos parâmetros do body no template Meta (correspondência com {"{{1}}"}, {"{{2}}"}, etc.)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Defina a ordem em que as variáveis preenchem os placeholders do template aprovado na Meta. Use vírgula ou quebra de linha.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setMetaTemplateBodyVariables("guest_name, reservation_code, checkin_date, web_checkin_link")}
+                          >
+                            Mensagem (nome, localizador, check-in, link check-in)
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setMetaTemplateBodyVariables("guest_name, reservation_code, amount, payment_link")}
+                          >
+                            Cobrança (nome, localizador, valor, link pagamento)
+                          </Button>
+                        </div>
+                        <Input
+                          value={metaTemplateBodyVariables}
+                          onChange={(e) => setMetaTemplateBodyVariables(e.target.value)}
+                          placeholder="guest_name, reservation_code, payment_link, ..."
+                          className="font-mono text-sm"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Variáveis: guest_name, reservation_code (localizador), checkin_date, checkout_date, amount, payment_link, web_checkin_link, establishment_name, establishment_address
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {templateSource === "chatwoot" && channel === "chatwoot" && (
+                    <div className="space-y-2">
+                      <Label>Canned Response (Chatwoot)</Label>
+                      <Select
+                        value={chatwootCannedResponseId != null ? String(chatwootCannedResponseId) : (chatwootCannedResponseShortCode || "none")}
+                        onValueChange={(v) => {
+                          if (v === "none") { setChatwootCannedResponseId(null); setChatwootCannedResponseShortCode(""); return; }
+                          const c = (channelTemplates?.chatwoot ?? []).find((x) => String(x.id) === v || x.short_code === v);
+                          if (c) { setChatwootCannedResponseId(c.id); setChatwootCannedResponseShortCode(c.short_code); }
+                        }}
+                        disabled={channelTemplatesLoading}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Carregar Canned Responses..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Selecione uma resposta rápida</SelectItem>
+                          {(channelTemplates?.chatwoot ?? []).map((c) => (
+                            <SelectItem key={c.id} value={String(c.id)}>
+                              {c.short_code} – {c.content?.slice(0, 40)}…
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end">
+                  <Button onClick={saveConfig} disabled={configSaving}>
+                    {configSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                    Salvar configuração
+                  </Button>
+                </div>
+              </div>
+            )}
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="reservas" className="space-y-4">
+          <Card className="overflow-hidden border-0 shadow-lg shadow-black/5 bg-card">
+            <div className="border-b bg-muted/30 px-6 py-4">
+              <h3 className="font-semibold flex items-center gap-2">
+                <Bell className="h-4 w-4 text-primary" />
+                Lembrete de check-in
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Hóspedes que ainda não realizaram check-in. Envie o lembrete com o template configurado e o link de pagamento/check-in.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="checkin-date-filter" className="text-sm whitespace-nowrap">Data do check-in</Label>
+                  <Input
+                    id="checkin-date-filter"
+                    type="date"
+                    value={checkinDateFilter}
+                    onChange={(e) => setCheckinDateFilter(e.target.value)}
+                    className="w-[160px]"
+                  />
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={onlyWithoutPayment}
+                    onCheckedChange={(v) => setOnlyWithoutPayment(!!v)}
+                  />
+                  <span className="text-sm">Apenas com valor pendente</span>
+                </label>
+              </div>
+              {selectedReservationIds.length > 0 && (
+                <Button
+                  onClick={() => sendChargeForReservations(selectedReservationIds, "checkin_reminder", { phone_overrides: phoneOverrides })}
+                  disabled={sendingCharge}
+                  className="shadow-sm"
+                >
+                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  Enviar lembrete para {selectedReservationIds.length} reserva(s)
+                </Button>
+              )}
+              {pendingLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : pendingReservations.length === 0 ? (
+                <p className="text-muted-foreground py-8 text-center rounded-lg bg-muted/30">
+                  Nenhuma reserva encontrada para a data selecionada.
+                </p>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <ReservationsChargeTable
+                    list={pendingReservations}
+                    selectedIds={selectedReservationIds}
+                    onToggleOne={toggleReservationSelection}
+                    onToggleAll={() => (selectedReservationIds.length >= pendingReservations.length ? setSelectedReservationIds([]) : setSelectedReservationIds(pendingReservations.map((r) => r.id)))}
+                    onSendOne={(id) => sendChargeForReservations([id], "checkin_reminder", { phone_overrides: phoneOverrides })}
+                    sendingCharge={sendingCharge}
+                    formatCurrency={formatCurrency}
+                    format={format}
+                    ptBR={ptBR}
+                    showPhone
+                    phoneOverrides={phoneOverrides}
+                    onPhoneOverride={handlePhoneOverride}
+                  />
+                </div>
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="pendentes" className="space-y-4">
+          <Card className="overflow-hidden border-0 shadow-lg shadow-black/5 bg-card">
+            <div className="border-b bg-muted/30 px-6 py-4">
+              <h3 className="font-semibold flex items-center gap-2">
+                <Wallet className="h-4 w-4 text-primary" />
+                Cobrar pagamentos pendentes
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Reservas com valor pendente (pagamento parcial ou não pago). Envie o link de pagamento com o template de cobrança.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="payment-list-view" className="text-sm whitespace-nowrap">Exibir</Label>
+                  <Select value={paymentListView} onValueChange={(v) => setPaymentListView(v as PaymentListView)}>
+                    <SelectTrigger id="payment-list-view" className="w-[220px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="recent_and_future">Recentes e futuras (hoje em diante)</SelectItem>
+                      <SelectItem value="today_only">Somente do dia atual</SelectItem>
+                      <SelectItem value="all">Todas não pagas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={includeCheckedInPayment}
+                    onCheckedChange={(v) => setIncludeCheckedInPayment(!!v)}
+                  />
+                  <span className="text-sm">Incluir reservas com check-in já realizado</span>
+                </label>
+              </div>
+              {selectedReservationIds.length > 0 && (
+                <Button
+                  onClick={() => sendChargeForReservations(selectedReservationIds, "payment_pending", { phone_overrides: phoneOverrides })}
+                  disabled={sendingCharge}
+                  className="shadow-sm"
+                >
+                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  Enviar cobrança para {selectedReservationIds.length} reserva(s)
+                </Button>
+              )}
+              {pendingPaymentsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : pendingPaymentsOnlyReservations.length === 0 ? (
+                <p className="text-muted-foreground py-8 text-center rounded-lg bg-muted/30">
+                  Nenhuma reserva com pagamento pendente.
+                </p>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <ReservationsChargeTable
+                    list={pendingPaymentsOnlyReservations}
+                    selectedIds={selectedReservationIds}
+                    onToggleOne={toggleReservationSelection}
+                    onToggleAll={() => (selectedReservationIds.length >= pendingPaymentsOnlyReservations.length ? setSelectedReservationIds([]) : setSelectedReservationIds(pendingPaymentsOnlyReservations.map((r) => r.id)))}
+                    onSendOne={(id) => sendChargeForReservations([id], "payment_pending", { phone_overrides: phoneOverrides })}
+                    sendingCharge={sendingCharge}
+                    formatCurrency={formatCurrency}
+                    format={format}
+                    ptBR={ptBR}
+                    showStatus={includeCheckedInPayment}
+                    showPhone
+                    phoneOverrides={phoneOverrides}
+                    onPhoneOverride={handlePhoneOverride}
+                  />
+                </div>
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="checkout" className="space-y-4">
+          <Card className="overflow-hidden border-0 shadow-lg shadow-black/5 bg-card">
+            <div className="border-b bg-muted/30 px-6 py-4">
+              <h3 className="font-semibold flex items-center gap-2">
+                <CalendarCheck className="h-4 w-4 text-primary" />
+                Lembrete de checkout
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Reservas com check-out na data selecionada. Envie o lembrete de checkout com o template configurado.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="checkout-date-filter" className="text-sm whitespace-nowrap">Data do check-out</Label>
+                  <Input
+                    id="checkout-date-filter"
+                    type="date"
+                    value={checkoutDateFilter}
+                    onChange={(e) => setCheckoutDateFilter(e.target.value)}
+                    className="w-[160px]"
+                  />
+                </div>
+              </div>
+              {selectedReservationIds.length > 0 && (
+                <Button
+                  onClick={() => sendChargeForReservations(selectedReservationIds, "checkout_reminder", { phone_overrides: phoneOverrides })}
+                  disabled={sendingCharge}
+                  className="shadow-sm"
+                >
+                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  Enviar lembrete de checkout para {selectedReservationIds.length} reserva(s)
+                </Button>
+              )}
+              {checkoutLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : checkoutReservationsRaw.length === 0 ? (
+                <p className="text-muted-foreground py-8 text-center rounded-lg bg-muted/30">
+                  Nenhuma reserva com check-out na data selecionada.
+                </p>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <ReservationsChargeTable
+                    list={checkoutReservationsRaw}
+                    selectedIds={selectedReservationIds}
+                    onToggleOne={toggleReservationSelection}
+                    onToggleAll={() => (selectedReservationIds.length >= checkoutReservationsRaw.length ? setSelectedReservationIds([]) : setSelectedReservationIds(checkoutReservationsRaw.map((r) => r.id)))}
+                    onSendOne={(id) => sendChargeForReservations([id], "checkout_reminder", { phone_overrides: phoneOverrides })}
+                    sendingCharge={sendingCharge}
+                    formatCurrency={formatCurrency}
+                    format={format}
+                    ptBR={ptBR}
+                    showPhone
+                    phoneOverrides={phoneOverrides}
+                    onPhoneOverride={handlePhoneOverride}
+                    useCheckoutDate
+                  />
+                </div>
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="mensagem" className="space-y-4">
+          <Card className="overflow-hidden border-0 shadow-lg shadow-black/5 bg-card">
+            <div className="border-b bg-muted/30 px-6 py-4">
+              <h3 className="font-semibold flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-primary" />
+                Mensagem personalizada
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Reservas do dia: envie mensagem para hóspedes. Use os filtros e escolha o template. Inclui link de pagamento quando aplicável.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="message-date-filter" className="text-sm whitespace-nowrap">Data do check-in</Label>
+                  <Input
+                    id="message-date-filter"
+                    type="date"
+                    value={messageDateFilter}
+                    onChange={(e) => setMessageDateFilter(e.target.value)}
+                    className="w-[160px]"
+                  />
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={includeCheckedInMessage}
+                    onCheckedChange={(v) => setIncludeCheckedInMessage(!!v)}
+                  />
+                  <span className="text-sm">Incluir reservas com check-in já realizado</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={onlyPendingPaymentMessage}
+                    onCheckedChange={(v) => setOnlyPendingPaymentMessage(!!v)}
+                  />
+                  <span className="text-sm">Apenas reservas pendentes de pagamento</span>
+                </label>
+                <div className="space-y-2 min-w-[200px]">
+                  <Label className="text-sm">Template a usar</Label>
+                  <Select
+                    value={selectedTemplateIdForMessage ?? "none"}
+                    onValueChange={(v) => setSelectedTemplateIdForMessage(v === "none" ? null : v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Padrão da configuração" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Padrão da configuração</SelectItem>
+                      {templates.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {selectedReservationIds.length > 0 && (
+                <Button
+                  onClick={() => sendChargeForReservations(selectedReservationIds, undefined, {
+                    template_id_override: selectedTemplateIdForMessage ?? undefined,
+                    phone_overrides: phoneOverrides,
+                  })}
+                  disabled={sendingCharge}
+                  className="shadow-sm"
+                >
+                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  Enviar mensagem para {selectedReservationIds.length} reserva(s)
+                </Button>
+              )}
+              {messageLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : messageReservationsRaw.length === 0 ? (
+                <p className="text-muted-foreground py-8 text-center rounded-lg bg-muted/30">
+                  Nenhuma reserva encontrada para a data e filtros selecionados.
+                </p>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <ReservationsChargeTable
+                    list={messageReservationsRaw}
+                    selectedIds={selectedReservationIds}
+                    onToggleOne={toggleReservationSelection}
+                    onToggleAll={() => (selectedReservationIds.length >= messageReservationsRaw.length ? setSelectedReservationIds([]) : setSelectedReservationIds(messageReservationsRaw.map((r) => r.id)))}
+                    onSendOne={(id) => sendChargeForReservations([id], undefined, { template_id_override: selectedTemplateIdForMessage ?? undefined, phone_overrides: phoneOverrides })}
+                    sendingCharge={sendingCharge}
+                    formatCurrency={formatCurrency}
+                    format={format}
+                    ptBR={ptBR}
+                    showStatus={includeCheckedInMessage}
+                    showPhone
+                    phoneOverrides={phoneOverrides}
+                    onPhoneOverride={handlePhoneOverride}
+                  />
+                </div>
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="templates" className="space-y-4">
+          <Card className="overflow-hidden border-0 shadow-lg shadow-black/5 bg-card">
+            <div className="border-b bg-muted/30 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 className="font-semibold flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-primary" />
+                  Templates de mensagem
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1 mb-2">Use as variáveis no texto do template (clique em &quot;Novo template&quot; para ver o painel de variáveis).</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(TEMPLATE_VARS as readonly string[]).map((v) => {
+                    const info = TEMPLATE_VAR_INFO[v];
+                    return (
+                      <Tooltip key={v}>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
+                            {`{{${v}}}`}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p className="font-medium">{info?.label ?? v}</p>
+                          {info?.description && <p className="text-xs text-muted-foreground">{info.description}</p>}
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              </div>
+              <Button onClick={openNewTemplate} className="shadow-sm">
+                <Plus className="h-4 w-4 mr-2" />
+                Novo template
+              </Button>
+            </div>
+            <div className="p-6">
+            {templatesLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : templates.length === 0 ? (
+              <p className="text-muted-foreground py-8 text-center rounded-lg bg-muted/30">
+                Nenhum template criado. Use o template padrão na configuração ou crie um novo.
+              </p>
+            ) : (
+              <div className="rounded-lg border overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40">
+                    <TableHead>Nome</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Padrão</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {templates.map((t) => (
+                    <TableRow key={t.id} className="hover:bg-muted/20">
+                      <TableCell className="font-medium">{t.name}</TableCell>
+                      <TableCell>
+                        <span className="text-muted-foreground text-sm">
+                          {t.template_type === "checkin_reminder" ? "Lembrete check-in" : t.template_type === "payment_pending" ? "Pagamento pendente" : t.template_type === "checkout_reminder" ? "Lembrete checkout" : "Personalizado"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {t.is_default ? (
+                          <span className="text-primary font-medium">Padrão</span>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDefaultTemplate(t.id)}
+                            className="text-muted-foreground"
+                          >
+                            <Star className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" onClick={() => openEditTemplate(t)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDeleteTemplateId(t.id)}
+                          className="text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              </div>
+            )}
+            </div>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle>{editingTemplate ? "Editar template" : "Novo template"}</DialogTitle>
+              <DialogDescription>
+                Crie a mensagem e use as variáveis abaixo. Clique em uma variável para inserir no texto.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 py-4 overflow-auto">
+              <div className="lg:col-span-4 space-y-4">
+                <div className="rounded-xl border bg-muted/30 p-4">
+                  <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">Variáveis disponíveis</h4>
+                  <p className="text-xs text-muted-foreground mb-3">Clique para inserir no corpo da mensagem</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(TEMPLATE_VARS as readonly string[]).map((v) => {
+                      const info = TEMPLATE_VAR_INFO[v] ?? { label: v, description: "" };
+                      return (
+                        <Tooltip key={v}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => insertTemplateVariable(v)}
+                              className="inline-flex flex-col items-start rounded-lg border bg-background px-3 py-2 text-left shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                            >
+                              <code className="text-xs font-mono text-primary">{`{{${v}}}`}</code>
+                              <span className="text-[10px] text-muted-foreground mt-0.5">{info.label}</span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="max-w-[200px]">
+                            <p className="font-medium">{info.label}</p>
+                            <p className="text-xs text-muted-foreground">{info.description}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div className="lg:col-span-8 space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Nome do template</Label>
+                    <Input
+                      value={templateName}
+                      onChange={(e) => setTemplateName(e.target.value)}
+                      placeholder="Ex: Lembrete check-in padrão"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Tipo de template</Label>
+                    <Select value={templateType} onValueChange={(v) => setTemplateType(v as TemplateType)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="checkin_reminder">Lembrete de check-in</SelectItem>
+                        <SelectItem value="payment_pending">Pagamento pendente</SelectItem>
+                        <SelectItem value="checkout_reminder">Lembrete de checkout</SelectItem>
+                        <SelectItem value="custom">Personalizado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Carregar exemplo</Label>
+                  <Select
+                    value="none"
+                    onValueChange={(v) => {
+                      if (v === "checkin") { setTemplateBody(DEFAULT_TEMPLATE_CHECKIN); setTemplateType("checkin_reminder"); }
+                      else if (v === "pagamento") { setTemplateBody(DEFAULT_TEMPLATE_PAGAMENTO); setTemplateType("payment_pending"); }
+                      else if (v === "checkout") { setTemplateBody(DEFAULT_TEMPLATE_CHECKOUT); setTemplateType("checkout_reminder"); }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um modelo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Não carregar —</SelectItem>
+                      <SelectItem value="checkin">Lembrete de check-in</SelectItem>
+                      <SelectItem value="pagamento">Pagamento pendente</SelectItem>
+                      <SelectItem value="checkout">Lembrete de checkout</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Corpo da mensagem</Label>
+                  <Textarea
+                    ref={templateBodyRef}
+                    value={templateBody}
+                    onChange={(e) => setTemplateBody(e.target.value)}
+                    rows={10}
+                    placeholder="Olá {{guest_name}}, ..."
+                    className="font-mono text-sm resize-none"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={templateIsDefault} onCheckedChange={setTemplateIsDefault} />
+                  <Label>Usar como template padrão</Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex cursor-help">
+                        <HelpCircle className="h-4 w-4 text-muted-foreground" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Se marcado, este template será usado quando nenhum template for selecionado na configuração.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setTemplateDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={saveTemplate}>Salvar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+      <AlertDialog open={!!deleteTemplateId} onOpenChange={() => setDeleteTemplateId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover template?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. A configuração de cobrança que usar este template passará a usar o padrão do sistema.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground"
+              onClick={() => deleteTemplateId && deleteTemplate(deleteTemplateId)}
+            >
+              Remover
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+    </TooltipProvider>
+  );
+}

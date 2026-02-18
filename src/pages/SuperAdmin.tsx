@@ -37,7 +37,7 @@ import {
   Eye,
   ChevronDown,
   ChevronRight,
-  Terminal
+  Terminal,
 } from "lucide-react";
 import {
   Table,
@@ -3178,6 +3178,7 @@ const FeatureFlagsManager = () => {
     channel_manager: true,
     stay_reviews: { enabled: false, establishment_ids: [] },
     dynamic_pricing_automation: { enabled: false, company_ids: [] },
+    checkin_charge_enabled: { enabled: false, company_ids: [] },
     client_deduplication: { enabled: false, establishment_ids: [] },
     rate_recommendations: { enabled: false, establishment_ids: [] },
     availability_map: { enabled: false, establishment_ids: [] },
@@ -3223,6 +3224,9 @@ const FeatureFlagsManager = () => {
         booking_engine_advanced_customization_enabled: typeof fe.booking_engine_advanced_customization_enabled === 'boolean'
           ? { enabled: fe.booking_engine_advanced_customization_enabled, company_ids: [] }
           : (fe.booking_engine_advanced_customization_enabled || { enabled: false, company_ids: [] }),
+        checkin_charge_enabled: typeof fe.checkin_charge_enabled === 'boolean'
+          ? { enabled: fe.checkin_charge_enabled, company_ids: [] }
+          : (fe.checkin_charge_enabled || { enabled: false, company_ids: [] }),
       });
     }
   }, [settings]);
@@ -3242,7 +3246,8 @@ const FeatureFlagsManager = () => {
       feature === 'booking_engine_enabled' ||
       feature === 'booking_engine_themes_enabled' ||
       feature === 'booking_engine_custom_domain_enabled' ||
-      feature === 'booking_engine_advanced_customization_enabled';
+      feature === 'booking_engine_advanced_customization_enabled' ||
+      feature === 'checkin_charge_enabled';
 
     if (isStructured) {
       // Determinar qual tipo de ID usar baseado na feature
@@ -3250,7 +3255,8 @@ const FeatureFlagsManager = () => {
                             feature === 'booking_engine_enabled' ||
                             feature === 'booking_engine_themes_enabled' ||
                             feature === 'booking_engine_custom_domain_enabled' ||
-                            feature === 'booking_engine_advanced_customization_enabled';
+                            feature === 'booking_engine_advanced_customization_enabled' ||
+                            feature === 'checkin_charge_enabled';
       const idKey = usesCompanyIds ? 'company_ids' : 'establishment_ids';
       
       const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
@@ -3269,7 +3275,8 @@ const FeatureFlagsManager = () => {
                               feature === 'booking_engine_enabled' ||
                               feature === 'booking_engine_themes_enabled' ||
                               feature === 'booking_engine_custom_domain_enabled' ||
-                              feature === 'booking_engine_advanced_customization_enabled';
+                              feature === 'booking_engine_advanced_customization_enabled' ||
+                              feature === 'checkin_charge_enabled';
         const idKey = usesCompanyIds ? 'company_ids' : 'establishment_ids';
         
         return {
@@ -3552,6 +3559,14 @@ const FeatureFlagsManager = () => {
       label: "Customização Avançada do Motor",
       description: "Libera configurações avançadas de cores, fontes e elementos visuais do motor de reservas",
       icon: Settings,
+      supportsCompanies: true,
+      supportsEstablishments: false,
+    },
+    {
+      key: "checkin_charge_enabled" as const,
+      label: "Mensagens & Cobranças",
+      description: "Permite envio de mensagens e cobranças por WhatsApp, Chatwoot ou Evolution API, com link de pagamento e web check-in",
+      icon: CreditCard,
       supportsCompanies: true,
       supportsEstablishments: false,
     },

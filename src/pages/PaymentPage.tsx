@@ -585,6 +585,36 @@ const PaymentPage = () => {
                   </div>
                 )}
 
+                {/* Datas de check-in e check-out (reserva principal) */}
+                {(reservation?.checkin_date || reservation?.checkout_date) && (
+                  <>
+                    {reservation.checkin_date && (
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
+                        <span className="text-xs sm:text-sm text-slate-600 font-medium">Check-in</span>
+                        <span className="text-xs sm:text-sm font-semibold text-slate-900 text-right sm:text-left">
+                          {new Date(reservation.checkin_date + "T12:00:00").toLocaleDateString("pt-BR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                          })}
+                        </span>
+                      </div>
+                    )}
+                    {reservation.checkout_date && (
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
+                        <span className="text-xs sm:text-sm text-slate-600 font-medium">Check-out</span>
+                        <span className="text-xs sm:text-sm font-semibold text-slate-900 text-right sm:text-left">
+                          {new Date(reservation.checkout_date + "T12:00:00").toLocaleDateString("pt-BR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                          })}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+
                 {/* Localizadores das Reservas (quando há múltiplas reservas) */}
                 {allReservations.length > 0 && (
                   <div className="pt-2 sm:pt-3 border-t border-slate-200">
@@ -618,6 +648,13 @@ const PaymentPage = () => {
                                 </span>
                               )}
                             </div>
+                            {(res.checkin_date || res.checkout_date) && (
+                              <p className="text-xs text-slate-500 mt-1">
+                                {res.checkin_date && new Date(res.checkin_date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                                {res.checkin_date && res.checkout_date && " → "}
+                                {res.checkout_date && new Date(res.checkout_date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                              </p>
+                            )}
                           </div>
                         </div>
                       ))}

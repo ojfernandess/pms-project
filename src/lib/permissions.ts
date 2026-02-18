@@ -130,6 +130,7 @@ export const routeToFeature: Record<string, string> = {
   "/avaliacoes": "stay_reviews",
   "/channel-manager": "channel_manager",
   "/logs": "logs",
+  "/cobranca-checkin": "settings",
   "/configuracoes": "settings",
   "/motor-reservas/configuracoes": "booking_engine",
   "/pagina-publica/configuracoes": "public_reservation_page",

@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.94.0/+esm";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 
 /**
@@ -2881,6 +2881,35 @@ serve(async (req) => {
                   console.error(`[Webhook] ❌ Stack trace:`, emailError instanceof Error ? emailError.stack : 'N/A');
                   // Não lançar erro aqui para não quebrar o processamento do webhook
                   // Mas garantir que o erro seja logado para debug
+                }
+
+                // Mensagens & Cobranças: envio automático "Após confirmação da reserva"
+                if (newPaidAmount >= totalAmount && totalAmount > 0 && reservation?.establishment_id) {
+                  try {
+                    const { data: ccConfig } = await supabaseClient
+                      .from("checkin_charge_config")
+                      .select("send_timing")
+                      .eq("establishment_id", reservation.establishment_id)
+                      .eq("enabled", true)
+                      .maybeSingle();
+                    if (ccConfig?.send_timing === "after_confirmation") {
+                      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+                      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+                      const res = await fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/send-checkin-charge`, {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+                        body: JSON.stringify({ reservation_id: payment.reservation_id, intent: "checkin_reminder" }),
+                      });
+                      const resData = await res.json().catch(() => ({}));
+                      if (res.ok && resData?.results?.[0]?.success) {
+                        console.log(`[Webhook] ✅ Mensagens & Cobranças enviado para reserva ${payment.reservation_id} (after_confirmation)`);
+                      } else {
+                        console.warn(`[Webhook] ⚠️ send-checkin-charge para reserva ${payment.reservation_id}:`, resData?.results?.[0]?.error || res.statusText);
+                      }
+                    }
+                  } catch (ccErr) {
+                    console.error(`[Webhook] ❌ Erro ao chamar send-checkin-charge (after_confirmation):`, ccErr);
+                  }
                 }
               }
             }

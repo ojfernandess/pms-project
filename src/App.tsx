@@ -41,8 +41,8 @@ import OwnerDashboard from "./pages/OwnerDashboard";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
-import PaymentPage from "./pages/PaymentPage";
 import QuotePaymentPage from "./pages/QuotePaymentPage";
+import CheckinChargePaymentPage from "./pages/CheckinChargePaymentPage";
 import QuoteRoomSelection from "./pages/QuoteRoomSelection";
 import PublicReservation from "./pages/PublicReservation";
 import BookingEnginePage from "./booking-engine";
@@ -53,13 +53,16 @@ import PaymentSuccess from "./pages/PaymentSuccess";
 import Documentation from "./pages/Documentation";
 import BookingEngineSettings from "./pages/BookingEngineSettings";
 import PublicReservationSettings from "./pages/PublicReservationSettings";
+import CheckinChargeSettings from "./pages/CheckinChargeSettings";
 import CustomDomainDetector from "./components/booking-engine/CustomDomainDetector";
 import { EstablishmentProvider } from "./contexts/EstablishmentContext";
 import { StripeProvider } from "./components/stripe/StripeProvider";
 import { useSiteMeta } from "./hooks/useSiteMeta";
 import "./i18n/config";
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { startMonitoring, stopMonitoring } from "./lib/monitoring";
+
+const PaymentPage = lazy(() => import("./pages/PaymentPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -150,7 +153,8 @@ const AppRoutesWithMeta = () => {
             <Route path="/guest-dashboard" element={<GuestDashboard />} />
             <Route path="/review/:locator" element={<ReviewPage />} />
             <Route path="/thank-you" element={<ThankYouPage />} />
-            <Route path="/payment/:paymentIntentId" element={<PaymentPage />} />
+            <Route path="/payment/checkin/:token" element={<CheckinChargePaymentPage />} />
+            <Route path="/payment/:paymentIntentId" element={<Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p>Carregando...</p></div>}><PaymentPage /></Suspense>} />
             <Route path="/payment/success/:paymentIntentId" element={<PaymentSuccess />} />
             <Route path="/payment/return" element={<PaymentSuccess />} />
             <Route path="/quote-payment/:paymentIntentId" element={<QuotePaymentPage />} />
@@ -183,6 +187,7 @@ const AppRoutesWithMeta = () => {
             <Route path="/:establishmentId/channel-manager" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ChannelManager /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/motor-reservas/configuracoes" element={<ProtectedRoute><RoleProtectedRoute><AppLayout><BookingEngineSettings /></AppLayout></RoleProtectedRoute></ProtectedRoute>} />
             <Route path="/pagina-publica/configuracoes" element={<ProtectedRoute><RoleProtectedRoute><AppLayout><PublicReservationSettings /></AppLayout></RoleProtectedRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/cobranca-checkin" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CheckinChargeSettings /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/configuracoes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Settings /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/perfil" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Profile /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/funcionarios" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Employees /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />

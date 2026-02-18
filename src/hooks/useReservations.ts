@@ -547,6 +547,46 @@ export const useReservations = () => {
             // Não bloquear a criação da reserva se o web check-in falhar
           }
 
+          // Mensagens & Cobranças: envio automático "Após confirmação da reserva" quando reserva é criada já confirmada
+          if (newReservation?.status === "confirmed" && newReservation?.establishment_id) {
+            try {
+              const { data: ccConfig } = await supabase
+                .from("checkin_charge_config")
+                .select("send_timing")
+                .eq("establishment_id", newReservation.establishment_id)
+                .eq("enabled", true)
+                .maybeSingle();
+              if (ccConfig?.send_timing === "after_confirmation") {
+                await supabase.functions.invoke("send-checkin-charge", {
+                  body: { reservation_id: newReservation.id, intent: "checkin_reminder" },
+                });
+              }
+            } catch (e) {
+              console.warn("Mensagens & Cobranças (after_confirmation, create):", e);
+            }
+          }
+
+          // Mensagens & Cobranças: ao criar reserva, enviar mensagem de Pagamento Pendente quando houver valor a pagar
+          const totalAmount = Number(newReservation?.total_amount ?? 0);
+          const paidAmount = Number(newReservation?.paid_amount ?? 0);
+          if (newReservation?.establishment_id && totalAmount > 0 && paidAmount < totalAmount) {
+            try {
+              const { data: ccConfig } = await supabase
+                .from("checkin_charge_config")
+                .select("id")
+                .eq("establishment_id", newReservation.establishment_id)
+                .eq("enabled", true)
+                .maybeSingle();
+              if (ccConfig) {
+                await supabase.functions.invoke("send-checkin-charge", {
+                  body: { reservation_id: newReservation.id, intent: "payment_pending" },
+                });
+              }
+            } catch (e) {
+              console.warn("Mensagens & Cobranças (payment_pending, create):", e);
+            }
+          }
+
           // Registrar log de criação
           try {
             await logActivity({
@@ -668,6 +708,25 @@ export const useReservations = () => {
         category: data.category_id?.substring(0, 8) || "sem categoria",
         isExtension
       });
+
+      // Mensagens & Cobranças: envio automático "Após confirmação da reserva" quando status passa a confirmed
+      if (updates.status === "confirmed" && data?.establishment_id) {
+        try {
+          const { data: ccConfig } = await supabase
+            .from("checkin_charge_config")
+            .select("send_timing")
+            .eq("establishment_id", data.establishment_id)
+            .eq("enabled", true)
+            .maybeSingle();
+          if (ccConfig?.send_timing === "after_confirmation") {
+            await supabase.functions.invoke("send-checkin-charge", {
+              body: { reservation_id: id, intent: "checkin_reminder" },
+            });
+          }
+        } catch (e) {
+          console.warn("Mensagens & Cobranças (after_confirmation):", e);
+        }
+      }
 
       // Recalcular política de cancelamento se datas foram alteradas
       if (oldReservation && (updates.checkin_date || updates.checkout_date)) {
