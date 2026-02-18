@@ -54,6 +54,7 @@ import Documentation from "./pages/Documentation";
 import BookingEngineSettings from "./pages/BookingEngineSettings";
 import PublicReservationSettings from "./pages/PublicReservationSettings";
 import CheckinChargeSettings from "./pages/CheckinChargeSettings";
+import HelpCheckinCharge from "./pages/HelpCheckinCharge";
 import CustomDomainDetector from "./components/booking-engine/CustomDomainDetector";
 import { EstablishmentProvider } from "./contexts/EstablishmentContext";
 import { StripeProvider } from "./components/stripe/StripeProvider";
@@ -188,6 +189,7 @@ const AppRoutesWithMeta = () => {
             <Route path="/motor-reservas/configuracoes" element={<ProtectedRoute><RoleProtectedRoute><AppLayout><BookingEngineSettings /></AppLayout></RoleProtectedRoute></ProtectedRoute>} />
             <Route path="/pagina-publica/configuracoes" element={<ProtectedRoute><RoleProtectedRoute><AppLayout><PublicReservationSettings /></AppLayout></RoleProtectedRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/cobranca-checkin" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CheckinChargeSettings /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/cobranca-checkin/ajuda" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><HelpCheckinCharge /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/configuracoes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Settings /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/perfil" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Profile /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/funcionarios" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Employees /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />

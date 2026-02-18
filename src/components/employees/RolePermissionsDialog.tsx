@@ -47,6 +47,7 @@ const MODULES = [
   { key: "stay_reviews", label: "Avaliações" },
   { key: "channel_manager", label: "Channel Manager" },
   { key: "logs", label: "Logs" },
+  { key: "checkin_charge", label: "Mensagens & Cobranças" },
   { key: "settings", label: "Configurações" },
   { key: "booking_engine", label: "Motor de Reservas" },
   { key: "public_reservation_page", label: "Página Pública de Reservas" },
