@@ -48,7 +48,17 @@ import {
   MessageSquare,
   FileText,
   Bell,
+  MoreVertical,
+  Search,
 } from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   Tooltip,
@@ -218,6 +228,22 @@ const STATUS_LABELS: Record<string, string> = {
   checkedin: "Check-in realizado",
 };
 
+function getInitials(name: string | null): string {
+  if (!name?.trim()) return "?";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase().slice(0, 2);
+  return name.slice(0, 2).toUpperCase();
+}
+
+function whatsAppLink(phone: string): string {
+  const digits = (phone || "").replace(/\D/g, "");
+  if (digits.length === 10) return `https://wa.me/55${digits}`;
+  if (digits.length === 11 && digits.startsWith("55")) return `https://wa.me/${digits}`;
+  if (digits.length === 11) return `https://wa.me/55${digits}`;
+  if (digits.length >= 12) return `https://wa.me/${digits}`;
+  return `https://wa.me/55${digits}`;
+}
+
 function ReservationsChargeTable({
   list,
   selectedIds,
@@ -254,74 +280,105 @@ function ReservationsChargeTable({
   return (
     <Table>
       <TableHeader>
-        <TableRow className="bg-muted/40">
+        <TableRow className="bg-muted/40 border-b">
           <TableHead className="w-10">
             <Checkbox checked={list.length > 0 && selectedIds.length >= list.length} onCheckedChange={onToggleAll} />
           </TableHead>
+          <TableHead className="w-[80px]">Hóspede</TableHead>
           <TableHead>Código</TableHead>
-          <TableHead>Hóspede</TableHead>
-          {showPhone && (
-            <TableHead className="min-w-[140px]">Telefone</TableHead>
-          )}
-          {showStatus && <TableHead>Status reserva</TableHead>}
+          {showPhone && <TableHead className="min-w-[150px]">Telefone</TableHead>}
+          {showStatus && <TableHead>Status</TableHead>}
           <TableHead>{dateLabel}</TableHead>
           <TableHead className="text-right">Total</TableHead>
           <TableHead className="text-right">Pago</TableHead>
           <TableHead className="text-right">Pendente</TableHead>
-          <TableHead>Cobrança</TableHead>
-          <TableHead className="w-32">Ações</TableHead>
+          <TableHead>Status pagamento</TableHead>
+          <TableHead className="min-w-[120px]">Último envio</TableHead>
+          <TableHead className="w-36 text-right">Ações</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {list.map((r) => {
           const pending = Math.max(0, Number(r.total_amount || 0) - Number(r.paid_amount || 0));
+          const isPaid = r.charge_status === "paid" || pending <= 0;
           const dateVal = r[dateField as keyof PendingReservationRow] as string | undefined;
           const phoneVal = (phoneOverrides && phoneOverrides[r.id] !== undefined) ? phoneOverrides[r.id] : (r.guest_phone ?? "");
           return (
-            <TableRow key={r.id} className="hover:bg-muted/20">
+            <TableRow
+              key={r.id}
+              className="hover:bg-primary/5 transition-colors border-b border-border/50 last:border-b-0"
+            >
               <TableCell>
                 <Checkbox checked={selectedIds.includes(r.id)} onCheckedChange={() => onToggleOne(r.id)} />
               </TableCell>
-              <TableCell className="font-medium">{r.reservation_code}</TableCell>
-              <TableCell>{r.guest_name ?? "—"}</TableCell>
+              <TableCell>
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-9 w-9 rounded-full border-2 border-background shadow-sm">
+                    <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                      {getInitials(r.guest_name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="font-medium text-sm truncate max-w-[100px]" title={r.guest_name ?? ""}>
+                    {r.guest_name ?? "—"}
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell className="font-mono text-sm">{r.reservation_code}</TableCell>
               {showPhone && (
-                <TableCell className="p-1">
-                  <Input
-                    type="tel"
-                    placeholder="Telefone"
-                    value={phoneVal}
-                    onChange={(e) => onPhoneOverride?.(r.id, e.target.value)}
-                    className="h-8 text-sm font-mono"
-                  />
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="tel"
+                      placeholder="Telefone"
+                      value={phoneVal}
+                      onChange={(e) => onPhoneOverride?.(r.id, e.target.value)}
+                      className="h-8 text-sm font-mono w-[130px]"
+                    />
+                    {phoneVal && (
+                      <a
+                        href={whatsAppLink(phoneVal)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366]/20 transition-colors"
+                        aria-label="Abrir WhatsApp"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden>
+                          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                        </svg>
+                      </a>
+                    )}
+                  </div>
                 </TableCell>
               )}
               {showStatus && (
                 <TableCell>
-                  <span className={r.status === "checkedin" ? "text-green-600 font-medium" : "text-muted-foreground"}>
+                  <span className={r.status === "checkedin" ? "text-green-600 font-medium text-sm" : "text-muted-foreground text-sm"}>
                     {STATUS_LABELS[r.status] ?? r.status}
                   </span>
                 </TableCell>
               )}
-              <TableCell>{dateVal ? fmtDate(parseLocalDate(dateVal), "dd/MM/yyyy", { locale: ptBR }) : "—"}</TableCell>
-              <TableCell className="text-right">R$ {fmt(r.total_amount ?? 0)}</TableCell>
-              <TableCell className="text-right">R$ {fmt(r.paid_amount ?? 0)}</TableCell>
-              <TableCell className="text-right">R$ {fmt(pending)}</TableCell>
+              <TableCell className="text-sm">{dateVal ? fmtDate(parseLocalDate(dateVal), "dd/MM/yyyy", { locale: ptBR }) : "—"}</TableCell>
+              <TableCell className="text-right text-sm">R$ {fmt(r.total_amount ?? 0)}</TableCell>
+              <TableCell className="text-right text-sm">R$ {fmt(r.paid_amount ?? 0)}</TableCell>
+              <TableCell className="text-right text-sm">R$ {fmt(pending)}</TableCell>
               <TableCell>
-                {r.charge_sent_at ? (
-                  r.charge_status === "paid" ? (
-                    <span className="text-green-600 font-medium">Pago</span>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      Enviada em {fmtDate(new Date(r.charge_sent_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
-                    </span>
-                  )
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
+                <Badge variant={isPaid ? "default" : "secondary"} className={isPaid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-amber-100 text-amber-800 hover:bg-amber-200"}>
+                  {isPaid ? "Pago" : "Pendente"}
+                </Badge>
               </TableCell>
-              <TableCell>
-                <Button variant="outline" size="sm" onClick={() => onSendOne(r.id)} disabled={sendingCharge} className="shadow-sm">
-                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Send className="h-4 w-4 mr-1" /> Enviar</>}
+              <TableCell className="text-sm text-muted-foreground">
+                {r.charge_sent_at
+                  ? fmtDate(new Date(r.charge_sent_at), "dd/MM/yyyy HH:mm", { locale: ptBR })
+                  : "—"}
+              </TableCell>
+              <TableCell className="text-right">
+                <Button
+                  size="sm"
+                  onClick={() => onSendOne(r.id)}
+                  disabled={sendingCharge}
+                  className="rounded-lg shadow-sm gap-1.5 bg-primary hover:bg-primary/90"
+                >
+                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Send className="h-4 w-4" /> Enviar</>}
                 </Button>
               </TableCell>
             </TableRow>
@@ -398,6 +455,9 @@ export default function CheckinChargeSettings() {
   const [checkoutDateFilter, setCheckoutDateFilter] = useState<string>(() => format(new Date(), "yyyy-MM-dd"));
   const [paymentListView, setPaymentListView] = useState<PaymentListView>("recent_and_future");
   const [includeCheckedInPayment, setIncludeCheckedInPayment] = useState(false);
+  const [guestSearch, setGuestSearch] = useState("");
+  const [filterPaymentStatus, setFilterPaymentStatus] = useState<"all" | "paid" | "pending">("all");
+  const [filterMessageSent, setFilterMessageSent] = useState<"all" | "yes" | "no">("all");
 
   const { data: config, isLoading: configLoading } = useQuery({
     queryKey: ["checkin_charge_config", establishmentUuid],
@@ -477,9 +537,26 @@ export default function CheckinChargeSettings() {
   });
 
   const pendingReservations = useMemo(() => {
-    if (!onlyWithoutPayment) return pendingReservationsRaw;
-    return pendingReservationsRaw.filter((r) => Number(r.paid_amount || 0) < Number(r.total_amount || 0));
-  }, [pendingReservationsRaw, onlyWithoutPayment]);
+    let list = pendingReservationsRaw;
+    if (onlyWithoutPayment) list = list.filter((r) => Number(r.paid_amount || 0) < Number(r.total_amount || 0));
+    if (guestSearch.trim()) {
+      const q = guestSearch.trim().toLowerCase();
+      list = list.filter(
+        (r) =>
+          (r.guest_name ?? "").toLowerCase().includes(q) || (r.reservation_code ?? "").toLowerCase().includes(q)
+      );
+    }
+    if (filterPaymentStatus !== "all") {
+      list = list.filter((r) => {
+        const paid = Number(r.paid_amount ?? 0) >= Number(r.total_amount ?? 0) || r.charge_status === "paid";
+        return filterPaymentStatus === "paid" ? paid : !paid;
+      });
+    }
+    if (filterMessageSent !== "all") {
+      list = list.filter((r) => (filterMessageSent === "yes" ? r.charge_sent_at : !r.charge_sent_at));
+    }
+    return list;
+  }, [pendingReservationsRaw, onlyWithoutPayment, guestSearch, filterPaymentStatus, filterMessageSent]);
 
   // Cobrar pagamentos pendentes: quando "Incluir reservas com check-in já realizado" está desmarcado = só sem check-in; marcado = só com check-in
   const { data: pendingPaymentsRaw = [], isLoading: pendingPaymentsLoading } = useQuery({
@@ -547,7 +624,26 @@ export default function CheckinChargeSettings() {
     enabled: !!establishmentUuid && isEnabled,
   });
 
-  const pendingPaymentsOnlyReservations = pendingPaymentsRaw;
+  const pendingPaymentsOnlyReservations = useMemo(() => {
+    let list = pendingPaymentsRaw;
+    if (guestSearch.trim()) {
+      const q = guestSearch.trim().toLowerCase();
+      list = list.filter(
+        (r) =>
+          (r.guest_name ?? "").toLowerCase().includes(q) || (r.reservation_code ?? "").toLowerCase().includes(q)
+      );
+    }
+    if (filterPaymentStatus !== "all") {
+      list = list.filter((r) => {
+        const paid = Number(r.paid_amount ?? 0) >= Number(r.total_amount ?? 0) || r.charge_status === "paid";
+        return filterPaymentStatus === "paid" ? paid : !paid;
+      });
+    }
+    if (filterMessageSent !== "all") {
+      list = list.filter((r) => (filterMessageSent === "yes" ? r.charge_sent_at : !r.charge_sent_at));
+    }
+    return list;
+  }, [pendingPaymentsRaw, guestSearch, filterPaymentStatus, filterMessageSent]);
 
   // Mensagem personalizada: desmarcado = só sem check-in; marcado = só com check-in (status checkedin ou web_checkin concluído)
   const { data: messageReservationsRaw = [], isLoading: messageLoading } = useQuery({
@@ -649,6 +745,96 @@ export default function CheckinChargeSettings() {
       });
     },
     enabled: !!establishmentUuid && isEnabled && !!checkoutDateFilter,
+  });
+
+  const filteredCheckoutReservations = useMemo(() => {
+    let list = checkoutReservationsRaw;
+    if (guestSearch.trim()) {
+      const q = guestSearch.trim().toLowerCase();
+      list = list.filter(
+        (r) =>
+          (r.guest_name ?? "").toLowerCase().includes(q) || (r.reservation_code ?? "").toLowerCase().includes(q)
+      );
+    }
+    if (filterPaymentStatus !== "all") {
+      list = list.filter((r) => {
+        const paid = Number(r.paid_amount ?? 0) >= Number(r.total_amount ?? 0) || r.charge_status === "paid";
+        return filterPaymentStatus === "paid" ? paid : !paid;
+      });
+    }
+    if (filterMessageSent !== "all") {
+      list = list.filter((r) => (filterMessageSent === "yes" ? r.charge_sent_at : !r.charge_sent_at));
+    }
+    return list;
+  }, [checkoutReservationsRaw, guestSearch, filterPaymentStatus, filterMessageSent]);
+
+  const filteredMessageReservations = useMemo(() => {
+    let list = messageReservationsRaw;
+    if (guestSearch.trim()) {
+      const q = guestSearch.trim().toLowerCase();
+      list = list.filter(
+        (r) =>
+          (r.guest_name ?? "").toLowerCase().includes(q) || (r.reservation_code ?? "").toLowerCase().includes(q)
+      );
+    }
+    if (filterPaymentStatus !== "all") {
+      list = list.filter((r) => {
+        const paid = Number(r.paid_amount ?? 0) >= Number(r.total_amount ?? 0) || r.charge_status === "paid";
+        return filterPaymentStatus === "paid" ? paid : !paid;
+      });
+    }
+    if (filterMessageSent !== "all") {
+      list = list.filter((r) => (filterMessageSent === "yes" ? r.charge_sent_at : !r.charge_sent_at));
+    }
+    return list;
+  }, [messageReservationsRaw, guestSearch, filterPaymentStatus, filterMessageSent]);
+
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const todayRange = getCheckinDateRange(todayStr);
+  const { data: summaryCounts } = useQuery({
+    queryKey: ["checkin_charge_summary", establishmentUuid, todayStr],
+    queryFn: async () => {
+      if (!establishmentUuid) return { checkinsToday: 0, pendentesEnvio: 0, pagamentosPendentes: 0, checkoutsToday: 0 };
+      const [checkinList, paymentList, checkoutRes, chargesRes] = await Promise.all([
+        supabase
+          .from("reservations")
+          .select("id, web_checkin(status)")
+          .eq("establishment_id", establishmentUuid)
+          .gte("checkin_date", todayRange.start)
+          .lt("checkin_date", todayRange.end)
+          .in("status", ["pending", "confirmed"]),
+        supabase
+          .from("reservations")
+          .select("id, paid_amount, total_amount")
+          .eq("establishment_id", establishmentUuid)
+          .gte("checkin_date", todayRange.start)
+          .in("status", ["pending", "unpaid", "confirmed", "checkedin"]),
+        supabase
+          .from("reservations")
+          .select("id")
+          .eq("establishment_id", establishmentUuid)
+          .gte("checkout_date", todayRange.start)
+          .lt("checkout_date", todayRange.end)
+          .in("status", ["confirmed", "checkedin"]),
+        supabase.from("checkin_charges").select("reservation_id"),
+      ]);
+      const chargeIds = new Set((chargesRes.data ?? []).map((c: { reservation_id: string }) => c.reservation_id));
+      const checkinData = (checkinList as { data?: Array<{ id: string; web_checkin?: { status: string }[] | { status: string } }> })?.data ?? [];
+      const withCheckin = checkinData.filter(
+        (r) => !(Array.isArray(r.web_checkin) ? r.web_checkin : r.web_checkin ? [r.web_checkin] : []).some((w) => w?.status === "completed")
+      );
+      const pendentesEnvio = withCheckin.filter((r) => !chargeIds.has(r.id)).length;
+      const paymentData = (paymentList as { data?: Array<{ paid_amount?: number; total_amount?: number }> })?.data ?? [];
+      const pagamentosPendentes = paymentData.filter((r) => Number(r.paid_amount ?? 0) < Number(r.total_amount ?? 0)).length;
+      const checkoutData = (checkoutRes as { data?: unknown[] })?.data ?? [];
+      return {
+        checkinsToday: withCheckin.length,
+        pendentesEnvio,
+        pagamentosPendentes,
+        checkoutsToday: checkoutData.length,
+      };
+    },
+    enabled: !!establishmentUuid && isEnabled,
   });
 
   useEffect(() => {
@@ -960,35 +1146,116 @@ export default function CheckinChargeSettings() {
         </Link>
       </div>
 
+      {/* Cards de resumo */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="rounded-2xl border shadow-sm hover:shadow-md transition-shadow overflow-hidden p-0">
+          <div className="p-4 flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600">
+              <CalendarCheck className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Check-ins do dia</p>
+              <p className="text-2xl font-bold text-foreground">{summaryCounts?.checkinsToday ?? 0}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className="rounded-2xl border shadow-sm hover:shadow-md transition-shadow overflow-hidden p-0">
+          <div className="p-4 flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
+              <Send className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Pendentes de envio</p>
+              <p className="text-2xl font-bold text-foreground">{summaryCounts?.pendentesEnvio ?? 0}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className="rounded-2xl border shadow-sm hover:shadow-md transition-shadow overflow-hidden p-0">
+          <div className="p-4 flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
+              <Wallet className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Pagamentos pendentes</p>
+              <p className="text-2xl font-bold text-foreground">{summaryCounts?.pagamentosPendentes ?? 0}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className="rounded-2xl border shadow-sm hover:shadow-md transition-shadow overflow-hidden p-0">
+          <div className="p-4 flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-500/10 text-violet-600">
+              <Bell className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Checkouts do dia</p>
+              <p className="text-2xl font-bold text-foreground">{summaryCounts?.checkoutsToday ?? 0}</p>
+            </div>
+          </div>
+        </Card>
+      </div>
+
       <Tabs defaultValue="reservas" className="space-y-6">
-        <TabsList className="flex flex-wrap h-auto gap-1 p-1.5 rounded-xl bg-muted/60 border border-border/60">
-          <TabsTrigger value="reservas" className="rounded-lg data-[state=active]:shadow-sm gap-2">
+        <TabsList className="flex flex-wrap h-auto gap-1 p-2 rounded-2xl bg-muted/40 border border-border/60 shadow-inner">
+          <TabsTrigger
+            value="reservas"
+            className="rounded-xl gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md px-4 py-2.5"
+          >
             <Bell className="h-4 w-4" />
             Lembrete de check-in
+            <Badge variant="secondary" className="ml-1 h-5 min-w-5 rounded-full px-1.5 text-xs data-[state=active]:bg-primary-foreground/20">
+              {pendingReservations.length}
+            </Badge>
           </TabsTrigger>
-          <TabsTrigger value="pendentes" className="rounded-lg data-[state=active]:shadow-sm gap-2">
+          <TabsTrigger
+            value="pendentes"
+            className="rounded-xl gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md px-4 py-2.5"
+          >
             <Wallet className="h-4 w-4" />
             Pagamentos pendentes
+            <Badge variant="secondary" className="ml-1 h-5 min-w-5 rounded-full px-1.5 text-xs data-[state=active]:bg-primary-foreground/20">
+              {pendingPaymentsOnlyReservations.length}
+            </Badge>
           </TabsTrigger>
-          <TabsTrigger value="checkout" className="rounded-lg data-[state=active]:shadow-sm gap-2">
+          <TabsTrigger
+            value="checkout"
+            className="rounded-xl gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md px-4 py-2.5"
+          >
             <CalendarCheck className="h-4 w-4" />
             Lembrete de checkout
+            <Badge variant="secondary" className="ml-1 h-5 min-w-5 rounded-full px-1.5 text-xs data-[state=active]:bg-primary-foreground/20">
+              {checkoutReservationsRaw.length}
+            </Badge>
           </TabsTrigger>
-          <TabsTrigger value="mensagem" className="rounded-lg data-[state=active]:shadow-sm gap-2">
+          <TabsTrigger
+            value="mensagem"
+            className="rounded-xl gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md px-4 py-2.5"
+          >
             <MessageSquare className="h-4 w-4" />
             Mensagem personalizada
+            <Badge variant="secondary" className="ml-1 h-5 min-w-5 rounded-full px-1.5 text-xs data-[state=active]:bg-primary-foreground/20">
+              {messageReservationsRaw.length}
+            </Badge>
           </TabsTrigger>
-          <TabsTrigger value="templates" className="rounded-lg data-[state=active]:shadow-sm gap-2">
+          <TabsTrigger
+            value="templates"
+            className="rounded-xl gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md px-4 py-2.5"
+          >
             <FileText className="h-4 w-4" />
             Templates
+            <Badge variant="secondary" className="ml-1 h-5 min-w-5 rounded-full px-1.5 text-xs data-[state=active]:bg-primary-foreground/20">
+              {templates.length}
+            </Badge>
           </TabsTrigger>
-          <TabsTrigger value="config" className="rounded-lg data-[state=active]:shadow-sm">
+          <TabsTrigger
+            value="config"
+            className="rounded-xl data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md px-4 py-2.5"
+          >
             Configuração
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="config" className="space-y-4">
-          <Card className="p-6">
+          <Card className="p-6 rounded-2xl border shadow-sm">
             {configLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -1421,7 +1688,7 @@ export default function CheckinChargeSettings() {
         </TabsContent>
 
         <TabsContent value="reservas" className="space-y-4">
-          <Card className="overflow-hidden border-0 shadow-lg shadow-black/5 bg-card">
+          <Card className="overflow-hidden border-0 shadow-lg rounded-2xl shadow-black/5 bg-card">
             <div className="border-b bg-muted/30 px-6 py-4">
               <h3 className="font-semibold flex items-center gap-2">
                 <Bell className="h-4 w-4 text-primary" />
@@ -1440,7 +1707,7 @@ export default function CheckinChargeSettings() {
                     type="date"
                     value={checkinDateFilter}
                     onChange={(e) => setCheckinDateFilter(e.target.value)}
-                    className="w-[160px]"
+                    className="w-[160px] rounded-lg"
                   />
                 </div>
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -1451,26 +1718,74 @@ export default function CheckinChargeSettings() {
                   <span className="text-sm">Apenas com valor pendente</span>
                 </label>
               </div>
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="relative flex-1 min-w-[200px] max-w-xs">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por hóspede ou código..."
+                    value={guestSearch}
+                    onChange={(e) => setGuestSearch(e.target.value)}
+                    className="pl-9 rounded-lg h-9"
+                  />
+                </div>
+                <Select value={filterPaymentStatus} onValueChange={(v) => setFilterPaymentStatus(v as "all" | "paid" | "pending")}>
+                  <SelectTrigger className="w-[140px] rounded-lg h-9">
+                    <SelectValue placeholder="Status pagamento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="paid">Pago</SelectItem>
+                    <SelectItem value="pending">Pendente</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filterMessageSent} onValueChange={(v) => setFilterMessageSent(v as "all" | "yes" | "no")}>
+                  <SelectTrigger className="w-[160px] rounded-lg h-9">
+                    <SelectValue placeholder="Mensagem enviada" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="yes">Enviada</SelectItem>
+                    <SelectItem value="no">Não enviada</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               {selectedReservationIds.length > 0 && (
-                <Button
-                  onClick={() => sendChargeForReservations(selectedReservationIds, "checkin_reminder", { phone_overrides: phoneOverrides })}
-                  disabled={sendingCharge}
-                  className="shadow-sm"
-                >
-                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-                  Enviar lembrete para {selectedReservationIds.length} reserva(s)
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={() => sendChargeForReservations(selectedReservationIds, "checkin_reminder", { phone_overrides: phoneOverrides })}
+                    disabled={sendingCharge}
+                    className="rounded-lg shadow-md bg-primary hover:bg-primary/90 gap-2"
+                  >
+                    {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Enviar lembrete para {selectedReservationIds.length} reserva(s)
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" className="rounded-lg" disabled={sendingCharge}>
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem onClick={() => { setSelectedReservationIds(pendingReservations.map((r) => r.id)); }} disabled={sendingCharge}>
+                        Selecionar todas ({pendingReservations.length})
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setSelectedReservationIds([])}>
+                        Limpar seleção
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               )}
               {pendingLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
               ) : pendingReservations.length === 0 ? (
-                <p className="text-muted-foreground py-8 text-center rounded-lg bg-muted/30">
+                <p className="text-muted-foreground py-8 text-center rounded-xl bg-muted/30">
                   Nenhuma reserva encontrada para a data selecionada.
                 </p>
               ) : (
-                <div className="rounded-lg border overflow-hidden">
+                <div className="rounded-xl border overflow-hidden shadow-sm">
                   <ReservationsChargeTable
                     list={pendingReservations}
                     selectedIds={selectedReservationIds}
@@ -1492,7 +1807,7 @@ export default function CheckinChargeSettings() {
         </TabsContent>
 
         <TabsContent value="pendentes" className="space-y-4">
-          <Card className="overflow-hidden border-0 shadow-lg shadow-black/5 bg-card">
+          <Card className="overflow-hidden border-0 shadow-lg rounded-2xl shadow-black/5 bg-card">
             <div className="border-b bg-muted/30 px-6 py-4">
               <h3 className="font-semibold flex items-center gap-2">
                 <Wallet className="h-4 w-4 text-primary" />
@@ -1507,7 +1822,7 @@ export default function CheckinChargeSettings() {
                 <div className="flex items-center gap-2">
                   <Label htmlFor="payment-list-view" className="text-sm whitespace-nowrap">Exibir</Label>
                   <Select value={paymentListView} onValueChange={(v) => setPaymentListView(v as PaymentListView)}>
-                    <SelectTrigger id="payment-list-view" className="w-[220px]">
+                    <SelectTrigger id="payment-list-view" className="w-[220px] rounded-lg">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1525,13 +1840,34 @@ export default function CheckinChargeSettings() {
                   <span className="text-sm">Incluir reservas com check-in já realizado</span>
                 </label>
               </div>
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="relative flex-1 min-w-[200px] max-w-xs">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por hóspede ou código..."
+                    value={guestSearch}
+                    onChange={(e) => setGuestSearch(e.target.value)}
+                    className="pl-9 rounded-lg h-9"
+                  />
+                </div>
+                <Select value={filterMessageSent} onValueChange={(v) => setFilterMessageSent(v as "all" | "yes" | "no")}>
+                  <SelectTrigger className="w-[160px] rounded-lg h-9">
+                    <SelectValue placeholder="Mensagem enviada" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="yes">Enviada</SelectItem>
+                    <SelectItem value="no">Não enviada</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               {selectedReservationIds.length > 0 && (
                 <Button
                   onClick={() => sendChargeForReservations(selectedReservationIds, "payment_pending", { phone_overrides: phoneOverrides })}
                   disabled={sendingCharge}
-                  className="shadow-sm"
+                  className="rounded-lg shadow-md bg-primary hover:bg-primary/90 gap-2"
                 >
-                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   Enviar cobrança para {selectedReservationIds.length} reserva(s)
                 </Button>
               )}
@@ -1544,7 +1880,7 @@ export default function CheckinChargeSettings() {
                   Nenhuma reserva com pagamento pendente.
                 </p>
               ) : (
-                <div className="rounded-lg border overflow-hidden">
+                <div className="rounded-xl border overflow-hidden shadow-sm">
                   <ReservationsChargeTable
                     list={pendingPaymentsOnlyReservations}
                     selectedIds={selectedReservationIds}
@@ -1567,7 +1903,7 @@ export default function CheckinChargeSettings() {
         </TabsContent>
 
         <TabsContent value="checkout" className="space-y-4">
-          <Card className="overflow-hidden border-0 shadow-lg shadow-black/5 bg-card">
+          <Card className="overflow-hidden border-0 shadow-lg rounded-2xl shadow-black/5 bg-card">
             <div className="border-b bg-muted/30 px-6 py-4">
               <h3 className="font-semibold flex items-center gap-2">
                 <CalendarCheck className="h-4 w-4 text-primary" />
@@ -1586,17 +1922,48 @@ export default function CheckinChargeSettings() {
                     type="date"
                     value={checkoutDateFilter}
                     onChange={(e) => setCheckoutDateFilter(e.target.value)}
-                    className="w-[160px]"
+                    className="w-[160px] rounded-lg"
                   />
                 </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="relative flex-1 min-w-[200px] max-w-xs">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por hóspede ou código..."
+                    value={guestSearch}
+                    onChange={(e) => setGuestSearch(e.target.value)}
+                    className="pl-9 rounded-lg h-9"
+                  />
+                </div>
+                <Select value={filterPaymentStatus} onValueChange={(v) => setFilterPaymentStatus(v as "all" | "paid" | "pending")}>
+                  <SelectTrigger className="w-[140px] rounded-lg h-9">
+                    <SelectValue placeholder="Status pagamento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="paid">Pago</SelectItem>
+                    <SelectItem value="pending">Pendente</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filterMessageSent} onValueChange={(v) => setFilterMessageSent(v as "all" | "yes" | "no")}>
+                  <SelectTrigger className="w-[160px] rounded-lg h-9">
+                    <SelectValue placeholder="Mensagem enviada" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="yes">Enviada</SelectItem>
+                    <SelectItem value="no">Não enviada</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               {selectedReservationIds.length > 0 && (
                 <Button
                   onClick={() => sendChargeForReservations(selectedReservationIds, "checkout_reminder", { phone_overrides: phoneOverrides })}
                   disabled={sendingCharge}
-                  className="shadow-sm"
+                  className="rounded-lg shadow-md bg-primary hover:bg-primary/90 gap-2"
                 >
-                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   Enviar lembrete de checkout para {selectedReservationIds.length} reserva(s)
                 </Button>
               )}
@@ -1604,17 +1971,17 @@ export default function CheckinChargeSettings() {
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
-              ) : checkoutReservationsRaw.length === 0 ? (
+              ) : filteredCheckoutReservations.length === 0 ? (
                 <p className="text-muted-foreground py-8 text-center rounded-lg bg-muted/30">
                   Nenhuma reserva com check-out na data selecionada.
                 </p>
               ) : (
-                <div className="rounded-lg border overflow-hidden">
+                <div className="rounded-xl border overflow-hidden shadow-sm">
                   <ReservationsChargeTable
-                    list={checkoutReservationsRaw}
+                    list={filteredCheckoutReservations}
                     selectedIds={selectedReservationIds}
                     onToggleOne={toggleReservationSelection}
-                    onToggleAll={() => (selectedReservationIds.length >= checkoutReservationsRaw.length ? setSelectedReservationIds([]) : setSelectedReservationIds(checkoutReservationsRaw.map((r) => r.id)))}
+                    onToggleAll={() => (selectedReservationIds.length >= filteredCheckoutReservations.length ? setSelectedReservationIds([]) : setSelectedReservationIds(filteredCheckoutReservations.map((r) => r.id)))}
                     onSendOne={(id) => sendChargeForReservations([id], "checkout_reminder", { phone_overrides: phoneOverrides })}
                     sendingCharge={sendingCharge}
                     formatCurrency={formatCurrency}
@@ -1632,7 +1999,7 @@ export default function CheckinChargeSettings() {
         </TabsContent>
 
         <TabsContent value="mensagem" className="space-y-4">
-          <Card className="overflow-hidden border-0 shadow-lg shadow-black/5 bg-card">
+          <Card className="overflow-hidden border-0 shadow-lg rounded-2xl shadow-black/5 bg-card">
             <div className="border-b bg-muted/30 px-6 py-4">
               <h3 className="font-semibold flex items-center gap-2">
                 <MessageSquare className="h-4 w-4 text-primary" />
@@ -1651,7 +2018,7 @@ export default function CheckinChargeSettings() {
                     type="date"
                     value={messageDateFilter}
                     onChange={(e) => setMessageDateFilter(e.target.value)}
-                    className="w-[160px]"
+                    className="w-[160px] rounded-lg"
                   />
                 </div>
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -1674,7 +2041,7 @@ export default function CheckinChargeSettings() {
                     value={selectedTemplateIdForMessage ?? "none"}
                     onValueChange={(v) => setSelectedTemplateIdForMessage(v === "none" ? null : v)}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="rounded-lg">
                       <SelectValue placeholder="Padrão da configuração" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1688,6 +2055,37 @@ export default function CheckinChargeSettings() {
                   </Select>
                 </div>
               </div>
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="relative flex-1 min-w-[200px] max-w-xs">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por hóspede ou código..."
+                    value={guestSearch}
+                    onChange={(e) => setGuestSearch(e.target.value)}
+                    className="pl-9 rounded-lg h-9"
+                  />
+                </div>
+                <Select value={filterPaymentStatus} onValueChange={(v) => setFilterPaymentStatus(v as "all" | "paid" | "pending")}>
+                  <SelectTrigger className="w-[140px] rounded-lg h-9">
+                    <SelectValue placeholder="Status pagamento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="paid">Pago</SelectItem>
+                    <SelectItem value="pending">Pendente</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filterMessageSent} onValueChange={(v) => setFilterMessageSent(v as "all" | "yes" | "no")}>
+                  <SelectTrigger className="w-[160px] rounded-lg h-9">
+                    <SelectValue placeholder="Mensagem enviada" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="yes">Enviada</SelectItem>
+                    <SelectItem value="no">Não enviada</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               {selectedReservationIds.length > 0 && (
                 <Button
                   onClick={() => sendChargeForReservations(selectedReservationIds, undefined, {
@@ -1695,9 +2093,9 @@ export default function CheckinChargeSettings() {
                     phone_overrides: phoneOverrides,
                   })}
                   disabled={sendingCharge}
-                  className="shadow-sm"
+                  className="rounded-lg shadow-md bg-primary hover:bg-primary/90 gap-2"
                 >
-                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  {sendingCharge ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   Enviar mensagem para {selectedReservationIds.length} reserva(s)
                 </Button>
               )}
@@ -1705,17 +2103,17 @@ export default function CheckinChargeSettings() {
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
-              ) : messageReservationsRaw.length === 0 ? (
+              ) : filteredMessageReservations.length === 0 ? (
                 <p className="text-muted-foreground py-8 text-center rounded-lg bg-muted/30">
                   Nenhuma reserva encontrada para a data e filtros selecionados.
                 </p>
               ) : (
-                <div className="rounded-lg border overflow-hidden">
+                <div className="rounded-xl border overflow-hidden shadow-sm">
                   <ReservationsChargeTable
-                    list={messageReservationsRaw}
+                    list={filteredMessageReservations}
                     selectedIds={selectedReservationIds}
                     onToggleOne={toggleReservationSelection}
-                    onToggleAll={() => (selectedReservationIds.length >= messageReservationsRaw.length ? setSelectedReservationIds([]) : setSelectedReservationIds(messageReservationsRaw.map((r) => r.id)))}
+                    onToggleAll={() => (selectedReservationIds.length >= filteredMessageReservations.length ? setSelectedReservationIds([]) : setSelectedReservationIds(filteredMessageReservations.map((r) => r.id)))}
                     onSendOne={(id) => sendChargeForReservations([id], undefined, { template_id_override: selectedTemplateIdForMessage ?? undefined, phone_overrides: phoneOverrides })}
                     sendingCharge={sendingCharge}
                     formatCurrency={formatCurrency}
