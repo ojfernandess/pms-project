@@ -50,6 +50,7 @@ import {
   Bell,
   MoreVertical,
   Search,
+  LayoutList,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -458,6 +459,8 @@ export default function CheckinChargeSettings() {
   const [guestSearch, setGuestSearch] = useState("");
   const [filterPaymentStatus, setFilterPaymentStatus] = useState<"all" | "paid" | "pending">("all");
   const [filterMessageSent, setFilterMessageSent] = useState<"all" | "yes" | "no">("all");
+  const [digestDate, setDigestDate] = useState<string>(() => format(new Date(), "yyyy-MM-dd"));
+  const [sendingDigest, setSendingDigest] = useState(false);
 
   const { data: config, isLoading: configLoading } = useQuery({
     queryKey: ["checkin_charge_config", establishmentUuid],
@@ -1247,6 +1250,13 @@ export default function CheckinChargeSettings() {
             </Badge>
           </TabsTrigger>
           <TabsTrigger
+            value="resumo-dia"
+            className="rounded-xl gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md px-4 py-2.5"
+          >
+            <LayoutList className="h-4 w-4" />
+            Resumo do dia
+          </TabsTrigger>
+          <TabsTrigger
             value="config"
             className="rounded-xl data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md px-4 py-2.5"
           >
@@ -1487,6 +1497,65 @@ export default function CheckinChargeSettings() {
                     </div>
                   </div>
                 )}
+
+                <div className="rounded-lg border p-4 space-y-4 bg-muted/10">
+                  <Label className="text-base">Resumo do dia</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Envio de resumo (checkouts do dia, manutenções e bloqueios criados no dia) para um grupo no Chatwoot ou para números no WhatsApp Cloud. Use a aba &quot;Resumo do dia&quot; para disparar o envio manual ou ative o envio automático no horário desejado.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="daily-digest-automate"
+                        checked={channelConfig.daily_digest_automate === true}
+                        onCheckedChange={(v) => setChannelConfig((prev) => ({ ...prev, daily_digest_automate: v }))}
+                      />
+                      <Label htmlFor="daily-digest-automate" className="cursor-pointer">Automatizar envio do resumo do dia</Label>
+                    </div>
+                    {channelConfig.daily_digest_automate === true && (
+                      <div className="flex items-center gap-2">
+                        <Label className="text-muted-foreground whitespace-nowrap">Horário de envio:</Label>
+                        <Input
+                          type="time"
+                          value={(channelConfig.daily_digest_time as string) || "08:00"}
+                          onChange={(e) => setChannelConfig((prev) => ({ ...prev, daily_digest_time: e.target.value || "08:00" }))}
+                          className="w-[120px]"
+                        />
+                        <span className="text-xs text-muted-foreground">(horário de Brasília)</span>
+                      </div>
+                    )}
+                  </div>
+                  {channel === "chatwoot" && (
+                    <div className="space-y-2">
+                      <Label>ID da conversa (grupo) no Chatwoot</Label>
+                      <Input
+                        type="number"
+                        placeholder="Ex: 123 (ID da conversa/grupo que receberá o resumo)"
+                        value={channelConfig.daily_digest_conversation_id != null ? String(channelConfig.daily_digest_conversation_id) : ""}
+                        onChange={(e) => setChannelConfigField("daily_digest_conversation_id", e.target.value ? Number(e.target.value) : 0)}
+                        className="max-w-xs"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        No Chatwoot, abra a conversa/grupo desejada e use o ID da URL (ex.: /accounts/1/conversations/123 → use 123).
+                      </p>
+                    </div>
+                  )}
+                  {channel === "whatsapp_cloud" && (
+                    <div className="space-y-2">
+                      <Label>Números para envio do resumo (um por linha)</Label>
+                      <Textarea
+                        placeholder="5511999999999&#10;5521988888888"
+                        value={Array.isArray(channelConfig.daily_digest_phones) ? (channelConfig.daily_digest_phones as string[]).join("\n") : (channelConfig.daily_digest_phones as string) ?? ""}
+                        onChange={(e) => setChannelConfigField("daily_digest_phones", e.target.value)}
+                        rows={4}
+                        className="font-mono text-sm resize-y"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Inclua os números (com DDI) que devem receber o resumo do dia via WhatsApp Cloud API. Um número por linha.
+                      </p>
+                    </div>
+                  )}
+                </div>
 
                 <div className="space-y-4">
                   <Label className="text-base">Origem do template</Label>
@@ -2126,6 +2195,63 @@ export default function CheckinChargeSettings() {
                   />
                 </div>
               )}
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="resumo-dia" className="space-y-4">
+          <Card className="p-6 rounded-2xl border shadow-sm">
+            <h3 className="font-semibold flex items-center gap-2 mb-2">
+              <LayoutList className="h-4 w-4 text-primary" />
+              Resumo do dia
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Envia para um grupo no Chatwoot (ou para números no WhatsApp Cloud) um resumo com: checkouts do dia, manutenções abertas no dia e bloqueios de quarto criados no dia. Configure o destino e o horário de envio automático em Configuração → Resumo do dia. Quando a automação estiver ativa, é necessário configurar um cron externo (ex.: cron-job.org) para chamar a função <code className="text-xs bg-muted px-1 rounded">send-daily-digest-schedule</code> a cada 15 minutos.
+            </p>
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="space-y-2">
+                <Label>Data do resumo</Label>
+                <Input
+                  type="date"
+                  value={digestDate}
+                  onChange={(e) => setDigestDate(e.target.value)}
+                  className="rounded-lg max-w-[180px]"
+                />
+              </div>
+              <Button
+                onClick={async () => {
+                  if (!establishmentUuid) return;
+                  setSendingDigest(true);
+                  try {
+                    const { data, error } = await supabase.functions.invoke("send-daily-digest", {
+                      body: { establishment_id: establishmentUuid, date: digestDate },
+                    });
+                    if (error) {
+                      toast.error(error.message || "Erro ao enviar resumo");
+                      return;
+                    }
+                    const sentChatwoot = (data as { sent_chatwoot?: boolean })?.sent_chatwoot;
+                    const sentWhatsapp = (data as { sent_whatsapp?: number })?.sent_whatsapp;
+                    const errs = (data as { errors?: string[] })?.errors;
+                    if (errs?.length) {
+                      toast.error(errs.join(" "));
+                      return;
+                    }
+                    if (sentChatwoot) toast.success("Resumo enviado para o grupo no Chatwoot.");
+                    else if (sentWhatsapp && sentWhatsapp > 0) toast.success(`Resumo enviado para ${sentWhatsapp} número(s) no WhatsApp.`);
+                    else toast.success("Resumo enviado.");
+                  } catch (e) {
+                    toast.error((e as Error).message || "Erro ao enviar resumo");
+                  } finally {
+                    setSendingDigest(false);
+                  }
+                }}
+                disabled={sendingDigest}
+                className="rounded-lg gap-2"
+              >
+                {sendingDigest ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Enviar resumo do dia
+              </Button>
             </div>
           </Card>
         </TabsContent>
