@@ -128,6 +128,14 @@ const statusConfig: Record<RoomOccupancyStatus, {
     icon: AlertCircle,
     emoji: "🟤"
   },
+  last_day: {
+    label: "Último dia",
+    color: "bg-red-400",
+    bgColor: "bg-red-50/80 border-red-300",
+    textColor: "text-red-700",
+    icon: Clock,
+    emoji: "🔴"
+  },
 };
 
 // Função para mapear RoomOccupancyStatus para room_status (ENUM do banco)
@@ -141,6 +149,7 @@ const mapOccupancyStatusToRoomStatus = (status: RoomOccupancyStatus): 'available
     case 'dirty_priority':
       return 'cleaning';
     case 'occupied':
+    case 'last_day':
       return 'occupied';
     case 'reserved':
     case 'inspection':
@@ -170,7 +179,7 @@ const OccupancyMap = () => {
   const [maintenanceDialogOpen, setMaintenanceDialogOpen] = useState(false);
   const [newStatus, setNewStatus] = useState<RoomOccupancyStatus | "">("");
   
-  const { rooms: roomsFromHook, isLoading } = useOccupancyMap(selectedDate);
+  const { rooms: roomsFromHook, summary: operationalSummary, isLoading } = useOccupancyMap(selectedDate);
   const { reservations, refetch: refetchReservations, checkIn, checkOut } = useReservations();
   const { createTicket } = useMaintenance();
   const { canCreate } = usePermissions();
@@ -300,7 +309,7 @@ const OccupancyMap = () => {
     });
   }, [rooms, searchTerm, selectedCategory, selectedStatuses]);
 
-  // Estatísticas
+  // Estatísticas (compatível com resumo operacional do hook)
   const stats = useMemo(() => {
     const total = rooms.length;
     const byStatus: Record<RoomOccupancyStatus, number> = {
@@ -312,13 +321,14 @@ const OccupancyMap = () => {
       reserved: 0,
       inspection: 0,
       dirty_priority: 0,
+      last_day: 0,
     };
 
     rooms.forEach((room) => {
       byStatus[room.status]++;
     });
 
-    const occupied = byStatus.occupied + byStatus.reserved;
+    const occupied = byStatus.occupied + byStatus.reserved + byStatus.last_day;
     const occupancyRate = total > 0 ? Math.round((occupied / total) * 100) : 0;
 
     return {
@@ -865,27 +875,27 @@ const OccupancyMap = () => {
                                   (room.checkin_date === selectedDateStr && 
                                    room.reservation_status === "checkedin");
                                 
-                                // Determinar texto do status do quarto
-                                let roomStatusText = isDirtyAvailable ? "Disponível (Sujo)" : config.label;
+                                // Determinar texto do status do quarto (prioridade: display_tag operacional)
+                                let roomStatusText = room.display_tag ?? (isDirtyAvailable ? "Disponível (Sujo)" : config.label);
                                 let statusDisplayText = "";
                                 
                                 // Texto superior (dias ou status)
                                 if (room.nights_remaining !== undefined && room.nights_remaining > 0) {
                                   statusDisplayText = `${room.nights_remaining}º dia`;
-                                } else if (room.nights_remaining === 0) {
-                                  statusDisplayText = "Último dia";
+                                } else if (room.nights_remaining === 0 || room.status === "last_day") {
+                                  statusDisplayText = room.display_tag || "Último dia";
                                 } else if (room.status === "available") {
-                                  statusDisplayText = isDirtyAvailable ? "Aguardando Limpeza" : "Disponível";
+                                  statusDisplayText = isDirtyAvailable ? "Aguardando Limpeza" : (room.display_tag || "Disponível");
                                 } else if (room.status === "dirty" || room.status === "dirty_priority") {
-                                  statusDisplayText = "Aguardando Limpeza";
+                                  statusDisplayText = room.display_tag || "Aguardando Limpeza";
                                 } else if (room.status === "maintenance") {
                                   statusDisplayText = "Em Manutenção";
                                 } else if (room.status === "blocked") {
                                   statusDisplayText = "Bloqueado";
                                 } else if (room.status === "reserved") {
-                                  statusDisplayText = "Reservado";
+                                  statusDisplayText = room.display_tag || "Reservado";
                                 } else if (room.status === "occupied") {
-                                  statusDisplayText = "Ocupado";
+                                  statusDisplayText = room.display_tag || "Ocupado";
                                 }
             
             return (
@@ -913,7 +923,7 @@ const OccupancyMap = () => {
                 
                                     {/* Clientes */}
                                     <div className="col-span-4 flex flex-col gap-0.5 sm:gap-1 py-0.5 min-w-0">
-                                      {/* Hóspede Anterior (Checkout) - Sempre mostrar */}
+                                      {/* Hóspede que está saindo (checkout) */}
                                       <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap min-h-[16px] sm:min-h-[18px]">
                                         {room.previous_guest_name ? (
                                           <>
@@ -927,7 +937,7 @@ const OccupancyMap = () => {
                                               </span>
                                             )}
                                             <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-slate-700 text-white rounded flex-shrink-0 font-medium">
-                                              CHECKOUT
+                                              SAINDO
                                             </span>
                                             {room.previous_checkout_date && (
                                               <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
@@ -954,47 +964,44 @@ const OccupancyMap = () => {
                                               </span>
                                             )}
                                             {(() => {
-                                              // Verificar se é reserva futura (ainda não entrou)
-                                              const reservationStatus = room.reservation_status;
-                                              const hasCheckedInStatus = reservationStatus === "checkedin";
-                                              
-                                              let hasCheckedInByDate = false;
-                                              if (room.checkin_date) {
-                                                const checkinDate = parseISO(room.checkin_date);
-                                                checkinDate.setHours(0, 0, 0, 0);
-                                                const selectedDateNormalized = startOfDay(selectedDate);
-                                                hasCheckedInByDate = checkinDate <= selectedDateNormalized;
-                                              }
-                                              
-                                              const isFutureReservation = room.checkin_date && 
-                                                                        parseISO(room.checkin_date) > startOfDay(selectedDate);
-                                              
-                                              // Mostrar CHECKIN se é reserva futura ou ainda não fez check-in
-                                              // Mostrar CHECKOUT apenas se já fez check-in
-                                              const shouldShowCheckin = isFutureReservation || (!hasCheckedInStatus && !hasCheckedInByDate);
-                                              const shouldShowCheckout = hasCheckedInStatus || (hasCheckedInByDate && !isFutureReservation);
-                                              
-                                              if (shouldShowCheckin && room.checkin_date) {
+                                              // Prioridade: reserva de CHEGADA HOJE = sempre ENTRANDO (verde). Evitar badge de saída na linha do entrante.
+                                              const isArrivalToday = room.display_tag === "Chegada Hoje" ||
+                                                room.reservation_operational_type === "checkin_today" ||
+                                                room.reservation_operational_type === "day_use" ||
+                                                (room.checkin_date === selectedDateStr && room.reservation_status !== "checkedin");
+                                              const isLeavingToday = room.display_tag === "Checkout Hoje" ||
+                                                room.status === "last_day" ||
+                                                (room.checkout_date === selectedDateStr && room.reservation_status === "checkedin");
+
+                                              if (isArrivalToday && room.checkin_date) {
                                                 return (
                                                   <>
                                                     <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-emerald-500 text-white rounded flex-shrink-0 font-medium">
-                                                      CHECKIN
+                                                      ENTRANDO
                                                     </span>
                                                     <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
                                                       - às {room.checkin_time?.substring(0, 5) || "15:00"}
                                                     </span>
                                                   </>
                                                 );
-                                              } else if (shouldShowCheckout && room.checkout_date) {
+                                              }
+                                              if (isLeavingToday && room.checkout_date) {
                                                 return (
                                                   <>
                                                     <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-slate-700 text-white rounded flex-shrink-0 font-medium">
-                                                      CHECKOUT
+                                                      SAINDO
                                                     </span>
                                                     <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
                                                       - às {room.checkout_time?.substring(0, 5) || "12:00"}
                                                     </span>
                                                   </>
+                                                );
+                                              }
+                                              if (room.checkin_date) {
+                                                return (
+                                                  <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-emerald-500 text-white rounded flex-shrink-0 font-medium">
+                                                    ENTRANDO
+                                                  </span>
                                                 );
                                               }
                                               return null;
@@ -1005,8 +1012,8 @@ const OccupancyMap = () => {
                                         )}
                                       </div>
                                       
-                                      {/* Próximo Hóspede (Checkin) - Mostrar apenas se houver */}
-                                      {room.next_guest_name && (
+                                      {/* Próximo hóspede (quem vai entrar) - só mostrar se for diferente do atual (evitar duplicar entrante) */}
+                                      {room.next_guest_name && (room.next_reservation_code !== room.reservation_code || room.next_guest_name !== room.guest_name) && (
                                         <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap min-h-[16px] sm:min-h-[18px]">
                                           <div className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0 mt-0.5" />
                                           <span className="text-[10px] sm:text-xs text-slate-800 truncate max-w-[120px] sm:max-w-[150px]">
@@ -1018,7 +1025,7 @@ const OccupancyMap = () => {
                                             </span>
                                           )}
                                           <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-emerald-500 text-white rounded flex-shrink-0 font-medium">
-                                            CHECKIN
+                                            ENTRANDO
                                           </span>
                                           {room.next_checkin_date && (
                                             <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
@@ -1220,25 +1227,25 @@ const OccupancyMap = () => {
                                                 (room.checkin_date === selectedDateStr && 
                                                  room.reservation_status === "checkedin");
                                               
-                                              let roomStatusText = isDirtyAvailable ? "Disponível (Sujo)" : config.label;
+                                              let roomStatusText = room.display_tag ?? (isDirtyAvailable ? "Disponível (Sujo)" : config.label);
                                               let statusDisplayText = "";
                                               
                                               if (room.nights_remaining !== undefined && room.nights_remaining > 0) {
                                                 statusDisplayText = `${room.nights_remaining}º dia`;
-                                              } else if (room.nights_remaining === 0) {
-                                                statusDisplayText = "Último dia";
+                                              } else if (room.nights_remaining === 0 || room.status === "last_day") {
+                                                statusDisplayText = room.display_tag || "Último dia";
                                               } else if (room.status === "available") {
-                                                statusDisplayText = isDirtyAvailable ? "Aguardando Limpeza" : "Disponível";
+                                                statusDisplayText = isDirtyAvailable ? "Aguardando Limpeza" : (room.display_tag || "Disponível");
                                               } else if (room.status === "dirty" || room.status === "dirty_priority") {
-                                                statusDisplayText = "Aguardando Limpeza";
+                                                statusDisplayText = room.display_tag || "Aguardando Limpeza";
                                               } else if (room.status === "maintenance") {
                                                 statusDisplayText = "Em Manutenção";
                                               } else if (room.status === "blocked") {
                                                 statusDisplayText = "Bloqueado";
                                               } else if (room.status === "reserved") {
-                                                statusDisplayText = "Reservado";
+                                                statusDisplayText = room.display_tag || "Reservado";
                                               } else if (room.status === "occupied") {
-                                                statusDisplayText = "Ocupado";
+                                                statusDisplayText = room.display_tag || "Ocupado";
                                               }
                                               
                                               return (
@@ -1277,7 +1284,7 @@ const OccupancyMap = () => {
                                                             </span>
                                                           )}
                                                           <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-slate-700 text-white rounded flex-shrink-0 font-medium">
-                                                            CHECKOUT
+                                                            SAINDO
                                                           </span>
                                                           {room.previous_checkout_date && (
                                                             <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
@@ -1303,44 +1310,43 @@ const OccupancyMap = () => {
                                                             </span>
                                                           )}
                                                           {(() => {
-                                                            const reservationStatus = room.reservation_status;
-                                                            const hasCheckedInStatus = reservationStatus === "checkedin";
-                                                            
-                                                            let hasCheckedInByDate = false;
-                                                            if (room.checkin_date) {
-                                                              const checkinDate = parseISO(room.checkin_date);
-                                                              checkinDate.setHours(0, 0, 0, 0);
-                                                              const selectedDateNormalized = startOfDay(selectedDate);
-                                                              hasCheckedInByDate = checkinDate <= selectedDateNormalized;
-                                                            }
-                                                            
-                                                            const isFutureReservation = room.checkin_date && 
-                                                                                      parseISO(room.checkin_date) > startOfDay(selectedDate);
-                                                            
-                                                            const shouldShowCheckin = isFutureReservation || (!hasCheckedInStatus && !hasCheckedInByDate);
-                                                            const shouldShowCheckout = hasCheckedInStatus || (hasCheckedInByDate && !isFutureReservation);
-                                                            
-                                                            if (shouldShowCheckin && room.checkin_date) {
+                                                            const isArrivalToday = room.display_tag === "Chegada Hoje" ||
+                                                              room.reservation_operational_type === "checkin_today" ||
+                                                              room.reservation_operational_type === "day_use" ||
+                                                              (room.checkin_date === selectedDateStr && room.reservation_status !== "checkedin");
+                                                            const isLeavingToday = room.display_tag === "Checkout Hoje" ||
+                                                              room.status === "last_day" ||
+                                                              (room.checkout_date === selectedDateStr && room.reservation_status === "checkedin");
+
+                                                            if (isArrivalToday && room.checkin_date) {
                                                               return (
                                                                 <>
                                                                   <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-emerald-500 text-white rounded flex-shrink-0 font-medium">
-                                                                    CHECKIN
+                                                                    ENTRANDO
                                                                   </span>
                                                                   <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
                                                                     - às {room.checkin_time?.substring(0, 5) || "15:00"}
                                                                   </span>
                                                                 </>
                                                               );
-                                                            } else if (shouldShowCheckout && room.checkout_date) {
+                                                            }
+                                                            if (isLeavingToday && room.checkout_date) {
                                                               return (
                                                                 <>
                                                                   <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-slate-700 text-white rounded flex-shrink-0 font-medium">
-                                                                    CHECKOUT
+                                                                    SAINDO
                                                                   </span>
                                                                   <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
                                                                     - às {room.checkout_time?.substring(0, 5) || "12:00"}
                                                                   </span>
                                                                 </>
+                                                              );
+                                                            }
+                                                            if (room.checkin_date) {
+                                                              return (
+                                                                <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-emerald-500 text-white rounded flex-shrink-0 font-medium">
+                                                                  ENTRANDO
+                                                                </span>
                                                               );
                                                             }
                                                             return null;
@@ -1351,7 +1357,7 @@ const OccupancyMap = () => {
                                                       )}
                                                     </div>
                                                     
-                                                    {room.next_guest_name && (
+                                                    {room.next_guest_name && (room.next_reservation_code !== room.reservation_code || room.next_guest_name !== room.guest_name) && (
                                                       <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap min-h-[16px] sm:min-h-[18px]">
                                                         <div className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0 mt-0.5" />
                                                         <span className="text-[10px] sm:text-xs text-slate-800 truncate max-w-[120px] sm:max-w-[150px]">
@@ -1363,7 +1369,7 @@ const OccupancyMap = () => {
                                                           </span>
                                                         )}
                                                         <span className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.5 bg-emerald-500 text-white rounded flex-shrink-0 font-medium">
-                                                          CHECKIN
+                                                          ENTRANDO
                                                         </span>
                                                         {room.next_checkin_date && (
                                                           <span className="text-[8px] sm:text-[9px] text-slate-500 flex-shrink-0 hidden sm:inline">
@@ -1461,16 +1467,32 @@ const OccupancyMap = () => {
           )}
         </div>
 
-        {/* Resumo - Abaixo das Categorias */}
+        {/* Resumo operacional do dia */}
         <div className="space-y-4">
           <Card className="p-3 sm:p-4">
             <h3 className="font-semibold text-sm sm:text-base text-slate-900 mb-3 sm:mb-4">
-              RESUMO - {format(selectedDate, "dd/MM/yyyy", { locale: ptBR })}
+              RESUMO OPERACIONAL - {format(selectedDate, "dd/MM/yyyy", { locale: ptBR })}
             </h3>
             <div className="space-y-3">
               <div>
                 <div className="text-xs sm:text-sm text-slate-600 mb-1">Total de Quartos</div>
-                <div className="text-xl sm:text-2xl font-bold text-slate-900">{stats.total}</div>
+                <div className="text-xl sm:text-2xl font-bold text-slate-900">{operationalSummary.total_rooms}</div>
+              </div>
+
+              <div className="space-y-1.5 pt-2 border-t">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Movimento do dia</div>
+                <div className="flex items-center justify-between text-xs sm:text-sm">
+                  <span>Saídas hoje</span>
+                  <span className="font-semibold">{operationalSummary.saídas_hoje}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs sm:text-sm">
+                  <span>Entradas hoje</span>
+                  <span className="font-semibold">{operationalSummary.entradas_hoje}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs sm:text-sm">
+                  <span>Stayovers</span>
+                  <span className="font-semibold">{operationalSummary.stayovers}</span>
+                </div>
               </div>
               
               <div className="space-y-2 pt-2 border-t">
@@ -1480,25 +1502,26 @@ const OccupancyMap = () => {
                     <span>Disponíveis</span>
                   </div>
                   <div className="font-semibold text-xs sm:text-sm">
-                    {stats.available} ({Math.round((stats.available / stats.total) * 100)}%)
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs sm:text-sm">
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    <span className="text-sm sm:text-base">🔴</span>
-                    <span>Ocupados</span>
-                  </div>
-                  <div className="font-semibold text-xs sm:text-sm">
-                    {stats.occupied} ({Math.round((stats.occupied / stats.total) * 100)}%)
+                    {operationalSummary.disponíveis}
+                    {operationalSummary.total_rooms > 0 && (
+                      <span className="text-slate-500 font-normal ml-1">
+                        ({Math.round((operationalSummary.disponíveis / operationalSummary.total_rooms) * 100)}%)
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-xs sm:text-sm">
                   <div className="flex items-center gap-1.5 sm:gap-2">
                     <span className="text-sm sm:text-base">🟡</span>
-                    <span>Sujos</span>
+                    <span>Sujo</span>
                   </div>
                   <div className="font-semibold text-xs sm:text-sm">
-                    {stats.dirty} ({Math.round((stats.dirty / stats.total) * 100)}%)
+                    {operationalSummary.sujo}
+                    {operationalSummary.total_rooms > 0 && (
+                      <span className="text-slate-500 font-normal ml-1">
+                        ({Math.round((operationalSummary.sujo / operationalSummary.total_rooms) * 100)}%)
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-xs sm:text-sm">
@@ -1507,7 +1530,12 @@ const OccupancyMap = () => {
                     <span>Manutenção</span>
                   </div>
                   <div className="font-semibold text-xs sm:text-sm">
-                    {stats.maintenance} ({Math.round((stats.maintenance / stats.total) * 100)}%)
+                    {operationalSummary.manutenção}
+                    {operationalSummary.total_rooms > 0 && (
+                      <span className="text-slate-500 font-normal ml-1">
+                        ({Math.round((operationalSummary.manutenção / operationalSummary.total_rooms) * 100)}%)
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-xs sm:text-sm">
@@ -1516,14 +1544,19 @@ const OccupancyMap = () => {
                     <span>Bloqueados</span>
                   </div>
                   <div className="font-semibold text-xs sm:text-sm">
-                    {stats.blocked} ({Math.round((stats.blocked / stats.total) * 100)}%)
+                    {operationalSummary.bloqueados}
+                    {operationalSummary.total_rooms > 0 && (
+                      <span className="text-slate-500 font-normal ml-1">
+                        ({Math.round((operationalSummary.bloqueados / operationalSummary.total_rooms) * 100)}%)
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
 
               <div className="pt-2 border-t">
-                <div className="text-xs sm:text-sm text-slate-600 mb-1">Taxa de Ocupação</div>
-                <div className="text-lg sm:text-xl font-bold text-slate-900">{stats.occupancyRate}%</div>
+                <div className="text-xs sm:text-sm text-slate-600 mb-1">Taxa de ocupação real do dia</div>
+                <div className="text-lg sm:text-xl font-bold text-slate-900">{operationalSummary.taxa_ocupacao_real}%</div>
               </div>
             </div>
           </Card>
@@ -1538,7 +1571,7 @@ const OccupancyMap = () => {
               QUARTO {selectedRoom?.room_number} - {selectedRoom?.category_name}
             </DialogTitle>
             <DialogDescription>
-              Status Atual: {selectedRoom && statusConfig[selectedRoom.status].emoji} {selectedRoom && statusConfig[selectedRoom.status].label}
+              Status Atual: {selectedRoom && statusConfig[selectedRoom.status].emoji} {selectedRoom && (selectedRoom.display_tag || statusConfig[selectedRoom.status].label)}
             </DialogDescription>
           </DialogHeader>
           

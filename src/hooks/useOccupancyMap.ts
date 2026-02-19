@@ -10,9 +10,18 @@ export type RoomOccupancyStatus =
   | "dirty"          // 🟡 Sujo/Aguardando Limpeza
   | "maintenance"    // 🔵 Em Manutenção
   | "blocked"        // ⚫ Bloqueado
-  | "reserved"       // 🟣 Reservado (Check-in Futuro)
+  | "reserved"       // 🟣 Reservado (Check-in Futuro / Chegada Hoje)
   | "inspection"     // 🟠 Aguardando Inspeção
-  | "dirty_priority"; // 🟤 Sujo com Prioridade
+  | "dirty_priority" // 🟤 Sujo com Prioridade
+  | "last_day";      // 🔴 Último dia (Checkout Hoje)
+
+/** Classificação operacional da reserva no dia */
+export type ReservationOperationalType =
+  | "stayover"       // checkin < today, checkout > today
+  | "checkout_today" // checkout_date = today
+  | "checkin_today"  // checkin_date = today
+  | "day_use"        // checkin = today AND checkout = today
+  | "no_show";       // checkin_date = today AND status = noshow
 
 export interface RoomOccupancyData {
   id: string;
@@ -72,6 +81,47 @@ export interface RoomOccupancyData {
   // Flag para indicar se o quarto está sujo (dirty) mesmo estando disponível
   // Usado quando há check-out ou passou do horário de check-out
   is_dirty?: boolean;
+  
+  // Classificação operacional e tag de exibição
+  reservation_operational_type?: ReservationOperationalType;
+  display_tag?: string; // "Checkout Hoje", "Chegada Hoje", "Último dia", "Stayover", "Day Use", "No-Show"
+}
+
+/** Resumo operacional do dia para o mapa de ocupação */
+export interface OccupancyOperationalSummary {
+  total_rooms: number;
+  saídas_hoje: number;
+  entradas_hoje: number;
+  stayovers: number;
+  disponíveis: number;
+  sujo: number;
+  manutenção: number;
+  bloqueados: number;
+  taxa_ocupacao_real: number; // percentual 0-100
+}
+
+/** Classifica a reserva no dia operacional (data selecionada) */
+function getReservationOperationalType(
+  res: { checkin_date?: string; checkout_date?: string; status?: string },
+  dateStr: string
+): ReservationOperationalType | undefined {
+  if (!res?.checkin_date || !res?.checkout_date) return undefined;
+  const checkin = parseISO(res.checkin_date);
+  const checkout = parseISO(res.checkout_date);
+  const today = parseISO(dateStr);
+  checkin.setHours(0, 0, 0, 0);
+  checkout.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+  const cin = checkin.getTime();
+  const cout = checkout.getTime();
+  const t = today.getTime();
+
+  if (res.status === "noshow" && cin === t) return "no_show";
+  if (cin === t && cout === t) return "day_use";
+  if (cout === t) return "checkout_today";
+  if (cin === t) return "checkin_today";
+  if (cin < t && cout > t) return "stayover";
+  return undefined;
 }
 
 export const useOccupancyMap = (selectedDate?: Date) => {
@@ -82,6 +132,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
 
   const { data: rooms, isLoading } = useQuery({
     queryKey: ["occupancy_map_rooms", selectedEstablishment?.id, dateStr],
+    refetchInterval: 30_000, // Atualização a cada 30s (check-in, check-out, limpeza, etc.)
     queryFn: async () => {
       const establishmentId = selectedEstablishment?.id;
       
@@ -91,9 +142,21 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         dateStr
       });
       
+      const emptySummary: OccupancyOperationalSummary = {
+        total_rooms: 0,
+        saídas_hoje: 0,
+        entradas_hoje: 0,
+        stayovers: 0,
+        disponíveis: 0,
+        sujo: 0,
+        manutenção: 0,
+        bloqueados: 0,
+        taxa_ocupacao_real: 0,
+      };
+
       if (!establishmentId) {
         console.warn("useOccupancyMap: Nenhum estabelecimento selecionado");
-        return [];
+        return { rooms: [], summary: emptySummary };
       }
       
       if (establishmentId) {
@@ -135,7 +198,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
       
       if (!roomsData || roomsData.length === 0) {
         console.warn("useOccupancyMap: Nenhum quarto encontrado para o estabelecimento:", establishmentId);
-        return [];
+        return { rooms: [], summary: emptySummary };
       }
       
       console.log("useOccupancyMap: Quartos encontrados:", roomsData.length);
@@ -145,8 +208,8 @@ export const useOccupancyMap = (selectedDate?: Date) => {
       // OU reservas futuras (checkin >= dateStr) para mostrar status "reserved"
       // IMPORTANTE: Fazer duas queries separadas e combinar para garantir que todas sejam encontradas
       
-      // Query 1: Reservas ativas (checkin_date <= dateStr AND checkout_date >= dateStr)
-      // IMPORTANTE: Incluir "unpaid" para considerar reservas sem pagamento
+      // Query base operacional: reservas no dia (checkin_date <= dateStr AND checkout_date >= dateStr)
+      // Inclui noshow para classificar e liberar quarto; checkedout para fluxo checkout → limpeza → check-in
       let activeReservationsQuery = supabase
         .from("reservations")
         .select(`
@@ -158,7 +221,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         `)
         .lte("checkin_date", dateStr)
         .gte("checkout_date", dateStr)
-        .in("status", ["pending", "unpaid", "confirmed", "checkedin", "checkedout", "blocked", "preregistration"])
+        .in("status", ["pending", "unpaid", "confirmed", "checkedin", "checkedout", "blocked", "preregistration", "noshow"])
         .neq("status", "cancelled");
       
       if (establishmentId) {
@@ -379,21 +442,39 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         }
       });
 
-      // Mapear check-outs na data selecionada por quarto
+      // Mapear check-outs na data selecionada por quarto (quem está saindo hoje)
+      // Incluir TODAS as reservas com checkout_date = hoje, não só checkedin/checkedout,
+      // para sempre mostrar "hóspede anterior" quando existe saída no dia
       const checkoutsByRoom: Record<string, any> = {};
       checkoutReservations?.forEach((reservation) => {
-        // Apenas check-outs que realmente ocorreram ou estão ocorrendo hoje
         if (reservation.room_id && reservation.status !== "cancelled") {
           checkoutsByRoom[reservation.room_id] = reservation;
+        }
+      });
+      reservations?.forEach((reservation) => {
+        if (reservation.room_id && reservation.status !== "cancelled" && reservation.checkout_date === dateStr) {
+          if (!checkoutsByRoom[reservation.room_id]) {
+            checkoutsByRoom[reservation.room_id] = reservation;
+          }
         }
       });
 
       // Mapear check-ins na data selecionada por quarto
       const checkinsByRoom: Record<string, any> = {};
       checkinReservations?.forEach((reservation) => {
-        // Apenas check-ins que realmente ocorreram
         if (reservation.room_id && reservation.status !== "cancelled") {
           checkinsByRoom[reservation.room_id] = reservation;
+        }
+      });
+
+      // Mapear reservas com CHEGADA HOJE por quarto (quem vai entrar)
+      // Usado para prioridade operacional: no mesmo dia mostrar saindo + entrando
+      const arrivingTodayByRoom: Record<string, any> = {};
+      reservations?.forEach((reservation) => {
+        if (reservation.room_id && reservation.status !== "cancelled" && reservation.checkin_date === dateStr) {
+          if (!arrivingTodayByRoom[reservation.room_id]) {
+            arrivingTodayByRoom[reservation.room_id] = reservation;
+          }
         }
       });
 
@@ -445,11 +526,13 @@ export const useOccupancyMap = (selectedDate?: Date) => {
       });
       
       let processedRooms: RoomOccupancyData[] = [];
-      
+      let summary: OccupancyOperationalSummary = emptySummary;
+
       try {
         processedRooms = roomsData.map((room): RoomOccupancyData => {
         const reservation = reservationsByRoom[room.id];
         const checkoutToday = checkoutsByRoom[room.id];
+        const arrivingToday = arrivingTodayByRoom[room.id];
         const checkinToday = checkinsByRoom[room.id];
         const maintenance = maintenanceByRoom[room.id];
         const nextReservation = nextReservationsByRoom[room.id];
@@ -489,11 +572,13 @@ export const useOccupancyMap = (selectedDate?: Date) => {
             const selectedDateObj = parseISO(dateStr);
             selectedDateObj.setHours(0, 0, 0, 0);
             
-            // Reserva está ativa se:
-            // - Data selecionada está dentro do período (checkin <= date <= checkout)
-            // - Status NÃO é "checkedout" (já saiu)
-            // - Status NÃO é "cancelled" (cancelada)
-            if (checkinDate <= selectedDateObj && 
+            // NO_SHOW: checkin_date = today e status = noshow → quarto fica disponível
+            if (reservation.status === "noshow" && checkinDate.getTime() === selectedDateObj.getTime()) {
+              hasActiveReservation = false;
+              reservationData = null;
+            }
+            // Reserva está ativa se: período cobre a data e não é checkedout/cancelled
+            else if (checkinDate <= selectedDateObj && 
                 checkoutDate >= selectedDateObj && 
                 reservation.status !== "checkedout" &&
                 reservation.status !== "cancelled") {
@@ -637,6 +722,32 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           }
         }
 
+        // 7. Classificação operacional e regras visuais (Último dia, Chegada Hoje, tags)
+        let operationalType: ReservationOperationalType | undefined = reservationData
+          ? getReservationOperationalType(reservationData, dateStr)
+          : undefined;
+        let displayTag: string | undefined;
+
+        if (!hasManualStatus || (room.status !== "maintenance" && room.status !== "blocked")) {
+          // Checkout hoje e ainda não fez check-out → Último dia
+          if (
+            hasActiveReservation &&
+            reservationData?.checkout_date === dateStr &&
+            reservationData?.status !== "checkedout"
+          ) {
+            status = "last_day";
+            displayTag = "Checkout Hoje";
+          } else if (status === "reserved" && reservationData?.checkin_date === dateStr) {
+            displayTag = "Chegada Hoje";
+          } else if (status === "occupied") {
+            displayTag = "Ocupado";
+          } else if (status === "dirty") {
+            displayTag = "Sujo / Aguardando Limpeza";
+          } else if (status === "available") {
+            displayTag = "Disponível";
+          }
+        }
+
         // Calcular informações da reserva
         let nightsRemaining: number | undefined;
         let checkoutText: string | undefined;
@@ -759,6 +870,17 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           // Se a próxima é a mesma da anterior, significa que é um check-in recente
           // Manter como próxima para mostrar informações de check-in
         }
+
+        // Prioridade operacional: mesmo dia com SAÍDA + ENTRADA
+        // Quando há checkout hoje E chegada hoje no mesmo quarto, exibir quem SAI como anterior
+        // e quem ENTRA como "atual" (reservationData), para não mostrar badge CHECKOUT na linha do entrante
+        if (checkoutToday && arrivingToday && checkoutToday.id !== arrivingToday.id) {
+          previousGuestToUse = checkoutToday;
+          reservationData = arrivingToday;
+          operationalType = getReservationOperationalType(arrivingToday, dateStr);
+          displayTag = "Chegada Hoje";
+          status = "reserved";
+        }
         
         const nextGuestName = actualNextReservation 
           ? (actualNextReservation.guest?.full_name || actualNextReservation.financial_responsible?.full_name || actualNextReservation.guest_name)
@@ -843,8 +965,42 @@ export const useOccupancyMap = (selectedDate?: Date) => {
                                    (reservationData?.checkout_date === dateStr && reservationData?.status === "checkedout"),
           // Flag para indicar se está sujo (mesmo estando disponível)
           is_dirty: isDirty,
+          // Classificação operacional e tag de exibição
+          reservation_operational_type: operationalType,
+          display_tag: displayTag,
         };
       });
+
+      // Resumo operacional do dia
+      summary = {
+        total_rooms: processedRooms.length,
+        saídas_hoje: processedRooms.filter(
+          (r) => r.reservation_operational_type === "checkout_today" || r.status === "last_day"
+        ).length,
+        entradas_hoje: processedRooms.filter(
+          (r) =>
+            r.reservation_operational_type === "checkin_today" ||
+            r.reservation_operational_type === "day_use"
+        ).length,
+        stayovers: processedRooms.filter((r) => r.reservation_operational_type === "stayover").length,
+        disponíveis: processedRooms.filter((r) => r.status === "available").length,
+        sujo: processedRooms.filter((r) => r.status === "dirty" || r.status === "dirty_priority").length,
+        manutenção: processedRooms.filter((r) => r.status === "maintenance").length,
+        bloqueados: processedRooms.filter((r) => r.status === "blocked").length,
+        taxa_ocupacao_real:
+          processedRooms.length > 0
+            ? Math.round(
+                (processedRooms.filter(
+                  (r) =>
+                    r.status === "occupied" ||
+                    r.status === "last_day" ||
+                    r.status === "reserved"
+                ).length /
+                  processedRooms.length) *
+                  100
+              )
+            : 0,
+      };
       } catch (error) {
         console.error("useOccupancyMap: Erro ao processar quartos:", error);
         throw error;
@@ -852,16 +1008,26 @@ export const useOccupancyMap = (selectedDate?: Date) => {
       
       console.log("useOccupancyMap: Processamento concluído", {
         processedRoomsCount: processedRooms?.length || 0,
-        hasProcessedRooms: !!processedRooms,
-        isArray: Array.isArray(processedRooms)
+        summary,
       });
-      
-      return processedRooms || [];
+
+      return { rooms: processedRooms || [], summary };
     },
   });
 
   return {
-    rooms: rooms || [],
+    rooms: rooms?.rooms ?? [],
+    summary: rooms?.summary ?? {
+      total_rooms: 0,
+      saídas_hoje: 0,
+      entradas_hoje: 0,
+      stayovers: 0,
+      disponíveis: 0,
+      sujo: 0,
+      manutenção: 0,
+      bloqueados: 0,
+      taxa_ocupacao_real: 0,
+    },
     isLoading,
   };
 };
