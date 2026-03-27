@@ -225,8 +225,6 @@ const CategoryDetailPage = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { settings: siteSettings } = useSiteSettings();
-  useMotorMeta(company, siteSettings ?? undefined);
-  useMotorAdvanced(company);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -247,6 +245,9 @@ const CategoryDetailPage = () => {
   const [adults, setAdults] = useState(searchParams.get("adults") || "2");
   const [children, setChildren] = useState(searchParams.get("children") || "0");
   const [coupon, setCoupon] = useState(searchParams.get("coupon") || "");
+
+  useMotorMeta(company, siteSettings ?? undefined);
+  useMotorAdvanced(company);
 
   // Verificar se há um parâmetro de reserva na URL
   const reservationIdFromUrl = searchParams.get("reservation");

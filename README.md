@@ -230,6 +230,9 @@ O banco de dados utiliza RLS do Supabase para garantir que:
 
 ## 📚 Documentação
 
+### Funcionalidades do PMS
+- **[README — Funcionalidades do PMS](./README-FUNCIONALIDADES.md)** — Visão geral de todos os módulos (dashboard, mapas, tarifário, financeiro, motor de reservas, Super Admin, etc.)
+
 ### 📖 Índice Completo
 - **[Índice de Documentação](./docs/INDEX.md)** - Navegue por toda a documentação do sistema
 
