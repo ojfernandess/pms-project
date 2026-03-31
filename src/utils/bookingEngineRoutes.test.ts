@@ -10,6 +10,11 @@ describe("isBookingEngineRoute", () => {
     expect(isBookingEngineRoute("/politica/x")).toBe(true);
   });
 
+  it("raiz é motor (domínio personalizado do booking engine)", () => {
+    expect(isBookingEngineRoute("/")).toBe(true);
+    expect(isBookingEngineRoute("")).toBe(true);
+  });
+
   it("rotas do PMS não são tratadas como motor", () => {
     expect(isBookingEngineRoute("/login")).toBe(false);
     expect(isBookingEngineRoute("/estabelecimento-id/dashboard")).toBe(false);

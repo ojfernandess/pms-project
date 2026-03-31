@@ -8,11 +8,15 @@ Carregar **apenas** o ícone configurado em `companies.booking_engine_favicon`, 
 2. Placeholder cinza em `data:`  
 3. Múltiplas substituições em sequência que geravam **várias requisições** ao mesmo recurso
 
+## Raiz `/` e domínio personalizado
+
+No **domínio personalizado** do motor, a URL da home é `https://hotel.com/` (pathname `"/"`). Essa rota é tratada como motor em `isBookingEngineRoute` para que **`useSiteMeta` não injete o favicon do SuperAdmin** na raiz — antes isso gerava **dois** ícones (PMS + cliente) e mais requisições.
+
 ## Componentes
 
 | Peça | Função |
 |------|--------|
-| `src/utils/bookingEngineRoutes.ts` | Lista única de prefixos de rota do motor (`/motor`, `/reservar`, …) |
+| `src/utils/bookingEngineRoutes.ts` | Prefixos do motor + **raiz `/`** como motor (white-label) |
 | `src/utils/bootstrapMotorFavicon.ts` | `stripStaticFaviconLinksOnMotorBoot()` — remove links legados **antes** do React (chamado em `main.tsx`) |
 | `src/utils/bookingEngineFavicon.ts` | `applyMotorBookingEngineFavicon(company)` — remove ícones existentes e insere **no máximo um** `<link rel="icon" data-motor-booking-favicon="1">` |
 | `src/hooks/useMotorMeta.ts` | Aplica o favicon quando `company` carrega |
