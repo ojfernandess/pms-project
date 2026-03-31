@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { applyBookingEngineFavicon } from "@/utils/bookingEngineFavicon";
+import { applyMotorBookingEngineFavicon } from "@/utils/bookingEngineFavicon";
 
 type CompanyMotorMeta = {
   id?: string;
@@ -110,6 +110,6 @@ export function useMotorMeta(
   }, [company, siteSettings]);
 
   useEffect(() => {
-    applyBookingEngineFavicon(company);
+    applyMotorBookingEngineFavicon(company);
   }, [company?.id, company?.booking_engine_favicon]);
 }

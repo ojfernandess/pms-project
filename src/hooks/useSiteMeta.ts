@@ -1,18 +1,7 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { useSiteSettings } from "./useSiteSettings";
-
-/** Rotas do motor de reservas / páginas white-label: o favicon é controlado pelo motor, não pelo sistema */
-function isBookingEngineRoute(pathname: string): boolean {
-  const p = pathname.toLowerCase();
-  return (
-    p.startsWith("/motor") ||
-    p.startsWith("/reservar") ||
-    p.startsWith("/categoria") ||
-    p.startsWith("/reserva") ||
-    p.startsWith("/politica")
-  );
-}
+import { isBookingEngineRoute } from "@/utils/bookingEngineRoutes";
 
 /**
  * Hook para atualizar dinamicamente o título e meta tags do site
@@ -137,7 +126,8 @@ export const useSiteMeta = () => {
   }, [settings, pathname, isMotor]);
 
   // Favicon só no PMS. Rotas do motor: não alterar aqui — evita sobrescrever o ícone aplicado por
-  // useMotorMeta/applyBookingEngineFavicon (ordem de efeitos pai/filho no React 18).
+  // useMotorMeta / applyMotorBookingEngineFavicon (ordem de efeitos pai/filho no React 18).
+  /* eslint-disable react-hooks/exhaustive-deps -- depende só de favicon_url, não do objeto settings inteiro */
   useEffect(() => {
     if (isMotor) return;
     if (!settings) return;

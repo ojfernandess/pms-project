@@ -3,6 +3,10 @@ import App from "./App.tsx";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
 import { initializeConsoleOverride } from "./lib/logger";
+import { stripStaticFaviconLinksOnMotorBoot } from "./utils/bootstrapMotorFavicon";
+
+// Motor de reservas: remover links de ícone estáticos antes do React (evita fetch do placeholder legado)
+stripStaticFaviconLinksOnMotorBoot();
 
 // Inicializar override do console ANTES de qualquer outro código
 initializeConsoleOverride();
