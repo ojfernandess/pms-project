@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, FileText, Phone, Mail, MapPin, Info, MessageCircle, CreditCard, CheckCircle2, Clock } from "lucide-react";
+import { Loader2, FileText, Phone, Mail, MapPin, Info, MessageCircle, CreditCard, CheckCircle2, Clock, User } from "lucide-react";
 import { StripeProvider } from "@/components/stripe/StripeProvider";
 import { PaymentDialog } from "@/components/stripe/PaymentDialog";
 import { supabase } from "@/integrations/supabase/client";
@@ -509,187 +509,248 @@ const PaymentPage = () => {
     return "outline";
   };
 
+  const reservationCode = (reservation as { reservation_code?: string } | undefined)?.reservation_code;
+
   return (
-    <StripeProvider>
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50 flex items-center justify-center px-3 py-4 sm:px-4 sm:py-6 md:px-6 md:py-8 lg:py-12">
-        <div className="w-full max-w-lg">
-          {/* Logo do Sistema */}
-          {systemLogo && (
-            <div className="flex justify-center mb-4 sm:mb-6 md:mb-8">
-              <img
-                src={systemLogo}
-                alt="Logo do Sistema"
-                className="h-12 sm:h-16 md:h-20 w-auto object-contain max-w-[200px] sm:max-w-[250px] md:max-w-none"
-              />
-                </div>
-              )}
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-8 px-4">
+      <div className="max-w-4xl mx-auto space-y-6">
+        {/* Header — alinhado ao padrão QuotePaymentPage */}
+        <Card className="p-6">
+          <div
+            className={`flex items-center mb-6 gap-4 flex-wrap ${
+              systemLogo ? "justify-between" : "justify-end"
+            }`}
+          >
+            {systemLogo && (
+              <img src={systemLogo} alt="Logo" className="h-12 object-contain" />
+            )}
+            <Badge variant="outline" className="text-sm">
+              {reservationCode
+                ? `Reserva #${reservationCode}`
+                : paymentIntentId
+                  ? `Ref. ${paymentIntentId.slice(0, 10)}…`
+                  : "Pagamento"}
+            </Badge>
+          </div>
 
-          <Card className="border-0 shadow-xl overflow-hidden">
-            {/* Header com gradiente sutil */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 sm:p-5 md:p-6 lg:p-8">
-              <div className="flex items-center gap-2 sm:gap-3 mb-2">
-                <CreditCard className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 flex-shrink-0" />
-                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold leading-tight">Pagamento</h1>
-                </div>
-              {paymentData.description && (
-                <p className="text-blue-50 text-xs sm:text-sm md:text-base mt-2 break-words">{paymentData.description}</p>
-              )}
-                </div>
+          <div className="space-y-4">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 mb-2">Pagamento</h1>
+              <p className="text-sm text-slate-600">
+                {paymentData.description?.trim()
+                  ? paymentData.description
+                  : "Revise os dados e conclua o pagamento da sua reserva"}
+              </p>
+            </div>
 
-            <div className="p-4 sm:p-5 md:p-6 lg:p-8 space-y-4 sm:space-y-5 md:space-y-6">
-              {/* Valor Principal */}
-              <div className="text-center py-4 sm:py-5 md:py-6 border-b border-slate-200">
-                <p className="text-xs sm:text-sm text-slate-500 mb-2 font-medium">Valor Total</p>
-                <p className="text-3xl sm:text-4xl md:text-5xl font-bold text-slate-900 break-words px-2">
-                  {new Intl.NumberFormat("pt-BR", {
-                    style: "currency",
-                    currency: paymentData.currency || "BRL",
-                  }).format((paymentData.amount || 0) / 100)}
-                </p>
-                <div className="mt-3 sm:mt-4">
-                  <Badge 
-                    variant={getStatusBadgeVariant(paymentData.status)}
-                    className="text-xs sm:text-sm px-2.5 sm:px-3 py-1"
-                  >
-                    {paymentData.status === "succeeded" && <CheckCircle2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1 sm:mr-1.5" />}
-                    {paymentData.status === "pending" && <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1 sm:mr-1.5" />}
-                    <span className="whitespace-nowrap">{getPaymentStatusLabel(paymentData.status)}</span>
-                  </Badge>
-                </div>
-              </div>
+            <Separator />
 
-              {/* Informações da Reserva */}
-              <div className="space-y-2 sm:space-y-3">
-                {clientName && (
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
-                    <span className="text-xs sm:text-sm text-slate-600 font-medium">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {clientName && (
+                <div className="flex items-start gap-3">
+                  <User className="h-5 w-5 text-slate-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs text-slate-500">
                       {guest ? "Hóspede" : "Responsável Financeiro"}
-                    </span>
-                    <span className="text-xs sm:text-sm font-semibold text-slate-900 break-words text-right sm:text-left">{clientName}</span>
+                    </p>
+                    <p className="text-sm font-semibold text-slate-900">{clientName}</p>
+                  </div>
+                </div>
+              )}
+
+              {(guest?.email || financialResponsible?.email) && (
+                <div className="flex items-start gap-3">
+                  <Mail className="h-5 w-5 text-slate-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs text-slate-500">E-mail</p>
+                    <p className="text-sm font-semibold text-slate-900 break-all">
+                      {guest?.email || financialResponsible?.email}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        {/* Detalhes da Reserva */}
+        <Card className="p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">Detalhes da Reserva</h2>
+
+          <div className="space-y-4">
+            {(categoryName || locationName || reservation?.checkin_date || reservation?.checkout_date) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {categoryName && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Acomodação</p>
+                    <p className="text-sm font-semibold text-slate-900">{categoryName}</p>
                   </div>
                 )}
 
                 {locationName && (
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
-                    <span className="text-xs sm:text-sm text-slate-600 font-medium">
-                      {building ? "Prédio" : "Estabelecimento"}
-                </span>
-                    <span className="text-xs sm:text-sm font-semibold text-slate-900 break-words text-right sm:text-left">{locationName}</span>
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">{building ? "Prédio" : "Local"}</p>
+                    <p className="text-sm font-semibold text-slate-900">{locationName}</p>
                   </div>
                 )}
 
-                {categoryName && (
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
-                    <span className="text-xs sm:text-sm text-slate-600 font-medium">Categoria</span>
-                    <span className="text-xs sm:text-sm font-semibold text-slate-900 break-words text-right sm:text-left">{categoryName}</span>
-                  </div>
-                )}
-
-                {/* Datas de check-in e check-out (reserva principal) */}
-                {(reservation?.checkin_date || reservation?.checkout_date) && (
-                  <>
-                    {reservation.checkin_date && (
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
-                        <span className="text-xs sm:text-sm text-slate-600 font-medium">Check-in</span>
-                        <span className="text-xs sm:text-sm font-semibold text-slate-900 text-right sm:text-left">
-                          {new Date(reservation.checkin_date + "T12:00:00").toLocaleDateString("pt-BR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                            year: "numeric",
-                          })}
-                        </span>
-                      </div>
-                    )}
-                    {reservation.checkout_date && (
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 sm:py-3 border-b border-slate-100">
-                        <span className="text-xs sm:text-sm text-slate-600 font-medium">Check-out</span>
-                        <span className="text-xs sm:text-sm font-semibold text-slate-900 text-right sm:text-left">
-                          {new Date(reservation.checkout_date + "T12:00:00").toLocaleDateString("pt-BR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                            year: "numeric",
-                          })}
-                        </span>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {/* Localizadores das Reservas (quando há múltiplas reservas) */}
-                {allReservations.length > 0 && (
-                  <div className="pt-2 sm:pt-3 border-t border-slate-200">
-                    <p className="text-xs sm:text-sm text-slate-600 font-medium mb-2 sm:mb-3">
-                      {allReservations.length > 1 ? "Localizadores das Reservas" : "Localizador da Reserva"}
+                {reservation?.checkin_date && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Check-in</p>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {new Date(reservation.checkin_date + "T12:00:00").toLocaleDateString("pt-BR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                      })}
                     </p>
-                    <div className="space-y-2">
-                      {allReservations.map((res, index) => (
-                        <div key={res.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 border-b border-slate-100 last:border-b-0">
-                          <div className="flex-1">
-                            {allReservations.length > 1 && (
-                              <p className="text-xs text-slate-500 mb-1">
-                                Reserva {index + 1} - {res.guest_name || "Hóspede"}
-                              </p>
-                            )}
-                            <div className="flex items-center gap-2">
-                              {res.locator ? (
-                                <>
-                                  <span className="text-xs sm:text-sm font-mono font-semibold text-slate-900 break-all">
-                                    {res.locator}
-                                  </span>
-                                  {res.code && (
-                                    <span className="text-xs text-slate-500">
-                                      ({res.code})
-                                    </span>
-                                  )}
-                                </>
-                              ) : (
-                                <span className="text-xs sm:text-sm font-mono font-semibold text-slate-900 break-all">
-                                  {res.code || "Aguardando localizador"}
-                                </span>
-                              )}
-                            </div>
-                            {(res.checkin_date || res.checkout_date) && (
-                              <p className="text-xs text-slate-500 mt-1">
-                                {res.checkin_date && new Date(res.checkin_date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}
-                                {res.checkin_date && res.checkout_date && " → "}
-                                {res.checkout_date && new Date(res.checkout_date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
                   </div>
                 )}
-            </div>
 
-              {/* Exibir política de cancelamento se houver */}
-              {cancellationPolicy && paymentData.status !== "succeeded" && (
-                <div className="mb-4">
-                  <CancellationPolicyDisplay
-                    policy={cancellationPolicy}
-                    reservationId={paymentData?.reservation?.id || allReservations[0]?.id}
-                    requireAcceptance={true}
-                    onAcceptanceChange={setPolicyAccepted}
-                    showFullPolicyLink={true}
-                  />
+                {reservation?.checkout_date && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Check-out</p>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {new Date(reservation.checkout_date + "T12:00:00").toLocaleDateString("pt-BR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                      })}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Localizadores das Reservas (múltiplas reservas — lógica inalterada) */}
+            {allReservations.length > 0 && (
+              <div className="pt-2">
+                <p className="text-xs sm:text-sm text-slate-600 font-medium mb-2 sm:mb-3">
+                  {allReservations.length > 1 ? "Localizadores das Reservas" : "Localizador da Reserva"}
+                </p>
+                <div className="space-y-2">
+                  {allReservations.map((res, index) => (
+                    <div
+                      key={res.id}
+                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 py-2 border-b border-slate-100 last:border-b-0"
+                    >
+                      <div className="flex-1">
+                        {allReservations.length > 1 && (
+                          <p className="text-xs text-slate-500 mb-1">
+                            Reserva {index + 1} - {res.guest_name || "Hóspede"}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {res.locator ? (
+                            <>
+                              <span className="text-xs sm:text-sm font-mono font-semibold text-slate-900 break-all">
+                                {res.locator}
+                              </span>
+                              {res.code && <span className="text-xs text-slate-500">({res.code})</span>}
+                            </>
+                          ) : (
+                            <span className="text-xs sm:text-sm font-mono font-semibold text-slate-900 break-all">
+                              {res.code || "Aguardando localizador"}
+                            </span>
+                          )}
+                        </div>
+                        {(res.checkin_date || res.checkout_date) && (
+                          <p className="text-xs text-slate-500 mt-1">
+                            {res.checkin_date &&
+                              new Date(res.checkin_date + "T12:00:00").toLocaleDateString("pt-BR", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                              })}
+                            {res.checkin_date && res.checkout_date && " → "}
+                            {res.checkout_date &&
+                              new Date(res.checkout_date + "T12:00:00").toLocaleDateString("pt-BR", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                              })}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* Botões de Ação */}
-              <div className="pt-3 sm:pt-4 space-y-2 sm:space-y-3">
+            <Separator />
+
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 bg-slate-50 rounded-lg">
+              <div className="space-y-2">
+                <span className="text-lg font-semibold text-slate-900">Total</span>
+                <Badge
+                  variant={getStatusBadgeVariant(paymentData.status)}
+                  className="text-xs sm:text-sm px-2.5 sm:px-3 py-1 w-fit"
+                >
+                  {paymentData.status === "succeeded" && (
+                    <CheckCircle2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1 sm:mr-1.5" />
+                  )}
+                  {paymentData.status === "pending" && (
+                    <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1 sm:mr-1.5" />
+                  )}
+                  <span className="whitespace-nowrap">{getPaymentStatusLabel(paymentData.status)}</span>
+                </Badge>
+              </div>
+              <span className="text-2xl font-bold text-emerald-600">
+                {new Intl.NumberFormat("pt-BR", {
+                  style: "currency",
+                  currency: paymentData.currency || "BRL",
+                }).format((paymentData.amount || 0) / 100)}
+              </span>
+            </div>
+          </div>
+        </Card>
+
+        <StripeProvider>
+          <Card className="p-6">
+            {paymentData && (
+              <PaymentDialog
+                open={paymentDialogOpen}
+                onOpenChange={setPaymentDialogOpen}
+                amount={(paymentData.amount || 0) / 100}
+                currency={paymentData.currency}
+                paymentType={paymentData.payment_type}
+                reservationId={paymentData.reservation_id}
+                guestId={paymentData.guest_id}
+                description={paymentData.description}
+                establishmentId={paymentData.establishment_id}
+                locationName={building?.name || establishment?.name}
+                categoryName={category?.name}
+                existingPaymentIntentId={paymentIntentId || undefined}
+                onSuccess={handlePaymentSuccess}
+              />
+            )}
+
+            {/* Exibir política de cancelamento se houver */}
+            {cancellationPolicy && paymentData.status !== "succeeded" && (
+              <div className="mb-4">
+                <CancellationPolicyDisplay
+                  policy={cancellationPolicy}
+                  reservationId={paymentData?.reservation?.id || allReservations[0]?.id}
+                  requireAcceptance={true}
+                  onAcceptanceChange={setPolicyAccepted}
+                  showFullPolicyLink={true}
+                />
+              </div>
+            )}
+
             {paymentData.status !== "succeeded" && (
               <Button
                 onClick={() => setPaymentDialogOpen(true)}
-                    className="w-full h-11 sm:h-12 text-sm sm:text-base font-semibold shadow-md hover:shadow-lg transition-all"
+                className="w-full h-12 text-base"
                 size="lg"
-                disabled={cancellationPolicy && !policyAccepted}
+                disabled={!!cancellationPolicy && !policyAccepted}
               >
-                    <CreditCard className="w-4 h-4 sm:w-5 sm:h-5 mr-2 flex-shrink-0" />
-                    <span className="whitespace-nowrap">Realizar Pagamento</span>
+                <CreditCard className="mr-2 h-5 w-5" />
+                Realizar Pagamento
               </Button>
             )}
-            
+
             {cancellationPolicy && !policyAccepted && paymentData.status !== "succeeded" && (
               <p className="text-xs text-amber-600 mt-2 text-center">
                 ⚠️ É necessário aceitar a política de cancelamento para prosseguir com o pagamento
@@ -699,19 +760,23 @@ const PaymentPage = () => {
             <Button
               variant="outline"
               onClick={() => navigate("/guest-dashboard")}
-                  className="w-full h-10 sm:h-11 border-slate-200 hover:bg-slate-50 text-sm sm:text-base"
+              className="w-full h-10 sm:h-11 border-slate-200 hover:bg-slate-50 text-sm sm:text-base mt-3"
             >
               Voltar
             </Button>
-              </div>
+          </Card>
+        </StripeProvider>
 
-            {/* Informações adicionais configuráveis */}
-            {(stripeConfig?.show_establishment_policies || 
-              stripeConfig?.show_refund_policy || 
-              stripeConfig?.show_legal_policies || 
-              stripeConfig?.show_contact_info) && (
-                <div className="mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-slate-200 space-y-3 sm:space-y-4">
-                  <h3 className="text-xs sm:text-sm font-semibold text-slate-700 uppercase tracking-wide">Informações Adicionais</h3>
+        {/* Informações adicionais configuráveis */}
+        {(stripeConfig?.show_establishment_policies ||
+          stripeConfig?.show_refund_policy ||
+          stripeConfig?.show_legal_policies ||
+          stripeConfig?.show_contact_info) && (
+          <Card className="p-6">
+            <div className="space-y-3 sm:space-y-4">
+              <h3 className="text-xs sm:text-sm font-semibold text-slate-700 uppercase tracking-wide">
+                Informações Adicionais
+              </h3>
 
                 {stripeConfig?.show_establishment_policies && hotelSettings?.policies && (
                   <Collapsible>
@@ -883,31 +948,12 @@ const PaymentPage = () => {
                     </div>
                   </div>
                 )}
-              </div>
-            )}
-          </div>
-        </Card>
-        </div>
-      </div>
+            </div>
+          </Card>
+        )}
 
-      {paymentData && (
-        <PaymentDialog
-          open={paymentDialogOpen}
-          onOpenChange={setPaymentDialogOpen}
-          amount={(paymentData.amount || 0) / 100}
-          currency={paymentData.currency}
-          paymentType={paymentData.payment_type}
-          reservationId={paymentData.reservation_id}
-          guestId={paymentData.guest_id}
-          description={paymentData.description}
-          establishmentId={paymentData.establishment_id}
-          locationName={building?.name || establishment?.name}
-          categoryName={category?.name}
-          existingPaymentIntentId={paymentIntentId || undefined}
-          onSuccess={handlePaymentSuccess}
-        />
-      )}
-    </StripeProvider>
+      </div>
+    </div>
   );
 };
 

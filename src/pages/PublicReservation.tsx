@@ -14,6 +14,7 @@ import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { useMotorMeta } from "@/hooks/useMotorMeta";
 import { Dialog, DialogContent, DialogTitle, DialogHeader, DialogDescription } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
@@ -527,6 +528,7 @@ const PublicReservation = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pmsLogoUrl, setPmsLogoUrl] = useState<string | null>(null);
   const { settings: siteSettings } = useSiteSettings();
+  useMotorMeta(company, siteSettings ?? undefined);
 
   // Form data
   const [formData, setFormData] = useState({

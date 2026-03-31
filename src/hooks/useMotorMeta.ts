@@ -1,11 +1,14 @@
 import { useEffect } from "react";
+import { applyBookingEngineFavicon } from "@/utils/bookingEngineFavicon";
 
 type CompanyMotorMeta = {
+  id?: string;
   booking_engine_title?: string | null;
   booking_engine_meta_description?: string | null;
   booking_engine_og_title?: string | null;
   booking_engine_og_description?: string | null;
   booking_engine_og_image?: string | null;
+  booking_engine_favicon?: string | null;
   name?: string;
 };
 
@@ -105,4 +108,8 @@ export function useMotorMeta(
     if (ogImage) setMeta("twitter:image", ogImage, true);
     else document.querySelector('meta[name="twitter:image"]')?.remove();
   }, [company, siteSettings]);
+
+  useEffect(() => {
+    applyBookingEngineFavicon(company);
+  }, [company?.id, company?.booking_engine_favicon]);
 }

@@ -2,10 +2,6 @@ import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { useSiteSettings } from "./useSiteSettings";
 
-/** Favicon neutro (data URI): evita que o navegador recaia em /favicon.ico ao remover ícones nas rotas do motor */
-const NEUTRAL_FAVICON =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23f0f0f0'/%3E%3C/svg%3E";
-
 /** Rotas do motor de reservas / páginas white-label: o favicon é controlado pelo motor, não pelo sistema */
 function isBookingEngineRoute(pathname: string): boolean {
   const p = pathname.toLowerCase();
@@ -52,24 +48,6 @@ export const useSiteMeta = () => {
       document.head.appendChild(metaAuthor);
     }
     metaAuthor.setAttribute("content", settings.site_title || "");
-
-    // Favicon: nas rotas do motor (white-label) NUNCA usar o do sistema — só o motor aplica o do cliente.
-    // Nas rotas do PMS: usar favicon do SuperAdmin ou fallback para /favicon.ico (public).
-    const oldFavicons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]');
-    if (isMotor) {
-      oldFavicons.forEach(fav => fav.remove());
-      const placeholder = document.createElement("link");
-      placeholder.setAttribute("rel", "icon");
-      placeholder.setAttribute("href", NEUTRAL_FAVICON);
-      document.head.appendChild(placeholder);
-    } else {
-      oldFavicons.forEach(fav => fav.remove());
-      const pmsFaviconUrl = settings.favicon_url?.trim() || `${window.location.origin}/favicon.ico`;
-      const favicon = document.createElement("link");
-      favicon.setAttribute("rel", "icon");
-      favicon.setAttribute("href", pmsFaviconUrl);
-      document.head.appendChild(favicon);
-    }
 
     // Função auxiliar para atualizar ou criar meta tags
     const updateMetaTag = (property: string, content: string, isName = false) => {
@@ -157,5 +135,21 @@ export const useSiteMeta = () => {
       }
     }
   }, [settings, pathname, isMotor]);
+
+  // Favicon só no PMS. Rotas do motor: não alterar aqui — evita sobrescrever o ícone aplicado por
+  // useMotorMeta/applyBookingEngineFavicon (ordem de efeitos pai/filho no React 18).
+  useEffect(() => {
+    if (isMotor) return;
+    if (!settings) return;
+    const oldFavicons = document.querySelectorAll(
+      'link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]'
+    );
+    oldFavicons.forEach((fav) => fav.remove());
+    const pmsFaviconUrl = settings.favicon_url?.trim() || `${window.location.origin}/favicon.ico`;
+    const favicon = document.createElement("link");
+    favicon.setAttribute("rel", "icon");
+    favicon.setAttribute("href", pmsFaviconUrl);
+    document.head.appendChild(favicon);
+  }, [isMotor, settings?.favicon_url]);
 };
 
