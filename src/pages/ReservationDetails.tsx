@@ -66,6 +66,12 @@ import { ManualCheckinDialog } from "@/components/reservations/ManualCheckinDial
 import { usePermissions } from "@/hooks/usePermissions";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
+import {
+  formatReservationChannelOrigin,
+  reservationGuestContactFields,
+  formatOtaGuestAddressLines,
+} from "@/lib/reservationChannelDisplay";
 
 const ReservationDetails = () => {
   const { reservationCode } = useParams<{ establishmentId?: string; reservationCode?: string }>();
@@ -492,16 +498,34 @@ const ReservationDetails = () => {
         }
       }
 
+      let ota_booking: Record<string, unknown> | null = null;
+      const { data: otaBookingData, error: otaBookingErr } = await supabase
+        .from("ota_reservations")
+        .select(
+          `
+          *,
+          ota_channels ( id, name, channel_manager_type )
+        `
+        )
+        .eq("reservation_id", reservationData.id)
+        .maybeSingle();
+      if (!otaBookingErr && otaBookingData) {
+        ota_booking = otaBookingData as Record<string, unknown>;
+      }
+
       return {
         ...reservationData,
         financial_responsible: financialResponsible,
         guest: guest,
         rooms: room,
         room_categories: roomCategory || (categoryName ? { name: categoryName } : null),
-        guest_name: guest?.full_name || financialResponsible?.full_name,
+        /** Preservar nome gravado na reserva (ex.: OTA/Aiosell) quando não há guest_id/cliente. */
+        guest_name:
+          guest?.full_name || financialResponsible?.full_name || reservationData.guest_name || null,
         cancelled_by_user: cancelledByUser,
         web_checkin: webCheckin,
         pricing_plans: pricingPlan,
+        ota_booking,
       };
     },
     enabled: !!reservationCode,
@@ -1788,19 +1812,54 @@ const ReservationDetails = () => {
                   <h2 className="text-xl font-semibold text-slate-900">Dados do Hóspede</h2>
                       </div>
                 <h3 className="text-2xl font-bold text-slate-900 mb-4 mt-2">
-                  {reservation.guest?.full_name || reservation.financial_responsible?.full_name || "N/A"}
+                  {reservationGuestDisplayName(reservation)}
                 </h3>
+                {reservation.ota_booking && (
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Contacto enviado pelo canal (Aiosell / OTA) quando aplicável.
+                  </p>
+                )}
                 <div className="space-y-2">
-                  {reservation.guest?.email || reservation.financial_responsible?.email ? (
-                    <div className="flex items-center gap-2 text-slate-600">
-                      <span className="text-sm">{reservation.guest?.email || reservation.financial_responsible?.email}</span>
+                  {(() => {
+                    const gc = reservationGuestContactFields(reservation as Parameters<typeof reservationGuestContactFields>[0]);
+                    return (
+                      <>
+                        {gc.email ? (
+                          <div className="flex items-center gap-2 text-slate-600">
+                            <span className="text-sm">{gc.email}</span>
+                          </div>
+                        ) : null}
+                        {gc.phone ? (
+                          <div className="flex items-center gap-2 text-slate-600">
+                            <span className="text-sm">{gc.phone}</span>
+                          </div>
+                        ) : null}
+                      </>
+                    );
+                  })()}
+                  {reservation.ota_booking?.ota_guest_address &&
+                    formatOtaGuestAddressLines(
+                      reservation.ota_booking.ota_guest_address as Record<string, unknown>
+                    ).length > 0 && (
+                      <div className="text-sm text-slate-600 space-y-0.5 pt-1">
+                        {formatOtaGuestAddressLines(
+                          reservation.ota_booking.ota_guest_address as Record<string, unknown>
+                        ).map((line, i) => (
+                          <div key={i}>{line}</div>
+                        ))}
                       </div>
-                  ) : null}
-                  {reservation.guest?.phone || reservation.financial_responsible?.phone ? (
-                    <div className="flex items-center gap-2 text-slate-600">
-                      <span className="text-sm">{reservation.guest?.phone || reservation.financial_responsible?.phone}</span>
-                  </div>
-                  ) : null}
+                    )}
+                  {reservation.ota_booking?.ota_cm_booking_id && (
+                    <div className="text-xs text-slate-500 pt-1">
+                      CM booking: {String(reservation.ota_booking.ota_cm_booking_id)}
+                    </div>
+                  )}
+                  {reservation.ota_booking?.ota_special_requests && (
+                    <div className="text-sm text-slate-600 pt-1 border-t border-slate-100 mt-2 pt-2">
+                      <span className="font-medium text-slate-700">Pedidos especiais: </span>
+                      {String(reservation.ota_booking.ota_special_requests)}
+                    </div>
+                  )}
                   {reservation.guest?.document_number || reservation.financial_responsible?.document_number ? (
                     <div className="flex items-center gap-2 text-slate-600">
                       <span className="text-sm">
@@ -2252,13 +2311,15 @@ const ReservationDetails = () => {
                 </div>
 
                 {/* Origem / Canal */}
-                {(reservation.origin || reservation.channel) && (
+                {(reservation.origin || reservation.channel || reservation.ota_booking) && (
                   <div className="pb-6 border-b border-slate-100">
                     <Label className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2 block">
                       Origem / Canal
                     </Label>
                     <div className="text-base font-medium text-slate-900">
-                      {reservation.origin || reservation.channel || "Direto"}
+                      {formatReservationChannelOrigin(
+                        reservation as Parameters<typeof formatReservationChannelOrigin>[0]
+                      )}
                     </div>
                   </div>
                 )}

@@ -8,6 +8,7 @@ import { ptBR, enUS, es } from "date-fns/locale";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 
 interface VerifyReservationStepProps {
   webCheckin: any;
@@ -291,7 +292,7 @@ export function VerifyReservationStep({
               <p className="text-sm font-semibold text-slate-900 mb-2">{t("webCheckin.verify.guest")}</p>
               <div className="space-y-1 text-sm text-slate-600">
                 <div className="font-medium">
-                  {reservation.guest?.full_name || reservation.financial_responsible?.full_name || t("webCheckin.verify.notAvailable")}
+                  {reservationGuestDisplayName(reservation, t("webCheckin.verify.notAvailable"))}
                 </div>
                 {reservation.guest?.email && (
                   <div className="flex items-center gap-1">

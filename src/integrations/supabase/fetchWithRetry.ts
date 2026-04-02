@@ -2,13 +2,15 @@
  * Fetch com retry para falhas transitórias de rede (ex.: ERR_CONNECTION_CLOSED → Failed to fetch).
  * Não altera o comportamento em caso de sucesso; apenas reexecuta a mesma requisição algumas vezes.
  */
-const MAX_ATTEMPTS = 3;
-const BASE_DELAY_MS = 150;
+const MAX_ATTEMPTS = 2;
+const BASE_DELAY_MS = 200;
 
 function isTransientNetworkError(error: unknown): boolean {
   if (error instanceof DOMException && error.name === "AbortError") return false;
   if (!(error instanceof TypeError)) return false;
   const msg = String(error.message || "").toLowerCase();
+  /** Retries agravam net::ERR_INSUFFICIENT_RESOURCES (demasiadas ligações). */
+  if (msg.includes("insufficient") && msg.includes("resource")) return false;
   return (
     msg.includes("failed to fetch") ||
     msg.includes("network") ||

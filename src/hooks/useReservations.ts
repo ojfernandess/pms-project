@@ -384,9 +384,11 @@ export const useReservations = () => {
             const establishmentId = getEstablishmentId();
             if (establishmentId && newReservation) {
               // Buscar dados do hóspede para a mensagem
-              const guestName = newReservation.guest?.full_name || 
-                               newReservation.financial_responsible?.full_name || 
-                               "Hóspede";
+              const guestName =
+                newReservation.guest?.full_name ||
+                newReservation.financial_responsible?.full_name ||
+                (newReservation.guest_name && String(newReservation.guest_name).trim()) ||
+                "Hóspede";
               
               await supabase.rpc("create_notification_for_establishment", {
                 p_establishment_id: establishmentId,

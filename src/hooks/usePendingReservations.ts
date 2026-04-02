@@ -46,7 +46,14 @@ export const usePendingReservations = () => {
           financial_responsible:clients!client_id(*),
           guest:clients!guest_id(*),
           rooms (*),
-          room_categories (*)
+          room_categories (*),
+          ota_reservations (
+            ota_source_channel_name,
+            ota_segment,
+            ota_guest_email,
+            ota_guest_phone,
+            ota_channels ( name )
+          )
         `)
         .eq("establishment_id", establishmentId)
         .in("status", ["pending", "confirmed", "preregistration"])
@@ -87,7 +94,14 @@ export const usePendingReservations = () => {
           financial_responsible:clients!client_id(*),
           guest:clients!guest_id(*),
           rooms (*),
-          room_categories (*)
+          room_categories (*),
+          ota_reservations (
+            ota_source_channel_name,
+            ota_segment,
+            ota_guest_email,
+            ota_guest_phone,
+            ota_channels ( name )
+          )
         `)
         .eq("establishment_id", establishmentId)
         .in("status", ["pending", "confirmed", "preregistration"])
@@ -125,7 +139,14 @@ export const usePendingReservations = () => {
           financial_responsible:clients!client_id(*),
           guest:clients!guest_id(*),
           rooms (*),
-          room_categories (*)
+          room_categories (*),
+          ota_reservations (
+            ota_source_channel_name,
+            ota_segment,
+            ota_guest_email,
+            ota_guest_phone,
+            ota_channels ( name )
+          )
         `)
         .eq("establishment_id", establishmentId)
         .in("status", ["confirmed", "pending"])
@@ -158,7 +179,14 @@ export const usePendingReservations = () => {
           financial_responsible:clients!client_id(*),
           guest:clients!guest_id(*),
           rooms (*),
-          room_categories (*)
+          room_categories (*),
+          ota_reservations (
+            ota_source_channel_name,
+            ota_segment,
+            ota_guest_email,
+            ota_guest_phone,
+            ota_channels ( name )
+          )
         `)
         .eq("establishment_id", establishmentId)
         .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"]);

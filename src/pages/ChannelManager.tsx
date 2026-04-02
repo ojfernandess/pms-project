@@ -26,8 +26,12 @@ import { useChannelManager } from "@/hooks/useChannelManager";
 import { OTADialog } from "@/components/channels/OTADialog";
 import { ChannelPricingDialog } from "@/components/channels/ChannelPricingDialog";
 import { SyncStatusCard } from "@/components/channels/SyncStatusCard";
+import { AiosellMappingPanel } from "@/components/channels/AiosellMappingPanel";
 import { formatDate } from "@/lib/reservationUtils";
 import { formatCurrency } from "@/lib/reservationUtils";
+import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { toast } from "sonner";
+import { validateAiosellChannelForReservationsPull } from "@/lib/aiosellReservationsSyncInvoke";
 
 const ChannelManager = () => {
   const {
@@ -40,6 +44,8 @@ const ChannelManager = () => {
     deleteChannelPricing,
     syncChannel,
     isSyncing,
+    syncAiosellReservations,
+    isSyncingAiosellReservations,
   } = useChannelManager();
 
   const [otaDialogOpen, setOtaDialogOpen] = useState(false);
@@ -81,6 +87,25 @@ const ChannelManager = () => {
     }
   };
 
+  const handleSyncAiosellReservations = async (channelId: string) => {
+    const est = getSelectedEstablishmentId();
+    if (!est) {
+      toast.error("Selecione um estabelecimento");
+      return;
+    }
+    const channel = channels.find((c: { id: string }) => c.id === channelId);
+    const check = validateAiosellChannelForReservationsPull(channel);
+    if (!check.ok) {
+      toast.error(check.message);
+      return;
+    }
+    try {
+      await syncAiosellReservations({ channelId, establishmentId: est, pull: true });
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -94,6 +119,9 @@ const ChannelManager = () => {
         <TabsList>
           <TabsTrigger value="channels">Canais</TabsTrigger>
           <TabsTrigger value="pricing">Tarifas por Canal</TabsTrigger>
+          {channels.some((c: { channel_manager_type?: string }) => c.channel_manager_type === "aiosell") && (
+            <TabsTrigger value="aiosell-mapping">Mapeamento Aiosell</TabsTrigger>
+          )}
           <TabsTrigger value="reservations">Reservas OTA</TabsTrigger>
         </TabsList>
 
@@ -133,6 +161,8 @@ const ChannelManager = () => {
                     channel={channel}
                     onSync={handleSync}
                     isSyncing={isSyncing}
+                    onSyncReservations={handleSyncAiosellReservations}
+                    isSyncingReservations={isSyncingAiosellReservations}
                   />
                 ))}
               </div>
@@ -156,6 +186,30 @@ const ChannelManager = () => {
                         Mais informações: <a href="https://www.bukly.com.br" target="_blank" rel="noopener noreferrer" className="underline">www.bukly.com.br</a>
                       </p>
                     </div>
+                  </div>
+                </Card>
+              )}
+
+              {channels.some((c: any) => c.channel_manager_type === "aiosell") && (
+                <Card className="p-4 bg-slate-50 border-slate-200">
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-slate-900 mb-2">Aiosell Channel Manager</h4>
+                    <p className="text-sm text-slate-800 mb-2">
+                      Configure o código do hotel (sandbox ou produção), usuário e senha HTTP Basic. Use o
+                      separador <strong>Mapeamento Aiosell</strong> para associar cada categoria e plano do PMS
+                      aos Room Codes e Rate Plan Codes do painel Aiosell (ex. deluxe / deluxe-s-ep).
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      Documentação:{" "}
+                      <a
+                        href="https://support.aiosell.com/portal/en/kb/articles/aiosell-rest-api-documentation-property-management-system-to-channel-manager"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                      >
+                        Aiosell REST API (PMS → Channel Manager)
+                      </a>
+                    </p>
                   </div>
                 </Card>
               )}
@@ -315,6 +369,10 @@ const ChannelManager = () => {
               </Table>
             </Card>
           )}
+        </TabsContent>
+
+        <TabsContent value="aiosell-mapping" className="space-y-4">
+          <AiosellMappingPanel />
         </TabsContent>
 
         <TabsContent value="reservations">

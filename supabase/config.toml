@@ -1,1 +1,10 @@
 project_id = "maqgvfjcoarxtyyvntql"
+
+[functions.aiosell-reservation-webhook]
+verify_jwt = false
+
+[functions.aiosell-sync]
+verify_jwt = true
+
+[functions.aiosell-reservations-sync]
+verify_jwt = true

@@ -197,6 +197,11 @@ function formatCurrency(value: number): string {
   return Number(value).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/** IDs únicos para PostgREST `.in()` — evita `id=in.(null)` ou lista vazia quando `client_id` é null. */
+function uniqueNonNullClientIds(ids: (string | null | undefined)[]): string[] {
+  return [...new Set(ids.filter((id): id is string => id != null && id !== ""))];
+}
+
 /** Converte string de data (YYYY-MM-DD) para Date em horário local, evitando deslocamento de 1 dia por UTC. */
 function parseLocalDate(dateStr: string): Date {
   const part = String(dateStr).split("T")[0];
@@ -509,9 +514,11 @@ export default function CheckinChargeSettings() {
         (r) => !(Array.isArray(r.web_checkin) ? r.web_checkin : r.web_checkin ? [r.web_checkin] : []).some((w) => w?.status === "completed")
       );
       const ids = (withCheckin as { id: string }[]).map((r) => r.id);
-      const clientIds = [...new Set((withCheckin as { client_id: string }[]).map((r) => r.client_id))];
+      const clientIds = uniqueNonNullClientIds((withCheckin as { client_id: string | null }[]).map((r) => r.client_id));
       const [clientsRes, chargesRes] = await Promise.all([
-        supabase.from("clients").select("id, full_name, phone").in("id", clientIds),
+        clientIds.length
+          ? supabase.from("clients").select("id, full_name, phone").in("id", clientIds)
+          : Promise.resolve({ data: [] as { id: string; full_name: string; phone?: string | null }[], error: null }),
         supabase.from("checkin_charges").select("reservation_id, id, status, sent_at").in("reservation_id", ids),
       ]);
       const clientsMap = new Map((clientsRes.data ?? []).map((c: { id: string; full_name: string; phone?: string | null }) => [c.id, { name: c.full_name, phone: c.phone ?? null }]));
@@ -598,9 +605,11 @@ export default function CheckinChargeSettings() {
         : byPayment.filter((r) => !hasCheckinDone(r));
 
       const ids = list.map((r) => r.id);
-      const clientIds = [...new Set(list.map((r) => r.client_id))];
+      const clientIds = uniqueNonNullClientIds(list.map((r) => r.client_id));
       const [clientsRes, chargesRes] = await Promise.all([
-        supabase.from("clients").select("id, full_name, phone").in("id", clientIds),
+        clientIds.length
+          ? supabase.from("clients").select("id, full_name, phone").in("id", clientIds)
+          : Promise.resolve({ data: [] as { id: string; full_name: string; phone?: string | null }[], error: null }),
         supabase.from("checkin_charges").select("reservation_id, id, status, sent_at").in("reservation_id", ids),
       ]);
       const clientsMap = new Map((clientsRes.data ?? []).map((c: { id: string; full_name: string; phone?: string | null }) => [c.id, { name: c.full_name, phone: c.phone ?? null }]));
@@ -677,9 +686,11 @@ export default function CheckinChargeSettings() {
         list = list.filter((r) => Number(r.paid_amount ?? 0) < Number(r.total_amount ?? 0));
       }
       const ids = list.map((r) => r.id);
-      const clientIds = [...new Set(list.map((r) => r.client_id))];
+      const clientIds = uniqueNonNullClientIds(list.map((r) => r.client_id));
       const [clientsRes, chargesRes] = await Promise.all([
-        supabase.from("clients").select("id, full_name, phone").in("id", clientIds),
+        clientIds.length
+          ? supabase.from("clients").select("id, full_name, phone").in("id", clientIds)
+          : Promise.resolve({ data: [] as { id: string; full_name: string; phone?: string | null }[], error: null }),
         supabase.from("checkin_charges").select("reservation_id, id, status, sent_at").in("reservation_id", ids),
       ]);
       const clientsMap = new Map((clientsRes.data ?? []).map((c: { id: string; full_name: string; phone?: string | null }) => [c.id, { name: c.full_name, phone: c.phone ?? null }]));
@@ -722,9 +733,11 @@ export default function CheckinChargeSettings() {
       if (error) throw error;
       if (!reservations?.length) return [];
       const ids = (reservations as { id: string }[]).map((r) => r.id);
-      const clientIds = [...new Set((reservations as { client_id: string }[]).map((r) => r.client_id))];
+      const clientIds = uniqueNonNullClientIds((reservations as { client_id: string | null }[]).map((r) => r.client_id));
       const [clientsRes, chargesRes] = await Promise.all([
-        supabase.from("clients").select("id, full_name, phone").in("id", clientIds),
+        clientIds.length
+          ? supabase.from("clients").select("id, full_name, phone").in("id", clientIds)
+          : Promise.resolve({ data: [] as { id: string; full_name: string; phone?: string | null }[], error: null }),
         supabase.from("checkin_charges").select("reservation_id, id, status, sent_at").in("reservation_id", ids),
       ]);
       const clientsMap = new Map((clientsRes.data ?? []).map((c: { id: string; full_name: string; phone?: string | null }) => [c.id, { name: c.full_name, phone: c.phone ?? null }]));

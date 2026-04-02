@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/reservationUtils";
 import { cn } from "@/lib/utils";
+import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 
 interface Reservation {
   id: string;
@@ -13,6 +14,7 @@ interface Reservation {
   checkout_date: string;
   status: string;
   total_amount: number;
+  guest_name?: string | null;
   guest?: { full_name: string };
   financial_responsible?: { full_name: string };
   rooms?: { room_number: string };
@@ -337,7 +339,7 @@ export const ReservationTimeline = ({
                         <div className="flex items-center justify-between h-full">
                           <div className="flex-1 min-w-0">
                             <div className="font-medium truncate">{reservation.reservation_code}</div>
-                            <div className="truncate">{reservation.guest?.full_name || reservation.financial_responsible?.full_name || "Sem cliente"}</div>
+                            <div className="truncate">{reservationGuestDisplayName(reservation, "Sem cliente")}</div>
                             <div className="text-xs opacity-80">
                               {formatDate(reservation.checkin_date)} - {formatDate(reservation.checkout_date)}
                             </div>

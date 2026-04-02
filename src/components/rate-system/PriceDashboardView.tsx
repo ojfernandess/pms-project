@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { scheduleChannelSyncAfterRateEdit } from "@/lib/channelSyncAfterRates";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { fetchRatesDashboard } from "@/lib/ratesApi";
 import { formatCurrency } from "@/lib/reservationUtils";
@@ -670,6 +671,7 @@ export const PriceDashboardView = () => {
       queryClient.invalidateQueries({ queryKey: ["room_categories"] });
       queryClient.invalidateQueries({ queryKey: ["rate_system_categories"] });
       queryClient.invalidateQueries({ queryKey: ["rates_dashboard", establishmentId] });
+      scheduleChannelSyncAfterRateEdit(establishmentId ?? null);
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao aplicar preços");

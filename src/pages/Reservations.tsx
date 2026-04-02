@@ -40,6 +40,7 @@ import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { useNavigate, useParams } from "react-router-dom";
 import { logActivity } from "@/lib/activityLogger";
 import { useTranslation } from "react-i18next";
+import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 
 const Reservations = () => {
   const queryClient = useQueryClient();
@@ -197,6 +198,7 @@ const Reservations = () => {
         reservation.reservation_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         identificationNumberStr.toLowerCase().includes(searchTerm.toLowerCase()) ||
         reservation.guest?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (reservation.guest_name && String(reservation.guest_name).toLowerCase().includes(searchTerm.toLowerCase())) ||
         reservation.financial_responsible?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         reservation.rooms?.room_number?.toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -512,7 +514,7 @@ const Reservations = () => {
                     {reservation.reservation_code}
                   </TableCell>
                   <TableCell>
-                    {reservation.guest?.full_name || reservation.financial_responsible?.full_name || "N/A"}
+                    {reservationGuestDisplayName(reservation)}
                   </TableCell>
                   <TableCell>
                     {reservation.rooms?.room_number || "Não atribuído"}

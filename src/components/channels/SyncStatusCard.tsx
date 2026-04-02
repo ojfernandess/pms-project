@@ -8,9 +8,18 @@ interface SyncStatusCardProps {
   channel: any;
   onSync: (channelId: string) => void;
   isSyncing: boolean;
+  /** Aiosell: importar reservas (GET ou payloads em lote). */
+  onSyncReservations?: (channelId: string) => void;
+  isSyncingReservations?: boolean;
 }
 
-export const SyncStatusCard = ({ channel, onSync, isSyncing }: SyncStatusCardProps) => {
+export const SyncStatusCard = ({
+  channel,
+  onSync,
+  isSyncing,
+  onSyncReservations,
+  isSyncingReservations,
+}: SyncStatusCardProps) => {
   const getStatusIcon = () => {
     switch (channel.sync_status) {
       case "success":
@@ -70,7 +79,14 @@ export const SyncStatusCard = ({ channel, onSync, isSyncing }: SyncStatusCardPro
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      {channel.channel_manager_type === "aiosell" && (
+        <div className="mb-3 p-2 bg-slate-50 rounded text-xs text-slate-800">
+          <p className="font-semibold">Aiosell Channel Manager</p>
+          <p>Push de tarifas, inventário e restrições via HTTP Basic. Webhook de reservas na Edge Function.</p>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm text-muted-foreground">
           {channel.channel_type === "channel_manager" ? (
             <span>Channel Manager</span>
@@ -78,15 +94,38 @@ export const SyncStatusCard = ({ channel, onSync, isSyncing }: SyncStatusCardPro
             <span>Comissão: {channel.commission_rate}%</span>
           )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onSync(channel.id)}
-          disabled={isSyncing || channel.sync_status === "syncing" || channel.bukly_sync_status === "syncing"}
-        >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Sincronizar
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onSync(channel.id)}
+            disabled={
+              isSyncing ||
+              isSyncingReservations ||
+              channel.sync_status === "syncing" ||
+              channel.bukly_sync_status === "syncing"
+            }
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Tarifas / inventário
+          </Button>
+          {channel.channel_manager_type === "aiosell" && onSyncReservations && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onSyncReservations(channel.id)}
+              disabled={
+                isSyncing ||
+                isSyncingReservations ||
+                channel.sync_status === "syncing" ||
+                channel.bukly_sync_status === "syncing"
+              }
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reservas
+            </Button>
+          )}
+        </div>
       </div>
     </Card>
   );

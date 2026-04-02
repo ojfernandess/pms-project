@@ -2,6 +2,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { toast } from "sonner";
+import { invokeBuklySync } from "@/lib/buklySyncInvoke";
+import { invokeAiosellSync } from "@/lib/aiosellSyncInvoke";
+import { invokeAiosellReservationsSync } from "@/lib/aiosellReservationsSyncInvoke";
 
 export const useChannelManager = () => {
   const queryClient = useQueryClient();
@@ -235,325 +238,52 @@ export const useChannelManager = () => {
     },
   });
 
-  // Função auxiliar para sincronizar canal Bukly
-  const syncBuklyChannel = async (channelId: string, establishmentId: string) => {
-    // Buscar tarifas do novo sistema tarifário (rate_calendar) para os próximos 365 dias
-    const today = new Date().toISOString().split("T")[0];
-    const futureDate = new Date();
-    futureDate.setDate(futureDate.getDate() + 365);
-    const futureDateStr = futureDate.toISOString().split("T")[0];
+  const syncBuklyChannel = invokeBuklySync;
 
-    const { data: rateCalendar, error: rateError } = await supabase
-      .from("rate_calendar")
-      .select(`
-        *,
-        pricing_plans (*),
-        room_categories (*)
-      `)
-      .eq("establishment_id", establishmentId)
-      .gte("date", today)
-      .lte("date", futureDateStr)
-      .order("date", { ascending: true });
-
-    if (rateError) throw rateError;
-
-    // Buscar disponibilidade (quartos disponíveis por categoria)
-    const { data: rooms, error: roomsError } = await supabase
-      .from("rooms")
-      .select("id, category_id")
-      .eq("establishment_id", establishmentId);
-
-    if (roomsError) throw roomsError;
-
-    // Buscar reservas para calcular disponibilidade
-    const { data: reservations, error: reservationsError } = await supabase
-      .from("reservations")
-      .select("category_id, checkin_date, checkout_date, room_id")
-      .eq("establishment_id", establishmentId)
-      .in("status", ["pending", "confirmed", "checked_in"]);
-
-    if (reservationsError) throw reservationsError;
-
-    // Preparar dados para Bukly
-    const rates: any[] = [];
-    const availability: any[] = [];
-    const restrictions: any[] = [];
-
-    // Agrupar por categoria e data
-    const categoryDates = new Map<string, Set<string>>();
-    (rateCalendar || []).forEach(rate => {
-      const key = rate.category_id;
-      if (!categoryDates.has(key)) {
-        categoryDates.set(key, new Set());
-      }
-      categoryDates.get(key)!.add(rate.date);
-    });
-
-    // Preparar tarifas
-    (rateCalendar || []).forEach(rate => {
-      rates.push({
-        categoryId: rate.category_id,
-        categoryName: rate.room_categories?.name,
-        planId: rate.pricing_plan_id,
-        planCode: rate.pricing_plans?.code,
-        date: rate.date,
-        basePrice: rate.base_price,
-        adultPrice: rate.adult_price,
-        childPrice: rate.child_price,
-      });
-    });
-
-    // Preparar disponibilidade
-    categoryDates.forEach((dates, categoryId) => {
-      const categoryRooms = rooms?.filter(r => r.category_id === categoryId) || [];
-      const totalRooms = categoryRooms.length;
-
-      dates.forEach(date => {
-        // Calcular quartos ocupados nesta data
-        const occupiedRooms = reservations?.filter(r => {
-          if (r.category_id !== categoryId) return false;
-          const checkin = new Date(r.checkin_date);
-          const checkout = new Date(r.checkout_date);
-          const currentDate = new Date(date);
-          return currentDate >= checkin && currentDate < checkout;
-        }).length || 0;
-
-        availability.push({
-          categoryId,
-          date,
-          available: Math.max(0, totalRooms - occupiedRooms),
-          total: totalRooms,
-        });
-      });
-    });
-
-    // Preparar restrições (rate_calendar: min_stay, max_stay, closed_to_arrival, closed_to_departure por plano)
-    (rateCalendar || []).forEach(rate => {
-      const minLOS = rate.min_stay ?? rate.min_los;
-      const maxLOS = rate.max_stay ?? rate.max_los;
-      const cta = rate.closed_to_arrival ?? rate.cta;
-      const ctd = rate.closed_to_departure ?? rate.ctd;
-      if (minLOS || cta || ctd || maxLOS) {
-        restrictions.push({
-          categoryId: rate.category_id,
-          planId: rate.pricing_plan_id,
-          date: rate.date,
-          minLOS,
-          cta: !!cta,
-          ctd: !!ctd,
-          maxLOS,
+  const syncAiosellChannel = async (
+    channelId: string,
+    establishmentId: string,
+    opts?: { silent?: boolean }
+  ) => {
+    const payload = await invokeAiosellSync(channelId, establishmentId);
+    if (!opts?.silent) {
+      const invBlocks =
+        payload.inventoryCombinedBlocks != null
+          ? payload.inventoryCombinedBlocks
+          : (payload.inventoryAvailBlocks ?? 0) + (payload.inventoryRestrictionBlocks ?? 0);
+      const summary = `Aiosell: ${invBlocks} bloco(s) de inventário (disp. + restrições), ${payload.rateRows ?? 0} linha(s) de tarifa com preço + restrições (${payload.rateUpdateBlocks ?? 0} bloco(s)).`;
+      const apiEcho = payload.aiosellApiMessages?.filter(Boolean).join(" · ");
+      toast.success(apiEcho ? `${summary} — ${apiEcho}` : summary);
+      if (payload.syncHints) {
+        console.info("[Aiosell sync] Resumo (rede → resposta JSON):", {
+          hotelCode: payload.syncHints.hotelCode,
+          establishmentId: payload.syncHints.establishmentId,
+          linhasRateCalendar: payload.syncHints.rateCalendarRows,
+          roomCodes: payload.syncHints.roomCodesSent,
+          rateplanCodes: payload.syncHints.rateplanCodesSent,
         });
       }
-    });
-
-    // Buscar configuração do canal Bukly
-    const { data: channel, error: channelError } = await supabase
-      .from("ota_channels")
-      .select("*")
-      .eq("id", channelId)
-      .single();
-
-    if (channelError || !channel) {
-      throw new Error("Canal Bukly não encontrado");
     }
-
-    const apiUrl = channel.bukly_api_url || "https://api.bukly.com.br";
-    const hotelId = channel.bukly_hotel_id;
-    const apiKey = channel.api_key;
-    const apiSecret = channel.api_secret;
-
-    if (!hotelId || !apiKey || !apiSecret) {
-      throw new Error("Credenciais do Bukly não configuradas");
-    }
-
-    // Criar log de sincronização (se a tabela existir)
-    let syncLog: any = null;
-    try {
-      const { data, error: logError } = await supabase
-        .from("bukly_sync_logs")
-        .insert({
-          ota_channel_id: channelId,
-          establishment_id: establishmentId,
-          sync_type: "full",
-          status: "pending",
-          sync_data: { rates, availability, restrictions },
-        })
-        .select()
-        .single();
-
-      if (!logError) {
-        syncLog = data;
-      }
-    } catch (error) {
-      // Se a tabela não existir, continuar sem log
-      console.warn("Tabela bukly_sync_logs não encontrada, continuando sem log");
-    }
-
-    try {
-      // Atualizar status para syncing
-      await supabase
-        .from("ota_channels")
-        .update({
-          bukly_sync_status: "syncing",
-          sync_status: "syncing",
-        })
-        .eq("id", channelId);
-
-      // Enviar tarifas para API do Bukly
-      if (rates.length > 0) {
-        const ratesResponse = await fetch(`${apiUrl}/api/rates`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-API-Key": apiKey,
-            "X-API-Secret": apiSecret,
-            "X-Hotel-Id": hotelId,
-          },
-          body: JSON.stringify({
-            hotelId,
-            rates: rates.reduce((acc, rate) => {
-              const key = `${rate.categoryId}_${rate.planId}`;
-              if (!acc[key]) {
-                acc[key] = {
-                  categoryId: rate.categoryId,
-                  categoryName: rate.categoryName,
-                  planId: rate.planId,
-                  planCode: rate.planCode,
-                  rates: [],
-                };
-              }
-              acc[key].rates.push({
-                date: rate.date,
-                basePrice: rate.basePrice,
-                adultPrice: rate.adultPrice,
-                childPrice: rate.childPrice,
-              });
-              return acc;
-            }, {} as Record<string, any>),
-          }),
-        });
-
-        if (!ratesResponse.ok) {
-          const errorData = await ratesResponse.json().catch(() => ({}));
-          throw new Error(errorData.message || `Erro ao sincronizar tarifas: ${ratesResponse.statusText}`);
-        }
-      }
-
-      // Enviar disponibilidade para API do Bukly
-      if (availability.length > 0) {
-        const availabilityResponse = await fetch(`${apiUrl}/api/availability`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-API-Key": apiKey,
-            "X-API-Secret": apiSecret,
-            "X-Hotel-Id": hotelId,
-          },
-          body: JSON.stringify({
-            hotelId,
-            availability,
-          }),
-        });
-
-        if (!availabilityResponse.ok) {
-          const errorData = await availabilityResponse.json().catch(() => ({}));
-          throw new Error(errorData.message || `Erro ao sincronizar disponibilidade: ${availabilityResponse.statusText}`);
-        }
-      }
-
-      // Enviar restrições para API do Bukly
-      if (restrictions.length > 0) {
-        const restrictionsResponse = await fetch(`${apiUrl}/api/restrictions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-API-Key": apiKey,
-            "X-API-Secret": apiSecret,
-            "X-Hotel-Id": hotelId,
-          },
-          body: JSON.stringify({
-            hotelId,
-            restrictions,
-          }),
-        });
-
-        if (!restrictionsResponse.ok) {
-          const errorData = await restrictionsResponse.json().catch(() => ({}));
-          throw new Error(errorData.message || `Erro ao sincronizar restrições: ${restrictionsResponse.statusText}`);
-        }
-      }
-
-      // Atualizar log de sincronização (se existir)
-      if (syncLog?.id) {
-        try {
-          const totalRecords = rates.length + availability.length + restrictions.length;
-          await supabase
-            .from("bukly_sync_logs")
-            .update({
-              status: "success",
-              records_synced: totalRecords,
-              completed_at: new Date().toISOString(),
-            })
-            .eq("id", syncLog.id);
-        } catch (error) {
-          // Ignorar erro se a tabela não existir
-          console.warn("Erro ao atualizar log de sincronização:", error);
-        }
-      }
-
-      // Atualizar status do canal
-      const { data: updatedChannel, error: updateError } = await supabase
-        .from("ota_channels")
-        .update({
-          bukly_last_sync_at: new Date().toISOString(),
-          bukly_sync_status: "success",
-          last_sync_at: new Date().toISOString(),
-          sync_status: "success",
-          sync_error: null,
-        })
-        .eq("id", channelId)
-        .select()
-        .single();
-
-      if (updateError) throw updateError;
-
-      toast.success(`Sincronizadas ${rates.length} tarifas, ${availability.length} disponibilidades e ${restrictions.length} restrições com Bukly!`);
-      return updatedChannel;
-    } catch (error: any) {
-      // Atualizar log com erro (se existir)
-      if (syncLog?.id) {
-        try {
-          await supabase
-            .from("bukly_sync_logs")
-            .update({
-              status: "error",
-              error_message: error.message,
-              completed_at: new Date().toISOString(),
-            })
-            .eq("id", syncLog.id);
-        } catch (logError) {
-          // Ignorar erro se a tabela não existir
-          console.warn("Erro ao atualizar log de sincronização:", logError);
-        }
-      }
-
-      // Atualizar status do canal
-      await supabase
-        .from("ota_channels")
-        .update({
-          bukly_sync_status: "error",
-          sync_status: "error",
-          sync_error: error.message,
-        })
-        .eq("id", channelId);
-
-      throw error;
-    }
+    return payload.channel;
   };
+
+  type SyncChannelArg =
+    | string
+    | { channelId: string; silent?: boolean; skipInvalidate?: boolean };
+
+  const parseSyncChannelArg = (arg: SyncChannelArg) =>
+    typeof arg === "string"
+      ? { channelId: arg, silent: false, skipInvalidate: false }
+      : {
+          channelId: arg.channelId,
+          silent: !!arg.silent,
+          skipInvalidate: !!arg.skipInvalidate,
+        };
 
   // Sincronizar canal usando o novo sistema tarifário (rate_calendar)
   const syncChannel = useMutation({
-    mutationFn: async (channelId: string) => {
+    mutationFn: async (arg: SyncChannelArg) => {
+      const { channelId, silent } = parseSyncChannelArg(arg);
       const establishmentId = getSelectedEstablishmentId();
       if (!establishmentId) throw new Error("Establishment ID não encontrado");
 
@@ -571,7 +301,11 @@ export const useChannelManager = () => {
       // Verificar se é um channel manager (Bukly)
       if (channel.channel_type === "channel_manager" && channel.channel_manager_type === "bukly") {
         // Usar integração do Bukly
-        return await syncBuklyChannel(channelId, establishmentId);
+        return await syncBuklyChannel(channelId, establishmentId, { silent });
+      }
+
+      if (channel.channel_type === "channel_manager" && channel.channel_manager_type === "aiosell") {
+        return await syncAiosellChannel(channelId, establishmentId, { silent });
       }
 
       // Sincronização padrão para OTAs diretas
@@ -670,7 +404,9 @@ export const useChannelManager = () => {
 
         if (error) throw error;
         
-        toast.success(`Sincronizadas ${syncData.length} tarifas com sucesso!`);
+        if (!silent) {
+          toast.success(`Sincronizadas ${syncData.length} tarifas com sucesso!`);
+        }
         return data;
       } catch (error: any) {
         // Atualizar status para error
@@ -684,14 +420,40 @@ export const useChannelManager = () => {
         throw error;
       }
     },
-    onSuccess: () => {
+    onSuccess: (_data, arg) => {
+      const { skipInvalidate } = parseSyncChannelArg(arg as SyncChannelArg);
+      if (skipInvalidate) return;
       queryClient.invalidateQueries({ queryKey: ["ota_channels"] });
-      queryClient.invalidateQueries({ queryKey: ["ota_reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["channel_pricing"] });
       queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Erro ao sincronizar canal");
+    onError: (error: any, arg) => {
+      const { silent } = parseSyncChannelArg(arg as SyncChannelArg);
+      if (!silent) {
+        toast.error(error.message || "Erro ao sincronizar canal");
+      }
+    },
+  });
+
+  const syncAiosellReservationsMutation = useMutation({
+    mutationFn: async (args: { channelId: string; establishmentId: string; pull?: boolean }) => {
+      return invokeAiosellReservationsSync(args.channelId, args.establishmentId, {
+        pull: args.pull !== false,
+      });
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["ota_reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      const processed = data.processed ?? 0;
+      const created = data.created ?? 0;
+      const skipped = data.skipped ?? 0;
+      const failed = data.failed ?? 0;
+      toast.success(
+        `Reservas: ${processed} processada(s), ${created} nova(s), ${skipped} já existente(s), ${failed} erro(s).`
+      );
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Erro ao sincronizar reservas do canal");
     },
   });
 
@@ -716,6 +478,8 @@ export const useChannelManager = () => {
     deleteChannelPricing: deleteChannelPricing.mutateAsync,
     syncChannel: syncChannel.mutateAsync,
     isSyncing: syncChannel.isPending,
+    syncAiosellReservations: syncAiosellReservationsMutation.mutateAsync,
+    isSyncingAiosellReservations: syncAiosellReservationsMutation.isPending,
     isCreating: createChannel.isPending || createChannelPricing.isPending,
   };
 };

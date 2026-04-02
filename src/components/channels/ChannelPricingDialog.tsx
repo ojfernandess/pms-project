@@ -27,6 +27,7 @@ export const ChannelPricingDialog = ({
 }: ChannelPricingDialogProps) => {
   const { channels, channelPricing, createChannelPricing, updateChannelPricing, isCreating } =
     useChannelManager();
+
   const { ratePlans } = useRateSystem();
   const [loading, setLoading] = useState(false);
 
@@ -56,7 +57,14 @@ export const ChannelPricingDialog = ({
     start_date: "",
     end_date: "",
     is_active: true,
+    channel_room_code: "",
+    channel_rate_plan_code: "",
   });
+
+  const selectedChannel = channels.find((c: any) => c.id === formData.ota_channel_id);
+  const showChannelCodes =
+    selectedChannel?.channel_manager_type === "aiosell" ||
+    selectedChannel?.channel_manager_type === "bukly";
 
   useEffect(() => {
     if (pricingId && open) {
@@ -71,6 +79,8 @@ export const ChannelPricingDialog = ({
           start_date: pricing.start_date || "",
           end_date: pricing.end_date || "",
           is_active: pricing.is_active ?? true,
+          channel_room_code: pricing.channel_room_code || "",
+          channel_rate_plan_code: pricing.channel_rate_plan_code || "",
         });
       }
     } else if (!pricingId && open) {
@@ -83,6 +93,8 @@ export const ChannelPricingDialog = ({
         start_date: "",
         end_date: "",
         is_active: true,
+        channel_room_code: "",
+        channel_rate_plan_code: "",
       });
     }
   }, [pricingId, open, channelPricing]);
@@ -95,14 +107,24 @@ export const ChannelPricingDialog = ({
       const data: any = {
         ota_channel_id: formData.ota_channel_id,
         category_id: formData.category_id,
+        /** Obrigatório no update: sem isto o PostgREST não limpa o UUID ao passar a «Nenhum plano». */
+        pricing_plan_id: formData.pricing_plan_id?.trim() || null,
         price_multiplier: parseFloat(formData.price_multiplier),
         is_active: formData.is_active,
       };
-
-      if (formData.pricing_plan_id) data.pricing_plan_id = formData.pricing_plan_id;
       if (formData.fixed_price) data.fixed_price = parseFloat(formData.fixed_price);
       if (formData.start_date) data.start_date = formData.start_date;
       if (formData.end_date) data.end_date = formData.end_date;
+      if (formData.channel_room_code?.trim()) {
+        data.channel_room_code = formData.channel_room_code.trim();
+      } else {
+        data.channel_room_code = null;
+      }
+      if (formData.channel_rate_plan_code?.trim()) {
+        data.channel_rate_plan_code = formData.channel_rate_plan_code.trim();
+      } else {
+        data.channel_rate_plan_code = null;
+      }
 
       if (pricingId) {
         await updateChannelPricing({ id: pricingId, ...data });
@@ -240,6 +262,48 @@ export const ChannelPricingDialog = ({
               />
             </div>
           </div>
+
+          {showChannelCodes && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="channel_room_code">
+                  {selectedChannel?.channel_manager_type === "aiosell"
+                    ? "Room Code (Aiosell)"
+                    : "Código externo do quarto"}
+                </Label>
+                <Input
+                  id="channel_room_code"
+                  value={formData.channel_room_code}
+                  onChange={(e) => setFormData({ ...formData, channel_room_code: e.target.value })}
+                  placeholder="Ex.: EXECUTIVE"
+                />
+              </div>
+              <div>
+                <Label htmlFor="channel_rate_plan_code">
+                  {selectedChannel?.channel_manager_type === "aiosell"
+                    ? "Rate Plan Code (Aiosell)"
+                    : "Código externo do plano"}
+                </Label>
+                <Input
+                  id="channel_rate_plan_code"
+                  value={formData.channel_rate_plan_code}
+                  onChange={(e) =>
+                    setFormData({ ...formData, channel_rate_plan_code: e.target.value })
+                  }
+                  placeholder="Ex.: EXECUTIVE-BAR"
+                />
+              </div>
+            </div>
+          )}
+
+          {selectedChannel?.channel_manager_type === "aiosell" && (
+            <p className="text-xs text-muted-foreground">
+              Obrigatório para sincronizar: os mesmos identificadores de quarto e de plano de tarifas que no Channel
+              Manager Aiosell (a API não aceita substitutos derivados do PMS). Se o mesmo par room+rate plan na
+              Aiosell servir para todos os planos desta categoria, escolha «Nenhum plano» e guarde — assim uma linha
+              cobre o calendário inteiro.
+            </p>
+          )}
 
           <div className="flex items-center gap-2">
             <Switch

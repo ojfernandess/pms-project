@@ -30,6 +30,7 @@ import {
   exportToXLSX,
 } from "@/lib/financialUtils";
 import { formatDate } from "@/lib/reservationUtils";
+import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import {
@@ -176,6 +177,7 @@ const Financial = () => {
           payment_status,
           status,
           channel,
+          guest_name,
           guest:clients!guest_id(full_name),
           financial_responsible:clients!client_id(full_name),
           reservation_service_fees(
@@ -210,7 +212,7 @@ const Financial = () => {
           data_checkin: formatDate(reservation.checkin_date),
           data_checkout: formatDate(reservation.checkout_date),
           codigo_reserva: reservation.reservation_code || "",
-          hospede: reservation.guest?.full_name || reservation.financial_responsible?.full_name || "",
+          hospede: reservationGuestDisplayName(reservation, ""),
           canal: reservation.channel || "direct",
           valor_base: Number(reservation.total_amount || 0).toFixed(2),
           taxas_extras: serviceFeesTotal > 0 ? serviceFeesTotal.toFixed(2) : "0,00",
@@ -285,6 +287,7 @@ const Financial = () => {
             paid_amount,
             payment_status,
             status,
+            guest_name,
             guest:clients!guest_id(full_name),
             financial_responsible:clients!client_id(full_name),
             reservation_service_fees(
@@ -422,7 +425,7 @@ const Financial = () => {
           data_checkin: formatDate(reservation.checkin_date),
           data_checkout: formatDate(reservation.checkout_date),
           codigo_reserva: reservation.reservation_code || "",
-          hospede: reservation.guest?.full_name || reservation.financial_responsible?.full_name || "",
+          hospede: reservationGuestDisplayName(reservation, ""),
           valor_base_reserva: baseAmount.toFixed(2),
           valor_extensao_reserva: extensionAmount > 0 ? extensionAmount.toFixed(2) : "0,00",
           taxas_extras_reserva: serviceFeesTotal > 0 ? serviceFeesTotal.toFixed(2) : "0,00",
@@ -705,9 +708,14 @@ const Financial = () => {
                             {payment.reservations?.reservation_code || "-"}
                           </TableCell>
                           <TableCell>
-                            {payment.reservations?.guest?.full_name || 
-                             payment.reservations?.financial_responsible?.full_name || 
-                             payment.reservations?.clients?.full_name || "-"}
+                            {reservationGuestDisplayName(
+                              {
+                                guest: payment.reservations?.guest,
+                                financial_responsible: payment.reservations?.financial_responsible,
+                                guest_name: payment.reservations?.guest_name,
+                              },
+                              payment.reservations?.clients?.full_name || "-"
+                            )}
                           </TableCell>
                           <TableCell>{payment.payment_method}</TableCell>
                           <TableCell className="font-medium">

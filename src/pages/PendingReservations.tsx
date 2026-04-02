@@ -28,6 +28,8 @@ import { usePendingReservations } from "@/hooks/usePendingReservations";
 import { SplitReservationDialog } from "@/components/reservations/SplitReservationDialog";
 import { ChangeRoomDialog } from "@/components/reservations/ChangeRoomDialog";
 import { formatCurrency, formatDate } from "@/lib/reservationUtils";
+import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
+import { formatReservationChannelOrigin } from "@/lib/reservationChannelDisplay";
 import { useNavigate, useParams } from "react-router-dom";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -152,9 +154,7 @@ const PendingReservations = () => {
                           {reservation.reservation_code}
                         </TableCell>
                         <TableCell>
-                          {reservation.guest?.full_name ||
-                            reservation.financial_responsible?.full_name ||
-                            "N/A"}
+                          {reservationGuestDisplayName(reservation)}
                         </TableCell>
                         <TableCell>
                           {formatDate(reservation.checkin_date)}
@@ -168,8 +168,12 @@ const PendingReservations = () => {
                             "Sem quarto"}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline">
-                            {reservation.channel || "N/A"}
+                          <Badge
+                            variant="outline"
+                            className="max-w-[min(100%,280px)] whitespace-normal text-left font-normal"
+                            title={formatReservationChannelOrigin(reservation)}
+                          >
+                            {formatReservationChannelOrigin(reservation)}
                           </Badge>
                         </TableCell>
                         <TableCell>
@@ -265,9 +269,7 @@ const PendingReservations = () => {
                           {reservation.reservation_code}
                         </TableCell>
                         <TableCell>
-                          {reservation.guest?.full_name ||
-                            reservation.financial_responsible?.full_name ||
-                            "N/A"}
+                          {reservationGuestDisplayName(reservation)}
                         </TableCell>
                         <TableCell>
                           {formatDate(reservation.checkin_date)}
@@ -372,9 +374,7 @@ const PendingReservations = () => {
                           {reservation.reservation_code}
                         </TableCell>
                         <TableCell>
-                          {reservation.guest?.full_name ||
-                            reservation.financial_responsible?.full_name ||
-                            "N/A"}
+                          {reservationGuestDisplayName(reservation)}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
@@ -475,10 +475,7 @@ const PendingReservations = () => {
                             </div>
                             <p className="text-sm text-muted-foreground">
                               Hóspede:{" "}
-                              {overbooking.reservation.guest?.full_name ||
-                                overbooking.reservation.financial_responsible
-                                  ?.full_name ||
-                                "N/A"}
+                              {reservationGuestDisplayName(overbooking.reservation)}
                             </p>
                             <p className="text-sm text-muted-foreground">
                               Período: {formatDate(overbooking.reservation.checkin_date)} -{" "}
@@ -508,8 +505,7 @@ const PendingReservations = () => {
                                   (conflict: any) => (
                                     <li key={conflict.id}>
                                       {conflict.reservation_code} -{" "}
-                                      {conflict.guest?.full_name ||
-                                        conflict.financial_responsible?.full_name}
+                                      {reservationGuestDisplayName(conflict, "N/A")}
                                       {" "}({formatDate(conflict.checkin_date)} -{" "}
                                       {formatDate(conflict.checkout_date)})
                                     </li>

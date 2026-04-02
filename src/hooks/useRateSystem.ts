@@ -20,6 +20,7 @@ import {
   useStaggerPhase1,
   useStaggerPhase2,
 } from "@/lib/rateSystem";
+import { scheduleChannelSyncAfterRateEdit } from "@/lib/channelSyncAfterRates";
 
 export interface RatePlan {
   id: string;
@@ -343,6 +344,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       queryClient.invalidateQueries({ queryKey: ["rate_plans"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Plano tarifário atualizado com sucesso!");
+      scheduleChannelSyncAfterRateEdit(getEstablishmentId());
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao atualizar plano tarifário");
@@ -621,6 +623,9 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       if (updateSource === 'manual' && !skipToast) {
         toast.success("Tarifário atualizado");
       }
+      if (updateSource !== "channel_sync") {
+        scheduleChannelSyncAfterRateEdit(getEstablishmentId());
+      }
     },
     onError: (error: unknown) => {
       toast.error(error instanceof Error ? error.message : "Erro ao atualizar tarifas");
@@ -751,6 +756,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
         })();
       }
       toast.success("Tarifas atualizadas com sucesso!");
+      scheduleChannelSyncAfterRateEdit(getEstablishmentId());
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao atualizar tarifas");

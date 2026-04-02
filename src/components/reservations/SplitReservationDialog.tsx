@@ -22,6 +22,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { logActivity } from "@/lib/activityLogger";
+import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 
 interface SplitReservationDialogProps {
   open: boolean;
@@ -331,7 +332,7 @@ export const SplitReservationDialog = ({
                 <Badge variant="destructive">Overbooking</Badge>
               </div>
               <div className="text-sm text-muted-foreground">
-                <p>Hóspede: {reservation.guest?.full_name || reservation.financial_responsible?.full_name}</p>
+                <p>Hóspede: {reservationGuestDisplayName(reservation, "—")}</p>
                 <p>
                   Período: {format(parseISO(reservation.checkin_date), "dd/MM/yyyy", { locale: ptBR })} -{" "}
                   {format(parseISO(reservation.checkout_date), "dd/MM/yyyy", { locale: ptBR })}

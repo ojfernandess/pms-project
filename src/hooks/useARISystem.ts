@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { format, isValid } from "date-fns";
 import { toast } from "sonner";
+import { scheduleChannelSyncAfterRateEdit } from "@/lib/channelSyncAfterRates";
 
 export interface RateInventory {
   id: string;
@@ -249,6 +250,7 @@ export const useARISystem = () => {
       queryClient.invalidateQueries({ queryKey: ['ari_sales_status'] });
       queryClient.invalidateQueries({ queryKey: ['ari_sales_status_bulk'] });
       toast.success('Status de venda atualizado');
+      scheduleChannelSyncAfterRateEdit(selectedEstablishment?.id);
     },
     onError: (error: any) => {
       toast.error('Erro ao atualizar status: ' + error.message);
@@ -321,6 +323,7 @@ export const useARISystem = () => {
       queryClient.invalidateQueries({ queryKey: ['ari_sales_status'] });
       queryClient.invalidateQueries({ queryKey: ['ari_sales_status_bulk'] });
       toast.success('Status atualizado em massa');
+      scheduleChannelSyncAfterRateEdit(selectedEstablishment?.id);
     },
     onError: (error: any) => {
       toast.error('Erro ao atualizar status em massa: ' + error.message);
@@ -408,6 +411,7 @@ export const useARISystem = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ari_inventory'] });
       toast.success('Inventário atualizado');
+      scheduleChannelSyncAfterRateEdit(selectedEstablishment?.id);
     },
     onError: (error: any) => {
       toast.error('Erro ao atualizar inventário: ' + error.message);

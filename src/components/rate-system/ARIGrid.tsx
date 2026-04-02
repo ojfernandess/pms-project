@@ -653,6 +653,27 @@ export const ARIGrid = ({
     return Math.max(0, finalPrice);
   };
 
+  /**
+   * Mescla preço dinâmico (contexto) com rate_calendar. Se o valor persistido diverge do cache
+   * dinâmico, mantém o persistido — evita a célula “voltar” ao preço calculado após edição inline.
+   */
+  const resolveEntryWithDynamicForDisplay = (
+    entry: any,
+    dynamicPrice: number | undefined,
+    occupancy: number
+  ): any => {
+    if (occupancy !== 2) return entry;
+    if (dynamicPrice == null || dynamicPrice <= 0) return entry;
+    if (!entry) {
+      return { base_price: dynamicPrice };
+    }
+    const persisted = Number(entry.base_price || 0);
+    if (Math.abs(persisted - dynamicPrice) > 0.01) {
+      return entry;
+    }
+    return { ...entry, base_price: dynamicPrice };
+  };
+
   // Função para calcular ocupação
   const calculateOccupancy = (inventory: any): number => {
     if (!inventory || inventory.total_rooms === 0) return 0;
@@ -821,8 +842,12 @@ export const ARIGrid = ({
       } else {
         // Sem entrada existente: criar nova — base_price e adult_price são obrigatórios
         const category = currentCategories.find((c: { id: string }) => c.id === currentEditingCell.categoryId);
-        updateData.base_price = Number(category?.base_price) || 0;
-        updateData.adult_price = 0;
+        if (updateData.base_price === undefined) {
+          updateData.base_price = Number(category?.base_price) || 0;
+        }
+        if (updateData.adult_price === undefined) {
+          updateData.adult_price = 0;
+        }
         if (updateData.min_stay === undefined) updateData.min_stay = 0;
         if (updateData.max_stay === undefined) updateData.max_stay = 0;
         updateData.closed_to_arrival = updateData.closed_to_arrival ?? false;
@@ -831,6 +856,17 @@ export const ARIGrid = ({
 
       // Salvar e aguardar conclusão antes de limpar o estado
       await upsertRateCalendar([updateData]);
+
+      if (
+        currentEditingCell.field.startsWith('price_') &&
+        parseInt(currentEditingCell.field.replace('price_', ''), 10) === 2 &&
+        dynamicPrices
+      ) {
+        const normalizedAfterSave =
+          parseFloat(currentEditingCell.value.toString().replace(',', '.')) || 0;
+        const cacheKey = `${currentEditingCell.planId}-${currentEditingCell.categoryId}-${currentEditingCell.date}`;
+        dynamicPrices.setPrice(cacheKey, normalizedAfterSave);
+      }
       
       console.log('[ARIGrid] Edição salva com sucesso');
       
@@ -1563,12 +1599,9 @@ export const ARIGrid = ({
   ) => {
     const dateStr = format(date, 'yyyy-MM-dd');
     const cacheKey = `${plan.id}-${category.id}-${dateStr}`;
-    // Preço dinâmico (calculado com regras) tem prioridade sobre rate_calendar
     const dynamicPrice = dynamicPrices?.getPrice(cacheKey);
     const entry = getRateCalendarEntry(category.id, plan.id, date);
-    const entryWithDynamicBase = dynamicPrice != null && dynamicPrice > 0 && occupancy === 2
-      ? { ...entry, base_price: dynamicPrice }
-      : entry;
+    const entryWithDynamicBase = resolveEntryWithDynamicForDisplay(entry, dynamicPrice, occupancy);
     const price = calculatePriceForOccupancy(entryWithDynamicBase, occupancy);
     const isPast = date < startOfDay(new Date());
     const isStandardPrice = occupancy === 2;
@@ -1593,7 +1626,7 @@ export const ARIGrid = ({
                 if (parts.length > 2) {
                   value = parts[0] + (parts[1] ? ',' + parts.slice(1).join('') : '');
                 }
-                setEditingCell({ ...editingCell, value });
+                setEditingCell((prev) => (prev ? { ...prev, value } : null));
               }}
               onBlur={handleSaveCellEdit}
               onKeyDown={(e) => {
@@ -1712,7 +1745,9 @@ export const ARIGrid = ({
             <Input
               type="number"
               value={editingCell.value}
-              onChange={(e) => setEditingCell({ ...editingCell, value: e.target.value })}
+              onChange={(e) =>
+                setEditingCell((prev) => (prev ? { ...prev, value: e.target.value } : null))
+              }
               onBlur={handleSaveCellEdit}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
@@ -2185,9 +2220,7 @@ export const ARIGrid = ({
                           const cacheKey = `${plan.id}-${category.id}-${dateStr}`;
                           const dynamicPrice = dynamicPrices?.getPrice(cacheKey);
                           const entry = getRateCalendarEntry(category.id, plan.id, date);
-                          const entryWithDynamic = dynamicPrice != null && dynamicPrice > 0
-                            ? { ...entry, base_price: dynamicPrice }
-                            : entry;
+                          const entryWithDynamic = resolveEntryWithDynamicForDisplay(entry, dynamicPrice, 2);
                           const price = calculatePriceForOccupancy(entryWithDynamic, 2); // Preço padrão x2
                           const status = getSalesStatusForDate(category.id, date);
                           
