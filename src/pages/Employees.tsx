@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useUserLimits } from "@/hooks/useUserLimits";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Edit, Trash2, Loader2, Users, Shield, AlertCircle, Key, UserPlus, User, Briefcase, Mail, Phone, FileText, MapPin, Building2, Calendar, Lock, CheckCircle2, XCircle, Sparkles } from "lucide-react";
+import { Plus, Edit, Trash2, Loader2, Users, Shield, AlertCircle, Key, UserPlus, User, Briefcase, Mail, Phone, FileText, MapPin, Building2, Calendar, Lock, CheckCircle2, XCircle, Sparkles, Send } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -50,6 +50,16 @@ import { sendEmployeeAddedToEstablishmentEmail } from "@/lib/emailService";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 
+type EmployeeAuthStatus = {
+  email: string | null;
+  email_confirmed_at: string | null;
+  last_sign_in_at: string | null;
+  banned_until: string | null;
+  is_banned: boolean;
+  email_confirmed: boolean;
+  auth_label: "ativo" | "pendente" | "suspenso";
+};
+
 const Employees = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -60,6 +70,23 @@ const Employees = () => {
   const [selectedRole, setSelectedRole] = useState<any>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("employees");
+  const [createNewUser, setCreateNewUser] = useState(false);
+  const [formData, setFormData] = useState({
+    user_id: "",
+    role_id: "",
+    full_name: "",
+    cpf: "",
+    phone: "",
+    email: "",
+    password: "",
+    address: "",
+    city: "",
+    state: "",
+    postal_code: "",
+    country: "Brasil",
+    birth_date: "",
+    is_active: true,
+  });
 
   const queryClient = useQueryClient();
   const { selectedEstablishment } = useEstablishment();
@@ -68,6 +95,45 @@ const Employees = () => {
   const { role } = useCurrentEmployeeRole();
   const { canAccess } = usePermissions();
   const { createOrUpdateUserLimit } = useUserLimits();
+
+  const [resendingUserId, setResendingUserId] = useState<string | null>(null);
+
+  const establishmentIdForAuth =
+    selectedEstablishment?.id ?? localStorage.getItem("selectedEstablishmentId") ?? null;
+
+  const employeeUserIdsKey = useMemo(() => {
+    const ids = employees
+      .map((e) => e.user_id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+    return [...new Set(ids)].sort().join(",");
+  }, [employees]);
+
+  const { data: employeeAuthStatuses = {}, isLoading: isLoadingEmployeeAuth } = useQuery({
+    queryKey: ["employee_auth_status", establishmentIdForAuth, employeeUserIdsKey],
+    queryFn: async () => {
+      if (!establishmentIdForAuth || !employeeUserIdsKey) return {};
+      const user_ids = employeeUserIdsKey.split(",").filter(Boolean);
+      if (user_ids.length === 0) return {};
+
+      const { data, error } = await supabase.functions.invoke("employee-auth-admin", {
+        body: {
+          action: "auth_status_batch",
+          establishment_id: establishmentIdForAuth,
+          user_ids,
+        },
+      });
+
+      if (error) throw error;
+      if (data && typeof data === "object" && "error" in data && (data as { error: string }).error) {
+        throw new Error(String((data as { error: string }).error));
+      }
+
+      return (
+        (data as { statuses?: Record<string, EmployeeAuthStatus | null> })?.statuses ?? {}
+      ) as Record<string, EmployeeAuthStatus | null>;
+    },
+    enabled: Boolean(establishmentIdForAuth && employeeUserIdsKey.length > 0),
+  });
   
   // Buscar usuários de todas as empresas onde o gerente atual é gerente
   const { data: companyUsers = [], isLoading: isLoadingCompanyUsers } = useQuery({
@@ -235,24 +301,6 @@ const Employees = () => {
     );
   }
 
-  const [createNewUser, setCreateNewUser] = useState(false);
-  const [formData, setFormData] = useState({
-    user_id: "",
-    role_id: "",
-    full_name: "",
-    cpf: "",
-    phone: "",
-    email: "",
-    password: "",
-    address: "",
-    city: "",
-    state: "",
-    postal_code: "",
-    country: "Brasil",
-    birth_date: "",
-    is_active: true,
-  });
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -283,20 +331,26 @@ const Employees = () => {
           }
 
           try {
-            // Criar usuário via signup (não requer super admin)
-            const { data: signupData, error: signupError } = await supabase.auth.signUp({
-              email: formData.email,
-              password: formData.password,
-              options: {
-                emailRedirectTo: `${window.location.origin}/login`,
-                data: {
+            // Edge Function: createUser com confirmação de e-mail (template Confirm sign up).
+            const { data: fnData, error: fnError } = await supabase.functions.invoke(
+              "create-employee-auth",
+              {
+                body: {
+                  email: formData.email,
+                  password: formData.password,
                   full_name: formData.full_name || undefined,
+                  establishment_id: establishmentId,
                 },
-              },
-            });
+              }
+            );
 
-            if (signupError) throw signupError;
-            if (!signupData.user) throw new Error("Erro ao criar usuário");
+            if (fnError) throw fnError;
+            if (fnData && typeof fnData === "object" && "error" in fnData && fnData.error) {
+              throw new Error(String((fnData as { error: string }).error));
+            }
+
+            const newUserId = (fnData as { user_id?: string })?.user_id;
+            if (!newUserId) throw new Error("Erro ao criar usuário");
 
             // Aguardar um pouco para o trigger sincronizar
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -317,7 +371,7 @@ const Employees = () => {
               const { error: updateError } = await supabase
                 .from("users")
                 .update(profileData)
-                .eq("id", signupData.user.id);
+                .eq("id", newUserId);
 
               if (updateError) {
                 console.error("Erro ao atualizar perfil do usuário:", updateError);
@@ -328,13 +382,24 @@ const Employees = () => {
             const { data: userData, error: fetchError } = await supabase
               .from("users")
               .select("*")
-              .eq("id", signupData.user.id)
+              .eq("id", newUserId)
               .single();
             
             if (fetchError) throw fetchError;
             if (!userData) throw new Error("Usuário criado mas não encontrado na tabela");
 
             userId = userData.id;
+
+            const authSent = (fnData as { auth_email_sent?: boolean })?.auth_email_sent;
+            if (authSent) {
+              toast.info(
+                "Foi enviado o e-mail de confirmação da conta (template Confirm sign up / StayOS). Verifique o spam."
+              );
+            } else {
+              toast.info(
+                "Conta criada; se não chegar e-mail de confirmação, confira SITE_URL / AUTH_REDIRECT_URL na função create-employee-auth e as URLs em Authentication → URL Configuration."
+              );
+            }
 
             // Criar limite de usuário para impedir que funcionário crie empresas ou estabelecimentos
             // Funcionários criados por gerentes devem ter max_companies = 0 e max_establishments = 0
@@ -630,6 +695,34 @@ const Employees = () => {
     setDialogOpen(true);
   };
 
+  const handleResendConfirmation = async (employee: { user_id?: string }) => {
+    const est = selectedEstablishment?.id ?? localStorage.getItem("selectedEstablishmentId");
+    if (!est || !employee.user_id) {
+      toast.error("Estabelecimento ou utilizador inválido");
+      return;
+    }
+    setResendingUserId(employee.user_id);
+    try {
+      const { data, error } = await supabase.functions.invoke("employee-auth-admin", {
+        body: {
+          action: "resend_confirmation",
+          establishment_id: est,
+          user_id: employee.user_id,
+        },
+      });
+      if (error) throw error;
+      if (data && typeof data === "object" && "error" in data && (data as { error: string }).error) {
+        throw new Error((data as { error: string }).error);
+      }
+      toast.success("E-mail de confirmação da conta reenviado (Confirm sign up). Peça para verificar o spam.");
+      await queryClient.invalidateQueries({ queryKey: ["employee_auth_status"] });
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao reenviar");
+    } finally {
+      setResendingUserId(null);
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
@@ -712,7 +805,8 @@ const Employees = () => {
                   <TableHead>Função</TableHead>
                   <TableHead>E-mail</TableHead>
                   <TableHead>Telefone</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Estabelecimento</TableHead>
+                  <TableHead>Conta (Supabase Auth)</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -748,6 +842,46 @@ const Employees = () => {
                         {employee.is_active ? "Ativo" : "Inativo"}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      {isLoadingEmployeeAuth ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      ) : (() => {
+                        const auth = employeeAuthStatuses[employee.user_id];
+                        if (!auth) {
+                          return <span className="text-sm text-muted-foreground">—</span>;
+                        }
+                        const label =
+                          auth.auth_label === "ativo"
+                            ? "Confirmada"
+                            : auth.auth_label === "suspenso"
+                              ? "Suspensa"
+                              : "Pendente confirmação";
+                        const variant =
+                          auth.auth_label === "suspenso"
+                            ? "destructive"
+                            : auth.auth_label === "ativo"
+                              ? "default"
+                              : "secondary";
+                        return (
+                          <div className="flex flex-col gap-1 items-start">
+                            <Badge variant={variant}>
+                              {label}
+                            </Badge>
+                            {auth.last_sign_in_at ? (
+                              <span className="text-xs text-muted-foreground max-w-[10rem] leading-tight">
+                                Último acesso:{" "}
+                                {new Date(auth.last_sign_in_at).toLocaleString("pt-BR", {
+                                  dateStyle: "short",
+                                  timeStyle: "short",
+                                })}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Sem login registado</span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -760,6 +894,30 @@ const Employees = () => {
                             <Edit className="h-4 w-4 mr-2" />
                             Editar
                           </DropdownMenuItem>
+                          {(() => {
+                            const auth = employeeAuthStatuses[employee.user_id];
+                            const canResend =
+                              !isLoadingEmployeeAuth &&
+                              !!auth &&
+                              !auth.email_confirmed &&
+                              !auth.is_banned &&
+                              !!(auth.email || employee.email || employee.users?.email);
+                            return (
+                              <DropdownMenuItem
+                                disabled={!canResend || resendingUserId === employee.user_id}
+                                onClick={() => {
+                                  if (canResend) void handleResendConfirmation(employee);
+                                }}
+                              >
+                                {resendingUserId === employee.user_id ? (
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Send className="h-4 w-4 mr-2" />
+                                )}
+                                Reenviar link de confirmação
+                              </DropdownMenuItem>
+                            );
+                          })()}
                           <DropdownMenuItem
                             onClick={() => {
                               setSelectedEmployeeForPermissions(employee);

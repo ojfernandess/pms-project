@@ -2,7 +2,1407 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-/** Inline: o bundler de deploy só inclui `index.ts` (não ficheiros irmãos). */
+// --- Inlined for Supabase remote bundle (only index.ts is uploaded) ---
+/** Fragmento alinhado a `src/lib/emailTemplateEngine.ts` (processTemplate + condicionais + each). */
+
+export interface TemplateVariables {
+  [key: string]: string | number | null | undefined | any; // Permite objetos e arrays
+}
+
+/**
+ * ObtÃƒÂ©m valor de uma variÃƒÂ¡vel aninhada (ex: "main_guest.name" ou "documents.0.guest_name")
+ */
+function getNestedValue(variables: TemplateVariables, path: string): any {
+  const parts = path.split('.');
+  let value: any = variables;
+  
+  for (const part of parts) {
+    if (value === null || value === undefined) return null;
+    
+    // Se for um nÃƒÂºmero, tratar como ÃƒÂ­ndice de array
+    const numPart = parseInt(part, 10);
+    if (!isNaN(numPart) && Array.isArray(value)) {
+      value = value[numPart];
+    } else if (typeof value === 'object' && part in value) {
+      value = value[part];
+    } else {
+      return null;
+    }
+  }
+  
+  return value;
+}
+
+/**
+ * Processa loops {{#each array}}...{{/each}}
+ */
+function processEachLoops(template: string, variables: TemplateVariables): string {
+  let processed = template;
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = 100;
+
+  while (changed && iterations < maxIterations) {
+    iterations++;
+    changed = false;
+
+    // Regex para encontrar {{#each variable}}
+    const eachRegex = /\{\{#each\s+(\w+(?:\.\w+)*)\}\}/g;
+    let match;
+
+    while ((match = eachRegex.exec(processed)) !== null) {
+      const startIndex = match.index;
+      const variablePath = match[1];
+      const startTag = match[0];
+
+      // Encontrar o {{/each}} correspondente
+      let depth = 1;
+      let searchIndex = startIndex + startTag.length;
+      let endIndex = -1;
+
+      while (depth > 0 && searchIndex < processed.length) {
+        const nextEach = processed.indexOf('{{#each', searchIndex);
+        const nextEndEach = processed.indexOf('{{/each}}', searchIndex);
+
+        if (nextEndEach === -1) break;
+
+        if (nextEach !== -1 && nextEach < nextEndEach) {
+          depth++;
+          searchIndex = nextEach + 7;
+        } else {
+          depth--;
+          if (depth === 0) {
+            endIndex = nextEndEach + 10; // {{/each}} tem 10 caracteres
+            break;
+          } else {
+            searchIndex = nextEndEach + 10;
+          }
+        }
+      }
+
+      if (endIndex === -1) break;
+
+      const fullMatch = processed.substring(startIndex, endIndex);
+      const content = processed.substring(startIndex + startTag.length, endIndex - 10);
+
+      // Obter o array da variÃƒÂ¡vel
+      const arrayValue = getNestedValue(variables, variablePath);
+      
+      if (Array.isArray(arrayValue) && arrayValue.length > 0) {
+        // Processar cada item do array
+        const items = arrayValue.map((item: any, index: number) => {
+          // Criar contexto com "this" e ÃƒÂ­ndice
+          const itemContext: TemplateVariables = {
+            ...variables,
+            this: item,
+            '@index': index,
+            '@first': index === 0,
+            '@last': index === arrayValue.length - 1,
+          };
+
+          // Adicionar propriedades do item ao contexto como variÃƒÂ¡veis achatadas
+          // Ex: this.guest_name -> guest_name, this.document_type -> document_type
+          if (typeof item === 'object' && item !== null) {
+            Object.keys(item).forEach(key => {
+              // Adicionar como this.key para acesso direto
+              itemContext[`this.${key}`] = item[key];
+              // TambÃƒÂ©m adicionar como key para acesso sem this (mais simples)
+              itemContext[key] = item[key];
+            });
+          }
+
+          // Processar o conteÃƒÂºdo do loop com o contexto do item
+          // Usar uma versÃƒÂ£o recursiva que processa apenas o conteÃƒÂºdo do loop
+          let itemContent = content;
+          
+          // Substituir {{this.property}} e {{property}} dentro do loop
+          if (typeof item === 'object' && item !== null) {
+            Object.keys(item).forEach(key => {
+              const value = item[key];
+              const stringValue = value !== null && value !== undefined ? String(value) : '';
+              
+              // Substituir {{this.key}}
+              const thisRegex = new RegExp(`\\{\\{this\\.${key}\\}\\}`, 'g');
+              itemContent = itemContent.replace(thisRegex, stringValue);
+              
+              // Substituir {{key}} (sem this)
+              const keyRegex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+              itemContent = itemContent.replace(keyRegex, stringValue);
+            });
+          }
+          
+          // Processar condicionais e outras variÃƒÂ¡veis no contexto do item
+          return processTemplate(itemContent, itemContext);
+        });
+
+        processed = processed.replace(fullMatch, items.join(''));
+      } else {
+        // Array vazio ou nÃƒÂ£o ÃƒÂ© array: remover o bloco
+        processed = processed.replace(fullMatch, '');
+      }
+
+      changed = true;
+      break;
+    }
+  }
+
+  return processed;
+}
+
+/**
+ * Processa um template HTML substituindo variÃƒÂ¡veis no formato {{variable_name}}
+ * e processando condicionais no formato {{#if variable_name}}...{{/if}}
+ * e loops no formato {{#each array}}...{{/each}}
+ */
+export function processTemplate(template: string, variables: TemplateVariables): string {
+  let processed = template;
+
+  // Log inicial para debug
+  if (template?.includes('{{review_link}}') || template?.includes('{{{review_link}}}')) {
+    console.log('Ã°Å¸â€Â processTemplate: Template contÃƒÂ©m review_link placeholder', {
+      hasReviewLinkVar: 'review_link' in variables,
+      reviewLinkValue: variables.review_link,
+      allKeys: Object.keys(variables),
+    });
+  }
+
+  // Primeiro, processar loops {{#each array}}...{{/each}}
+  processed = processEachLoops(processed, variables);
+
+  // Depois, processar condicionais {{#if variable}}...{{/if}}
+  // Fazer mÃƒÂºltiplas passadas atÃƒÂ© que nÃƒÂ£o haja mais mudanÃƒÂ§as
+  let conditionalChanged = true;
+  let conditionalIterations = 0;
+  while (conditionalChanged && conditionalIterations < 50) {
+    conditionalIterations++;
+    const beforeConditionals = processed;
+  processed = processConditionals(processed, variables);
+    conditionalChanged = beforeConditionals !== processed;
+  }
+  
+  // Limpeza final: remover qualquer {{/if}} solto que possa ter sobrado
+  // Isso pode acontecer se houver um erro no processamento de condicionais aninhadas
+  // Contar quantos {{#if}} e {{/if}} existem para garantir que nÃƒÂ£o removemos demais
+  const ifCount = (processed.match(/\{\{#if\s+\w+(?:\.\w+)*\}\}/g) || []).length;
+  const endifCount = (processed.match(/\{\{\/if\}\}/g) || []).length;
+  
+  // Se hÃƒÂ¡ mais {{/if}} do que {{#if}}, remover os extras
+  if (endifCount > ifCount) {
+    // Remover apenas os {{/if}} extras (a diferenÃƒÂ§a)
+    let removed = 0;
+    const toRemove = endifCount - ifCount;
+    processed = processed.replace(/\{\{\/if\}\}/g, (match) => {
+      if (removed < toRemove) {
+        removed++;
+        return '';
+      }
+      return match;
+    });
+  }
+
+  // Por ÃƒÂºltimo, substituir variÃƒÂ¡veis no formato {{variable_name}} ou {{variable.path}}
+  // Processar variÃƒÂ¡veis aninhadas primeiro (ex: {{main_guest.name}})
+  const nestedVarRegex = /\{\{(\w+(?:\.\w+)+)\}\}/g;
+  let nestedMatch;
+  let nestedChanged = true;
+  let nestedIterations = 0;
+  while (nestedChanged && nestedIterations < 10) {
+    nestedIterations++;
+    nestedChanged = false;
+    nestedVarRegex.lastIndex = 0; // Reset regex
+  while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
+    const fullMatch = nestedMatch[0];
+    const path = nestedMatch[1];
+    const value = getNestedValue(variables, path);
+    const stringValue = value !== null && value !== undefined ? String(value) : '';
+      if (processed.includes(fullMatch)) {
+    processed = processed.replace(fullMatch, stringValue);
+        nestedChanged = true;
+      }
+    }
+  }
+
+  // Depois, substituir variÃƒÂ¡veis simples no formato {{variable_name}}
+  // Fazer mÃƒÂºltiplas passadas para garantir que todas as variÃƒÂ¡veis sejam substituÃƒÂ­das
+  let varChanged = true;
+  let varIterations = 0;
+  while (varChanged && varIterations < 20) {
+    varIterations++;
+    varChanged = false;
+    
+    // Substituir variÃƒÂ¡veis aninhadas primeiro (formato {{variable.path}})
+    const nestedVarRegex = /\{\{(\w+(?:\.\w+)+)\}\}/g;
+    let nestedMatch;
+    nestedVarRegex.lastIndex = 0;
+    while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
+      const fullMatch = nestedMatch[0];
+      const path = nestedMatch[1];
+      const value = getNestedValue(variables, path);
+      const stringValue = value !== null && value !== undefined ? String(value) : '';
+      processed = processed.replace(fullMatch, stringValue);
+      varChanged = true;
+    }
+    
+    // Substituir variÃƒÂ¡veis com trÃƒÂªs chaves {{{variable}}} (HTML nÃƒÂ£o escapado)
+  Object.keys(variables).forEach((key) => {
+    const value = variables[key];
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        const stringValue = value !== null && value !== undefined ? String(value) : '';
+        const tripleBraceRegex = new RegExp(`\\{\\{\\{${key}\\}\\}\\}`, 'g');
+        const beforeReplace = processed;
+        processed = processed.replace(tripleBraceRegex, stringValue);
+        if (beforeReplace !== processed) {
+          varChanged = true;
+        }
+      }
+    });
+    
+    // Depois substituir variÃƒÂ¡veis simples primeiro (formato {{variable}})
+    // Processar variÃƒÂ¡veis simples (strings, nÃƒÂºmeros, etc) antes de objetos
+    Object.keys(variables).forEach((key) => {
+      const value = variables[key];
+      
+      // Processar apenas valores simples (nÃƒÂ£o objetos ou arrays)
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        const stringValue = value !== null && value !== undefined ? String(value) : '';
+        // Escapar caracteres especiais na chave
+        const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g');
+        const beforeReplace = processed;
+        const matches = processed.match(regex);
+        if (matches && matches.length > 0) {
+          processed = processed.replace(regex, stringValue);
+          if (beforeReplace !== processed) {
+            varChanged = true;
+            if (key === 'review_link') {
+              console.log('Ã¢Å“â€¦ review_link substituÃƒÂ­do no loop simples:', {
+                matches: matches.length,
+                value: stringValue,
+              });
+            }
+          }
+        }
+      }
+    });
+    
+    // Depois processar objetos e arrays (variÃƒÂ¡veis aninhadas)
+    Object.keys(variables).forEach((key) => {
+      const value = variables[key];
+    
+      // Processar objetos e arrays (variÃƒÂ¡veis aninhadas)
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // Processar propriedades do objeto como variÃƒÂ¡veis aninhadas
+      Object.keys(value).forEach((prop) => {
+        const nestedPath = `${key}.${prop}`;
+        const nestedValue = value[prop];
+        const stringValue = nestedValue !== null && nestedValue !== undefined ? String(nestedValue) : '';
+        const regex = new RegExp(`\\{\\{${nestedPath.replace(/\./g, '\\.')}\\}\\}`, 'g');
+          if (regex.test(processed)) {
+        processed = processed.replace(regex, stringValue);
+            varChanged = true;
+          }
+      });
+    } else {
+      // Esta parte jÃƒÂ¡ foi processada acima, mas manter para compatibilidade
+      // Converter para string, tratando null/undefined como string vazia
+      const stringValue = value !== null && value !== undefined ? String(value) : '';
+        // Usar replace global para substituir todas as ocorrÃƒÂªncias
+      // Escapar caracteres especiais na chave (como underscore, que ÃƒÂ© vÃƒÂ¡lido em regex)
+      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g');
+        const beforeReplace = processed;
+      const matches = processed.match(regex);
+      if (matches && matches.length > 0) {
+        console.log(`Ã°Å¸â€Â Substituindo variÃƒÂ¡vel ${key}:`, {
+          matches: matches.length,
+          value: stringValue,
+          key,
+          escapedKey,
+        });
+      }
+      processed = processed.replace(regex, stringValue);
+        if (beforeReplace !== processed) {
+          varChanged = true;
+          if (key === 'review_link') {
+            console.log('Ã¢Å“â€¦ review_link substituÃƒÂ­do:', {
+              before: beforeReplace.includes('{{review_link}}'),
+              after: processed.includes('{{review_link}}'),
+              value: stringValue,
+            });
+          }
+        } else if (key === 'review_link' && processed.includes('{{review_link}}')) {
+          console.warn('Ã¢Å¡Â Ã¯Â¸Â review_link NÃƒÆ’O foi substituÃƒÂ­do:', {
+            key,
+            escapedKey,
+            regex: regex.toString(),
+            value: stringValue,
+            templateHasPlaceholder: processed.includes('{{review_link}}'),
+          });
+        }
+    }
+  });
+  }
+  
+  // Log de debug para variÃƒÂ¡veis nÃƒÂ£o substituÃƒÂ­das (apenas em desenvolvimento)
+  // Deno Edge pode definir `window` sem `location` — usar optional chaining.
+  if (typeof window !== "undefined" && window.location?.hostname === "localhost") {
+    const remainingVars = processed.match(/\{\{[\w.]+(?:\.[\w.]+)*\}\}/g);
+    if (remainingVars && remainingVars.length > 0) {
+      console.log('Ã¢Å¡Â Ã¯Â¸Â VariÃƒÂ¡veis nÃƒÂ£o substituÃƒÂ­das no template:', remainingVars);
+      console.log('Ã°Å¸â€œâ€¹ VariÃƒÂ¡veis disponÃƒÂ­veis:', Object.keys(variables));
+      console.log('Ã°Å¸â€Â Verificando review_link:', {
+        hasReviewLink: 'review_link' in variables,
+        reviewLinkValue: variables.review_link,
+        reviewLinkType: typeof variables.review_link,
+      });
+    }
+  }
+
+  return processed;
+}
+
+/**
+ * Processa condicionais no formato {{#if variable}}...{{/if}}
+ * Remove blocos onde a variÃƒÂ¡vel ÃƒÂ© falsy (null, undefined, '', 0, false)
+ * Suporta condicionais aninhados
+ */
+function processConditionals(template: string, variables: TemplateVariables): string {
+  let processed = template;
+  
+  // Encontrar todos os blocos condicionais, lidando com aninhamento
+  // Usar uma abordagem iterativa que processa de dentro para fora
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = 100; // Prevenir loop infinito
+  
+  while (changed && iterations < maxIterations) {
+    iterations++;
+    changed = false;
+    
+    // Regex para encontrar blocos {{#if variable}}...{{/if}}
+    // Suporta variÃƒÂ¡veis aninhadas (ex: {{#if main_guest.name}})
+    const ifRegex = /\{\{#if\s+(\w+(?:\.\w+)*)\}\}/g;
+    let match;
+    let lastIndex = 0;
+    
+    while ((match = ifRegex.exec(processed)) !== null) {
+      const startIndex = match.index;
+      const variableName = match[1];
+      const startTag = match[0];
+      
+      // Encontrar o {{/if}} correspondente, contando aninhamentos
+      let depth = 1;
+      let searchIndex = startIndex + startTag.length;
+      
+      while (depth > 0 && searchIndex < processed.length) {
+        const nextIf = processed.indexOf('{{#if', searchIndex);
+        const nextEndIf = processed.indexOf('{{/if}}', searchIndex);
+        const nextElse = processed.indexOf('{{else}}', searchIndex);
+        
+        if (nextEndIf === -1) {
+          // NÃƒÂ£o encontrou fechamento, sair
+          break;
+        }
+        
+        // Verificar se hÃƒÂ¡ um {{else}} antes do prÃƒÂ³ximo {{#if}} ou {{/if}}
+        // Se houver um {{else}} no mesmo nÃƒÂ­vel (depth === 1), ele pertence ao bloco atual
+        // Se houver um {{#if}} antes do {{else}}, incrementar depth
+        if (nextIf !== -1 && nextIf < nextEndIf && (nextElse === -1 || nextIf < nextElse)) {
+          // Encontrou um {{#if}} antes do {{/if}}, incrementar profundidade
+          depth++;
+          searchIndex = nextIf + 5; // AvanÃƒÂ§ar apÃƒÂ³s {{#if
+        } else {
+          // Encontrou um {{/if}}
+          depth--;
+          if (depth === 0) {
+            // Este ÃƒÂ© o {{/if}} correspondente
+            const endIndex = nextEndIf + 7; // {{/if}} tem 7 caracteres
+            const fullMatch = processed.substring(startIndex, endIndex);
+            const content = processed.substring(startIndex + startTag.length, nextEndIf);
+            
+            // Verificar se hÃƒÂ¡ um {{else}} dentro do conteÃƒÂºdo
+            // Precisamos encontrar o {{else}} que pertence a este bloco (nÃƒÂ£o aos aninhados)
+            let elseIndex = -1;
+            let elseDepth = 0;
+            let searchElseIndex = 0;
+            
+            while (searchElseIndex < content.length) {
+              const nextIfInContent = content.indexOf('{{#if', searchElseIndex);
+              const nextElseInContent = content.indexOf('{{else}}', searchElseIndex);
+              const nextEndIfInContent = content.indexOf('{{/if}}', searchElseIndex);
+              
+              // Encontrar qual tag vem primeiro
+              const positions = [];
+              if (nextIfInContent !== -1) positions.push({ type: 'if', pos: nextIfInContent });
+              if (nextElseInContent !== -1) positions.push({ type: 'else', pos: nextElseInContent });
+              if (nextEndIfInContent !== -1) positions.push({ type: 'endif', pos: nextEndIfInContent });
+              
+              if (positions.length === 0) {
+                break; // NÃƒÂ£o hÃƒÂ¡ mais tags
+              }
+              
+              // Ordenar por posiÃƒÂ§ÃƒÂ£o
+              positions.sort((a, b) => a.pos - b.pos);
+              const nextTag = positions[0];
+              
+              // Se encontramos um {{else}} no nÃƒÂ­vel 0 (sem blocos aninhados abertos), ele pertence ao bloco atual
+              if (nextTag.type === 'else' && elseDepth === 0) {
+                elseIndex = nextTag.pos;
+                break;
+              }
+              
+              // Ajustar depth para rastrear blocos aninhados
+              if (nextTag.type === 'if') {
+                elseDepth++;
+                searchElseIndex = nextTag.pos + 5;
+              } else if (nextTag.type === 'endif') {
+                elseDepth--;
+                searchElseIndex = nextTag.pos + 7;
+              } else if (nextTag.type === 'else') {
+                // {{else}} dentro de um bloco aninhado, ignorar
+                searchElseIndex = nextTag.pos + 8;
+              } else {
+                break;
+              }
+            }
+            
+            let ifContent = content;
+            let elseContent = '';
+            
+            if (elseIndex !== -1) {
+              // Separar conteÃƒÂºdo do if e do else
+              ifContent = content.substring(0, elseIndex);
+              elseContent = content.substring(elseIndex + 8); // {{else}} tem 8 caracteres
+              
+              // Processar condicionais recursivamente no conteÃƒÂºdo do else
+              // Fazer mÃƒÂºltiplas passadas para garantir que todas as condicionais sejam processadas
+              let elseProcessed = elseContent;
+              let elseChanged = true;
+              let elseIterations = 0;
+              while (elseChanged && elseIterations < 10) {
+                elseIterations++;
+                const beforeProcess = elseProcessed;
+                elseProcessed = processConditionals(elseProcessed, variables);
+                elseChanged = beforeProcess !== elseProcessed;
+              }
+              // Limpeza final: remover qualquer {{/if}} que possa ter sobrado
+              // Isso pode acontecer se houver blocos aninhados mal formados
+              elseProcessed = elseProcessed.replace(/\{\{\/if\}\}/g, '');
+              elseContent = elseProcessed;
+            }
+            
+            // Verificar se a variÃƒÂ¡vel existe e ÃƒÂ© truthy
+            // Suportar variÃƒÂ¡veis aninhadas (ex: main_guest.document_number)
+            const value = variableName.includes('.') 
+              ? getNestedValue(variables, variableName)
+              : variables[variableName];
+            
+            // Debug: log para variÃƒÂ¡veis aninhadas problemÃƒÂ¡ticas
+            if (variableName.includes('.') && (value === null || value === undefined)) {
+              console.log(`Ã°Å¸â€Â [Template Debug] VariÃƒÂ¡vel aninhada nÃƒÂ£o encontrada: ${variableName}`, {
+                variableName,
+                path: variableName.split('.'),
+                variablesKeys: Object.keys(variables),
+                mainGuest: variables['main_guest'],
+              });
+            }
+            
+            const isTruthy = value !== null && 
+                             value !== undefined && 
+                             value !== '' && 
+                             value !== 0 && 
+                             value !== false &&
+                             (typeof value === 'string' ? value.trim() !== '' : true);
+            
+            if (isTruthy) {
+              // VariÃƒÂ¡vel ÃƒÂ© truthy: manter o conteÃƒÂºdo do if, remover apenas as tags
+              // Processar condicionais recursivamente no conteÃƒÂºdo do if se necessÃƒÂ¡rio
+              // Fazer mÃƒÂºltiplas passadas para garantir que todas as condicionais sejam processadas
+              let finalIfContent = ifContent;
+              let ifChanged = true;
+              let ifIterations = 0;
+              while (ifChanged && ifIterations < 10) {
+                ifIterations++;
+                const beforeProcess = finalIfContent;
+                finalIfContent = processConditionals(finalIfContent, variables);
+                ifChanged = beforeProcess !== finalIfContent;
+              }
+              // Limpar qualquer {{/if}} solto que possa ter sobrado do processamento recursivo
+              // (isso nÃƒÂ£o deveria acontecer, mas ÃƒÂ© uma seguranÃƒÂ§a)
+              finalIfContent = finalIfContent.replace(/\{\{\/if\}\}/g, '');
+              // Substituir o bloco completo (incluindo {{#if}} e {{/if}}) usando substring
+              processed = processed.substring(0, startIndex) + finalIfContent + processed.substring(endIndex);
+            } else {
+              // VariÃƒÂ¡vel ÃƒÂ© falsy: manter o conteÃƒÂºdo do else (se existir), remover apenas as tags
+              if (elseContent) {
+                // O elseContent jÃƒÂ¡ foi processado recursivamente, entÃƒÂ£o nÃƒÂ£o deve ter {{/if}} soltos
+                // Mas vamos garantir removendo apenas se houver (pode haver casos edge)
+                // IMPORTANTE: NÃƒÂ£o remover {{/if}} que fazem parte de blocos aninhados jÃƒÂ¡ processados
+                // O processamento recursivo jÃƒÂ¡ removeu as tags dos blocos aninhados
+                // Apenas remover se realmente houver {{/if}} solto (nÃƒÂ£o deveria acontecer)
+                let finalElseContent = elseContent;
+                // Verificar se hÃƒÂ¡ {{/if}} que nÃƒÂ£o fazem parte de um bloco vÃƒÂ¡lido
+                // Se o elseContent foi processado recursivamente, nÃƒÂ£o deveria ter {{/if}}
+                // Mas vamos fazer uma limpeza final apenas para garantir
+                finalElseContent = finalElseContent.replace(/\{\{\/if\}\}/g, '');
+                // Substituir o bloco completo (incluindo {{#if}} e {{/if}}) usando substring
+                processed = processed.substring(0, startIndex) + finalElseContent + processed.substring(endIndex);
+              } else {
+                // Sem else: remover todo o bloco (incluindo {{#if}} e {{/if}})
+                processed = processed.substring(0, startIndex) + processed.substring(endIndex);
+              }
+            }
+            
+            changed = true;
+            break; // Processar um bloco por vez
+          } else {
+            searchIndex = nextEndIf + 7;
+          }
+        }
+      }
+      
+      if (changed) {
+        break; // Reiniciar busca apÃƒÂ³s processar um bloco
+      }
+    }
+  }
+  
+  return processed;
+}
+
+
+/** Copiado de stripe-webhook para reutilizaÃ§Ã£o nas Edge Functions. */
+
+/**
+ * Detecta o domÃ­nio base do sistema automaticamente
+ * Detecta automaticamente se estÃ¡ em localhost (desenvolvimento) ou produÃ§Ã£o
+ */
+function detectBaseUrl(req: Request | null = null, supabaseUrl: string | null = null): string {
+  // 1. Tentar variÃƒÂ¡vel de ambiente SITE_URL (prioridade mÃƒÂ¡xima)
+  const siteUrl = Deno.env.get("SITE_URL");
+  if (siteUrl) {
+    console.log(`Ã°Å¸Å’Â [detectBaseUrl] Usando SITE_URL: ${siteUrl}`);
+    return siteUrl;
+  }
+
+  // 2. Verificar variÃƒÂ¡veis de ambiente de plataformas de produÃƒÂ§ÃƒÂ£o
+  // Vercel
+  const vercelUrl = Deno.env.get("VERCEL_URL");
+  if (vercelUrl) {
+    const url = `https://${vercelUrl}`;
+    console.log(`Ã°Å¸Å’Â [detectBaseUrl] Usando VERCEL_URL: ${url}`);
+    return url;
+  }
+
+  // Render
+  const renderUrl = Deno.env.get("RENDER_EXTERNAL_URL");
+  if (renderUrl) {
+    console.log(`Ã°Å¸Å’Â [detectBaseUrl] Usando RENDER_EXTERNAL_URL: ${renderUrl}`);
+    return renderUrl;
+  }
+
+  // Netlify
+  const netlifyUrl = Deno.env.get("URL");
+  if (netlifyUrl) {
+    console.log(`Ã°Å¸Å’Â [detectBaseUrl] Usando Netlify URL: ${netlifyUrl}`);
+    return netlifyUrl;
+  }
+
+  // Railway
+  const railwayUrl = Deno.env.get("RAILWAY_PUBLIC_DOMAIN");
+  if (railwayUrl) {
+    const url = `https://${railwayUrl}`;
+    console.log(`Ã°Å¸Å’Â [detectBaseUrl] Usando RAILWAY_PUBLIC_DOMAIN: ${url}`);
+    return url;
+  }
+
+  // 3. Tentar extrair do header Referer ou Origin se disponÃƒÂ­vel (ÃƒÂºtil para webhooks)
+  if (req) {
+    const referer = req.headers.get("referer");
+    const origin = req.headers.get("origin");
+    
+    if (origin) {
+      try {
+        const url = new URL(origin);
+        // Verificar se nÃƒÂ£o ÃƒÂ© localhost
+        if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
+          console.log(`Ã°Å¸Å’Â [detectBaseUrl] Usando Origin header: ${url.origin}`);
+        return url.origin;
+        }
+      } catch {
+        // Ignorar erro
+      }
+    }
+    
+    if (referer) {
+      try {
+        const url = new URL(referer);
+        // Verificar se nÃƒÂ£o ÃƒÂ© localhost
+        if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
+          console.log(`Ã°Å¸Å’Â [detectBaseUrl] Usando Referer header: ${url.origin}`);
+        return url.origin;
+        }
+      } catch {
+        // Ignorar erro
+      }
+    }
+  }
+
+  // 4. Analisar SUPABASE_URL para detectar ambiente
+  const supabaseUrlEnv = supabaseUrl || Deno.env.get("SUPABASE_URL");
+  if (supabaseUrlEnv) {
+    try {
+      const url = new URL(supabaseUrlEnv);
+      const hostname = url.hostname;
+      
+      // Se for localhost, retornar localhost
+      if (hostname.includes('localhost') || hostname.includes('127.0.0.1')) {
+        console.log(`Ã°Å¸Å’Â [detectBaseUrl] Detectado localhost via SUPABASE_URL: http://localhost:8080`);
+        return "http://localhost:8080";
+      }
+      
+      // Se for um projeto Supabase (.supabase.co), tentar inferir domÃƒÂ­nio de produÃƒÂ§ÃƒÂ£o
+      if (hostname.includes('.supabase.co')) {
+        // Extrair o ID do projeto do hostname
+        // Exemplo: xxxxxx.supabase.co -> pode inferir domÃƒÂ­nio customizado se configurado
+        // Por enquanto, vamos tentar usar variÃƒÂ¡veis de ambiente ou inferir
+        console.log(`Ã°Å¸Å’Â [detectBaseUrl] Detectado Supabase Cloud, tentando inferir domÃƒÂ­nio de produÃƒÂ§ÃƒÂ£o...`);
+      }
+      
+      // Se nÃƒÂ£o for um domÃƒÂ­nio .supabase.co, pode ser um domÃƒÂ­nio customizado
+      if (!hostname.includes('.supabase.co')) {
+        // Tentar inferir removendo subdomÃƒÂ­nios como 'api', 'app', etc.
+        const parts = hostname.split('.');
+        if (parts.length > 2) {
+          // Remover subdomÃƒÂ­nios como 'api', 'app', etc.
+          const domain = parts.slice(-2).join('.');
+          const inferredUrl = `${url.protocol}//${domain}`;
+          console.log(`Ã°Å¸Å’Â [detectBaseUrl] DomÃƒÂ­nio customizado inferido: ${inferredUrl}`);
+          return inferredUrl;
+        } else {
+          // Se for um domÃƒÂ­nio direto, usar como estÃƒÂ¡
+          const directUrl = `${url.protocol}//${hostname}`;
+          console.log(`Ã°Å¸Å’Â [detectBaseUrl] Usando domÃƒÂ­nio direto do SUPABASE_URL: ${directUrl}`);
+          return directUrl;
+        }
+      }
+    } catch {
+      // Ignorar erro
+    }
+  }
+
+  // 5. Verificar variÃƒÂ¡vel de ambiente de ambiente (NODE_ENV, DENO_ENV, etc.)
+  const env = Deno.env.get("ENVIRONMENT") || Deno.env.get("NODE_ENV") || Deno.env.get("DENO_ENV");
+  if (env === "production" || env === "prod") {
+    // Em produÃƒÂ§ÃƒÂ£o, tentar usar o SUPABASE_URL como base
+    if (supabaseUrlEnv) {
+      try {
+        const url = new URL(supabaseUrlEnv);
+        // Se nÃƒÂ£o for localhost, tentar inferir
+        if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
+          console.log(`Ã°Å¸Å’Â [detectBaseUrl] Ambiente de produÃƒÂ§ÃƒÂ£o detectado, usando SUPABASE_URL como base`);
+          // Retornar apenas o protocolo e hostname (sem path)
+          return `${url.protocol}//${url.hostname}`;
+        }
+      } catch {
+        // Ignorar erro
+      }
+    }
+  }
+
+  // 6. ÃƒÅ¡ltimo fallback: detectar baseado no SUPABASE_URL
+  // Se SUPABASE_URL contÃƒÂ©m localhost, usar localhost
+  if (supabaseUrlEnv && (supabaseUrlEnv.includes('localhost') || supabaseUrlEnv.includes('127.0.0.1'))) {
+    console.log(`Ã°Å¸Å’Â [detectBaseUrl] Fallback: Detectado localhost, usando http://localhost:8080`);
+    return "http://localhost:8080";
+  }
+
+  // 7. Se chegou aqui e nÃƒÂ£o ÃƒÂ© localhost, tentar inferir domÃƒÂ­nio de produÃƒÂ§ÃƒÂ£o
+  // Por padrÃƒÂ£o, se nÃƒÂ£o conseguir detectar, usar localhost (mais seguro para desenvolvimento)
+  console.log(`Ã°Å¸Å’Â [detectBaseUrl] Fallback final: Usando localhost (desenvolvimento)`);
+  return "http://localhost:8080";
+}
+
+
+const SITE_SETTINGS_FEATURE_ROW = "00000000-0000-0000-0000-000000000001";
+
+function isFeatureEnabledForEstablishment(
+  featureConfig: unknown,
+  establishmentId: string,
+): boolean {
+  if (!establishmentId) return false;
+  if (typeof featureConfig === "boolean") return featureConfig;
+  if (typeof featureConfig === "object" && featureConfig !== null) {
+    const o = featureConfig as Record<string, unknown>;
+    if (o.enabled !== true) return false;
+    if (!o.establishment_ids || !Array.isArray(o.establishment_ids)) return true;
+    return (o.establishment_ids as string[]).includes(establishmentId);
+  }
+  return false;
+}
+
+function otaGuestEmailFromReservation(reservation: Record<string, unknown>): string | null {
+  const ota = reservation?.ota_reservations;
+  const row = Array.isArray(ota) ? ota[0] : ota;
+  const e = (row as Record<string, unknown> | undefined)?.ota_guest_email;
+  return e != null && String(e).trim() !== "" ? String(e).trim() : null;
+}
+
+function otaGuestNameFromReservation(reservation: Record<string, unknown>): string | null {
+  const ota = reservation?.ota_reservations;
+  const row = Array.isArray(ota) ? ota[0] : ota;
+  const n = (row as Record<string, unknown> | undefined)?.ota_guest_name;
+  if (n != null && String(n).trim() !== "") return String(n).trim();
+  const gn = reservation?.guest_name;
+  return gn != null && String(gn).trim() !== "" ? String(gn).trim() : null;
+}
+
+function pickEmailTemplateForEstablishment(
+  allTemplates: any[] | null,
+  establishmentId: string,
+): any | null {
+  if (!allTemplates?.length) return null;
+  for (const template of allTemplates) {
+    const establishmentIds = template.establishment_ids;
+    if (establishmentIds === null || establishmentIds === undefined) return template;
+    if (Array.isArray(establishmentIds) && establishmentIds.length === 0) continue;
+    if (Array.isArray(establishmentIds) && establishmentIds.includes(establishmentId)) {
+      return template;
+    }
+    try {
+      const parsed = typeof establishmentIds === "string" ? JSON.parse(establishmentIds) : establishmentIds;
+      if (Array.isArray(parsed)) {
+        if (parsed.length === 0) continue;
+        if (parsed.includes(establishmentId)) return template;
+      }
+    } catch {
+      return template;
+    }
+  }
+  return null;
+}
+
+function formatDatePt(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  try {
+    return new Date(dateStr).toLocaleDateString("pt-BR");
+  } catch {
+    return "";
+  }
+}
+
+async function ensureWebCheckinRow(
+  supabase: SupabaseClient,
+  reservation: Record<string, unknown>,
+  establishmentId: string,
+): Promise<void> {
+  const rid = reservation.id as string;
+  const { data: existing } = await supabase
+    .from("web_checkin")
+    .select("id")
+    .eq("reservation_id", rid)
+    .maybeSingle();
+  if (existing?.id) return;
+
+  const code = reservation.reservation_code as string | null | undefined;
+  if (!code) return;
+
+  const payload = `${rid}:${code}:${Date.now()}`;
+  const token = btoa(payload).replace(/[^a-zA-Z0-9]/g, "").substring(0, 64);
+  const checkinDateObj = reservation.checkin_date ? new Date(reservation.checkin_date as string) : new Date();
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7);
+  if (checkinDateObj < expiresAt) expiresAt.setTime(checkinDateObj.getTime());
+
+  await supabase.from("web_checkin").insert({
+    reservation_id: rid,
+    establishment_id: establishmentId,
+    token,
+    locator: code,
+    expires_at: expiresAt.toISOString(),
+    status: "pending",
+  });
+}
+
+async function fetchReservationFull(
+  supabase: SupabaseClient,
+  reservationId: string,
+): Promise<any | null> {
+  const select = `
+    *,
+    financial_responsible:clients!client_id(*),
+    guest:clients!guest_id(*),
+    rooms (id, room_number, name, fixed_password),
+    room_categories (id, name, description, building_id),
+    reservation_service_fees (amount, quantity),
+    ota_reservations(ota_guest_email, ota_guest_name)
+  `;
+  const first = await supabase.from("reservations").select(select).eq("id", reservationId).maybeSingle();
+  let data = first.data;
+  if (first.error || !data) return null;
+  if (!data.reservation_code) {
+    await new Promise((r) => setTimeout(r, 300));
+    const second = await supabase.from("reservations").select(select).eq("id", reservationId).maybeSingle();
+    if (second.data) data = second.data;
+  }
+  return data;
+}
+
+function resolvePoliciesLink(
+  hotelSettings: any,
+  siteSettings: any,
+  reservation: any,
+  baseUrl: string,
+): string {
+  const buildingId = reservation.room_categories?.building_id ?? null;
+  const establishmentId = reservation.establishment_id ?? hotelSettings?.establishment_id;
+  const id = buildingId ?? establishmentId;
+  const type: "building" | "establishment" = buildingId ? "building" : "establishment";
+  if (!id) return "";
+  try {
+    const token = btoa(`${type}:${id}`);
+    const hotelName = hotelSettings?.name || "hotel";
+    const slug = hotelName
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return `${baseUrl}/policies/${slug}/${token}`;
+  } catch {
+    return "";
+  }
+}
+
+function resolveLogoUrls(
+  supabase: SupabaseClient,
+  hotelSettings: any,
+  siteSettings: any,
+): { logoUrl: string; hotelLogo: string } {
+  let logoUrl = siteSettings?.logo_url || hotelSettings?.logo_url || "";
+  let hotelLogo = hotelSettings?.logo_url || "";
+
+  const tryPublic = (raw: string): string => {
+    if (!raw || raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+    const buckets = ["hotel-assets", "uploads", "hotel-logos"];
+    for (const bucket of buckets) {
+      try {
+        let filePath = raw;
+        if (bucket === "hotel-assets" && !filePath.startsWith("hotel/") && !filePath.includes("/")) {
+          filePath = `hotel/${filePath}`;
+        }
+        if (filePath.includes("/storage/v1/object/public/")) {
+          const m = filePath.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
+          if (m?.[1]) filePath = m[1];
+        }
+        const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+        if (data?.publicUrl?.startsWith("http")) return data.publicUrl;
+      } catch {
+        /* next bucket */
+      }
+    }
+    return raw;
+  };
+
+  if (logoUrl) logoUrl = tryPublic(logoUrl);
+  if (hotelLogo) hotelLogo = tryPublic(hotelLogo);
+  return { logoUrl: logoUrl || "", hotelLogo: hotelLogo || "" };
+}
+
+async function buildVariables(
+  supabase: SupabaseClient,
+  reservation: any,
+  hotelSettings: any,
+  siteSettings: any,
+  baseUrl: string,
+  eventType: "reservation.created" | "payment.confirmed",
+): Promise<TemplateVariables> {
+  const checkinDate = formatDatePt(reservation.checkin_date);
+  const checkoutDate = formatDatePt(reservation.checkout_date);
+  const checkinTimeRaw =
+    reservation.checkin_time || hotelSettings?.checkin_time || hotelSettings?.default_checkin_time || "14:00";
+  const checkoutTimeRaw =
+    reservation.checkout_time || hotelSettings?.checkout_time || hotelSettings?.default_checkout_time || "12:00";
+  const checkinTime =
+    typeof checkinTimeRaw === "string" && checkinTimeRaw.includes(":")
+      ? checkinTimeRaw.substring(0, 5)
+      : checkinTimeRaw;
+  const checkoutTime =
+    typeof checkoutTimeRaw === "string" && checkoutTimeRaw.includes(":")
+      ? checkoutTimeRaw.substring(0, 5)
+      : checkoutTimeRaw;
+
+  const addressParts: string[] = [];
+  if (hotelSettings?.street) {
+    let streetLine = hotelSettings.street;
+    if (hotelSettings.number) streetLine += `, ${hotelSettings.number}`;
+    addressParts.push(streetLine);
+  }
+  if (hotelSettings?.neighborhood) addressParts.push(hotelSettings.neighborhood);
+  if (hotelSettings?.city) {
+    let cityLine = hotelSettings.city;
+    if (hotelSettings.state) cityLine += ` - ${hotelSettings.state}`;
+    if (hotelSettings.zip_code) cityLine += ` - CEP: ${hotelSettings.zip_code}`;
+    addressParts.push(cityLine);
+  }
+  const hotelAddress =
+    addressParts.length > 0
+      ? addressParts.join(", ")
+      : hotelSettings?.street
+        ? `${hotelSettings.street}, ${hotelSettings.city || ""}`
+        : "";
+
+  const hotelPhone =
+    hotelSettings?.phone_ddi && hotelSettings?.phone_number
+      ? `${hotelSettings.phone_ddi} ${hotelSettings.phone_number}`
+      : hotelSettings?.phone_number || hotelSettings?.phone || "";
+
+  const hotelWhatsApp =
+    hotelSettings?.whatsapp ||
+    (hotelSettings?.whatsapp_ddi && hotelSettings?.whatsapp_number
+      ? `${hotelSettings.whatsapp_ddi} ${hotelSettings.whatsapp_number}`
+      : hotelSettings?.whatsapp_number || "");
+
+  const policiesLink = resolvePoliciesLink(hotelSettings, siteSettings, reservation, baseUrl);
+
+  let webCheckinLink = "";
+  const { data: wc } = await supabase
+    .from("web_checkin")
+    .select("locator")
+    .eq("reservation_id", reservation.id)
+    .maybeSingle();
+  if (wc?.locator) webCheckinLink = `${baseUrl}/web-checkin/${wc.locator}`;
+  else if (reservation.reservation_code) {
+    webCheckinLink = `${baseUrl}/web-checkin/${reservation.reservation_code}`;
+  }
+
+  const { logoUrl, hotelLogo } = resolveLogoUrls(supabase, hotelSettings, siteSettings);
+
+  const guestName =
+    reservation.guest?.full_name ||
+    reservation.financial_responsible?.full_name ||
+    otaGuestNameFromReservation(reservation) ||
+    reservation.guest_name ||
+    "Hóspede";
+
+  const paymentLabel =
+    eventType === "payment.confirmed" || reservation.payment_status === "paid" ? "Pago" : "Pendente";
+
+  const baseTotalAmount = Number(reservation.total_amount || 0);
+  const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce(
+    (sum: number, fee: { amount?: unknown; quantity?: unknown }) =>
+      sum + Number(fee.amount || 0) * Number(fee.quantity || 1),
+    0,
+  );
+  const totalWithFees = baseTotalAmount + serviceFeesTotal;
+  const paidNum = Number(reservation.paid_amount || 0);
+
+  const idRaw = reservation.identification_number;
+  const identification_number =
+    idRaw != null && String(idRaw).trim() !== ""
+      ? `#${String(idRaw).trim()}`
+      : reservation.reservation_code || "";
+
+  const vars: TemplateVariables = {
+    guest_name: guestName,
+    reservation_code: reservation.reservation_code || "",
+    identification_number,
+    checkin_date: checkinDate,
+    checkout_date: checkoutDate,
+    checkin_time: checkinTime,
+    checkout_time: checkoutTime,
+    total_amount: totalWithFees.toFixed(2).replace(".", ","),
+    paid_amount: paidNum.toFixed(2).replace(".", ","),
+    payment_status: paymentLabel,
+    room_number: reservation.rooms?.room_number || "",
+    room_name: reservation.rooms?.name || "",
+    room_password: reservation.rooms?.fixed_password || "",
+    room_category: reservation.room_categories?.name || "",
+    category_name: reservation.room_categories?.name || "",
+    adults: reservation.adults || 0,
+    children: reservation.children || 0,
+    hotel_name: hotelSettings?.name || "",
+    hotel_address: hotelAddress,
+    hotel_contact: hotelPhone,
+    hotel_email: hotelSettings?.email || "",
+    hotel_phone: hotelPhone,
+    hotel_whatsapp: hotelWhatsApp,
+    hotel_website: hotelSettings?.website || "",
+    hotel_policies: hotelSettings?.policies || "",
+    policies_link: policiesLink,
+    web_checkin_link: webCheckinLink,
+    logo_url: logoUrl,
+    hotel_logo: hotelLogo,
+    payment_link: "",
+  };
+
+  return vars;
+}
+
+async function dispatchQueuedEmail(
+  supabase: SupabaseClient,
+  queueId: string,
+  emailSettings: any,
+  logPrefix: string,
+): Promise<void> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+  const { data: queueItem, error: fetchError } = await supabase
+    .from("email_queue")
+    .select("*")
+    .eq("id", queueId)
+    .maybeSingle();
+
+  if (fetchError || !queueItem) {
+    console.warn(`${logPrefix}: fila email â€” item não encontrado`, queueId);
+    return;
+  }
+
+  await supabase.from("email_queue").update({ status: "sending" }).eq("id", queueId);
+
+  const fail = async (msg: string) => {
+    await supabase
+      .from("email_queue")
+      .update({ status: "pending", error_message: msg.substring(0, 500) })
+      .eq("id", queueId);
+  };
+
+  try {
+    if (emailSettings.provider === "smtp") {
+      const smtpResponse = await fetch(`${supabaseUrl}/functions/v1/send-email-smtp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({
+          to: queueItem.recipient_email,
+          to_name: queueItem.recipient_name,
+          from: emailSettings.sender_email,
+          from_name: emailSettings.sender_name,
+          reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+          subject: queueItem.subject,
+          html: queueItem.body_html,
+          text: queueItem.body_text || "",
+          smtp_config: {
+            host: emailSettings.smtp_host,
+            port: emailSettings.smtp_port || 587,
+            secure: emailSettings.smtp_secure || false,
+            auth: { user: emailSettings.smtp_username, pass: emailSettings.smtp_password },
+          },
+        }),
+      });
+      if (smtpResponse.ok) {
+        await supabase
+          .from("email_queue")
+          .update({ status: "sent", sent_at: new Date().toISOString() })
+          .eq("id", queueId);
+      } else {
+        await fail(await smtpResponse.text());
+      }
+      return;
+    }
+
+    if (emailSettings.provider === "resend") {
+      const res = await fetch(`${supabaseUrl}/functions/v1/send-email-resend`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({
+          to: queueItem.recipient_email,
+          to_name: queueItem.recipient_name,
+          from: emailSettings.sender_email,
+          from_name: emailSettings.sender_name,
+          reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+          subject: queueItem.subject,
+          html: queueItem.body_html,
+          text: queueItem.body_text || "",
+          api_key: emailSettings.api_key || "",
+        }),
+      });
+      if (res.ok) {
+        await supabase
+          .from("email_queue")
+          .update({ status: "sent", sent_at: new Date().toISOString() })
+          .eq("id", queueId);
+      } else {
+        await fail(await res.text());
+      }
+      return;
+    }
+
+    if (emailSettings.provider === "sendgrid") {
+      const res = await fetch(`${supabaseUrl}/functions/v1/send-email-sendgrid`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({
+          to: queueItem.recipient_email,
+          to_name: queueItem.recipient_name,
+          from: emailSettings.sender_email,
+          from_name: emailSettings.sender_name,
+          reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+          subject: queueItem.subject,
+          html: queueItem.body_html,
+          text: queueItem.body_text || "",
+          api_key: emailSettings.api_key || "",
+        }),
+      });
+      if (res.ok) {
+        await supabase
+          .from("email_queue")
+          .update({ status: "sent", sent_at: new Date().toISOString() })
+          .eq("id", queueId);
+      } else {
+        await fail(await res.text());
+      }
+    }
+  } catch (e) {
+    console.warn(`${logPrefix}: erro ao enviar fila`, e);
+    await fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function queueAndMaybeSend(
+  supabase: SupabaseClient,
+  args: {
+    template: any;
+    eventType: string;
+    recipientEmail: string;
+    recipientName: string;
+    subject: string;
+    bodyHtml: string;
+    variables: TemplateVariables;
+    reservationId: string;
+    emailSettings: any;
+    logPrefix: string;
+  },
+): Promise<void> {
+  const cc = args.template.cc_emails?.trim() || null;
+  const bcc = args.template.bcc_emails?.trim() || null;
+
+  const { data: queueId, error: queueError } = await supabase.rpc("insert_email_queue", {
+    p_template_id: args.template.id,
+    p_event_type: args.eventType,
+    p_recipient_email: args.recipientEmail,
+    p_recipient_name: args.recipientName || "",
+    p_subject: args.subject,
+    p_body_html: args.bodyHtml,
+    p_reservation_id: args.reservationId,
+    p_variables: args.variables,
+    p_priority: 1,
+    p_cc_emails: cc,
+    p_bcc_emails: bcc,
+  });
+
+  if (queueError || !queueId) {
+    console.warn(`${args.logPrefix}: insert_email_queue`, queueError);
+    const { data: inserted, error: insErr } = await supabase
+      .from("email_queue")
+      .insert({
+        template_id: args.template.id,
+        event_type: args.eventType,
+        recipient_email: args.recipientEmail,
+        recipient_name: args.recipientName,
+        subject: args.subject,
+        body_html: args.bodyHtml,
+        reservation_id: args.reservationId,
+        variables: args.variables,
+        priority: 1,
+        status: "pending",
+        cc_emails: cc,
+        bcc_emails: bcc,
+      })
+      .select("id")
+      .single();
+    if (insErr || !inserted?.id) {
+      console.warn(`${args.logPrefix}: insert direto email_queue`, insErr);
+      return;
+    }
+    await dispatchQueuedEmail(supabase, inserted.id as string, args.emailSettings, args.logPrefix);
+    return;
+  }
+
+  await dispatchQueuedEmail(supabase, queueId as string, args.emailSettings, args.logPrefix);
+}
+
+/**
+ * Enfileira (e tenta enviar) e-mail de reserva criada ou pagamento confirmado para reservas OTA.
+ */
+async function notifyGuestAfterOtaReservationBooked(
+  supabase: SupabaseClient,
+  reservationId: string,
+  options?: { request?: Request | null; logPrefix?: string },
+): Promise<void> {
+  const logPrefix = options?.logPrefix ?? "ota-reservation-email";
+  const req = options?.request ?? null;
+
+  try {
+    const reservation = await fetchReservationFull(supabase, reservationId);
+    if (!reservation) {
+      console.warn(`${logPrefix}: reserva não encontrada`, reservationId);
+      return;
+    }
+    if (reservation.channel !== "ota") return;
+
+    const establishmentId = reservation.establishment_id as string;
+    if (!establishmentId) return;
+
+    const { data: siteRow } = await supabase
+      .from("site_settings")
+      .select("features_enabled")
+      .eq("id", SITE_SETTINGS_FEATURE_ROW)
+      .maybeSingle();
+
+    if (
+      !isFeatureEnabledForEstablishment(siteRow?.features_enabled?.email, establishmentId)
+    ) {
+      console.warn(`${logPrefix}: e-mail desativado para o estabelecimento`);
+      return;
+    }
+
+    const { data: emailSettings } = await supabase
+      .from("email_settings")
+      .select("*")
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (!emailSettings) {
+      console.warn(`${logPrefix}: email_settings inativo ou ausente`);
+      return;
+    }
+
+    const paid =
+      reservation.payment_status === "paid" ||
+      (Number(reservation.paid_amount || 0) >= Number(reservation.total_amount || 0) &&
+        Number(reservation.total_amount || 0) > 0);
+    const eventType = paid ? "payment.confirmed" : "reservation.created";
+
+    const { data: templates } = await supabase
+      .from("email_templates")
+      .select("*")
+      .eq("event_type", eventType)
+      .eq("is_active", true);
+
+    const template = pickEmailTemplateForEstablishment(templates || [], establishmentId);
+    if (!template) {
+      console.warn(`${logPrefix}: sem template ativo para ${eventType}`);
+      return;
+    }
+
+    const recipientEmail =
+      reservation.guest?.email ||
+      reservation.financial_responsible?.email ||
+      otaGuestEmailFromReservation(reservation);
+    const recipientName =
+      reservation.guest?.full_name ||
+      reservation.financial_responsible?.full_name ||
+      otaGuestNameFromReservation(reservation) ||
+      (reservation.guest_name as string) ||
+      "Hóspede";
+
+    if (!recipientEmail) {
+      console.warn(`${logPrefix}: sem e-mail do hóspede (guest/financeiro/OTA)`);
+      return;
+    }
+
+    const { data: hotelSettings } = await supabase
+      .from("hotel_settings")
+      .select("*")
+      .eq("establishment_id", establishmentId)
+      .maybeSingle();
+
+    const { data: siteSettings } = await supabase
+      .from("site_settings")
+      .select("logo_url, pms_base_url")
+      .maybeSingle();
+
+    await ensureWebCheckinRow(supabase, reservation, establishmentId);
+
+    const refreshed = await fetchReservationFull(supabase, reservationId);
+    const res = refreshed || reservation;
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    let baseUrl = detectBaseUrl(req, supabaseUrl);
+    if (siteSettings?.pms_base_url?.trim()) {
+      const pmsUrl = siteSettings.pms_base_url.trim();
+      try {
+        baseUrl = new URL(
+          pmsUrl.startsWith("http://") || pmsUrl.startsWith("https://") ? pmsUrl : `https://${pmsUrl}`,
+        ).origin;
+      } catch {
+        baseUrl = pmsUrl;
+      }
+    }
+
+    const variables = await buildVariables(
+      supabase,
+      res,
+      hotelSettings,
+      siteSettings,
+      baseUrl,
+      eventType as "reservation.created" | "payment.confirmed",
+    );
+
+    const subject = processTemplate(template.subject || "", variables);
+    const bodyHtml = processTemplate(template.body_html || "", variables);
+
+    const supabaseFunctionsUrl = supabaseUrl.replace(/\/$/, "");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+    if (emailSettings.provider === "resend" || emailSettings.provider === "sendgrid") {
+      const fn = emailSettings.provider === "resend" ? "send-email-resend" : "send-email-sendgrid";
+      try {
+        const direct = await fetch(`${supabaseFunctionsUrl}/functions/v1/${fn}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceKey}`,
+          },
+          body: JSON.stringify({
+            to: recipientEmail,
+            to_name: recipientName,
+            from: emailSettings.sender_email,
+            from_name: emailSettings.sender_name,
+            reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+            subject,
+            html: bodyHtml,
+            text: "",
+            api_key: emailSettings.api_key || "",
+          }),
+        });
+        if (direct.ok) {
+          console.log(`${logPrefix}: enviado diretamente (${fn}) para`, recipientEmail);
+          return;
+        }
+        console.warn(`${logPrefix}: envio direto falhou, usando fila`, await direct.text());
+      } catch (e) {
+        console.warn(`${logPrefix}: envio direto erro, usando fila`, e);
+      }
+    }
+
+    await queueAndMaybeSend(supabase, {
+      template,
+      eventType,
+      recipientEmail,
+      recipientName,
+      subject,
+      bodyHtml,
+      variables,
+      reservationId,
+      emailSettings,
+      logPrefix,
+    });
+  } catch (e) {
+    console.warn(`${logPrefix}: falha geral`, e);
+  }
+}
+
 async function triggerAiosellAvailabilitySync(args: {
   channelId: string;
   establishmentId: string;
@@ -48,7 +1448,7 @@ async function triggerAiosellAvailabilitySync(args: {
         return { ok: false, error: j.error ?? "sync_failed" };
       }
     } catch {
-      /* resposta não JSON */
+      /* resposta nÃ£o JSON */
     }
     return { ok: true, status: r.status };
   } catch (e) {
@@ -72,17 +1472,17 @@ function scheduleAiosellAvailabilitySync(args: {
 }
 
 /**
- * Logs de diagnóstico (Supabase → Edge Functions → aiosell-reservation-webhook → Logs):
- * - `booking_payload_shape` — rooms_count, room_lines (códigos/amount por linha), room0_only_amount
+ * Logs de diagnÃ³stico (Supabase â†’ Edge Functions â†’ aiosell-reservation-webhook â†’ Logs):
+ * - `booking_payload_shape` â€” rooms_count, room_lines (cÃ³digos/amount por linha), room0_only_amount
  * - `multi_room_single_reservation` (warn se rooms_count > 1)
- * - `book_amount_resolution` — total usado no PMS vs amount só em rooms[0]; amount_source_hint
- * Secret opcional: AIOSELL_WEBHOOK_LOG_BODY=1 → JSON do body truncado (~12k chars).
- * Pós-processamento: após sucesso, agenda envio de disponibilidade/tarifas (aiosell-sync). Desativar:
+ * - `book_amount_resolution` â€” total usado no PMS vs amount sÃ³ em rooms[0]; amount_source_hint
+ * Secret opcional: AIOSELL_WEBHOOK_LOG_BODY=1 â†’ JSON do body truncado (~12k chars).
+ * PÃ³s-processamento: apÃ³s sucesso, agenda envio de disponibilidade/tarifas (aiosell-sync). Desativar:
  *   AIOSELL_WEBHOOK_SKIP_POST_SYNC=1 ou AIOSELL_SKIP_POST_INVENTORY_SYNC=1
  * Doc. Aiosell (listagem / fetch reservas): https://support.aiosell.com/portal/en/kb/articles/fetch-reservations-from-aiosell
  *
  * Cancel / modify (CM): mesmo POST; reconhece `status` cancelled|modified, `reservation_id`, `hotel_id`,
- * ou path `…/reservation/cancel` | `…/reservation/modify` (proxy). URL Supabase padrão:
+ * ou path `â€¦/reservation/cancel` | `â€¦/reservation/modify` (proxy). URL Supabase padrÃ£o:
  * `POST /functions/v1/aiosell-reservation-webhook` + JSON com hotelCode/hotel_id e reservation_id.
  */
 
@@ -102,7 +1502,7 @@ function splitAiosellRatePlanCodes(raw: unknown): string[] {
   return out;
 }
 
-/** Reserva Aiosell: `channel_rate_plan_code` pode listar vários códigos CM (vírgula / `;`). */
+/** Reserva Aiosell: `channel_rate_plan_code` pode listar vÃ¡rios cÃ³digos CM (vÃ­rgula / `;`). */
 function channelRateplanMatchesAiosell(stored: unknown, incoming: string | null | undefined): boolean {
   if (incoming == null || !String(incoming).trim()) return true;
   const s = String(stored ?? "").trim();
@@ -112,8 +1512,8 @@ function channelRateplanMatchesAiosell(stored: unknown, incoming: string | null 
 }
 
 /**
- * Aiosell: `pah` true = pagamento no hotel; `pah` false = reserva pré-paga (OTA).
- * Aceita também texto em paymentStatus/segment quando o canal envia "Prepaid".
+ * Aiosell: `pah` true = pagamento no hotel; `pah` false = reserva prÃ©-paga (OTA).
+ * Aceita tambÃ©m texto em paymentStatus/segment quando o canal envia "Prepaid".
  */
 function boolFromUnknown(v: unknown): boolean | undefined {
   if (v === true || v === "true" || v === 1 || v === "1") return true;
@@ -191,7 +1591,7 @@ async function insertAiosellChannelPrepaidPayment(
 ): Promise<{ error: string | null }> {
   if (args.amount <= 0) return { error: null };
 
-  const marker = "Pré-pago via canal OTA (Aiosell)";
+  const marker = "PrÃ©-pago via canal OTA (Aiosell)";
   const { data: existing } = await supabase
     .from("payments")
     .select("id")
@@ -207,7 +1607,7 @@ async function insertAiosellChannelPrepaidPayment(
     args.partnerChannelName ? `canal parceiro: ${args.partnerChannelName}` : null,
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(" Â· ");
 
   const { error } = await supabase.from("payments").insert({
     reservation_id: args.reservationId,
@@ -274,7 +1674,7 @@ function normalizeActionFromLayers(layers: Record<string, unknown>[]): string {
       if (v != null && String(v).length) return String(v).toLowerCase();
     }
   }
-  /** CM/PMS doc.: cancel/modify só com `status` (sem `action`). */
+  /** CM/PMS doc.: cancel/modify sÃ³ com `status` (sem `action`). */
   for (const layer of layers) {
     const s = layer.status;
     if (s == null || s === "") continue;
@@ -357,7 +1757,7 @@ function sanitizeGuestNameBuilt(s: string): string {
 }
 
 /**
- * Documentação Aiosell: `guest.firstName`/`lastName`, `rooms[].guestName`, valores na raiz.
+ * DocumentaÃ§Ã£o Aiosell: `guest.firstName`/`lastName`, `rooms[].guestName`, valores na raiz.
  */
 function buildAiosellGuestName(
   body: Record<string, unknown>,
@@ -430,7 +1830,7 @@ function buildAiosellReservationNotes(
   if (meta.cmBookingId) parts.push(`CM booking: ${meta.cmBookingId}`);
   if (meta.bookedOn) parts.push(`Reservado em: ${meta.bookedOn}`);
   if (meta.specialRequests) parts.push(`Pedidos: ${meta.specialRequests}`);
-  return parts.join(" · ");
+  return parts.join(" Â· ");
 }
 
 function pickCheckIn(room0: Record<string, unknown>, layers: Record<string, unknown>[]): string | undefined {
@@ -493,7 +1893,7 @@ function pickRateplanCode(room0: Record<string, unknown>, layers: Record<string,
   return firstNonEmptyString(layers, keys);
 }
 
-/** Alinha com aiosell-sync (NBSP → espaço, trim) para bater com `aiosell_hotel_code` na BD. */
+/** Alinha com aiosell-sync (NBSP â†’ espaÃ§o, trim) para bater com `aiosell_hotel_code` na BD. */
 function normalizeAiosellCodeInput(s: unknown): string {
   return String(s ?? "")
     .replace(/\u00a0/g, " ")
@@ -518,8 +1918,8 @@ function extractNumberFromAmountLike(v: unknown): number | undefined {
 }
 
 /**
- * Valor monetário só no objeto do quarto (sem cair para body/layers).
- * Útil em logs: se `null` mas o total final > 0, o total veio provavelmente do nível booking.
+ * Valor monetÃ¡rio sÃ³ no objeto do quarto (sem cair para body/layers).
+ * Ãštil em logs: se `null` mas o total final > 0, o total veio provavelmente do nÃ­vel booking.
  */
 function pickTotalAmountFromRoomObjectOnly(room0: Record<string, unknown>): number | null {
   const direct =
@@ -536,7 +1936,7 @@ function pickTotalAmountFromRoomObjectOnly(room0: Record<string, unknown>): numb
   return null;
 }
 
-/** Resumo seguro por quarto para diagnóstico (sem dados pessoais completos). */
+/** Resumo seguro por quarto para diagnÃ³stico (sem dados pessoais completos). */
 function summarizeAiosellRoomLine(
   room: Record<string, unknown>,
   index: number
@@ -601,7 +2001,7 @@ function splitMoneyAcrossParts(total: number, n: number): number[] {
 }
 
 /**
- * Valor por quarto: se cada linha `rooms[]` tiver amount próprio, usa; senão reparte o total do booking.
+ * Valor por quarto: se cada linha `rooms[]` tiver amount prÃ³prio, usa; senÃ£o reparte o total do booking.
  */
 function computePerRoomAmounts(
   rooms: Record<string, unknown>[],
@@ -665,15 +2065,15 @@ function findChannelPricingMapping(
 
 /**
  * Aplica um payload no formato Aiosell -> PMS (book / modify / cancel).
- * Usado pelo webhook e pela sincronização manual/pull.
+ * Usado pelo webhook e pela sincronizaÃ§Ã£o manual/pull.
  *
- * Doc. típica CM: `POST …/reservation/cancel` e `.../reservation/modify` (path) ou o mesmo `status` no JSON.
+ * Doc. tÃ­pica CM: `POST â€¦/reservation/cancel` e `.../reservation/modify` (path) ou o mesmo `status` no JSON.
  */
 async function applyAiosellReservationPayload(
   supabase: SupabaseClient,
   channel: Record<string, unknown>,
   body: Record<string, unknown>,
-  opts?: { logPrefix?: string; requestPathname?: string }
+  opts?: { logPrefix?: string; requestPathname?: string; incomingRequest?: Request | null }
 ): Promise<{ status: number; json: Record<string, unknown> }> {
   const logPrefix = opts?.logPrefix ?? "aiosell-reservation";
 
@@ -719,8 +2119,8 @@ async function applyAiosellReservationPayload(
       mapped_rateplan_code: rateplanCode ?? null,
       doc_hint:
         rooms.length > 1
-          ? "Multi-room: cria uma reserva PMS por entrada em rooms[]; ota_reservation_code = bookingId#0, #1, …; total sem linha repartido."
-          : "Uma linha rooms ou room único; total pode vir do body.",
+          ? "Multi-room: cria uma reserva PMS por entrada em rooms[]; ota_reservation_code = bookingId#0, #1, â€¦; total sem linha repartido."
+          : "Uma linha rooms ou room Ãºnico; total pode vir do body.",
     })
   );
   if (rooms.length > 1) {
@@ -729,7 +2129,7 @@ async function applyAiosellReservationPayload(
       JSON.stringify({
         booking_id: bookingId ?? null,
         rooms_count: rooms.length,
-        message: "Serão criadas N reservas PMS (N = rooms.length), salvo idempotência bookingId#0.",
+        message: "SerÃ£o criadas N reservas PMS (N = rooms.length), salvo idempotÃªncia bookingId#0.",
       })
     );
   }
@@ -744,7 +2144,7 @@ async function applyAiosellReservationPayload(
 
   if (action.includes("cancel")) {
     if (!bookingId) {
-      return { status: 400, json: { success: false, error: "bookingId obrigatório para cancel" } };
+      return { status: 400, json: { success: false, error: "bookingId obrigatÃ³rio para cancel" } };
     }
     const otaRows = await listOtaRowsForAiosellBooking(supabase, channel.id as string, String(bookingId));
     if (otaRows.length === 0) {
@@ -769,10 +2169,10 @@ async function applyAiosellReservationPayload(
 
   if (action.includes("modify") || action.includes("update")) {
     if (!bookingId) {
-      return { status: 400, json: { success: false, error: "bookingId obrigatório para alteração" } };
+      return { status: 400, json: { success: false, error: "bookingId obrigatÃ³rio para alteraÃ§Ã£o" } };
     }
     if (!checkIn || !checkOut) {
-      return { status: 400, json: { success: false, error: "Datas obrigatórias para alteração" } };
+      return { status: 400, json: { success: false, error: "Datas obrigatÃ³rias para alteraÃ§Ã£o" } };
     }
     const otaRows = await listOtaRowsForAiosellBooking(supabase, channel.id as string, String(bookingId));
     if (otaRows.length === 0) {
@@ -858,7 +2258,7 @@ async function applyAiosellReservationPayload(
   // book (default)
   if (!bookingId) {
     console.warn(`${logPrefix} 400: bookingId ausente`, { rootKeys: Object.keys(body) });
-    return { status: 400, json: { success: false, error: "bookingId obrigatório" } };
+    return { status: 400, json: { success: false, error: "bookingId obrigatÃ³rio" } };
   }
   if (!checkIn || !checkOut) {
     console.warn(`${logPrefix} 400: datas ausentes`, {
@@ -866,7 +2266,7 @@ async function applyAiosellReservationPayload(
       hasCheckOut: !!checkOut,
       rootKeys: Object.keys(body),
     });
-    return { status: 400, json: { success: false, error: "checkIn/checkOut obrigatórios" } };
+    return { status: 400, json: { success: false, error: "checkIn/checkOut obrigatÃ³rios" } };
   }
 
   const prepaid = isAiosellPrepaidBooking(layers, body);
@@ -878,7 +2278,7 @@ async function applyAiosellReservationPayload(
     .eq("ota_channel_id", channel.id)
     .eq("is_active", true);
 
-  /** Vários quartos no payload Aiosell: uma reserva PMS por linha em `rooms[]`. */
+  /** VÃ¡rios quartos no payload Aiosell: uma reserva PMS por linha em `rooms[]`. */
   if (rooms.length > 1) {
     const { data: ex0 } = await supabase
       .from("ota_reservations")
@@ -904,7 +2304,7 @@ async function applyAiosellReservationPayload(
       const rpc = pickRateplanCode(rooms[i], layers);
       const mapping = findChannelPricingMapping(rc, rpc, pricingRows || []);
       if (!rc || !mapping?.category_id) {
-        console.warn(`${logPrefix} 400: room/mapeamento (pré-validação)`, {
+        console.warn(`${logPrefix} 400: room/mapeamento (prÃ©-validaÃ§Ã£o)`, {
           index: i,
           roomCode: rc ?? null,
           rateplanCode: rpc ?? null,
@@ -914,8 +2314,8 @@ async function applyAiosellReservationPayload(
           json: {
             success: false,
             error: !rc
-              ? `roomCode obrigatório (quarto ${i + 1})`
-              : `Mapeamento não encontrado para o quarto ${i + 1} (${rc} / ${rpc ?? "—"}). Configure Tarifas por canal.`,
+              ? `roomCode obrigatÃ³rio (quarto ${i + 1})`
+              : `Mapeamento nÃ£o encontrado para o quarto ${i + 1} (${rc} / ${rpc ?? "â€”"}). Configure Tarifas por canal.`,
           },
         };
       }
@@ -960,7 +2360,7 @@ async function applyAiosellReservationPayload(
           ? (room.occupancy as Record<string, unknown>)
           : {};
       const total_i = amounts[i] ?? 0;
-      const roomLabel = ` · Quarto ${i + 1}/${rooms.length} (Aiosell)`;
+      const roomLabel = ` Â· Quarto ${i + 1}/${rooms.length} (Aiosell)`;
       const reservationData: Record<string, unknown> = {
         guest_name: guestName_i,
         adults: Number(room.adults ?? occ.adults ?? body.adults ?? 2),
@@ -971,7 +2371,7 @@ async function applyAiosellReservationPayload(
         status: "pending",
         channel: "ota",
         notes: prepaid
-          ? `${baseNotes}${roomLabel} · Pagamento: pré-pago (OTA)`
+          ? `${baseNotes}${roomLabel} Â· Pagamento: prÃ©-pago (OTA)`
           : `${baseNotes}${roomLabel}`,
         checkin_time: hotelSettings?.checkin_time ?? null,
         checkout_time: hotelSettings?.checkout_time ?? null,
@@ -998,7 +2398,7 @@ async function applyAiosellReservationPayload(
         try {
           resRpc = JSON.parse(rpcResult) as typeof resRpc;
         } catch {
-          return { status: 500, json: { success: false, error: "Resposta RPC inválida" } };
+          return { status: 500, json: { success: false, error: "Resposta RPC invÃ¡lida" } };
         }
       }
       if (!resRpc?.success) {
@@ -1032,7 +2432,7 @@ async function applyAiosellReservationPayload(
       if (otaInsErr) {
         return {
           status: 500,
-          json: { success: false, error: `Reserva criada mas vínculo OTA falhou: ${otaInsErr.message}` },
+          json: { success: false, error: `Reserva criada mas vÃ­nculo OTA falhou: ${otaInsErr.message}` },
         };
       }
 
@@ -1047,6 +2447,15 @@ async function applyAiosellReservationPayload(
         if (payErr.error) {
           console.warn(`${logPrefix} prepaid payment insert`, payErr.error);
         }
+      }
+
+      try {
+        await notifyGuestAfterOtaReservationBooked(supabase, rid, {
+          request: opts?.incomingRequest ?? null,
+          logPrefix,
+        });
+      } catch (e) {
+        console.warn(`${logPrefix} guest notification email`, e);
       }
     }
 
@@ -1066,7 +2475,7 @@ async function applyAiosellReservationPayload(
 
   if (!roomCode) {
     console.warn(`${logPrefix} 400: roomCode ausente`, { rootKeys: Object.keys(body) });
-    return { status: 400, json: { success: false, error: "roomCode obrigatório" } };
+    return { status: 400, json: { success: false, error: "roomCode obrigatÃ³rio" } };
   }
 
   const { data: existingOta } = await supabase
@@ -1100,7 +2509,7 @@ async function applyAiosellReservationPayload(
       json: {
         success: false,
         error:
-          "Mapeamento não encontrado: configure Tarifa por Canal com Room Code / Rate Plan Code para este canal Aiosell",
+          "Mapeamento nÃ£o encontrado: configure Tarifa por Canal com Room Code / Rate Plan Code para este canal Aiosell",
       },
     };
   }
@@ -1141,7 +2550,7 @@ async function applyAiosellReservationPayload(
     payment_status: prepaid && total > 0 ? "paid" : "pending",
     status: "pending",
     channel: "ota",
-    notes: prepaid ? `${baseNotes} · Pagamento: pré-pago (OTA)` : baseNotes,
+    notes: prepaid ? `${baseNotes} Â· Pagamento: prÃ©-pago (OTA)` : baseNotes,
     checkin_time: hotelSettings?.checkin_time ?? null,
     checkout_time: hotelSettings?.checkout_time ?? null,
   };
@@ -1168,7 +2577,7 @@ async function applyAiosellReservationPayload(
     try {
       res = JSON.parse(rpcResult) as typeof res;
     } catch {
-      return { status: 500, json: { success: false, error: "Resposta RPC inválida" } };
+      return { status: 500, json: { success: false, error: "Resposta RPC invÃ¡lida" } };
     }
   }
   if (!res?.success) {
@@ -1199,7 +2608,7 @@ async function applyAiosellReservationPayload(
   if (otaInsErr) {
     return {
       status: 500,
-      json: { success: false, error: `Reserva criada mas vínculo OTA falhou: ${otaInsErr.message}` },
+      json: { success: false, error: `Reserva criada mas vÃ­nculo OTA falhou: ${otaInsErr.message}` },
     };
   }
 
@@ -1214,6 +2623,15 @@ async function applyAiosellReservationPayload(
     if (payErr.error) {
       console.warn(`${logPrefix} prepaid payment insert`, payErr.error);
     }
+  }
+
+  try {
+    await notifyGuestAfterOtaReservationBooked(supabase, rid, {
+      request: opts?.incomingRequest ?? null,
+      logPrefix,
+    });
+  } catch (e) {
+    console.warn(`${logPrefix} guest notification email`, e);
   }
 
   return {
@@ -1271,7 +2689,7 @@ function parseBearerOrTokenAuth(header: string | null): string | null {
   return parseBearerToken(header) || parseTokenScheme(header);
 }
 
-/** Formato típico de JWT (anon Supabase, etc.) — não usar como "password" do canal. */
+/** Formato tÃ­pico de JWT (anon Supabase, etc.) â€” nÃ£o usar como "password" do canal. */
 function looksLikeJwt(token: string): boolean {
   const t = token.trim();
   if (!t.startsWith("eyJ")) return false;
@@ -1279,7 +2697,7 @@ function looksLikeJwt(token: string): boolean {
   return parts.length === 3 && parts.every((p) => p.length > 0);
 }
 
-/** JWT anon / service_role / publishable — não são credenciais do canal Aiosell. */
+/** JWT anon / service_role / publishable â€” nÃ£o sÃ£o credenciais do canal Aiosell. */
 function isSupabasePlatformBearer(token: string | null): boolean {
   if (!token?.trim()) return false;
   const t = token.trim();
@@ -1290,7 +2708,7 @@ function isSupabasePlatformBearer(token: string | null): boolean {
 }
 
 /**
- * Bearer que conta como credencial do canal: não é JWT de plataforma nem JWT opaco (eyJ…)
+ * Bearer que conta como credencial do canal: nÃ£o Ã© JWT de plataforma nem JWT opaco (eyJâ€¦)
  * salvo quando coincide com webhook secret ou api_secret.
  */
 function resolveBearerForChannel(
@@ -1329,8 +2747,8 @@ function pickWebhookSecretFromBody(body: Record<string, unknown>): string {
 
 /**
  * Query string: credencial do canal (igual api_secret ou aiosell_webhook_secret).
- * Nomes alternativos porque alguns painéis só permitem acrescentar "?token=" etc.
- * Não incluir `gate` aqui — esse parâmetro é só para AIOSELL_WEBHOOK_GATE_KEY.
+ * Nomes alternativos porque alguns painÃ©is sÃ³ permitem acrescentar "?token=" etc.
+ * NÃ£o incluir `gate` aqui â€” esse parÃ¢metro Ã© sÃ³ para AIOSELL_WEBHOOK_GATE_KEY.
  */
 function pickSecretFromQuery(url: URL): string {
   const names = ["secret", "token", "auth", "webhook_secret", "pms_secret", "key"];
@@ -1341,7 +2759,7 @@ function pickSecretFromQuery(url: URL): string {
   return "";
 }
 
-/** Segundo fator na URL: define o mesmo valor em Supabase Secrets como AIOSELL_WEBHOOK_GATE_KEY (útil quando o CM não envia headers). */
+/** Segundo fator na URL: define o mesmo valor em Supabase Secrets como AIOSELL_WEBHOOK_GATE_KEY (Ãºtil quando o CM nÃ£o envia headers). */
 function gateKeyMatchesUrl(url: URL): boolean {
   const envGate = (Deno.env.get("AIOSELL_WEBHOOK_GATE_KEY") ?? "").trim();
   if (!envGate) return false;
@@ -1349,7 +2767,7 @@ function gateKeyMatchesUrl(url: URL): boolean {
   return !!g && g === envGate;
 }
 
-/** Alguns CMs enviam API secret no JSON (sem Basic no header). Nomes específicos para não confundir com dados de hóspede. */
+/** Alguns CMs enviam API secret no JSON (sem Basic no header). Nomes especÃ­ficos para nÃ£o confundir com dados de hÃ³spede. */
 function pickBodyApiSecretToken(layers: Record<string, unknown>[]): string {
   return (
     firstNonEmptyString(layers, [
@@ -1392,10 +2810,10 @@ function envFlagTrue(name: string): boolean {
 }
 
 /**
- * Contingência quando o CM (ex.: Stay OS) não envia headers, query nem campos de segredo no JSON.
+ * ContingÃªncia quando o CM (ex.: Stay OS) nÃ£o envia headers, query nem campos de segredo no JSON.
  * Definir secret no projeto: AIOSELL_WEBHOOK_TRUST_HOTEL_CODE_ONLY=true
  * Opcional: AIOSELL_WEBHOOK_TRUST_HOTEL_CODES=codigo1,codigo2 (restringe por hotelCode do body).
- * Menos seguro que ?secret= ou Basic — usar só se não houver alternativa.
+ * Menos seguro que ?secret= ou Basic â€” usar sÃ³ se nÃ£o houver alternativa.
  */
 function trustHotelCodeBypass(
   hotelCode: string | undefined,
@@ -1434,7 +2852,7 @@ serve(async (req) => {
   try {
     body = await req.json();
   } catch {
-    console.warn("aiosell-reservation-webhook 400: corpo não é JSON");
+    console.warn("aiosell-reservation-webhook 400: corpo nÃ£o Ã© JSON");
     return jsonResponse({ success: false, error: "Invalid JSON" }, 400);
   }
 
@@ -1456,7 +2874,7 @@ serve(async (req) => {
       rootKeys: Object.keys(body),
     });
     return jsonResponse(
-      { success: false, error: "hotelCode (ou query ota_channel_id) é obrigatório" },
+      { success: false, error: "hotelCode (ou query ota_channel_id) Ã© obrigatÃ³rio" },
       400
     );
   }
@@ -1470,7 +2888,7 @@ serve(async (req) => {
       .eq("channel_manager_type", "aiosell")
       .maybeSingle();
     if (error || !data) {
-      return jsonResponse({ success: false, error: "Canal Aiosell não encontrado" }, 404);
+      return jsonResponse({ success: false, error: "Canal Aiosell nÃ£o encontrado" }, 404);
     }
     channel = data;
   } else {
@@ -1482,7 +2900,7 @@ serve(async (req) => {
       .limit(1)
       .maybeSingle();
     if (error || !data) {
-      return jsonResponse({ success: false, error: "Canal Aiosell não encontrado para este hotelCode" }, 404);
+      return jsonResponse({ success: false, error: "Canal Aiosell nÃ£o encontrado para este hotelCode" }, 404);
     }
     channel = data;
   }
@@ -1500,7 +2918,7 @@ serve(async (req) => {
   const configuredWebhookSecret = whSecret.length > 0;
   const apiSecret = String(channel.api_secret ?? "").trim();
 
-  /** Chamadas à URL Supabase: Bearer JWT anon ou `apikey` com anon — não contar como segredo do canal. */
+  /** Chamadas Ã  URL Supabase: Bearer JWT anon ou `apikey` com anon â€” nÃ£o contar como segredo do canal. */
   const bearerForChannel = resolveBearerForChannel(bearerRaw, whSecret, apiSecret);
 
   const tokenFromBody = pickWebhookSecretFromBody(body);
@@ -1523,7 +2941,7 @@ serve(async (req) => {
     apikeyAsSecret ||
     xApiKeyAsSecret;
 
-  /** Header/query/body: com webhook secret na BD só aceita esse valor; senão aceita api_secret (mesmo que Aiosell envie só no header). */
+  /** Header/query/body: com webhook secret na BD sÃ³ aceita esse valor; senÃ£o aceita api_secret (mesmo que Aiosell envie sÃ³ no header). */
   const secretOk =
     !!inlineSecret &&
     (configuredWebhookSecret
@@ -1573,7 +2991,7 @@ serve(async (req) => {
         success: false,
         error: "Unauthorized",
         hint:
-          "A Aiosell muitas vezes envia só o JSON (hotelCode) sem Basic Auth. No PMS: Channel Manager → Editar canal Aiosell → ative «Aceitar webhook só com hotelCode». Ou use na URL do webhook ?secret= com o mesmo valor do api_secret, ou configure Basic (usuário = api_key, senha = api_secret). No Supabase: confirme deploy com verify_jwt=false (supabase/config.toml) e, se precisar, o secret AIOSELL_WEBHOOK_TRUST_HOTEL_CODE_ONLY.",
+          "A Aiosell muitas vezes envia sÃ³ o JSON (hotelCode) sem Basic Auth. No PMS: Channel Manager â†’ Editar canal Aiosell â†’ ative Â«Aceitar webhook sÃ³ com hotelCodeÂ». Ou use na URL do webhook ?secret= com o mesmo valor do api_secret, ou configure Basic (usuÃ¡rio = api_key, senha = api_secret). No Supabase: confirme deploy com verify_jwt=false (supabase/config.toml) e, se precisar, o secret AIOSELL_WEBHOOK_TRUST_HOTEL_CODE_ONLY.",
       },
       401
     );
@@ -1581,7 +2999,7 @@ serve(async (req) => {
 
   if (trustOk && !(secretOk || basicOk || bearerOk || bodyPairOk || gateOk)) {
     console.warn(
-      `aiosell-reservation-webhook: webhook sem credencial HTTP aceite (${trustOkEnv ? "secret AIOSELL_WEBHOOK_TRUST_HOTEL_CODE_ONLY" : ""}${trustOkEnv && trustOkChannel ? " e " : ""}${trustOkChannel ? "opção no canal (aiosell_webhook_trust_hotel_only)" : ""})`
+      `aiosell-reservation-webhook: webhook sem credencial HTTP aceite (${trustOkEnv ? "secret AIOSELL_WEBHOOK_TRUST_HOTEL_CODE_ONLY" : ""}${trustOkEnv && trustOkChannel ? " e " : ""}${trustOkChannel ? "opÃ§Ã£o no canal (aiosell_webhook_trust_hotel_only)" : ""})`
     );
   }
 
@@ -1591,7 +3009,7 @@ serve(async (req) => {
       const max = 12000;
       console.info(
         "aiosell-reservation-webhook raw_body_snippet",
-        s.length > max ? `${s.slice(0, max)}…(truncated,len=${s.length})` : s
+        s.length > max ? `${s.slice(0, max)}â€¦(truncated,len=${s.length})` : s
       );
     } catch (e) {
       console.warn("aiosell-reservation-webhook raw_body_snippet", e);
@@ -1601,6 +3019,7 @@ serve(async (req) => {
   const result = await applyAiosellReservationPayload(supabase, channel, body, {
     logPrefix: "aiosell-reservation-webhook",
     requestPathname: url.pathname,
+    incomingRequest: req,
   });
 
   if (

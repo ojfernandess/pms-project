@@ -7,6 +7,25 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+function otaGuestEmailFromReservation(reservation: {
+  ota_reservations?: { ota_guest_email?: string | null }[] | null;
+}): string | null {
+  const row = reservation?.ota_reservations?.[0];
+  const e = row?.ota_guest_email;
+  return e != null && String(e).trim() !== "" ? String(e).trim() : null;
+}
+
+function otaGuestNameFromReservation(reservation: {
+  guest_name?: string | null;
+  ota_reservations?: { ota_guest_name?: string | null }[] | null;
+}): string | null {
+  const row = reservation?.ota_reservations?.[0];
+  const n = row?.ota_guest_name;
+  if (n != null && String(n).trim() !== "") return String(n).trim();
+  const gn = reservation?.guest_name;
+  return gn != null && String(gn).trim() !== "" ? String(gn).trim() : null;
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
@@ -84,8 +103,10 @@ serve(async (req) => {
         reservation_code,
         guest_id,
         client_id,
+        guest_name,
         financial_responsible:clients!client_id(id, email, full_name),
         guest:clients!guest_id(id, email, full_name),
+        ota_reservations(ota_guest_email, ota_guest_name),
         rooms(id, room_number, name, category_id, room_categories!category_id(id, name, description, building_id))
       `
       )
@@ -224,12 +245,15 @@ serve(async (req) => {
           .select("*, pms_base_url")
           .maybeSingle();
 
-        // Determinar destinatário
         const recipientEmail =
-          reservation.guest?.email || reservation.financial_responsible?.email;
+          reservation.guest?.email ||
+          reservation.financial_responsible?.email ||
+          otaGuestEmailFromReservation(reservation);
         const recipientName =
           reservation.guest?.full_name ||
-          reservation.financial_responsible?.full_name;
+          reservation.financial_responsible?.full_name ||
+          otaGuestNameFromReservation(reservation) ||
+          "Hóspede";
 
         if (!recipientEmail) {
           console.warn(

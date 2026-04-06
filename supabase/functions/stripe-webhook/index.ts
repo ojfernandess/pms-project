@@ -815,8 +815,25 @@ function detectBaseUrl(req: Request | null = null, supabaseUrl: string | null = 
   return "http://localhost:8080";
 }
 
+/** Reservas OTA/channel: email em `ota_reservations` quando não há cliente ligado. */
+function otaGuestEmailFromReservation(reservation: any): string | null {
+  const ota = reservation?.ota_reservations;
+  const row = Array.isArray(ota) ? ota[0] : ota;
+  const e = row?.ota_guest_email;
+  return e != null && String(e).trim() !== "" ? String(e).trim() : null;
+}
+
+function otaGuestNameFromReservation(reservation: any): string | null {
+  const ota = reservation?.ota_reservations;
+  const row = Array.isArray(ota) ? ota[0] : ota;
+  const n = row?.ota_guest_name;
+  if (n != null && String(n).trim() !== "") return String(n).trim();
+  const gn = reservation?.guest_name;
+  return gn != null && String(gn).trim() !== "" ? String(gn).trim() : null;
+}
+
 /**
- * Envia email de pagamento confirmado
+ * Envia email de extensão de estadia
  */
 async function sendReservationExtensionEmail(
   reservationId: string,
@@ -837,7 +854,8 @@ async function sendReservationExtensionEmail(
         guest:clients!guest_id(*),
         rooms (id, room_number, name, fixed_password),
         room_categories (id, name, description, building_id),
-        reservation_service_fees (amount, quantity)
+        reservation_service_fees (amount, quantity),
+        ota_reservations(ota_guest_email, ota_guest_name)
       `)
       .eq("id", reservationId)
       .single();
@@ -872,9 +890,15 @@ async function sendReservationExtensionEmail(
       return;
     }
 
-    // Determinar destinatário
-    const recipientEmail = reservation.guest?.email || reservation.financial_responsible?.email;
-    const recipientName = reservation.guest?.full_name || reservation.financial_responsible?.full_name;
+    const recipientEmail =
+      reservation.guest?.email ||
+      reservation.financial_responsible?.email ||
+      otaGuestEmailFromReservation(reservation);
+    const recipientName =
+      reservation.guest?.full_name ||
+      reservation.financial_responsible?.full_name ||
+      otaGuestNameFromReservation(reservation) ||
+      "Hóspede";
 
     if (!recipientEmail) {
       console.warn("⚠️ Nenhum email encontrado para hóspede ou responsável financeiro");
@@ -1309,7 +1333,8 @@ async function sendMultipleReservationsCreatedEmail(
         guest:clients!guest_id(*),
         rooms (id, room_number, name),
         room_categories (id, name, description),
-        web_checkin (locator)
+        web_checkin (locator),
+        ota_reservations(ota_guest_email, ota_guest_name)
       `)
       .in("id", reservationIds);
 
@@ -1320,8 +1345,15 @@ async function sendMultipleReservationsCreatedEmail(
 
     // Usar a primeira reserva como base para dados do hóspede e estabelecimento
     const firstReservation = reservations[0];
-    const recipientEmail = firstReservation.guest?.email || firstReservation.financial_responsible?.email;
-    const recipientName = firstReservation.guest?.full_name || firstReservation.financial_responsible?.full_name;
+    const recipientEmail =
+      firstReservation.guest?.email ||
+      firstReservation.financial_responsible?.email ||
+      otaGuestEmailFromReservation(firstReservation);
+    const recipientName =
+      firstReservation.guest?.full_name ||
+      firstReservation.financial_responsible?.full_name ||
+      otaGuestNameFromReservation(firstReservation) ||
+      "Hóspede";
 
     if (!recipientEmail) {
       console.warn("⚠️ Email do destinatário não encontrado");
@@ -1806,7 +1838,8 @@ async function sendPaymentConfirmedEmail(
         financial_responsible:clients!client_id(*),
         guest:clients!guest_id(*),
         rooms (id, room_number, name, fixed_password),
-        room_categories (id, name, description, building_id)
+        room_categories (id, name, description, building_id),
+        ota_reservations(ota_guest_email, ota_guest_name)
       `)
       .eq("id", reservationId)
       .single();
@@ -1849,15 +1882,20 @@ async function sendPaymentConfirmedEmail(
 
     console.log(`📧 [sendPaymentConfirmedEmail] Configurações de email encontradas, provider: ${emailSettings.provider}`);
 
-    // Determinar destinatário
-    // Priorizar: 1) guest_name da reserva, 2) cliente do client_id, 3) guest_id, 4) financial_responsible
-    const recipientEmail = reservation.financial_responsible?.email || reservation.guest?.email;
-    // Usar guest_name da reserva (que contém o nome correto do hóspede) ou o nome do cliente do client_id
-    const recipientName = reservation.guest_name || reservation.financial_responsible?.full_name || reservation.guest?.full_name || "Hóspede";
+    const recipientEmail =
+      reservation.financial_responsible?.email ||
+      reservation.guest?.email ||
+      otaGuestEmailFromReservation(reservation);
+    const recipientName =
+      reservation.guest_name ||
+      reservation.financial_responsible?.full_name ||
+      reservation.guest?.full_name ||
+      otaGuestNameFromReservation(reservation) ||
+      "Hóspede";
 
     if (!recipientEmail) {
       console.warn(`⚠️ [sendPaymentConfirmedEmail] Nenhum email encontrado para hóspede ou responsável financeiro na reserva ${reservationId}`);
-      console.warn(`⚠️ [sendPaymentConfirmedEmail] Guest email: ${reservation.guest?.email || 'N/A'}, Financial responsible email: ${reservation.financial_responsible?.email || 'N/A'}`);
+      console.warn(`⚠️ [sendPaymentConfirmedEmail] Guest email: ${reservation.guest?.email || 'N/A'}, Financial responsible email: ${reservation.financial_responsible?.email || 'N/A'}, OTA email: ${otaGuestEmailFromReservation(reservation) || 'N/A'}`);
       return;
     }
 

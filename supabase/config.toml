@@ -8,3 +8,9 @@ verify_jwt = true
 
 [functions.aiosell-reservations-sync]
 verify_jwt = true
+
+[functions.create-employee-auth]
+verify_jwt = true
+
+[functions.employee-auth-admin]
+verify_jwt = true

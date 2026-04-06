@@ -7,6 +7,7 @@ import { format, parseISO, isAfter, isBefore, eachDayOfInterval, startOfDay } fr
 import { ptBR } from "date-fns/locale";
 import { logActivity } from "@/lib/activityLogger";
 import { triggerEmail } from "@/lib/emailService";
+import { reservationGuestContactFields } from "@/lib/reservationChannelDisplay";
 
 export interface Overbooking {
   reservation: any;
@@ -414,8 +415,7 @@ export const usePendingReservations = () => {
             if (shouldSendEmail) {
               try {
                 // Verificar se há e-mail do hóspede ou responsável financeiro
-                const guestEmail = overbooking.reservation.guest?.email || 
-                                  overbooking.reservation.financial_responsible?.email;
+                const guestEmail = reservationGuestContactFields(overbooking.reservation).email;
                 
                 if (!guestEmail) {
                   console.warn(`⚠️ Não foi possível enviar e-mail de overbooking para reserva ${reservationCode}: nenhum e-mail encontrado`);

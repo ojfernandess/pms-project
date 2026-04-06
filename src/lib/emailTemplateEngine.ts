@@ -2,6 +2,8 @@
  * Template Engine para processar templates de e-mail com variáveis dinâmicas
  */
 
+import { reservationGuestDisplayName } from './reservationChannelDisplay';
+
 export interface TemplateVariables {
   [key: string]: string | number | null | undefined | any; // Permite objetos e arrays
 }
@@ -1199,7 +1201,10 @@ export async function generateReservationVariables(
   const totalWithFees = baseTotalAmount + serviceFeesTotal;
 
   return {
-    guest_name: guest?.full_name || client?.full_name || 'Hóspede',
+    guest_name:
+      guest?.full_name ||
+      client?.full_name ||
+      reservationGuestDisplayName(reservation),
     reservation_code: reservation.reservation_code || '',
     identification_number: reservation.identification_number ? `#${reservation.identification_number}` : '',
     checkin_date: checkinDate,

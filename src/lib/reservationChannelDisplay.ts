@@ -63,6 +63,26 @@ export function reservationGuestContactFields(r: {
   return { email, phone };
 }
 
+/** Nome para e-mails/templates quando não há `clients` ligado (ex.: OTA/Aiosell). */
+export function reservationGuestDisplayName(r: {
+  guest?: { full_name?: string | null } | null;
+  financial_responsible?: { full_name?: string | null } | null;
+  ota_booking?: { ota_guest_name?: string | null } | null;
+  ota_reservations?: { ota_guest_name?: string | null }[] | null;
+  guest_name?: string | null;
+}): string {
+  const g = r.guest?.full_name?.trim();
+  if (g) return g;
+  const f = r.financial_responsible?.full_name?.trim();
+  if (f) return f;
+  const ota = r.ota_booking ?? r.ota_reservations?.[0];
+  const on = ota?.ota_guest_name?.trim();
+  if (on) return on;
+  const gn = r.guest_name?.trim();
+  if (gn) return gn;
+  return "Hóspede";
+}
+
 export function formatOtaGuestAddressLines(addr: Record<string, unknown> | null | undefined): string[] {
   if (!addr || typeof addr !== "object") return [];
   const line1 = addr.line1 ?? addr.line_1 ?? addr.street;

@@ -5,6 +5,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { processTemplate, generateReservationVariables, type TemplateVariables } from './emailTemplateEngine';
+import { reservationGuestContactFields, reservationGuestDisplayName } from './reservationChannelDisplay';
 
 export interface EmailSettings {
   id: string;
@@ -73,6 +74,17 @@ function parseEmailList(emailString?: string): string[] {
     .split(',')
     .map(email => email.trim())
     .filter(email => email.length > 0 && email.includes('@'));
+}
+
+function resolveReservationRecipient(
+  reservation: any,
+  customRecipientEmail?: string
+): { email: string | null; name: string } {
+  const { email } = reservationGuestContactFields(reservation);
+  const recipientEmail =
+    (customRecipientEmail && String(customRecipientEmail).trim()) || email || null;
+  const recipientName = reservationGuestDisplayName(reservation);
+  return { email: recipientEmail, name: recipientName };
 }
 
 /**
@@ -1950,7 +1962,8 @@ export async function sendCheckoutReminderEmail(
         financial_responsible:clients!client_id(*),
         guest:clients!guest_id(*),
         rooms (id, room_number, name),
-        room_categories (id, name, description, building_id)
+        room_categories (id, name, description, building_id),
+        ota_reservations(ota_guest_email, ota_guest_name)
       `)
       .eq('id', reservation.id || reservation)
       .single();
@@ -2029,18 +2042,15 @@ export async function sendCheckoutReminderEmail(
     const subject = processTemplate(template.subject, allVariables);
     const bodyHtml = processTemplate(template.body_html, allVariables);
 
-    // Determinar destinatário
-    // Se customRecipientEmail foi fornecido (ex: para portaria), usar ele
-    // Caso contrário, usar o email do hóspede ou responsável financeiro
-    const recipientEmail = customRecipientEmail || fullReservation.guest?.email || fullReservation.financial_responsible?.email;
-    const recipientName = fullReservation.guest?.full_name || fullReservation.financial_responsible?.full_name;
+    // Destinatário: cliente ou email em ota_reservations (reservas canal/Aiosell)
+    const { email: recipientEmail, name: recipientName } = resolveReservationRecipient(fullReservation);
 
     if (!recipientEmail) {
       console.warn('⚠️ E-mail do destinatário não encontrado para reserva:', fullReservation.id);
       return null;
     }
 
-    console.log('✅ Destinatário encontrado:', { email: recipientEmail, name: recipientName, isCustom: !!customRecipientEmail });
+    console.log('✅ Destinatário encontrado:', { email: recipientEmail, name: recipientName });
 
     // Adicionar à fila (incluindo CC e BCC do template)
     const queueId = await queueEmail({
@@ -2240,7 +2250,8 @@ export async function sendStayReviewRequestEmail(
         financial_responsible:clients!client_id(*),
         guest:clients!guest_id(*),
         rooms (id, room_number, name),
-        room_categories (id, name, description, building_id)
+        room_categories (id, name, description, building_id),
+        ota_reservations(ota_guest_email, ota_guest_name)
       `)
       .eq('id', reservation.id || reservation)
       .single();
@@ -2433,9 +2444,7 @@ export async function sendStayReviewRequestEmail(
     
     const finalBodyHtml = bodyHtml;
 
-    // Determinar destinatário
-    const recipientEmail = fullReservation.guest?.email || fullReservation.financial_responsible?.email;
-    const recipientName = fullReservation.guest?.full_name || fullReservation.financial_responsible?.full_name;
+    const { email: recipientEmail, name: recipientName } = resolveReservationRecipient(fullReservation);
 
     if (!recipientEmail) {
       console.warn('⚠️ E-mail do destinatário não encontrado para reserva:', fullReservation.id);
@@ -3134,7 +3143,8 @@ export async function triggerEmail(
         guest:clients!guest_id(*),
         rooms (id, room_number, name, fixed_password, authentication_type),
         room_categories (id, name, description, building_id),
-        reservation_service_fees (amount, quantity)
+        reservation_service_fees (amount, quantity),
+        ota_reservations(ota_guest_email, ota_guest_name)
       `)
       .eq('id', reservation.id || reservation)
       .single();
@@ -3143,12 +3153,14 @@ export async function triggerEmail(
       console.error('❌ Erro ao buscar reserva:', reservationError);
       return null;
     }
+    const otaContact = reservationGuestContactFields(fullReservation);
     console.log('✅ Reserva encontrada:', { 
       reservationId: fullReservation.id,
       hasFinancialResponsible: !!fullReservation.financial_responsible,
       hasGuest: !!fullReservation.guest,
       financialResponsibleEmail: fullReservation.financial_responsible?.email,
-      guestEmail: fullReservation.guest?.email
+      guestEmail: fullReservation.guest?.email,
+      otaGuestEmail: otaContact.email
     });
 
     // Buscar configurações do hotel
@@ -3327,11 +3339,10 @@ export async function triggerEmail(
       hotelLogoInProcessed: bodyHtml.includes(allVariables.hotel_logo || '')
     });
 
-    // Determinar destinatário
-    // Se customRecipientEmail foi fornecido (ex: para portaria), usar ele
-    // Caso contrário, usar o email do hóspede ou responsável financeiro
-    const recipientEmail = customRecipientEmail || fullReservation.guest?.email || fullReservation.financial_responsible?.email;
-    const recipientName = fullReservation.guest?.full_name || fullReservation.financial_responsible?.full_name;
+    const { email: recipientEmail, name: recipientName } = resolveReservationRecipient(
+      fullReservation,
+      customRecipientEmail
+    );
 
     if (!recipientEmail) {
       console.warn('⚠️ E-mail do destinatário não encontrado para reserva:', fullReservation.id);
