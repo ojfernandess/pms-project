@@ -263,6 +263,13 @@ function normalizeActionFromLayers(layers: Record<string, unknown>[]): string {
       if (v != null && String(v).length) return String(v).toLowerCase();
     }
   }
+  for (const layer of layers) {
+    const s = layer.status;
+    if (s == null || s === "") continue;
+    const t = String(s).trim().toLowerCase();
+    if (t === "cancelled" || t === "canceled") return "cancel";
+    if (t === "modified" || t === "update") return "modify";
+  }
   return "";
 }
 
@@ -271,6 +278,7 @@ function pickBookingIdFromLayers(layers: Record<string, unknown>[]): string | un
     "bookingId",
     "cmBookingId",
     "otaBookingId",
+    "reservation_id",
     "reservationId",
     "booking_id",
     "bookingReference",
@@ -629,12 +637,17 @@ async function applyAiosellReservationPayload(
   supabase: SupabaseClient,
   channel: Record<string, unknown>,
   body: Record<string, unknown>,
-  opts?: { logPrefix?: string }
+  opts?: { logPrefix?: string; requestPathname?: string }
 ): Promise<{ status: number; json: Record<string, unknown> }> {
   const logPrefix = opts?.logPrefix ?? "aiosell-reservations-sync";
 
   const layers = collectLayers(body);
-  const action = normalizeActionFromLayers(layers);
+  let action = normalizeActionFromLayers(layers);
+  const pathLower = (opts?.requestPathname ?? "").toLowerCase();
+  if (!action) {
+    if (pathLower.includes("reservation/cancel")) action = "cancel";
+    else if (pathLower.includes("reservation/modify")) action = "modify";
+  }
   const bookingId = pickBookingIdFromLayers(layers);
 
   const guest = pickGuestObject(layers);

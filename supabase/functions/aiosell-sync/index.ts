@@ -41,6 +41,10 @@ const SYNC_DAYS_AHEAD = 365;
  *
  * KB: https://support.aiosell.com/portal/en/kb/aiosell-kb/api-documentation — Rate Push, inventário, restrições.
  * Preços e restrições de tarifa vão no mesmo POST `rates[]` para o CM não sobrescrever o primeiro pedido.
+ *
+ * Precificação dinâmica: com `hotel_settings.rate_system_settings.auto_apply_dynamic_rules=true`, o BAR (x2)
+ * usa `dynamic_pricing_results.final_price` (se `persist_dynamic_rates`) ou `calculate_rate_price` por célula;
+ * com essa opção desligada, mantém-se o fluxo original (tarifário `rate_calendar` + planos derivados + Tarifas por canal).
  */
 
 /**
@@ -1283,6 +1287,113 @@ serve(async (req) => {
       ? "infer"
       : "list";
 
+  const { data: hotelRateSettings } = await db
+    .from("hotel_settings")
+    .select("rate_system_settings")
+    .eq("establishment_id", establishmentId)
+    .maybeSingle();
+
+  const rawRs = hotelRateSettings?.rate_system_settings as Record<string, unknown> | undefined;
+  const autoApplyDynamicRules =
+    rawRs?.auto_apply_dynamic_rules === true || String(rawRs?.auto_apply_dynamic_rules ?? "").toLowerCase() === "true";
+  const persistDynamicRates =
+    rawRs?.persist_dynamic_rates === true || String(rawRs?.persist_dynamic_rates ?? "").toLowerCase() === "true";
+
+  /** Alinha ao mapa de tarifas / rates-map: BAR x2 (2 adultos) antes de ocupação x1–x4 e Tarifas por canal. */
+  function dynamicPricingKey(catId: string, dateRaw: unknown, planId: unknown): string {
+    const d = normalizeCalendarDate(dateRaw) ?? String(dateRaw ?? "").slice(0, 10);
+    const pid = planId == null || planId === "" ? "" : String(planId);
+    return `${String(catId).trim()}\0${d}\0${pid}`;
+  }
+
+  let dynamicBarOcc2ByKey = new Map<string, number>();
+  let dynamicPersistRowsLoaded = 0;
+  let dynamicRpcPrefetchKeys = 0;
+
+  if (autoApplyDynamicRules) {
+    if (persistDynamicRates) {
+      const { data: dynRows, error: dynErr } = await db
+        .from("dynamic_pricing_results")
+        .select("category_id, rate_plan_id, date, final_price")
+        .eq("establishment_id", establishmentId)
+        .gte("date", today)
+        .lte("date", futureDateStr);
+      if (dynErr) {
+        console.warn("[aiosell-sync] dynamic_pricing_results (fallback tarifário):", dynErr.message);
+      } else {
+        for (const r of dynRows ?? []) {
+          const fp = Number((r as { final_price?: unknown }).final_price);
+          if (!Number.isFinite(fp) || fp <= 0) continue;
+          const k = dynamicPricingKey(
+            String((r as { category_id: string }).category_id),
+            (r as { date: unknown }).date,
+            (r as { rate_plan_id: unknown }).rate_plan_id
+          );
+          dynamicBarOcc2ByKey.set(k, fp);
+        }
+        dynamicPersistRowsLoaded = dynamicBarOcc2ByKey.size;
+      }
+    } else {
+      const uniqueKeys = new Set<string>();
+      for (const rate of rows) {
+        const pid = rate.pricing_plan_id;
+        if (pid == null || pid === "") continue;
+        uniqueKeys.add(
+          dynamicPricingKey(rate.category_id as string, rate.date, pid)
+        );
+      }
+      dynamicRpcPrefetchKeys = uniqueKeys.size;
+      const RPC_BATCH = 50;
+      const keysArr = [...uniqueKeys];
+      const rawMax = (Deno.env.get("AIOSELL_DYNAMIC_RPC_MAX_KEYS") ?? "").trim();
+      const parsedMax = parseInt(rawMax, 10);
+      const maxKeys =
+        Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(20_000, parsedMax) : 12_000;
+      const limited = keysArr.length > maxKeys ? keysArr.slice(0, maxKeys) : keysArr;
+      if (keysArr.length > maxKeys) {
+        console.warn(
+          "[aiosell-sync] dynamic_pricing_rpc_cap",
+          JSON.stringify({
+            keys_total: keysArr.length,
+            keys_prefetched: maxKeys,
+            hint:
+              "Limite de chamadas calculate_rate_price no sync; ative «Persistir preços dinâmicos» e recalc-rates para usar tabela dynamic_pricing_results (mais rápido) ou aumente AIOSELL_DYNAMIC_RPC_MAX_KEYS.",
+          })
+        );
+      }
+      for (let i = 0; i < limited.length; i += RPC_BATCH) {
+        const batch = limited.slice(i, i + RPC_BATCH);
+        const results = await Promise.all(
+          batch.map(async (key) => {
+            const parts = key.split("\0");
+            const catId = parts[0];
+            const dateStr = parts[1];
+            const planId = parts[2];
+            if (!planId) return null;
+            const { data, error } = await db.rpc("calculate_rate_price", {
+              p_establishment_id: establishmentId,
+              p_category_id: catId,
+              p_pricing_plan_id: planId,
+              p_date: dateStr,
+              p_adults: 2,
+              p_children: 0,
+            });
+            if (error) {
+              console.warn("[aiosell-sync] calculate_rate_price:", error.message, key);
+              return null;
+            }
+            const n = Number(data ?? 0);
+            if (!Number.isFinite(n) || n <= 0) return null;
+            return { key, price: n };
+          })
+        );
+        for (const p of results) {
+          if (p) dynamicBarOcc2ByKey.set(p.key, p.price);
+        }
+      }
+    }
+  }
+
   console.info(
     "[aiosell-sync] sync_start",
     JSON.stringify({
@@ -1295,6 +1406,14 @@ serve(async (req) => {
       aiosell_rate_occupancy_mode: aiosellRateOccupancyMode,
       window_from: today,
       window_to: futureDateStr,
+      auto_apply_dynamic_rules: autoApplyDynamicRules,
+      persist_dynamic_rates: persistDynamicRates,
+      dynamic_pricing_keys_loaded:
+        autoApplyDynamicRules && persistDynamicRates
+          ? dynamicPersistRowsLoaded
+          : autoApplyDynamicRules
+            ? dynamicRpcPrefetchKeys
+            : 0,
     })
   );
 
@@ -1413,6 +1532,8 @@ serve(async (req) => {
   /** Linhas `rates[]` no payload cujo valor vem de Tarifas por canal (não do tarifário PMS). */
   let channelPricingFixedPriceLines = 0;
   let channelPricingMultiplierLines = 0;
+  /** Linhas em que o BAR x2 veio de precificação dinâmica (antes de ocupação x1–x4 e Tarifas por canal). */
+  let dynamicPricingRowsApplied = 0;
   const MAX_LOG_ALL_RATES = 200;
   const MAX_SUSPECT_PRICE_LOGS = 150;
 
@@ -1448,6 +1569,20 @@ serve(async (req) => {
       }
     }
 
+    let effectiveBarOcc2 = derived.effectiveBase;
+    let dynamicApplied = false;
+    if (autoApplyDynamicRules && planId) {
+      const dk = dynamicPricingKey(rate.category_id as string, rate.date, planId);
+      const dynBar = dynamicBarOcc2ByKey.get(dk);
+      if (dynBar != null && dynBar > 0) {
+        effectiveBarOcc2 = dynBar;
+        dynamicApplied = true;
+      }
+    }
+    if (dynamicApplied) {
+      dynamicPricingRowsApplied++;
+    }
+
     const pricingKind = channelPricingRowKind(cfg ?? null, planId);
     const dateStr = String(rate.date);
     const pp = pickPricingPlanRow(rate);
@@ -1463,7 +1598,7 @@ serve(async (req) => {
           : aiosellListRateOccupancy;
       const pmsListBeforeChannel = pmsListPriceForAiosellOccupancy(
         rate,
-        derived.effectiveBase,
+        effectiveBarOcc2,
         occForLine
       );
       const rateForChannel = { ...rate, base_price: pmsListBeforeChannel };
@@ -1528,7 +1663,9 @@ serve(async (req) => {
         derived_base_source: derived.source,
         stored_base_in_db: derived.storedBase,
         base_plan_base: derived.basePlanBase,
-        effective_base_occ2: derived.effectiveBase,
+        effective_base_occ2: effectiveBarOcc2,
+        dynamic_pricing_applied: dynamicApplied,
+        tariff_bar_occ2_before_dynamic: derived.effectiveBase,
         channel_pricing_match: pricingKind,
         channel_pricing_id: cfg?.id != null ? String((cfg as Record<string, unknown>).id) : undefined,
         pricing_step: breakdown.step,
@@ -1566,6 +1703,14 @@ serve(async (req) => {
       /** Linhas usadas no índice base+planId+data (inclui pares sem mapeamento Aiosell). */
       rate_calendar_rows_price_index: rateCalendarRowsAll.length,
       price_index_entries: priceIndex.size,
+      auto_apply_dynamic_rules: autoApplyDynamicRules,
+      persist_dynamic_rates: persistDynamicRates,
+      dynamic_pricing_sync_mode: autoApplyDynamicRules
+        ? persistDynamicRates
+          ? "persisted_results"
+          : "rpc_calculate_rate_price"
+        : "tariff_only",
+      dynamic_pricing_calendar_rows_applied: dynamicPricingRowsApplied,
       derived_prices_recomputed: derivedRecomputedCount,
       /** Planos derivados (base+flutuação) em que o preço x2 foi o `base_price` guardado, não o recalculado. */
       derived_trust_calendar_rows: derivedTrustCalendarRows,
@@ -1997,12 +2142,29 @@ serve(async (req) => {
           aiosellRatesPostRequests,
           /** Blocos `startDate`–`endDate` por pedido (secret AIOSELL_RATES_UPDATE_CHUNK_SIZE). */
           aiosellRatesUpdateChunkSizeUsed,
+          /** Regras dinâmicas: com `auto_apply_dynamic_rules` desligado, o envio segue só o tarifário (`rate_calendar`). */
+          autoApplyDynamicRules,
+          persistDynamicRates,
+          dynamicPricingSyncMode: autoApplyDynamicRules
+            ? persistDynamicRates
+              ? "persisted_results"
+              : "rpc_calculate_rate_price"
+            : "tariff_only",
+          dynamicPricingRowsApplied: dynamicPricingRowsApplied,
         },
         /**
          * Diagnóstico de preço (resposta HTTP — não depende dos logs do Supabase).
          * `derivedPricesRecomputed`: planos «base + flutuação» recalculados a partir do plano base no mesmo sync.
          */
         ratePriceDiagnostics: {
+          autoApplyDynamicRules,
+          persistDynamicRates,
+          dynamicPricingSyncMode: autoApplyDynamicRules
+            ? persistDynamicRates
+              ? "persisted_results"
+              : "rpc_calculate_rate_price"
+            : "tariff_only",
+          dynamicPricingRowsApplied: dynamicPricingRowsApplied,
           derivedPricesRecomputed: derivedRecomputedCount,
           /** Planos derivados em que o preço enviado seguiu `rate_calendar.base_price` guardado (>2). */
           derivedTrustCalendarRows: derivedTrustCalendarRows,

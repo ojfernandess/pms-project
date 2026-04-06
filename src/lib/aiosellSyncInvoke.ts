@@ -50,8 +50,19 @@ export type AiosellSyncPayload = {
     aiosellRatesPostRequests?: number;
     /** Tamanho do lote em blocos `updates` (env AIOSELL_RATES_UPDATE_CHUNK_SIZE). */
     aiosellRatesUpdateChunkSizeUsed?: number;
+    /** `true` quando as regras dinâmicas estão aplicadas no cálculo enviado ao CM. */
+    autoApplyDynamicRules?: boolean;
+    persistDynamicRates?: boolean;
+    /** `tariff_only` = só `rate_calendar`; `persisted_results` / `rpc_calculate_rate_price` = preço com regras. */
+    dynamicPricingSyncMode?: "tariff_only" | "persisted_results" | "rpc_calculate_rate_price";
+    /** Linhas do calendário em que o BAR (x2) veio da precificação dinâmica. */
+    dynamicPricingRowsApplied?: number;
   };
   ratePriceDiagnostics?: {
+    autoApplyDynamicRules?: boolean;
+    persistDynamicRates?: boolean;
+    dynamicPricingSyncMode?: "tariff_only" | "persisted_results" | "rpc_calculate_rate_price";
+    dynamicPricingRowsApplied?: number;
     derivedPricesRecomputed?: number;
     /** Planos base+flutuação em que se usou o `base_price` persistido (alinhado à grelha ARI). */
     derivedTrustCalendarRows?: number;

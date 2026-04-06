@@ -80,6 +80,10 @@ function scheduleAiosellAvailabilitySync(args: {
  * Pós-processamento: após sucesso, agenda envio de disponibilidade/tarifas (aiosell-sync). Desativar:
  *   AIOSELL_WEBHOOK_SKIP_POST_SYNC=1 ou AIOSELL_SKIP_POST_INVENTORY_SYNC=1
  * Doc. Aiosell (listagem / fetch reservas): https://support.aiosell.com/portal/en/kb/articles/fetch-reservations-from-aiosell
+ *
+ * Cancel / modify (CM): mesmo POST; reconhece `status` cancelled|modified, `reservation_id`, `hotel_id`,
+ * ou path `…/reservation/cancel` | `…/reservation/modify` (proxy). URL Supabase padrão:
+ * `POST /functions/v1/aiosell-reservation-webhook` + JSON com hotelCode/hotel_id e reservation_id.
  */
 
 function splitAiosellRatePlanCodes(raw: unknown): string[] {
@@ -270,6 +274,14 @@ function normalizeActionFromLayers(layers: Record<string, unknown>[]): string {
       if (v != null && String(v).length) return String(v).toLowerCase();
     }
   }
+  /** CM/PMS doc.: cancel/modify só com `status` (sem `action`). */
+  for (const layer of layers) {
+    const s = layer.status;
+    if (s == null || s === "") continue;
+    const t = String(s).trim().toLowerCase();
+    if (t === "cancelled" || t === "canceled") return "cancel";
+    if (t === "modified" || t === "update") return "modify";
+  }
   return "";
 }
 
@@ -278,6 +290,7 @@ function pickBookingIdFromLayers(layers: Record<string, unknown>[]): string | un
     "bookingId",
     "cmBookingId",
     "otaBookingId",
+    "reservation_id",
     "reservationId",
     "booking_id",
     "bookingReference",
@@ -653,17 +666,24 @@ function findChannelPricingMapping(
 /**
  * Aplica um payload no formato Aiosell -> PMS (book / modify / cancel).
  * Usado pelo webhook e pela sincronização manual/pull.
+ *
+ * Doc. típica CM: `POST …/reservation/cancel` e `.../reservation/modify` (path) ou o mesmo `status` no JSON.
  */
 async function applyAiosellReservationPayload(
   supabase: SupabaseClient,
   channel: Record<string, unknown>,
   body: Record<string, unknown>,
-  opts?: { logPrefix?: string }
+  opts?: { logPrefix?: string; requestPathname?: string }
 ): Promise<{ status: number; json: Record<string, unknown> }> {
   const logPrefix = opts?.logPrefix ?? "aiosell-reservation";
 
   const layers = collectLayers(body);
-  const action = normalizeActionFromLayers(layers);
+  let action = normalizeActionFromLayers(layers);
+  const pathLower = (opts?.requestPathname ?? "").toLowerCase();
+  if (!action) {
+    if (pathLower.includes("reservation/cancel")) action = "cancel";
+    else if (pathLower.includes("reservation/modify")) action = "modify";
+  }
   const bookingId = pickBookingIdFromLayers(layers);
 
   const guest = pickGuestObject(layers);
@@ -1425,6 +1445,7 @@ serve(async (req) => {
   const hotelCode = firstNonEmptyString(layers, [
     "hotelCode",
     "hotelId",
+    "hotel_id",
     "propertyCode",
     "propertyId",
     "hotel_code",
@@ -1579,6 +1600,7 @@ serve(async (req) => {
 
   const result = await applyAiosellReservationPayload(supabase, channel, body, {
     logPrefix: "aiosell-reservation-webhook",
+    requestPathname: url.pathname,
   });
 
   if (

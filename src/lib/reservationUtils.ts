@@ -60,8 +60,10 @@ export const getAvailableRooms = async (
   if (roomsError) throw roomsError;
   if (!rooms) return [];
 
-  // Verificar se o período está disponível para venda (ARI)
-  if (establishmentId) {
+  // Verificar se o período está disponível para venda (ARI) — apenas para novas reservas.
+  // Ao editar (`excludeReservationId`), não bloquear a lista: a reserva já existe (ex.: canal OTA/Aiosell);
+  // o tarifário pode estar «fechado» para booking_engine mas a estadia é válida — o Select precisa mostrar o quarto atual.
+  if (establishmentId && !excludeReservationId) {
     const periodCheck = await checkPeriodAvailabilityForSale(
       establishmentId,
       categoryId,
@@ -71,7 +73,6 @@ export const getAvailableRooms = async (
     );
 
     if (!periodCheck.available) {
-      // Se houver datas bloqueadas, retornar array vazio
       return [];
     }
   }
@@ -122,9 +123,8 @@ export const getAvailableRooms = async (
         .from("rooms")
         .select("*")
         .eq("id", includeRoomId)
-        .eq("category_id", categoryId)
-        .single();
-      
+        .maybeSingle();
+
       if (!roomError && requestedRoom) {
         availableRooms.push(requestedRoom);
       }

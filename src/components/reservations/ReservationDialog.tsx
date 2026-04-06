@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,53 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AlertTriangle } from "lucide-react";
 
+/** Evita `GET .../clients?id=eq.null` quando a reserva é de canal OTA sem ficha em `clients`. */
+function isValidUuidForClientLookup(id: unknown): boolean {
+  if (id == null) return false;
+  const s = String(id).trim();
+  if (!s || s.toLowerCase() === "null") return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
+type GuestFormSlice = {
+  full_name: string;
+  email: string;
+  phone: string;
+  document_number: string;
+  document_type: string;
+};
+
+/** Reservas Channel Manager (Aiosell) guardam contacto em `ota_reservations`; no formulário o identificador é email. */
+function mergeOtaChannelGuestContact(
+  channel: string | null | undefined,
+  ota: { ota_guest_email?: string | null; ota_guest_phone?: string | null } | null | undefined,
+  guest: GuestFormSlice
+): GuestFormSlice {
+  if (channel !== "ota" || !ota) return guest;
+  const email = String(ota.ota_guest_email ?? "").trim();
+  const phone = String(ota.ota_guest_phone ?? "").trim();
+  const next = { ...guest };
+  if (email) {
+    next.email = email;
+    next.document_type = "Email";
+    next.document_number = email;
+  }
+  if (phone) {
+    next.phone = phone;
+  }
+  return next;
+}
+
+/** `room_id` pode estar vazio em reservas OTA; o embed `rooms` traz o quarto atribuído. */
+function resolveRoomIdFromReservationData(data: Record<string, unknown>): string {
+  const raw = data.room_id;
+  if (raw != null && String(raw).trim() !== "") return String(raw).trim();
+  const emb = data.rooms as { id?: string } | { id?: string }[] | null | undefined;
+  if (Array.isArray(emb)) return emb[0]?.id ? String(emb[0].id).trim() : "";
+  if (emb && typeof emb === "object" && emb.id != null) return String(emb.id).trim();
+  return "";
+}
+
 interface ReservationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -83,6 +130,7 @@ export const ReservationDialog = ({
   const [loading, setLoading] = useState(false);
   const [availableRooms, setAvailableRooms] = useState<any[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
+
   const [calculatedTotal, setCalculatedTotal] = useState<number>(0);
   const [isManualPrice, setIsManualPrice] = useState(false); // Flag para indicar que o preço foi definido manualmente
   const [promotionCode, setPromotionCode] = useState("");
@@ -189,6 +237,87 @@ export const ReservationDialog = ({
   
   // Estado para controlar se está em modo de edição ou visualização
   const [isEditMode, setIsEditMode] = useState(false);
+
+  const loadRoomsForReservation = useCallback(
+    async (
+      categoryId: string,
+      checkinDate: string,
+      checkoutDate: string,
+      roomIdForInclude: string,
+      excludeReservationId: string | undefined
+    ) => {
+      if (!categoryId) {
+        setAvailableRooms([]);
+        return;
+      }
+
+      setLoadingRooms(true);
+      try {
+        if (
+          checkinDate &&
+          checkoutDate &&
+          new Date(checkoutDate) > new Date(checkinDate)
+        ) {
+          let rooms = await getAvailableRooms(
+            categoryId,
+            checkinDate,
+            checkoutDate,
+            roomIdForInclude || undefined,
+            excludeReservationId
+          );
+          if (
+            excludeReservationId &&
+            roomIdForInclude &&
+            !rooms.some((r) => r.id === roomIdForInclude)
+          ) {
+            const { data: currentRoom } = await supabase
+              .from("rooms")
+              .select("*")
+              .eq("id", roomIdForInclude)
+              .maybeSingle();
+            if (currentRoom) {
+              rooms = [currentRoom, ...rooms];
+            }
+          }
+          setAvailableRooms(rooms);
+        } else {
+          const { data: rooms, error } = await supabase
+            .from("rooms")
+            .select("*")
+            .eq("category_id", categoryId)
+            .eq("is_blocked", false)
+            .order("room_number");
+
+          if (error) throw error;
+
+          let finalRooms = rooms || [];
+          if (
+            excludeReservationId &&
+            roomIdForInclude &&
+            !finalRooms.find((r) => r.id === roomIdForInclude)
+          ) {
+            const { data: currentRoom } = await supabase
+              .from("rooms")
+              .select("*")
+              .eq("id", roomIdForInclude)
+              .maybeSingle();
+            if (currentRoom) {
+              finalRooms = [currentRoom, ...finalRooms];
+            }
+          }
+          setAvailableRooms(finalRooms);
+        }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Erro ao buscar quartos";
+        console.error("Erro ao buscar quartos:", error);
+        toast.error(message);
+        setAvailableRooms([]);
+      } finally {
+        setLoadingRooms(false);
+      }
+    },
+    []
+  );
 
   // Buscar clientes
   const { data: clients } = useQuery({
@@ -542,7 +671,7 @@ export const ReservationDialog = ({
             *, 
             financial_responsible:clients!client_id(full_name, email, phone, document_number, document_type),
             guest:clients!guest_id(full_name, email, phone, document_number, document_type),
-            rooms(room_number)
+            rooms(id, room_number)
           `)
           .eq("id", reservationId)
           .single();
@@ -575,6 +704,12 @@ export const ReservationDialog = ({
             return;
           }
 
+          const { data: otaRow } = await supabase
+            .from("ota_reservations")
+            .select("ota_guest_email, ota_guest_phone")
+            .eq("reservation_id", reservationId)
+            .maybeSingle();
+
           // Obter horários padrão do hotel se não houver horários específicos na reserva
           const defaultCheckinTime = hotelSettings?.checkin_time 
             ? hotelSettings.checkin_time.substring(0, 5) 
@@ -583,10 +718,13 @@ export const ReservationDialog = ({
             ? hotelSettings.checkout_time.substring(0, 5) 
             : "12:00";
 
+          const dr = data as Record<string, unknown>;
+          const resolvedRoomId = resolveRoomIdFromReservationData(dr);
+
           setFormData({
-            client_id: data.client_id,
+            client_id: isValidUuidForClientLookup(data.client_id) ? String(data.client_id) : "",
             category_id: data.category_id,
-            room_id: data.room_id || "",
+            room_id: resolvedRoomId,
             checkin_date: data.checkin_date,
             checkout_date: data.checkout_date,
             checkin_time: data.checkin_time ? data.checkin_time.substring(0, 5) : defaultCheckinTime,
@@ -597,6 +735,14 @@ export const ReservationDialog = ({
             pricing_plan_id: data.pricing_plan_id || "",
             notes: data.notes || "",
           });
+
+          await loadRoomsForReservation(
+            data.category_id,
+            data.checkin_date,
+            data.checkout_date,
+            resolvedRoomId,
+            reservationId || undefined
+          );
           
           // Armazenar dados completos da reserva para o modal de pagamento
           setCurrentReservation({
@@ -637,81 +783,147 @@ export const ReservationDialog = ({
             }
           }
 
-          // Carregar dados completos do cliente para exibir no formulário
-          const { data: clientDataArray, error: clientError } = await supabase
-            .from("clients")
-            .select("*")
-            .eq("id", data.client_id)
-            .order("created_at", { ascending: false })
-            .limit(1);
+          // Carregar dados completos do cliente para exibir no formulário (reservas OTA podem não ter client_id)
+          const applyGuestFromReservationRow = () => {
+            const dr = data as Record<string, unknown>;
+            const name =
+              String(dr.guest_name || "").trim() ||
+              String((data as { guest?: { full_name?: string } }).guest?.full_name || "").trim() ||
+              String(
+                (data as { financial_responsible?: { full_name?: string } }).financial_responsible?.full_name || ""
+              ).trim() ||
+              "Hóspede";
+            const base: GuestFormSlice = {
+              full_name: name,
+              email: String(dr.guest_email || "").trim(),
+              phone: String(dr.guest_phone || "").trim(),
+              document_number: "",
+              document_type: "CPF",
+            };
+            setClientData(mergeOtaChannelGuestContact(data.channel, otaRow, base));
+            setFoundGuestClientId(null);
+            setFoundFinancialClientId(null);
+            setHasFinancialResponsible(false);
+            setSearchStep("found");
+          };
 
-          const clientData = clientDataArray && clientDataArray.length > 0 ? clientDataArray[0] : null;
-
-          if (!clientError && clientData) {
-            // Verificar se há guest_id diferente (modo duplo)
-            if (data.guest_id && data.guest_id !== data.client_id) {
-              // Modo duplo: Responsável financeiro diferente do hóspede
-              setFinancialResponsibleData({
-                full_name: clientData.full_name || "",
-                email: clientData.email || "",
-                phone: clientData.phone || "",
-                document_number: clientData.document_number || "",
-                document_type: clientData.document_type || "CPF",
-              });
-              setFoundFinancialClientId(data.client_id);
-              
-              // Carregar dados do hóspede
-              const { data: guestClientDataArray, error: guestError } = await supabase
+          if (!isValidUuidForClientLookup(data.client_id)) {
+            if (isValidUuidForClientLookup(data.guest_id)) {
+              const { data: guestOnlyRows, error: guestOnlyErr } = await supabase
                 .from("clients")
                 .select("*")
                 .eq("id", data.guest_id)
                 .order("created_at", { ascending: false })
                 .limit(1);
-              
-              const guestClientData = guestClientDataArray && guestClientDataArray.length > 0 ? guestClientDataArray[0] : null;
-              
-              if (!guestError && guestClientData) {
-                setGuestData({
-                  full_name: guestClientData.full_name || "",
-                  email: guestClientData.email || "",
-                  phone: guestClientData.phone || "",
-                  document_number: guestClientData.document_number || "",
-                  document_type: guestClientData.document_type || "CPF",
-                });
-                setFoundGuestClientId(data.guest_id);
+              const guestOnly = guestOnlyRows && guestOnlyRows.length > 0 ? guestOnlyRows[0] : null;
+              if (!guestOnlyErr && guestOnly) {
+                setClientData(
+                  mergeOtaChannelGuestContact(data.channel, otaRow, {
+                    full_name: guestOnly.full_name || "",
+                    email: guestOnly.email || "",
+                    phone: guestOnly.phone || "",
+                    document_number: guestOnly.document_number || "",
+                    document_type: guestOnly.document_type || "CPF",
+                  })
+                );
+                setFoundGuestClientId(String(data.guest_id));
+                setFoundFinancialClientId(null);
+                setHasFinancialResponsible(false);
+                setSearchStep("found");
+              } else if (guestOnlyErr) {
+                console.error("Erro ao carregar cliente (hóspede):", guestOnlyErr);
+                toast.error("Erro ao carregar dados do cliente");
+              } else {
+                applyGuestFromReservationRow();
               }
-              
-              setHasFinancialResponsible(true);
-              setClientData({
-                full_name: guestClientData?.full_name || "",
-                email: guestClientData?.email || "",
-                phone: guestClientData?.phone || "",
-                document_number: guestClientData?.document_number || "",
-                document_type: guestClientData?.document_type || "CPF",
-              });
             } else {
-              // Modo simples: Cliente é o hóspede e responsável
-              setClientData({
-                full_name: clientData.full_name || "",
-                email: clientData.email || "",
-                phone: clientData.phone || "",
-                document_number: clientData.document_number || "",
-                document_type: clientData.document_type || "CPF",
-              });
-              setFoundGuestClientId(data.client_id);
-              setHasFinancialResponsible(false);
+              applyGuestFromReservationRow();
             }
-            
-            // Mudar para etapa "found" para mostrar os dados
-            setSearchStep("found");
-          } else if (clientError) {
-            console.error("Erro ao carregar cliente:", clientError);
-            toast.error("Erro ao carregar dados do cliente");
+          } else {
+            const { data: clientDataArray, error: clientError } = await supabase
+              .from("clients")
+              .select("*")
+              .eq("id", data.client_id)
+              .order("created_at", { ascending: false })
+              .limit(1);
+
+            const clientData = clientDataArray && clientDataArray.length > 0 ? clientDataArray[0] : null;
+
+            if (!clientError && clientData) {
+              // Verificar se há guest_id diferente (modo duplo)
+              if (
+                data.guest_id &&
+                data.guest_id !== data.client_id &&
+                isValidUuidForClientLookup(data.guest_id)
+              ) {
+                // Modo duplo: Responsável financeiro diferente do hóspede
+                setFinancialResponsibleData({
+                  full_name: clientData.full_name || "",
+                  email: clientData.email || "",
+                  phone: clientData.phone || "",
+                  document_number: clientData.document_number || "",
+                  document_type: clientData.document_type || "CPF",
+                });
+                setFoundFinancialClientId(String(data.client_id));
+
+                // Carregar dados do hóspede
+                const { data: guestClientDataArray, error: guestError } = await supabase
+                  .from("clients")
+                  .select("*")
+                  .eq("id", data.guest_id)
+                  .order("created_at", { ascending: false })
+                  .limit(1);
+
+                const guestClientData =
+                  guestClientDataArray && guestClientDataArray.length > 0 ? guestClientDataArray[0] : null;
+
+                if (!guestError && guestClientData) {
+                  setGuestData(
+                    mergeOtaChannelGuestContact(data.channel, otaRow, {
+                      full_name: guestClientData.full_name || "",
+                      email: guestClientData.email || "",
+                      phone: guestClientData.phone || "",
+                      document_number: guestClientData.document_number || "",
+                      document_type: guestClientData.document_type || "CPF",
+                    })
+                  );
+                  setFoundGuestClientId(String(data.guest_id));
+                }
+
+                setHasFinancialResponsible(true);
+                setClientData({
+                  full_name: guestClientData?.full_name || "",
+                  email: guestClientData?.email || "",
+                  phone: guestClientData?.phone || "",
+                  document_number: guestClientData?.document_number || "",
+                  document_type: guestClientData?.document_type || "CPF",
+                });
+              } else {
+                // Modo simples: Cliente é o hóspede e responsável
+                setClientData(
+                  mergeOtaChannelGuestContact(data.channel, otaRow, {
+                    full_name: clientData.full_name || "",
+                    email: clientData.email || "",
+                    phone: clientData.phone || "",
+                    document_number: clientData.document_number || "",
+                    document_type: clientData.document_type || "CPF",
+                  })
+                );
+                setFoundGuestClientId(String(data.client_id));
+                setHasFinancialResponsible(false);
+              }
+
+              // Mudar para etapa "found" para mostrar os dados
+              setSearchStep("found");
+            } else if (clientError) {
+              console.error("Erro ao carregar cliente:", clientError);
+              toast.error("Erro ao carregar dados do cliente");
+            }
           }
         }
       };
 
-      fetchReservation();
+      void fetchReservation();
     } else if (!reservationId && open && !initialData) {
       // Nova reserva: sempre em modo de EDIÇÃO
       setIsEditMode(true);
@@ -742,74 +954,25 @@ export const ReservationDialog = ({
       setCalculatedTotal(0);
       setIsManualPrice(false); // Resetar flag ao limpar
     }
-  }, [reservationId, open, initialData]);
+  }, [reservationId, open, initialData, loadRoomsForReservation]);
 
-  // Buscar quartos quando categoria mudar
+  // Buscar quartos quando categoria/datas mudarem (ou ao editar com room_id já resolvido)
   useEffect(() => {
-    const fetchAvailableRooms = async () => {
-      if (!formData.category_id) {
-        setAvailableRooms([]);
-        return;
-      }
-
-      setLoadingRooms(true);
-      try {
-        // Se temos datas válidas, buscar quartos disponíveis para o período
-        if (
-          formData.checkin_date &&
-          formData.checkout_date &&
-          new Date(formData.checkout_date) > new Date(formData.checkin_date)
-        ) {
-          // Sempre incluir o quarto já selecionado (se houver) na busca, especialmente ao editar
-          // Passar reservationId para excluir a reserva atual da verificação de conflitos
-          // Isso garante que o quarto atual da reserva apareça na lista mesmo que esteja ocupado
-          const rooms = await getAvailableRooms(
-            formData.category_id,
-            formData.checkin_date,
-            formData.checkout_date,
-            formData.room_id || undefined, // Passar room_id atual para incluir na lista
-            reservationId || undefined // Excluir reserva atual da verificação de conflitos
-          );
-          setAvailableRooms(rooms);
-        } else {
-          // Se não temos datas, buscar todos os quartos da categoria (sem filtro de disponibilidade)
-          const { data: rooms, error } = await supabase
-            .from("rooms")
-            .select("*")
-            .eq("category_id", formData.category_id)
-            .eq("is_blocked", false)
-            .order("room_number");
-
-          if (error) throw error;
-          
-          // Se estiver editando uma reserva e tiver um room_id, garantir que ele esteja na lista
-          let finalRooms = rooms || [];
-          if (reservationId && formData.room_id && !finalRooms.find(r => r.id === formData.room_id)) {
-            // Buscar o quarto atual da reserva e adicioná-lo à lista
-            const { data: currentRoom } = await supabase
-              .from("rooms")
-              .select("*")
-              .eq("id", formData.room_id)
-              .single();
-            
-            if (currentRoom) {
-              finalRooms = [currentRoom, ...finalRooms];
-            }
-          }
-          
-          setAvailableRooms(finalRooms);
-        }
-      } catch (error: any) {
-        console.error("Erro ao buscar quartos:", error);
-        toast.error(error.message || "Erro ao buscar quartos");
-        setAvailableRooms([]);
-      } finally {
-        setLoadingRooms(false);
-      }
-    };
-
-    fetchAvailableRooms();
-  }, [formData.category_id, formData.checkin_date, formData.checkout_date, formData.room_id, reservationId]);
+    void loadRoomsForReservation(
+      formData.category_id,
+      formData.checkin_date,
+      formData.checkout_date,
+      formData.room_id || "",
+      reservationId || undefined
+    );
+  }, [
+    formData.category_id,
+    formData.checkin_date,
+    formData.checkout_date,
+    formData.room_id,
+    reservationId,
+    loadRoomsForReservation,
+  ]);
 
   // Calcular total quando necessário (com tarifário dinâmico)
   useEffect(() => {
@@ -2854,6 +3017,7 @@ export const ReservationDialog = ({
                             <SelectItem value="RG">RG</SelectItem>
                             <SelectItem value="Passaporte">Passaporte</SelectItem>
                             <SelectItem value="CNH">CNH</SelectItem>
+                            <SelectItem value="Email">Email</SelectItem>
                             <SelectItem value="Outro">Outro</SelectItem>
                   </SelectContent>
                 </Select>
@@ -2893,6 +3057,8 @@ export const ReservationDialog = ({
                               ? "00.000.000/0000-00" 
                               : (hasFinancialResponsible ? guestData.document_type : clientData.document_type) === "CPF"
                               ? "000.000.000-00"
+                              : (hasFinancialResponsible ? guestData.document_type : clientData.document_type) === "Email"
+                              ? "email@exemplo.com"
                               : "Digite o número do documento"
                           }
                           maxLength={(hasFinancialResponsible ? guestData.document_type : clientData.document_type) === "CNPJ" ? 18 : (hasFinancialResponsible ? guestData.document_type : clientData.document_type) === "CPF" ? 14 : undefined}
@@ -3270,6 +3436,7 @@ export const ReservationDialog = ({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="direct">Direto</SelectItem>
+                  <SelectItem value="ota">Channel Manager (OTA)</SelectItem>
                   <SelectItem value="booking">Booking.com</SelectItem>
                   <SelectItem value="airbnb">Airbnb</SelectItem>
                   <SelectItem value="expedia">Expedia</SelectItem>
@@ -3455,12 +3622,15 @@ export const ReservationDialog = ({
                       setFormData({ ...formData, room_id: roomId });
                     }}
                     required
-                    disabled={availableRooms.length === 0}
+                    disabled={
+                      availableRooms.length === 0 &&
+                      !(reservationId && (formData.room_id || "").trim())
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue placeholder={
-                        availableRooms.length === 0 
-                          ? "Nenhum quarto disponível" 
+                        availableRooms.length === 0 && !(reservationId && (formData.room_id || "").trim())
+                          ? "Nenhum quarto disponível"
                           : "Selecione um quarto"
                       } />
                     </SelectTrigger>
@@ -3479,7 +3649,8 @@ export const ReservationDialog = ({
                       <p className="text-xs text-muted-foreground mt-1">
                         Preencha as datas de check-in e check-out para ver a disponibilidade
                       </p>
-                    ) : availableRooms.length === 0 ? (
+                    ) : availableRooms.length === 0 &&
+                      !(reservationId && (formData.room_id || "").trim()) ? (
                       <p className="text-xs text-warning mt-1">
                         Nenhum quarto disponível neste período
                       </p>
