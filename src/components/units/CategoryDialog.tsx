@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { slugFromName } from "@/lib/slugUtils";
 import { useSlugValidation } from "@/hooks/useSlugValidation";
 import { useQueryClient } from "@tanstack/react-query";
+import { scheduleChannelSyncAfterRateEdit } from "@/lib/channelSyncAfterRates";
 import { Save, Trash2 } from "lucide-react";
 import { RoomsTable } from "./RoomsTable";
 
@@ -433,6 +434,8 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
         }
       });
 
+      scheduleChannelSyncAfterRateEdit(establishmentId ?? null);
+
       // Se quartos foram criados e a tabela está sendo mostrada, não fechar o dialog
       if (showRoomsTable && createdRooms.length > 0) {
         // Não fechar o dialog, apenas atualizar
@@ -475,6 +478,8 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
           return key === "room_categories" || key === "room_categories_with_rooms" || key === "occupancy_map_rooms";
         }
       });
+
+      scheduleChannelSyncAfterRateEdit(establishmentId ?? null);
 
       onSuccess();
       onOpenChange(false);

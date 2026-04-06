@@ -28,6 +28,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import { logActivity } from "@/lib/activityLogger";
+import { scheduleChannelSyncAfterRateEdit } from "@/lib/channelSyncAfterRates";
 import {
   LineChart,
   Line,
@@ -286,6 +287,8 @@ export const RateAnalyticsView = ({
         queryKey: ["rate_calendar"],
         exact: false
       });
+
+      scheduleChannelSyncAfterRateEdit(establishmentId);
       
       // Atualizar o preço atual em tempo real imediatamente após aplicar
       const recommendationKey = `${rec.category_id}-${rec.date}`;

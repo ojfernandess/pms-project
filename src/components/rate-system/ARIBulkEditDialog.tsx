@@ -112,6 +112,8 @@ export const ARIBulkEditDialog = ({
   const [closedToDeparture, setClosedToDeparture] = useState(false);
   const [stopSellOTA, setStopSellOTA] = useState(false);
   const [stopSellBookingEngine, setStopSellBookingEngine] = useState(false);
+  const [minAdvanceDays, setMinAdvanceDays] = useState('');
+  const [maxAdvanceDays, setMaxAdvanceDays] = useState('');
   
   // Date Range
   const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>({
@@ -323,7 +325,21 @@ export const ARIBulkEditDialog = ({
         ? [selectedPlanId]
         : ratePlans?.map((p: { id: string }) => p.id) || [];
 
-      const updates: { establishment_id?: string; pricing_plan_id: string; category_id: string; date: string; base_price: number; min_stay?: number | null; max_stay?: number | null; closed_to_arrival?: boolean; closed_to_departure?: boolean; stop_sell_ota?: boolean; stop_sell_booking_engine?: boolean }[] = [];
+      const updates: {
+        establishment_id?: string;
+        pricing_plan_id: string;
+        category_id: string;
+        date: string;
+        base_price: number;
+        min_stay?: number | null;
+        max_stay?: number | null;
+        closed_to_arrival?: boolean;
+        closed_to_departure?: boolean;
+        stop_sell_ota?: boolean;
+        stop_sell_booking_engine?: boolean;
+        min_advance_days?: number | null;
+        max_advance_days?: number | null;
+      }[] = [];
 
       for (const catId of effectiveCategoryIds) {
         for (const dateStr of dateStrings) {
@@ -338,12 +354,14 @@ export const ARIBulkEditDialog = ({
               category_id: catId,
               date: dateStr,
               base_price: currentRate?.base_price ?? 0,
-              min_stay: minStay ? parseInt(minStay) : null,
-              max_stay: maxStay ? parseInt(maxStay) : null,
+              min_stay: minStay ? parseInt(minStay, 10) : null,
+              max_stay: maxStay ? parseInt(maxStay, 10) : null,
               closed_to_arrival: closedToArrival,
               closed_to_departure: closedToDeparture,
               stop_sell_ota: stopSellOTA,
               stop_sell_booking_engine: stopSellBookingEngine,
+              min_advance_days: minAdvanceDays ? parseInt(minAdvanceDays, 10) : null,
+              max_advance_days: maxAdvanceDays ? parseInt(maxAdvanceDays, 10) : null,
             });
           }
         }
@@ -782,6 +800,31 @@ export const ARIBulkEditDialog = ({
                     placeholder="Ex: 7"
                     min="0"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Antecedência mínima (dias)</Label>
+                  <Input
+                    type="number"
+                    value={minAdvanceDays}
+                    onChange={(e) => setMinAdvanceDays(e.target.value)}
+                    placeholder="Ex: 7"
+                    min="0"
+                  />
+                  <p className="text-xs text-gray-500">Mínimo de dias antes do check-in (canal CM).</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Antecedência máxima (dias)</Label>
+                  <Input
+                    type="number"
+                    value={maxAdvanceDays}
+                    onChange={(e) => setMaxAdvanceDays(e.target.value)}
+                    placeholder="Ex: 365"
+                    min="0"
+                  />
+                  <p className="text-xs text-gray-500">Máximo de dias antes do check-in (canal CM).</p>
                 </div>
               </div>
 

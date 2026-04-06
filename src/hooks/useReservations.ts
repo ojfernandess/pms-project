@@ -9,6 +9,7 @@ import { useEffect } from "react";
 import { format } from "date-fns";
 import { recalculatePolicyAfterDateChange } from "@/utils/cancellationPolicyDateChange";
 import { recordProcessedRefund } from "@/services/financial/refundService";
+import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 
 type ReservationInsert = TablesInsert<"reservations">;
 type ReservationUpdate = TablesUpdate<"reservations">;
@@ -615,6 +616,7 @@ export const useReservations = () => {
           queryClient.invalidateQueries({ queryKey: ["reservations"] });
           queryClient.invalidateQueries({ queryKey: ["rooms"] });
           queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+          scheduleChannelSyncAfterInventoryChange(getEstablishmentId());
           toast.success("Reserva criada com sucesso!");
         },
     onError: (error: any) => {
@@ -876,7 +878,9 @@ export const useReservations = () => {
       // Forçar refetch imediato para atualizar o mapa em tempo real
       await queryClient.refetchQueries({ queryKey: ["reservations"] });
       await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
-      
+
+      scheduleChannelSyncAfterInventoryChange(data.establishment_id);
+
       return data;
     },
     // ⚠️ NÃO usar onSuccess automático aqui - deixar o componente controlar a invalidação
@@ -1040,7 +1044,11 @@ export const useReservations = () => {
       queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       queryClient.invalidateQueries({ queryKey: ["reservation_payments"] });
       queryClient.invalidateQueries({ queryKey: ["refunds"] });
-      
+
+      scheduleChannelSyncAfterInventoryChange(
+        reservationData.establishment_id || getEstablishmentId()
+      );
+
       // Criar notificação se for pré-reserva cancelada
       // Usar originalStatus que foi guardado antes do cancelamento
       if (reservationData && reservationData.originalStatus === 'preregistration') {
@@ -1147,7 +1155,9 @@ export const useReservations = () => {
           // Forçar refetch imediato para atualizar o mapa
           await queryClient.refetchQueries({ queryKey: ["reservations"] });
           await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
-          
+
+          scheduleChannelSyncAfterInventoryChange(updatedReservation.establishment_id);
+
           // Disparar e-mail de check-in confirmado apenas se não foi solicitado para pular
           // (o email já foi enviado pelo web check-in)
           if (!updatedReservation._skipEmail) {
@@ -1277,7 +1287,9 @@ export const useReservations = () => {
           // Forçar refetch imediato para atualizar o mapa
           await queryClient.refetchQueries({ queryKey: ["reservations"] });
           await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
-          
+
+          scheduleChannelSyncAfterInventoryChange(updatedReservation.establishment_id);
+
           // Disparar evento genérico de check-out concluído
           try {
             const { triggerEmail } = await import("@/lib/emailService");

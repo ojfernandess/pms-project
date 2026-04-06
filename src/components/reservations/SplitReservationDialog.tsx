@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { logActivity } from "@/lib/activityLogger";
 import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
+import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 
 interface SplitReservationDialogProps {
   open: boolean;
@@ -240,6 +241,7 @@ export const SplitReservationDialog = ({
         .eq("id", reservation.id);
 
       toast.success(`Reserva dividida em ${newReservations.length} reservas`);
+      scheduleChannelSyncAfterInventoryChange(reservation.establishment_id);
       onSuccess?.();
       onOpenChange(false);
     } catch (error: any) {

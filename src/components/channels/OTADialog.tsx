@@ -118,6 +118,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
     aiosell_hotel_code: "",
     aiosell_inventory_path: "/api/v2/cm/update/sample-pms",
     aiosell_rates_path: "/api/v2/cm/update-rates/sample-pms",
+    aiosell_list_rate_occupancy: 2,
     aiosell_bookings_list_path: "",
     aiosell_webhook_secret: "",
     aiosell_webhook_trust_hotel_only: true,
@@ -144,6 +145,12 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
           aiosell_hotel_code: channel.aiosell_hotel_code || "",
           aiosell_inventory_path: channel.aiosell_inventory_path || "/api/v2/cm/update/sample-pms",
           aiosell_rates_path: channel.aiosell_rates_path || "/api/v2/cm/update-rates/sample-pms",
+          aiosell_list_rate_occupancy: (() => {
+            const occ = Math.floor(
+              Number((channel as { aiosell_list_rate_occupancy?: unknown }).aiosell_list_rate_occupancy)
+            );
+            return occ >= 1 && occ <= 4 ? occ : 2;
+          })(),
           aiosell_bookings_list_path:
             (channel as { aiosell_bookings_list_path?: string | null }).aiosell_bookings_list_path || "",
           aiosell_webhook_secret: channel.aiosell_webhook_secret || "",
@@ -169,6 +176,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
         aiosell_hotel_code: "",
         aiosell_inventory_path: "/api/v2/cm/update/sample-pms",
         aiosell_rates_path: "/api/v2/cm/update-rates/sample-pms",
+        aiosell_list_rate_occupancy: 2,
         aiosell_bookings_list_path: "",
         aiosell_webhook_secret: "",
         aiosell_webhook_trust_hotel_only: true,
@@ -184,6 +192,10 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
       const data = {
         ...formData,
         commission_rate: parseFloat(formData.commission_rate) || 0,
+        aiosell_list_rate_occupancy: Math.min(
+          4,
+          Math.max(1, Math.floor(Number(formData.aiosell_list_rate_occupancy)) || 2)
+        ),
       };
 
       if (!channelId) {
@@ -513,6 +525,32 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
                         placeholder="Ex.: SANDBOX-PMS"
                         required
                       />
+                    </div>
+                    <div className="space-y-2 sm:col-span-2 sm:max-w-md">
+                      <Label htmlFor="aiosell_list_rate_occupancy" className={labelClass}>
+                        Preço no CM (ocupação do tarifário ARI)
+                      </Label>
+                      <Select
+                        value={String(formData.aiosell_list_rate_occupancy)}
+                        onValueChange={(v) =>
+                          setFormData({ ...formData, aiosell_list_rate_occupancy: Number(v) })
+                        }
+                      >
+                        <SelectTrigger id="aiosell_list_rate_occupancy">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 pessoa (coluna x1)</SelectItem>
+                          <SelectItem value="2">2 pessoas — preço padrão (coluna x2)</SelectItem>
+                          <SelectItem value="3">3 pessoas (coluna x3)</SelectItem>
+                          <SelectItem value="4">4 pessoas (coluna x4)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FieldHint>
+                        O valor enviado em <code className="text-xs">rates[].rate</code> usa a mesma regra do
+                        grid (base_price, adult_price e flutuações x1/x3/x4). Escolha a coluna que deve
+                        corresponder ao Channel Manager.
+                      </FieldHint>
                     </div>
                   </div>
                 </FormSection>

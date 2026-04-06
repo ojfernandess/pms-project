@@ -4,6 +4,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { toast } from "sonner";
 import { invokeBuklySync } from "@/lib/buklySyncInvoke";
 import { invokeAiosellSync } from "@/lib/aiosellSyncInvoke";
+import { getAiosellSyncMappingDebug } from "@/lib/aiosellSyncSummary";
 import { invokeAiosellReservationsSync } from "@/lib/aiosellReservationsSyncInvoke";
 
 export const useChannelManager = () => {
@@ -222,12 +223,18 @@ export const useChannelManager = () => {
   // Deletar tarifa por canal
   const deleteChannelPricing = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("channel_pricing")
         .delete()
-        .eq("id", id);
+        .eq("id", id)
+        .select("id");
 
       if (error) throw error;
+      if (!data?.length) {
+        throw new Error(
+          "Nenhuma linha foi eliminada (registo inexistente ou sem permissão)."
+        );
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["channel_pricing"] });
@@ -251,18 +258,33 @@ export const useChannelManager = () => {
         payload.inventoryCombinedBlocks != null
           ? payload.inventoryCombinedBlocks
           : (payload.inventoryAvailBlocks ?? 0) + (payload.inventoryRestrictionBlocks ?? 0);
-      const summary = `Aiosell: ${invBlocks} bloco(s) de inventário (disp. + restrições), ${payload.rateRows ?? 0} linha(s) de tarifa com preço + restrições (${payload.rateUpdateBlocks ?? 0} bloco(s)).`;
+      const pairCount = payload.syncedRatePairsCount ?? payload.syncedRatePairs?.length ?? 0;
+      const invRooms = payload.inventoryRoomCodesSent?.length ?? 0;
+      const summary = `Aiosell: ${invBlocks} bloco(s) inventário, ${payload.rateRows ?? 0} linha(s) tarifa (${payload.rateUpdateBlocks ?? 0} bloco(s)).`;
+      const mappingHint = `Mapeamento enviado: ${pairCount} par(es) room+rate único(s) (tarifas); ${invRooms} room code(s) no inventário.`;
       const apiEcho = payload.aiosellApiMessages?.filter(Boolean).join(" · ");
-      toast.success(apiEcho ? `${summary} — ${apiEcho}` : summary);
-      if (payload.syncHints) {
-        console.info("[Aiosell sync] Resumo (rede → resposta JSON):", {
-          hotelCode: payload.syncHints.hotelCode,
-          establishmentId: payload.syncHints.establishmentId,
-          linhasRateCalendar: payload.syncHints.rateCalendarRows,
-          roomCodes: payload.syncHints.roomCodesSent,
-          rateplanCodes: payload.syncHints.rateplanCodesSent,
+      const detailLine = apiEcho ? `${summary} ${mappingHint} — ${apiEcho}` : `${summary} ${mappingHint}`;
+
+      if (payload.syncHints?.aiosellRatePostAckOnly === true) {
+        toast.warning("Aiosell: envio aceito — o CM pode ainda mostrar valores antigos", {
+          description: `${detailLine}. A resposta da API só confirma receção do pedido, não que o painel do Channel Manager já foi atualizado. Se os valores não mudarem, contacte o suporte Aiosell (fila de processamento ou regras do endpoint).`,
+          duration: 18_000,
+        });
+      } else {
+        toast.success(detailLine);
+      }
+      const semWarn = payload.syncHints?.mappingSemanticsWarning;
+      if (semWarn) {
+        toast.warning(semWarn, { duration: 14000 });
+      }
+      if (payload.syncHints?.aiosellSamplePmsPathRates === true) {
+        toast.warning("Canal Aiosell: path de tarifas em modo «sample-pms»", {
+          description:
+            "O endpoint configurado é o da documentação (sandbox). A API pode aceitar o envio mas o painel do hotel em produção pode não mudar. No canal Aiosell, substitua o «Path de tarifas» pelo endpoint de produção que a Aiosell indicar (não use …/sample-pms em produção).",
+          duration: 20_000,
         });
       }
+      console.info("[Aiosell sync] Tarifários enviados (verificar CM):", getAiosellSyncMappingDebug(payload));
     }
     return payload.channel;
   };

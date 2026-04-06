@@ -22,6 +22,7 @@ import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
+import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 import { DateRangePicker } from "@/components/booking-engine/DateRangePicker";
 
 // Importar tipos e configurações de tema do booking engine
@@ -2828,6 +2829,8 @@ const PublicReservation = () => {
       }
       
       console.log(`[Reservation] Total de reservas criadas: ${createdReservations.length}, roomIndex final: ${roomIndex}, additionalClientIds: ${additionalClientIds.length}`);
+
+      scheduleChannelSyncAfterInventoryChange(establishment.id);
 
       // Criar orçamento (quote) vinculado às reservas criadas
       // Armazenar IDs das reservas no campo notes em formato JSON (no final para facilitar parsing)

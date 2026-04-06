@@ -20,7 +20,11 @@ import {
   useStaggerPhase1,
   useStaggerPhase2,
 } from "@/lib/rateSystem";
-import { scheduleChannelSyncAfterRateEdit } from "@/lib/channelSyncAfterRates";
+import {
+  flushChannelSyncAfterBulkCalendarSave,
+  flushChannelSyncNow,
+  scheduleChannelSyncAfterRateEdit,
+} from "@/lib/channelSyncAfterRates";
 
 export interface RatePlan {
   id: string;
@@ -51,6 +55,17 @@ export interface RateCalendarEntry {
   occupancy_percentage?: number;
   projected_occupancy?: number;
   pickup_rate?: number;
+  /** ARI / rate_calendar — usado por Channel Manager (ex.: Aiosell LOS) */
+  min_stay?: number;
+  max_stay?: number;
+  closed_to_arrival?: boolean;
+  closed_to_departure?: boolean;
+  stop_sell_ota?: boolean;
+  stop_sell_booking_engine?: boolean;
+  sales_status?: string;
+  /** Dias de antecedência (mínimo / máximo) para reserva — canal CM */
+  min_advance_days?: number;
+  max_advance_days?: number;
 }
 
 export interface DynamicPricingRule {
@@ -98,6 +113,10 @@ const USE_RATE_CALENDAR_SUMMARY =
   import.meta.env.VITE_USE_RATE_CALENDAR_SUMMARY === "true" || import.meta.env.VITE_USE_RATE_CALENDAR_SUMMARY === "1";
 
 function mapMvRowToEntry(row: Record<string, unknown>): RateCalendarEntry {
+  const sales =
+    (row.sales_status as string | undefined) ??
+    (row.availability as string | undefined) ??
+    "open";
   return {
     id: row.id as string,
     establishment_id: row.establishment_id as string,
@@ -110,6 +129,15 @@ function mapMvRowToEntry(row: Record<string, unknown>): RateCalendarEntry {
     adult_price: row.adult_price as number | undefined,
     child_price: row.child_price as number | undefined,
     occupancy_percentage: row.occupancy_percentage as number | undefined,
+    min_stay: row.min_stay != null ? Number(row.min_stay) : undefined,
+    max_stay: row.max_stay != null ? Number(row.max_stay) : undefined,
+    closed_to_arrival: Boolean(row.closed_to_arrival),
+    closed_to_departure: Boolean(row.closed_to_departure),
+    stop_sell_ota: Boolean(row.stop_sell_ota),
+    stop_sell_booking_engine: Boolean(row.stop_sell_booking_engine),
+    sales_status: sales,
+    min_advance_days: row.min_advance_days != null ? Number(row.min_advance_days) : undefined,
+    max_advance_days: row.max_advance_days != null ? Number(row.max_advance_days) : undefined,
   };
 }
 
@@ -229,6 +257,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       queryClient.invalidateQueries({ queryKey: ["rate_plans"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Plano tarifário criado com sucesso!");
+      scheduleChannelSyncAfterRateEdit(getEstablishmentId());
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao criar plano tarifário");
@@ -389,6 +418,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       queryClient.invalidateQueries({ queryKey: ["rate_plans"] });
       debouncedCalendarInvalidate();
       toast.success("Plano tarifário excluído com sucesso!");
+      scheduleChannelSyncAfterRateEdit(getEstablishmentId());
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao excluir plano tarifário");
@@ -624,7 +654,16 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
         toast.success("Tarifário atualizado");
       }
       if (updateSource !== "channel_sync") {
-        scheduleChannelSyncAfterRateEdit(getEstablishmentId());
+        const entries = Array.isArray(variables)
+          ? variables
+          : (variables as { entries: Partial<RateCalendarEntry>[] }).entries;
+        const estId = getEstablishmentId();
+        // Uma linha = célula: envio imediato. Várias linhas no mesmo upsert = mesmo padrão que bulkUpdateRates (debounce curto), não o debounce longo de 1,2s (parecia que o CM só atualizava em operações «grandes»).
+        if (entries.length === 1) {
+          flushChannelSyncNow(estId);
+        } else {
+          flushChannelSyncAfterBulkCalendarSave(estId);
+        }
       }
     },
     onError: (error: unknown) => {
@@ -756,7 +795,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
         })();
       }
       toast.success("Tarifas atualizadas com sucesso!");
-      scheduleChannelSyncAfterRateEdit(getEstablishmentId());
+      flushChannelSyncAfterBulkCalendarSave(getEstablishmentId());
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao atualizar tarifas");
@@ -902,6 +941,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       queryClient.invalidateQueries({ queryKey: ["hotel_settings_rate_system"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica atualizada com sucesso!");
+      scheduleChannelSyncAfterRateEdit(getEstablishmentId());
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao atualizar regra dinâmica");
@@ -950,6 +990,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       queryClient.invalidateQueries({ queryKey: ["hotel_settings_rate_system"] });
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Regra dinâmica excluída com sucesso!");
+      scheduleChannelSyncAfterRateEdit(getEstablishmentId());
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao excluir regra dinâmica");
@@ -1033,6 +1074,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição criada com sucesso!");
+      scheduleChannelSyncAfterRateEdit(getEstablishmentId());
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao criar restrição");
@@ -1087,6 +1129,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição atualizada com sucesso!");
+      scheduleChannelSyncAfterRateEdit(getEstablishmentId());
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao atualizar restrição");
@@ -1132,6 +1175,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       toast.success("Restrição excluída com sucesso!");
+      scheduleChannelSyncAfterRateEdit(getEstablishmentId());
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao excluir restrição");

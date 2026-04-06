@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { scheduleChannelSyncAfterRateEdit } from "@/lib/channelSyncAfterRates";
 
 interface RateSystemSettingsDialogProps {
   open: boolean;
@@ -156,6 +157,7 @@ export const RateSystemSettingsDialog = ({ open, onOpenChange }: RateSystemSetti
       queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
       queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
       toast.success("Configurações salvas com sucesso!");
+      scheduleChannelSyncAfterRateEdit(establishmentId);
       if (variables.persist_dynamic_rates && variables.auto_apply_dynamic_rules) {
         toast.info("Execute 'Recalcular Agora' no Mapa de Tarifas para popular os preços dinâmicos inicialmente.", { duration: 6000 });
       }

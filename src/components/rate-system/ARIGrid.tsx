@@ -25,6 +25,13 @@ import { OccupancyPriceEditDialog } from "./OccupancyPriceEditDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useLazyCalendarRange } from "@/lib/rateSystem";
 
+/** Alinha chaves do mapa com format(date) yyyy-MM-dd (PostgREST pode devolver date como ISO; evita perder entry e sobrescrever preço com valor base). */
+function normalizeRateCalendarDateKey(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  return m ? m[1] : s;
+}
+
 interface ARIGridProps {
   ratePlans: RatePlan[];
   categories: any[];
@@ -433,7 +440,7 @@ export const ARIGrid = ({
     if (rateCalendarToUse && rateCalendarToUse.length > 0) {
       rateCalendarToUse.forEach((entry: any) => {
         const categoryKey = entry.category_id;
-        const dateKey = entry.date;
+        const dateKey = normalizeRateCalendarDateKey(entry.date);
         const planKey = entry.pricing_plan_id;
         
         if (!map.has(categoryKey)) {
@@ -839,6 +846,8 @@ export const ARIGrid = ({
         updateData.max_stay = updateData.max_stay ?? entry.max_stay;
         updateData.closed_to_arrival = updateData.closed_to_arrival ?? entry.closed_to_arrival;
         updateData.closed_to_departure = updateData.closed_to_departure ?? entry.closed_to_departure;
+        updateData.min_advance_days = updateData.min_advance_days ?? entry.min_advance_days ?? 0;
+        updateData.max_advance_days = updateData.max_advance_days ?? entry.max_advance_days ?? 0;
       } else {
         // Sem entrada existente: criar nova — base_price e adult_price são obrigatórios
         const category = currentCategories.find((c: { id: string }) => c.id === currentEditingCell.categoryId);
@@ -850,6 +859,8 @@ export const ARIGrid = ({
         }
         if (updateData.min_stay === undefined) updateData.min_stay = 0;
         if (updateData.max_stay === undefined) updateData.max_stay = 0;
+        if (updateData.min_advance_days === undefined) updateData.min_advance_days = 0;
+        if (updateData.max_advance_days === undefined) updateData.max_advance_days = 0;
         updateData.closed_to_arrival = updateData.closed_to_arrival ?? false;
         updateData.closed_to_departure = updateData.closed_to_departure ?? false;
       }
@@ -1045,6 +1056,8 @@ export const ARIGrid = ({
           updateData.max_stay = entry.max_stay ?? 0;
           updateData.closed_to_arrival = entry.closed_to_arrival ?? false;
           updateData.closed_to_departure = entry.closed_to_departure ?? false;
+          updateData.min_advance_days = entry.min_advance_days ?? 0;
+          updateData.max_advance_days = entry.max_advance_days ?? 0;
         }
 
         updateDataArray.push(updateData);
@@ -1445,6 +1458,8 @@ export const ARIGrid = ({
           updateData.max_stay = entry.max_stay ?? 0;
           updateData.closed_to_arrival = entry.closed_to_arrival ?? false;
           updateData.closed_to_departure = entry.closed_to_departure ?? false;
+          updateData.min_advance_days = entry.min_advance_days ?? 0;
+          updateData.max_advance_days = entry.max_advance_days ?? 0;
           
           // Manter campos de flutuação de outras ocupações (preservar valores existentes)
           // IMPORTANTE: Preservar os valores existentes, não sobrescrever com null
@@ -1476,6 +1491,8 @@ export const ARIGrid = ({
           updateData.max_stay = 0;
           updateData.closed_to_arrival = false;
           updateData.closed_to_departure = false;
+          updateData.min_advance_days = 0;
+          updateData.max_advance_days = 0;
           
           // Inicializar campos de flutuação de outras ocupações como null
           // Mas apenas se não estamos editando essa ocupação específica
@@ -1708,19 +1725,30 @@ export const ARIGrid = ({
                   category_id: category.id,
                   pricing_plan_id: plan.id,
                   date: dateStr,
-                  [field]: checked,
                 };
 
                 if (entry) {
                   updateData.base_price = entry.base_price;
-                  updateData.adult_price = entry.adult_price;
+                  updateData.adult_price = entry.adult_price ?? 0;
                   updateData.min_stay = entry.min_stay ?? 0;
                   updateData.max_stay = entry.max_stay ?? 0;
+                  updateData.min_advance_days = entry.min_advance_days ?? 0;
+                  updateData.max_advance_days = entry.max_advance_days ?? 0;
+                  updateData.closed_to_arrival =
+                    field === "closed_to_arrival" ? checked : !!(entry.closed_to_arrival);
+                  updateData.closed_to_departure =
+                    field === "closed_to_departure" ? checked : !!(entry.closed_to_departure);
                 } else {
                   updateData.base_price = Number(category?.base_price) || 0;
                   updateData.adult_price = 0;
                   updateData.min_stay = 0;
                   updateData.max_stay = 0;
+                  updateData.min_advance_days = 0;
+                  updateData.max_advance_days = 0;
+                  updateData.closed_to_arrival =
+                    field === "closed_to_arrival" ? checked : false;
+                  updateData.closed_to_departure =
+                    field === "closed_to_departure" ? checked : false;
                 }
 
                 try {
@@ -2417,7 +2445,7 @@ export const ARIGrid = ({
                           </div>
                         </div>
 
-                        {/* Antecedência Mínima */}
+                        {/* Antecedência Mínima (dias antes do check-in) */}
                         <div className="flex border-b border-gray-100 bg-gray-25">
                           <div className="w-64 flex-shrink-0 p-2 border-r border-gray-200 bg-gray-50 text-xs text-gray-600 pl-8">
                             Antecedência Mínima
@@ -2429,13 +2457,13 @@ export const ARIGrid = ({
                                 className="flex-shrink-0 border-r border-gray-100 last:border-r-0"
                                 style={{ minWidth: '80px' }}
                               >
-                                <div className="p-2 text-sm text-center text-gray-600">0</div>
+                                {renderRestrictionCell(category, plan, date, 'min_advance_days', 'number')}
                               </div>
                             ))}
                           </div>
                         </div>
 
-                        {/* Antecedência Máxima */}
+                        {/* Antecedência Máxima (dias antes do check-in) */}
                         <div className="flex border-b border-gray-100 bg-gray-25 last:border-b-0">
                           <div className="w-64 flex-shrink-0 p-2 border-r border-gray-200 bg-gray-50 text-xs text-gray-600 pl-8">
                             Antecedência Máxima
@@ -2447,7 +2475,7 @@ export const ARIGrid = ({
                                 className="flex-shrink-0 border-r border-gray-100 last:border-r-0"
                                 style={{ minWidth: '80px' }}
                               >
-                                <div className="p-2 text-sm text-center text-gray-600">0</div>
+                                {renderRestrictionCell(category, plan, date, 'max_advance_days', 'number')}
                               </div>
                             ))}
                           </div>

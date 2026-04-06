@@ -181,6 +181,7 @@ export const useARISystem = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ari_inventory'] });
       toast.success('Inventário sincronizado com sucesso');
+      scheduleChannelSyncAfterRateEdit(selectedEstablishment?.id);
     },
     onError: (error: any) => {
       toast.error('Erro ao sincronizar inventário: ' + error.message);

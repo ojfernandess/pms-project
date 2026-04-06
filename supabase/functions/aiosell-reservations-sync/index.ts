@@ -2,6 +2,104 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+/** Inline: o bundler de deploy só inclui `index.ts` (não ficheiros irmãos). */
+async function triggerAiosellAvailabilitySync(args: {
+  channelId: string;
+  establishmentId: string;
+  logPrefix?: string;
+}): Promise<{ ok: boolean; status?: number; error?: string }> {
+  const url = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/$/, "");
+  const key = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
+  if (!url || !key) {
+    console.warn(
+      `${args.logPrefix ?? "triggerAiosellAvailabilitySync"}: SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY ausente`
+    );
+    return { ok: false, error: "misconfigured" };
+  }
+  const invokeUrl = `${url}/functions/v1/aiosell-sync`;
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 120_000);
+    const r = await fetch(invokeUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        apikey: key,
+      },
+      body: JSON.stringify({
+        channel_id: args.channelId,
+        establishment_id: args.establishmentId,
+      }),
+      signal: ac.signal,
+    });
+    clearTimeout(timer);
+    const text = await r.text();
+    if (!r.ok) {
+      console.warn(
+        `${args.logPrefix ?? "triggerAiosellAvailabilitySync"}: aiosell-sync HTTP ${r.status}`,
+        text.slice(0, 500)
+      );
+      return { ok: false, status: r.status, error: text.slice(0, 240) };
+    }
+    try {
+      const j = JSON.parse(text) as { success?: boolean; error?: string };
+      if (j.success === false) {
+        return { ok: false, error: j.error ?? "sync_failed" };
+      }
+    } catch {
+      /* resposta não JSON */
+    }
+    return { ok: true, status: r.status };
+  } catch (e) {
+    console.warn(`${args.logPrefix ?? "triggerAiosellAvailabilitySync"}`, e);
+    return { ok: false, error: String(e) };
+  }
+}
+
+function scheduleAiosellAvailabilitySync(args: {
+  channelId: string;
+  establishmentId: string;
+  logPrefix?: string;
+}): void {
+  const p = triggerAiosellAvailabilitySync(args);
+  const g = globalThis as { EdgeRuntime?: { waitUntil: (x: Promise<unknown>) => void } };
+  if (g.EdgeRuntime?.waitUntil) {
+    g.EdgeRuntime.waitUntil(p);
+  } else {
+    void p;
+  }
+}
+
+function envFlagTrue(name: string): boolean {
+  const v = (Deno.env.get(name) ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+function splitAiosellRatePlanCodes(raw: unknown): string[] {
+  const s = String(raw ?? "").replace(/\u00a0/g, " ");
+  if (!s.trim()) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of s.split(/[,;\n\r]+/)) {
+    const t = part.trim();
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+function channelRateplanMatchesAiosell(stored: unknown, incoming: string | null | undefined): boolean {
+  if (incoming == null || !String(incoming).trim()) return true;
+  const s = String(stored ?? "").trim();
+  if (!s) return true;
+  const want = String(incoming).toUpperCase().trim();
+  return splitAiosellRatePlanCodes(s).some((c) => c.toUpperCase() === want);
+}
+
 /**
  * Aiosell: `pah` true = pagamento no hotel; `pah` false = reserva pré-paga (OTA).
  * Aceita também texto em paymentStatus/segment quando o canal envia "Prepaid".
@@ -424,13 +522,116 @@ function pickTotalAmount(
   return 0;
 }
 
+function pickTotalAmountFromRoomObjectOnly(room0: Record<string, unknown>): number | null {
+  const direct =
+    extractNumberFromAmountLike(room0.amount) ?? extractNumberFromAmountLike(room0.total);
+  if (direct != null) return direct;
+  const keys = ["totalAmount", "total_amount", "totalPrice", "total_price", "grandTotal", "price"];
+  for (const k of keys) {
+    const v = room0[k];
+    if (v != null && v !== "") {
+      const n = Number(v);
+      if (!Number.isNaN(n)) return n;
+    }
+  }
+  return null;
+}
+
+function summarizeAiosellRoomLine(
+  room: Record<string, unknown>,
+  index: number
+): Record<string, unknown> {
+  const rc = pickRoomCode(room, []);
+  const rpc = pickRateplanCode(room, []);
+  const perRoom = pickTotalAmountFromRoomObjectOnly(room);
+  const amountKeys = ["amount", "total", "totalAmount", "total_amount", "totalPrice", "grandTotal", "price"].filter(
+    (k) => room[k] != null && room[k] !== ""
+  );
+  return {
+    index,
+    roomCode: rc ?? null,
+    rateplanCode: rpc ?? null,
+    amount_numeric_on_room: perRoom,
+    amount_fields_present: amountKeys,
+  };
+}
+
+function splitMoneyAcrossParts(total: number, n: number): number[] {
+  if (n <= 0) return [];
+  if (n === 1) return [Math.round(total * 100) / 100];
+  const cents = Math.round(total * 100);
+  const base = Math.floor(cents / n);
+  const rem = cents - base * n;
+  return Array.from({ length: n }, (_, i) => (base + (i < rem ? 1 : 0)) / 100);
+}
+
+function computePerRoomAmounts(
+  rooms: Record<string, unknown>[],
+  room0: Record<string, unknown>,
+  body: Record<string, unknown>,
+  layers: Record<string, unknown>[]
+): { amounts: number[]; strategy: "per_room_lines" | "split_booking_total" } {
+  if (rooms.length === 0) return { amounts: [], strategy: "split_booking_total" };
+  const per = rooms.map((r) => pickTotalAmountFromRoomObjectOnly(r));
+  const allSet = per.length > 0 && per.every((a) => a != null && !Number.isNaN(a));
+  if (allSet) {
+    return { amounts: per.map((a) => a as number), strategy: "per_room_lines" };
+  }
+  const bookingTotal = pickTotalAmount(room0, body, layers);
+  return { amounts: splitMoneyAcrossParts(bookingTotal, rooms.length), strategy: "split_booking_total" };
+}
+
+function otaReservationCodeForRoom(bookingId: string, roomIndex: number, multiRoom: boolean): string {
+  return multiRoom ? `${bookingId}#${roomIndex}` : bookingId;
+}
+
+async function listOtaRowsForAiosellBooking(
+  supabase: SupabaseClient,
+  channelId: string,
+  bookingId: string
+): Promise<{ id: string; reservation_id: string; ota_reservation_code: string }[]> {
+  const { data, error } = await supabase
+    .from("ota_reservations")
+    .select("id, reservation_id, ota_reservation_code")
+    .eq("ota_channel_id", channelId)
+    .like("ota_reservation_code", `${bookingId}%`);
+  if (error || !data?.length) return [];
+  return data.filter(
+    (r) =>
+      r.ota_reservation_code === bookingId || String(r.ota_reservation_code).startsWith(`${bookingId}#`)
+  );
+}
+
+function findChannelPricingMapping(
+  roomCode: string | undefined,
+  rateplanCode: string | undefined,
+  pricingRows: { channel_room_code?: unknown; channel_rate_plan_code?: unknown; category_id?: unknown }[] | null
+): { category_id: string; pricing_plan_id?: string | null } | null {
+  if (!roomCode) return null;
+  let mapping = (pricingRows || []).find(
+    (p) =>
+      p.channel_room_code &&
+      String(p.channel_room_code).toUpperCase() === String(roomCode).toUpperCase() &&
+      channelRateplanMatchesAiosell(p.channel_rate_plan_code, rateplanCode)
+  );
+  if (!mapping) {
+    mapping = (pricingRows || []).find(
+      (p) =>
+        p.channel_room_code &&
+        String(p.channel_room_code).toUpperCase() === String(roomCode).toUpperCase()
+    );
+  }
+  if (!mapping?.category_id) return null;
+  return { category_id: mapping.category_id as string, pricing_plan_id: (mapping.pricing_plan_id as string) ?? null };
+}
+
 async function applyAiosellReservationPayload(
   supabase: SupabaseClient,
   channel: Record<string, unknown>,
   body: Record<string, unknown>,
   opts?: { logPrefix?: string }
 ): Promise<{ status: number; json: Record<string, unknown> }> {
-  const logPrefix = opts?.logPrefix ?? "aiosell-reservation";
+  const logPrefix = opts?.logPrefix ?? "aiosell-reservations-sync";
 
   const layers = collectLayers(body);
   const action = normalizeActionFromLayers(layers);
@@ -455,6 +656,21 @@ async function applyAiosellReservationPayload(
   const roomCode = pickRoomCode(room0, layers);
   const rateplanCode = pickRateplanCode(room0, layers);
 
+  const totalOnRoom0Only = pickTotalAmountFromRoomObjectOnly(room0);
+  const roomSummaryLines = rooms.map((r, i) => summarizeAiosellRoomLine(r, i));
+  console.info(
+    `${logPrefix} booking_payload_shape`,
+    JSON.stringify({
+      booking_id: bookingId ?? null,
+      action: action || "(empty)",
+      rooms_count: rooms.length,
+      room_lines: roomSummaryLines,
+      room0_only_amount: totalOnRoom0Only,
+      mapped_room_code: roomCode ?? null,
+      mapped_rateplan_code: rateplanCode ?? null,
+    })
+  );
+
   const establishmentId = channel.establishment_id as string;
 
   const { data: hotelSettings } = await supabase
@@ -467,23 +683,25 @@ async function applyAiosellReservationPayload(
     if (!bookingId) {
       return { status: 400, json: { success: false, error: "bookingId obrigatório para cancel" } };
     }
-    const { data: otaRow } = await supabase
-      .from("ota_reservations")
-      .select("reservation_id")
-      .eq("ota_channel_id", channel.id)
-      .eq("ota_reservation_code", String(bookingId))
-      .maybeSingle();
-    if (!otaRow?.reservation_id) {
+    const otaRows = await listOtaRowsForAiosellBooking(supabase, channel.id as string, String(bookingId));
+    if (otaRows.length === 0) {
       return { status: 404, json: { success: false, error: "Reserva OTA não encontrada" } };
     }
-    const { error: updErr } = await supabase
-      .from("reservations")
-      .update({ status: "cancelled" })
-      .eq("id", otaRow.reservation_id);
+    const ids = otaRows.map((r) => r.reservation_id);
+    const { error: updErr } = await supabase.from("reservations").update({ status: "cancelled" }).in("id", ids);
     if (updErr) {
       return { status: 500, json: { success: false, error: updErr.message } };
     }
-    return { status: 200, json: { success: true, action: "cancel", reservation_id: otaRow.reservation_id } };
+    return {
+      status: 200,
+      json: {
+        success: true,
+        action: "cancel",
+        reservation_id: ids[0],
+        reservation_ids: ids,
+        cancelled_count: ids.length,
+      },
+    };
   }
 
   if (action.includes("modify") || action.includes("update")) {
@@ -493,35 +711,40 @@ async function applyAiosellReservationPayload(
     if (!checkIn || !checkOut) {
       return { status: 400, json: { success: false, error: "Datas obrigatórias para alteração" } };
     }
-    const { data: otaRow } = await supabase
-      .from("ota_reservations")
-      .select("reservation_id")
-      .eq("ota_channel_id", channel.id)
-      .eq("ota_reservation_code", String(bookingId))
-      .maybeSingle();
-    if (!otaRow?.reservation_id) {
+    const otaRows = await listOtaRowsForAiosellBooking(supabase, channel.id as string, String(bookingId));
+    if (otaRows.length === 0) {
       return { status: 404, json: { success: false, error: "Reserva OTA não encontrada" } };
     }
-    const patch: Record<string, unknown> = {
-      checkin_date: checkIn,
-      checkout_date: checkOut,
-      guest_name: guestName,
-    };
     const amt = room0.amount ?? room0.totalAmount ?? body.totalAmount ?? body.amount;
     const numAmt = extractNumberFromAmountLike(amt) ?? (amt != null && amt !== "" ? Number(amt) : NaN);
-    if (numAmt != null && !Number.isNaN(numAmt)) patch.total_amount = numAmt;
     const modifyPrepaid = isAiosellPrepaidBooking(layers, body);
-    if (modifyPrepaid && numAmt != null && !Number.isNaN(numAmt) && numAmt > 0) {
-      patch.paid_amount = numAmt;
-      patch.payment_status = "paid";
+    const n = otaRows.length;
+    const amountParts =
+      numAmt != null && !Number.isNaN(numAmt) && n > 1 ? splitMoneyAcrossParts(numAmt, n) : null;
+
+    for (let i = 0; i < otaRows.length; i++) {
+      const patch: Record<string, unknown> = {
+        checkin_date: checkIn,
+        checkout_date: checkOut,
+        guest_name: guestName,
+      };
+      if (numAmt != null && !Number.isNaN(numAmt)) {
+        const part = amountParts ? amountParts[i] : numAmt;
+        patch.total_amount = part;
+        if (modifyPrepaid && part > 0) {
+          patch.paid_amount = part;
+          patch.payment_status = "paid";
+        }
+      }
+      const { error: updErr } = await supabase
+        .from("reservations")
+        .update(patch)
+        .eq("id", otaRows[i].reservation_id);
+      if (updErr) {
+        return { status: 500, json: { success: false, error: updErr.message } };
+      }
     }
-    const { error: updErr } = await supabase
-      .from("reservations")
-      .update(patch)
-      .eq("id", otaRow.reservation_id);
-    if (updErr) {
-      return { status: 500, json: { success: false, error: updErr.message } };
-    }
+
     await supabase
       .from("ota_reservations")
       .update({
@@ -535,20 +758,35 @@ async function applyAiosellReservationPayload(
         ota_guest_address: guestAddr,
       })
       .eq("ota_channel_id", channel.id)
-      .eq("ota_reservation_code", String(bookingId));
+      .in("id", otaRows.map((r) => r.id));
+
     if (modifyPrepaid && numAmt != null && !Number.isNaN(numAmt) && numAmt > 0) {
-      const payErr = await insertAiosellChannelPrepaidPayment(supabase, {
-        reservationId: otaRow.reservation_id,
-        establishmentId,
-        amount: numAmt,
-        bookingId: String(bookingId),
-        partnerChannelName: meta.sourceChannel,
-      });
-      if (payErr.error) {
-        console.warn(`${logPrefix} prepaid payment (modify)`, payErr.error);
+      for (let i = 0; i < otaRows.length; i++) {
+        const part = amountParts ? amountParts[i] : numAmt;
+        if (part > 0) {
+          const payErr = await insertAiosellChannelPrepaidPayment(supabase, {
+            reservationId: otaRows[i].reservation_id,
+            establishmentId,
+            amount: part,
+            bookingId: `${String(bookingId)}#${i}`,
+            partnerChannelName: meta.sourceChannel,
+          });
+          if (payErr.error) {
+            console.warn(`${logPrefix} prepaid payment (modify)`, payErr.error);
+          }
+        }
       }
     }
-    return { status: 200, json: { success: true, action: "modify", reservation_id: otaRow.reservation_id } };
+    return {
+      status: 200,
+      json: {
+        success: true,
+        action: "modify",
+        reservation_id: otaRows[0].reservation_id,
+        reservation_ids: otaRows.map((r) => r.reservation_id),
+        updated_count: otaRows.length,
+      },
+    };
   }
 
   if (!bookingId) {
@@ -563,6 +801,196 @@ async function applyAiosellReservationPayload(
     });
     return { status: 400, json: { success: false, error: "checkIn/checkOut obrigatórios" } };
   }
+
+  const prepaid = isAiosellPrepaidBooking(layers, body);
+  const bookingTotal = pickTotalAmount(room0, body, layers);
+
+  const { data: pricingRows } = await supabase
+    .from("channel_pricing")
+    .select("category_id, pricing_plan_id, channel_room_code, channel_rate_plan_code")
+    .eq("ota_channel_id", channel.id)
+    .eq("is_active", true);
+
+  if (rooms.length > 1) {
+    const { data: ex0 } = await supabase
+      .from("ota_reservations")
+      .select("reservation_id")
+      .eq("ota_channel_id", channel.id)
+      .eq("ota_reservation_code", `${String(bookingId)}#0`)
+      .maybeSingle();
+    if (ex0?.reservation_id) {
+      return {
+        status: 200,
+        json: {
+          success: true,
+          action: "book",
+          already_exists: true,
+          multi_room: true,
+          reservation_id: ex0.reservation_id,
+        },
+      };
+    }
+
+    for (let i = 0; i < rooms.length; i++) {
+      const rc = pickRoomCode(rooms[i], layers);
+      const rpc = pickRateplanCode(rooms[i], layers);
+      const mapping = findChannelPricingMapping(rc, rpc, pricingRows || []);
+      if (!rc || !mapping?.category_id) {
+        return {
+          status: 400,
+          json: {
+            success: false,
+            error: !rc
+              ? `roomCode obrigatório (quarto ${i + 1})`
+              : `Mapeamento não encontrado para o quarto ${i + 1} (${rc} / ${rpc ?? "—"}).`,
+          },
+        };
+      }
+    }
+
+    const { amounts, strategy } = computePerRoomAmounts(rooms, room0, body, layers);
+    console.info(
+      `${logPrefix} book_amount_resolution`,
+      JSON.stringify({
+        booking_id: bookingId,
+        booking_total: bookingTotal,
+        per_room_amounts: amounts,
+        split_strategy: strategy,
+        prepaid,
+        rooms_count: rooms.length,
+        multi_room: true,
+      })
+    );
+
+    const baseNotes = buildAiosellReservationNotes(String(bookingId), meta);
+    const createdIds: string[] = [];
+
+    for (let i = 0; i < rooms.length; i++) {
+      const room = rooms[i];
+      const rc = pickRoomCode(room, layers);
+      const rpc = pickRateplanCode(room, layers);
+      const mapping = findChannelPricingMapping(rc, rpc, pricingRows || [])!;
+      const ci = pickCheckIn(room, layers) || checkIn;
+      const co = pickCheckOut(room, layers) || checkOut;
+
+      const rg =
+        room.guest && typeof room.guest === "object" && !Array.isArray(room.guest)
+          ? (room.guest as Record<string, unknown>)
+          : {};
+      const guestMerged_i = { ...guest, ...rg };
+      const guestName_i = buildAiosellGuestName(body, layers, guestMerged_i, room);
+      const guestPhone_i = pickGuestPhone(guestMerged_i);
+      const guestAddr_i = guestAddressJson(guestMerged_i.address);
+
+      const occ =
+        room.occupancy && typeof room.occupancy === "object" && !Array.isArray(room.occupancy)
+          ? (room.occupancy as Record<string, unknown>)
+          : {};
+      const total_i = amounts[i] ?? 0;
+      const roomLabel = ` · Quarto ${i + 1}/${rooms.length} (Aiosell)`;
+      const reservationData: Record<string, unknown> = {
+        guest_name: guestName_i,
+        adults: Number(room.adults ?? occ.adults ?? body.adults ?? 2),
+        children: Number(room.children ?? occ.children ?? body.children ?? 0),
+        total_amount: total_i,
+        paid_amount: prepaid && total_i > 0 ? total_i : 0,
+        payment_status: prepaid && total_i > 0 ? "paid" : "pending",
+        status: "pending",
+        channel: "ota",
+        notes: prepaid
+          ? `${baseNotes}${roomLabel} · Pagamento: pré-pago (OTA)`
+          : `${baseNotes}${roomLabel}`,
+        checkin_time: hotelSettings?.checkin_time ?? null,
+        checkout_time: hotelSettings?.checkout_time ?? null,
+      };
+      if (mapping.pricing_plan_id) {
+        reservationData.pricing_plan_id = mapping.pricing_plan_id;
+      }
+
+      const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_reservation_with_lock", {
+        p_reservation_data: reservationData,
+        p_checkin_date: ci,
+        p_checkout_date: co,
+        p_establishment_id: establishmentId,
+        p_room_id: null,
+        p_category_id: mapping.category_id,
+      });
+
+      if (rpcErr) {
+        return { status: 500, json: { success: false, error: rpcErr.message } };
+      }
+
+      let resRpc = rpcResult as { success?: boolean; error?: string; reservation_id?: string };
+      if (typeof rpcResult === "string") {
+        try {
+          resRpc = JSON.parse(rpcResult) as typeof resRpc;
+        } catch {
+          return { status: 500, json: { success: false, error: "Resposta RPC inválida" } };
+        }
+      }
+      if (!resRpc?.success) {
+        console.warn(`${logPrefix} 400: create_reservation_with_lock`, {
+          rpcMessage: resRpc?.error ?? null,
+          room_index: i,
+        });
+        return { status: 400, json: { success: false, error: resRpc?.error || "Falha ao criar reserva" } };
+      }
+
+      const rid = resRpc.reservation_id as string;
+      createdIds.push(rid);
+
+      const otaCode = otaReservationCodeForRoom(String(bookingId), i, true);
+      const { error: otaInsErr } = await supabase.from("ota_reservations").insert({
+        reservation_id: rid,
+        ota_channel_id: channel.id,
+        ota_reservation_code: otaCode,
+        ota_guest_name: guestName_i,
+        ota_guest_email: (guestMerged_i.email as string) || null,
+        ota_guest_phone: guestPhone_i,
+        ota_source_channel_name: meta.sourceChannel,
+        ota_segment: meta.segment,
+        ota_cm_booking_id: meta.cmBookingId,
+        ota_special_requests: meta.specialRequests,
+        ota_guest_address: guestAddr_i,
+        sync_status: "synced",
+        synced_at: new Date().toISOString(),
+      });
+
+      if (otaInsErr) {
+        return {
+          status: 500,
+          json: { success: false, error: `Reserva criada mas vínculo OTA falhou: ${otaInsErr.message}` },
+        };
+      }
+
+      if (prepaid && total_i > 0) {
+        const payErr = await insertAiosellChannelPrepaidPayment(supabase, {
+          reservationId: rid,
+          establishmentId,
+          amount: total_i,
+          bookingId: otaCode,
+          partnerChannelName: meta.sourceChannel,
+        });
+        if (payErr.error) {
+          console.warn(`${logPrefix} prepaid payment insert`, payErr.error);
+        }
+      }
+    }
+
+    return {
+      status: 200,
+      json: {
+        success: true,
+        action: "book",
+        multi_room: true,
+        reservation_ids: createdIds,
+        reservation_id: createdIds[0],
+        rooms_created: createdIds.length,
+        prepaid_recorded: prepaid && amounts.some((a) => a > 0),
+      },
+    };
+  }
+
   if (!roomCode) {
     console.warn(`${logPrefix} 400: roomCode ausente`, { rootKeys: Object.keys(body) });
     return { status: 400, json: { success: false, error: "roomCode obrigatório" } };
@@ -587,28 +1015,7 @@ async function applyAiosellReservationPayload(
     };
   }
 
-  const { data: pricingRows } = await supabase
-    .from("channel_pricing")
-    .select("category_id, pricing_plan_id, channel_room_code, channel_rate_plan_code")
-    .eq("ota_channel_id", channel.id)
-    .eq("is_active", true);
-
-  let mapping = (pricingRows || []).find(
-    (p: { channel_room_code?: unknown; channel_rate_plan_code?: unknown }) =>
-      p.channel_room_code &&
-      String(p.channel_room_code).toUpperCase() === String(roomCode).toUpperCase() &&
-      (!rateplanCode ||
-        !p.channel_rate_plan_code ||
-        String(p.channel_rate_plan_code).toUpperCase() === String(rateplanCode).toUpperCase())
-  );
-
-  if (!mapping) {
-    mapping = (pricingRows || []).find(
-      (p: { channel_room_code?: unknown }) =>
-        p.channel_room_code &&
-        String(p.channel_room_code).toUpperCase() === String(roomCode).toUpperCase()
-    );
-  }
+  const mapping = findChannelPricingMapping(roomCode, rateplanCode, pricingRows || []);
 
   if (!mapping?.category_id) {
     console.warn(`${logPrefix} 400: mapeamento channel_pricing`, {
@@ -625,8 +1032,17 @@ async function applyAiosellReservationPayload(
     };
   }
 
-  const total = pickTotalAmount(room0, body, layers);
-  const prepaid = isAiosellPrepaidBooking(layers, body);
+  const total = bookingTotal;
+  console.info(
+    `${logPrefix} book_amount_resolution`,
+    JSON.stringify({
+      booking_id: bookingId,
+      total_amount_used_for_pms: total,
+      total_on_room0_object_only: totalOnRoom0Only,
+      prepaid,
+      rooms_count: rooms.length,
+    })
+  );
 
   const occ = room0.occupancy && typeof room0.occupancy === "object" && !Array.isArray(room0.occupancy)
     ? (room0.occupancy as Record<string, unknown>)
@@ -1002,6 +1418,7 @@ serve(async (req) => {
   let created = 0;
   let skipped = 0;
   let failed = 0;
+  let shouldPushAvailability = false;
 
   for (const item of bookings) {
     const r = await applyAiosellReservationPayload(db, channel as Record<string, unknown>, item, {
@@ -1012,6 +1429,12 @@ serve(async (req) => {
     if (r.status >= 200 && r.status < 300 && j.success) {
       if (j.already_exists) skipped++;
       else if (j.action === "book") created++;
+      const action = String(j.action ?? "");
+      if (action === "cancel" || action === "modify") {
+        shouldPushAvailability = true;
+      } else if (action === "book" && !j.already_exists) {
+        shouldPushAvailability = true;
+      }
       results.push({ bookingId: bid || null, booking_id: bid || null, status: "ok", ...j });
     } else {
       failed++;
@@ -1021,6 +1444,22 @@ serve(async (req) => {
         status: "error",
         httpStatus: r.status,
         error: j.error ?? j,
+      });
+    }
+  }
+
+  if (
+    shouldPushAvailability &&
+    !envFlagTrue("AIOSELL_SKIP_POST_INVENTORY_SYNC") &&
+    (channel as { sync_enabled?: unknown }).sync_enabled !== false &&
+    (channel as { is_active?: unknown }).is_active !== false
+  ) {
+    const est = (channel as { establishment_id?: unknown }).establishment_id as string | undefined;
+    if (est) {
+      scheduleAiosellAvailabilitySync({
+        channelId: String((channel as { id: unknown }).id),
+        establishmentId: est,
+        logPrefix: "aiosell-reservations-sync",
       });
     }
   }

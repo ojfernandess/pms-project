@@ -13,6 +13,7 @@ import { usePlanTypes } from "@/hooks/usePlanTypes";
 import { useCancellationPolicies } from "@/hooks/useCancellationPolicies";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { flushChannelSyncNow } from "@/lib/channelSyncAfterRates";
 import { useQuery } from "@tanstack/react-query";
 
 interface RatePlanDialogProps {
@@ -233,6 +234,11 @@ export const RatePlanDialog = ({
             );
         }
       }
+
+      // Sincronizar CM só após pricing_plans + pricing_plan_categories estarem gravados.
+      // O onSuccess de create/updateRatePlan corre antes disto; o flush garante envio com dados completos.
+      const estId = getSelectedEstablishmentId();
+      if (estId) flushChannelSyncNow(estId);
     } catch (error) {
       console.error("Erro ao salvar plano:", error);
       throw error;

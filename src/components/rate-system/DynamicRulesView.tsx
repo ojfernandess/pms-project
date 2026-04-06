@@ -22,6 +22,7 @@ import {
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
+import { scheduleChannelSyncAfterRateEdit } from "@/lib/channelSyncAfterRates";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { supabase } from "@/integrations/supabase/client";
@@ -130,6 +131,7 @@ export const DynamicRulesView = ({
       queryClient.invalidateQueries({ queryKey: ["rate_system_settings"] });
       queryClient.invalidateQueries({ queryKey: ["hotel_settings"] });
       toast.success("Configurações salvas");
+      scheduleChannelSyncAfterRateEdit(establishmentId);
     },
     onError: () => toast.error("Erro ao salvar configurações"),
   });

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -23,19 +24,42 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { useChannelManager } from "@/hooks/useChannelManager";
-import { Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  normalizeAiosellRatePlanCodesStored,
+  splitAiosellRatePlanCodes,
+} from "@/lib/aiosellRatePlanCodes";
 
 /** Alinhado com supabase/functions/aiosell-sync SYNC_DAYS_AHEAD */
-const SYNC_DAYS_AHEAD = 180;
-
-function pairKey(categoryId: string, planId: string | null) {
-  return `${categoryId}\0${planId ?? ""}`;
-}
+const SYNC_DAYS_AHEAD = 365;
 
 function normPlanId(id: string | null | undefined) {
   return id?.trim() || null;
+}
+
+function pairKey(categoryId: string, planId: string | null | undefined) {
+  const p = normPlanId(planId);
+  return `${categoryId}\0${p ?? ""}`;
 }
 
 /** Normaliza para comparação simples (acentos removidos). */
@@ -66,12 +90,14 @@ type CalendarPair = {
   categoryName: string;
   planName: string;
   planCode: string | null;
+  /** Linha criada só em Tarifas por canal (ainda sem datas no calendário no intervalo). */
+  source?: "calendar" | "channel_only";
 };
 
 export function AiosellMappingPanel() {
   const establishmentId = getSelectedEstablishmentId();
   const queryClient = useQueryClient();
-  const { channels, channelPricing } = useChannelManager();
+  const { channels, channelPricing, deleteChannelPricing } = useChannelManager();
 
   const aiosellChannels = useMemo(
     () =>
@@ -131,6 +157,7 @@ export function AiosellMappingPanel() {
           categoryName: r.room_categories?.name || r.category_id,
           planName: r.pricing_plans?.name || (pid ? "Plano" : "—"),
           planCode: r.pricing_plans?.code || null,
+          source: "calendar",
         });
       }
       return Array.from(seen.values()).sort((a, b) =>
@@ -146,6 +173,83 @@ export function AiosellMappingPanel() {
     );
   }, [channelPricing, channelId]);
 
+  const calendarPairKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of pairsQuery.data || []) {
+      s.add(pairKey(p.category_id, p.pricing_plan_id));
+    }
+    return s;
+  }, [pairsQuery.data]);
+
+  /** Mapeamentos guardados para este canal que ainda não aparecem no intervalo do calendário. */
+  const channelOnlyPairs = useMemo((): CalendarPair[] => {
+    if (!channelId || pairsQuery.isLoading) return [];
+    const out: CalendarPair[] = [];
+    for (const p of existingForChannel) {
+      const cid = p.category_id as string;
+      const pid = normPlanId(p.pricing_plan_id as string | null);
+      const k = pairKey(cid, pid);
+      if (calendarPairKeys.has(k)) continue;
+      const rc = p.room_categories as { name?: string } | undefined;
+      const pp = p.pricing_plans as { name?: string; code?: string } | undefined;
+      out.push({
+        category_id: cid,
+        pricing_plan_id: pid,
+        categoryName: rc?.name || cid,
+        planName: pid ? pp?.name || "Plano" : "Todos os planos (categoria)",
+        planCode: pp?.code || null,
+        source: "channel_only",
+      });
+    }
+    return out.sort((a, b) =>
+      `${a.categoryName}\0${a.planName}`.localeCompare(`${b.categoryName}\0${b.planName}`)
+    );
+  }, [channelId, existingForChannel, calendarPairKeys, pairsQuery.isLoading]);
+
+  const displayPairs = useMemo(() => {
+    const cal = pairsQuery.data || [];
+    return [...cal, ...channelOnlyPairs];
+  }, [pairsQuery.data, channelOnlyPairs]);
+
+  const categoriesForAdd = useQuery({
+    queryKey: ["aiosell_mapping_categories", establishmentId],
+    enabled: !!establishmentId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("room_categories")
+        .select("id, name")
+        .eq("establishment_id", establishmentId!)
+        .order("name");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const plansForAdd = useQuery({
+    queryKey: ["aiosell_mapping_plans", establishmentId],
+    enabled: !!establishmentId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pricing_plans")
+        .select("id, name, code")
+        .eq("establishment_id", establishmentId!)
+        .eq("is_active", true)
+        .order("name");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [addCategoryId, setAddCategoryId] = useState("");
+  const [addPlanId, setAddPlanId] = useState<string>("__all__");
+  const [addRoom, setAddRoom] = useState("");
+  const [addRateplan, setAddRateplan] = useState("");
+  const [addSaving, setAddSaving] = useState(false);
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [pairToDelete, setPairToDelete] = useState<CalendarPair | null>(null);
+
   /** Só correspondência exata: uma linha na BD por (categoria + plano), alinhada com a sincronização. */
   const findExistingRow = (categoryId: string, planId: string | null) => {
     const want = normPlanId(planId);
@@ -160,10 +264,14 @@ export function AiosellMappingPanel() {
   >({});
 
   useEffect(() => {
-    if (!pairsQuery.data || !channelId) return;
+    if (!channelId) return;
+    if (displayPairs.length === 0) {
+      setDrafts({});
+      return;
+    }
     setDrafts((prev) => {
       const next: Record<string, { room: string; rateplan: string; pricingId?: string }> = {};
-      for (const pair of pairsQuery.data) {
+      for (const pair of displayPairs) {
         const k = pairKey(pair.category_id, pair.pricing_plan_id);
         const ex = findExistingRow(pair.category_id, pair.pricing_plan_id) as
           | {
@@ -173,15 +281,16 @@ export function AiosellMappingPanel() {
             }
           | undefined;
         const p = prev[k];
+        const storedRp = String(ex?.channel_rate_plan_code ?? "").trim();
         next[k] = {
           room: p !== undefined ? p.room : String(ex?.channel_room_code ?? "").trim(),
-          rateplan: p !== undefined ? p.rateplan : String(ex?.channel_rate_plan_code ?? "").trim(),
+          rateplan: p !== undefined ? p.rateplan : storedRp,
           pricingId: ex?.id ?? p?.pricingId,
         };
       }
       return next;
     });
-  }, [pairsQuery.data, channelId, existingForChannel]);
+  }, [displayPairs, channelId, existingForChannel]);
 
   const updateDraft = (
     pair: CalendarPair,
@@ -209,9 +318,13 @@ export function AiosellMappingPanel() {
     if (!d || !channelId) return;
 
     const room = d.room.trim();
-    const rateplan = d.rateplan.trim();
-    if (!room || !rateplan) {
-      if (!silent) toast.error("Preencha Room Code e Rate Plan Code (iguais ao painel Aiosell).");
+    const rateplan = normalizeAiosellRatePlanCodesStored(d.rateplan);
+    if (!room || splitAiosellRatePlanCodes(rateplan).length === 0) {
+      if (!silent) {
+        toast.error(
+          "Preencha Room Code e pelo menos um Rate Plan Code (códigos do Channel Manager Aiosell, separados por vírgula se forem vários)."
+        );
+      }
       return;
     }
 
@@ -261,14 +374,14 @@ export function AiosellMappingPanel() {
   };
 
   const saveAllFilled = async () => {
-    if (!pairsQuery.data) return;
-    const toSave = pairsQuery.data.filter((p) => {
+    if (!displayPairs.length) return;
+    const toSave = displayPairs.filter((p) => {
       const k = pairKey(p.category_id, p.pricing_plan_id);
       const d = drafts[k];
-      return d && d.room.trim() && d.rateplan.trim();
+      return d && d.room.trim() && splitAiosellRatePlanCodes(d.rateplan).length > 0;
     });
     if (toSave.length === 0) {
-      toast.message("Nenhuma linha com Room Code e Rate Plan Code preenchidos.");
+      toast.message("Nenhuma linha com Room Code e pelo menos um Rate Plan Code preenchidos.");
       return;
     }
     let ok = 0;
@@ -290,18 +403,102 @@ export function AiosellMappingPanel() {
     }
   };
 
+  const openAddDialog = () => {
+    if (!channelId) {
+      toast.error("Selecione um canal Aiosell.");
+      return;
+    }
+    setAddCategoryId("");
+    setAddPlanId("__all__");
+    setAddRoom("");
+    setAddRateplan("");
+    setAddOpen(true);
+  };
+
+  const saveNewLine = async () => {
+    if (!channelId) return;
+    const room = addRoom.trim();
+    const rateplan = normalizeAiosellRatePlanCodesStored(addRateplan);
+    if (!addCategoryId || !room || splitAiosellRatePlanCodes(rateplan).length === 0) {
+      toast.error(
+        "Selecione a categoria e preencha Room Code e pelo menos um Rate Plan Code (vários: separados por vírgula)."
+      );
+      return;
+    }
+    const planId = addPlanId === "__all__" ? null : addPlanId;
+    const k = pairKey(addCategoryId, planId);
+    if (displayPairs.some((p) => pairKey(p.category_id, p.pricing_plan_id) === k)) {
+      toast.error("Esta combinação de categoria e plano já existe na tabela.");
+      return;
+    }
+    setAddSaving(true);
+    try {
+      const { error } = await supabase.from("channel_pricing").insert({
+        ota_channel_id: channelId,
+        category_id: addCategoryId,
+        pricing_plan_id: planId,
+        price_multiplier: 1,
+        is_active: true,
+        channel_room_code: room,
+        channel_rate_plan_code: rateplan,
+      });
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ["channel_pricing"] });
+      await queryClient.invalidateQueries({ queryKey: ["aiosell_mapping_pairs"] });
+      toast.success("Linha de mapeamento adicionada.");
+      setAddOpen(false);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao adicionar");
+    } finally {
+      setAddSaving(false);
+    }
+  };
+
+  const confirmDeleteRow = async () => {
+    const pair = pairToDelete;
+    if (!pair) return;
+    const k = pairKey(pair.category_id, pair.pricing_plan_id);
+    const ex = findExistingRow(pair.category_id, pair.pricing_plan_id) as
+      | { id?: string }
+      | undefined;
+    const id = ex?.id ?? drafts[k]?.pricingId;
+    if (!id) {
+      toast.error("Não há linha guardada na base de dados para eliminar.");
+      setDeleteOpen(false);
+      setPairToDelete(null);
+      return;
+    }
+    try {
+      await deleteChannelPricing(id);
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[k];
+        return next;
+      });
+      await queryClient.invalidateQueries({ queryKey: ["channel_pricing"] });
+      await queryClient.refetchQueries({ queryKey: ["channel_pricing"] });
+      await queryClient.invalidateQueries({ queryKey: ["aiosell_mapping_pairs"] });
+      await queryClient.refetchQueries({ queryKey: ["aiosell_mapping_pairs"] });
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao eliminar");
+    } finally {
+      setDeleteOpen(false);
+      setPairToDelete(null);
+    }
+  };
+
   const selectedChannel = aiosellChannels.find((c) => c.id === channelId);
 
   const suspiciousPairs = useMemo(() => {
-    if (!pairsQuery.data) return [];
-    return pairsQuery.data.filter((pair) => {
+    if (!displayPairs.length) return [];
+    return displayPairs.filter((pair) => {
       const k = pairKey(pair.category_id, pair.pricing_plan_id);
       const d = drafts[k];
       const room = d?.room?.trim() ?? "";
       if (!room) return false;
       return mappingLooksSuspicious(pair.categoryName, room);
     });
-  }, [pairsQuery.data, drafts]);
+  }, [displayPairs, drafts]);
 
   if (aiosellChannels.length === 0) {
     return null;
@@ -312,13 +509,12 @@ export function AiosellMappingPanel() {
       <div className="space-y-1">
         <h3 className="text-lg font-semibold">Mapeamento Aiosell (PMS → Channel Manager)</h3>
         <p className="text-sm text-muted-foreground">
-          Para cada <strong>categoria</strong> e <strong>plano de tarifa</strong> que existe no
-          calendário (próximos {SYNC_DAYS_AHEAD} dias), indique os mesmos{" "}
-          <strong>Room Code</strong> e <strong>Rate Plan Code</strong> que configurou no painel
-          Aiosell (ex.: room <code className="text-xs bg-muted px-1 rounded">deluxe</code> e plano{" "}
-          <code className="text-xs bg-muted px-1 rounded">deluxe-s-ep</code>). O nome do plano no
-          PMS (ex. «Reembolsável») não precisa coincidir com o código Aiosell — o mapeamento é feito
-          aqui.
+          Para cada <strong>categoria</strong> e <strong>plano de tarifa</strong> no calendário
+          (próximos {SYNC_DAYS_AHEAD} dias), indique o <strong>Room Code</strong> e um ou mais{" "}
+          <strong>Rate Plan Codes</strong> do Channel Manager Aiosell que devem usar o mesmo preço
+          PMS (ex.: <code className="text-xs">deluxe-s-ep, deluxe-d-ep</code>). Pode{" "}
+          <strong>adicionar</strong> linhas manualmente ou <strong>eliminar</strong> mapeamentos
+          guardados. O nome do plano no PMS não precisa coincidir com o código Aiosell.
         </p>
       </div>
 
@@ -352,11 +548,14 @@ export function AiosellMappingPanel() {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Room e rate plan no painel Aiosell</AlertTitle>
         <AlertDescription className="text-sm">
-          Cada <strong>Room Code</strong> e <strong>Rate Plan Code</strong> que envia aqui tem de
-          existir no mapeamento do Channel Manager Aiosell (mesmos tipos de quarto e planos de
-          tarifa). Se o CM só tiver, por exemplo, <code className="text-xs">deluxe</code> e{" "}
-          <code className="text-xs">executivo</code>, não use códigos de outro tipo (ex.{" "}
-          <code className="text-xs">standard-*</code>) até os criar no Aiosell.
+          Cada código que listar em <strong>Rate Plan Code</strong> tem de existir no Channel
+          Manager Aiosell. Vários códigos na mesma linha: separados por vírgula, ponto e vírgula ou
+          nova linha; a sincronização envia o mesmo preço para todos. O <strong>Room Code</strong>{" "}
+          é o <strong>tipo de quarto no CM</strong> (ex. deluxe, executivo);{" "}
+          <strong>Rate Plan Code</strong> é o <strong>plano de tarifa no CM</strong> (ex. deluxe-s-ep).
+          Não coloque nomes de planos do PMS (reembolsável / não reembolsável) no campo Room Code — isso
+          inverte o que a API Aiosell espera. O preço enviado ao CM segue a coluna x1–x4 do tarifário ARI
+          configurada no canal OTA (preço padrão = x2, duas pessoas).
         </AlertDescription>
       </Alert>
 
@@ -392,14 +591,24 @@ export function AiosellMappingPanel() {
         </div>
       ) : pairsQuery.error ? (
         <p className="text-sm text-destructive">Erro ao carregar o calendário.</p>
-      ) : !pairsQuery.data?.length ? (
-        <p className="text-sm text-muted-foreground">
-          Não há linhas no calendário de tarifas neste intervalo. Gere ou edite tarifas no sistema
-          tarifário primeiro.
-        </p>
+      ) : displayPairs.length === 0 ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Não há linhas no calendário neste intervalo nem mapeamentos guardados para este canal.
+            Adicione uma linha abaixo ou crie tarifas no tarifário.
+          </p>
+          <Button type="button" size="sm" variant="default" onClick={openAddDialog}>
+            <Plus className="h-4 w-4 mr-2" />
+            Adicionar linha de mapeamento
+          </Button>
+        </div>
       ) : (
         <>
           <div className="flex flex-wrap gap-2 justify-end">
+            <Button type="button" variant="default" size="sm" onClick={openAddDialog}>
+              <Plus className="h-4 w-4 mr-2" />
+              Adicionar linha
+            </Button>
             <Button type="button" variant="secondary" size="sm" onClick={() => saveAllFilled()}>
               Guardar todas as linhas preenchidas
             </Button>
@@ -409,23 +618,37 @@ export function AiosellMappingPanel() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[100px]">Origem</TableHead>
                   <TableHead>Categoria (PMS)</TableHead>
                   <TableHead>Plano (PMS)</TableHead>
                   <TableHead className="min-w-[140px]">Room Code (Aiosell)</TableHead>
-                  <TableHead className="min-w-[160px]">Rate Plan Code (Aiosell)</TableHead>
+                  <TableHead className="min-w-[200px]">Rate Plan Code(s) (Aiosell)</TableHead>
                   <TableHead className="w-[100px]">Estado</TableHead>
-                  <TableHead className="w-[120px]" />
+                  <TableHead className="min-w-[140px]">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pairsQuery.data.map((pair) => {
+                {displayPairs.map((pair) => {
                   const k = pairKey(pair.category_id, pair.pricing_plan_id);
                   const d = drafts[k] || { room: "", rateplan: "" };
-                  const ok = d.room.trim() && d.rateplan.trim();
+                  const ok =
+                    d.room.trim().length > 0 &&
+                    splitAiosellRatePlanCodes(d.rateplan).length > 0;
                   const suspicious =
                     ok && mappingLooksSuspicious(pair.categoryName, d.room);
                   return (
                     <TableRow key={k}>
+                      <TableCell>
+                        {pair.source === "channel_only" ? (
+                          <Badge variant="secondary" className="text-xs font-normal">
+                            Só canal
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs font-normal">
+                            Calendário
+                          </Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="font-medium">{pair.categoryName}</TableCell>
                       <TableCell>
                         <div className="flex flex-col gap-0.5">
@@ -446,9 +669,10 @@ export function AiosellMappingPanel() {
                         />
                       </TableCell>
                       <TableCell>
-                        <Input
-                          className="font-mono text-sm h-9"
-                          placeholder="ex. deluxe-s-ep"
+                        <Textarea
+                          className="font-mono text-sm min-h-[44px] max-h-28 resize-y"
+                          placeholder={"ex. deluxe-s-ep, deluxe-d-ep"}
+                          rows={2}
                           value={d.rateplan}
                           onChange={(e) => updateDraft(pair, "rateplan", e.target.value)}
                         />
@@ -477,9 +701,26 @@ export function AiosellMappingPanel() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Button type="button" size="sm" variant="outline" onClick={() => savePair(pair)}>
-                          Guardar
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Button type="button" size="sm" variant="outline" onClick={() => savePair(pair)}>
+                            Guardar
+                          </Button>
+                          {d.pricingId ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => {
+                                setPairToDelete(pair);
+                                setDeleteOpen(true);
+                              }}
+                              title="Eliminar mapeamento guardado"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          ) : null}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -489,6 +730,108 @@ export function AiosellMappingPanel() {
           </div>
         </>
       )}
+
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adicionar mapeamento Aiosell</DialogTitle>
+            <DialogDescription>
+              Cria uma linha em Tarifas por canal. Room Code e um ou mais Rate Plan Codes do CM
+              (separados por vírgula).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <div className="space-y-2">
+              <Label>Categoria (quarto)</Label>
+              <Select value={addCategoryId} onValueChange={setAddCategoryId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(categoriesForAdd.data || []).map((c: { id: string; name: string }) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Plano de tarifa</Label>
+              <Select value={addPlanId} onValueChange={setAddPlanId}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Todos os planos (uma linha por categoria)</SelectItem>
+                  {(plansForAdd.data || []).map((p: { id: string; name: string; code?: string }) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                      {p.code ? ` (${p.code})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Room Code (Aiosell)</Label>
+              <Input
+                className="font-mono text-sm"
+                placeholder="ex. deluxe"
+                value={addRoom}
+                onChange={(e) => setAddRoom(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Rate Plan Code(s) (Aiosell)</Label>
+              <Textarea
+                className="font-mono text-sm min-h-[72px]"
+                placeholder="ex. deluxe-s-ep, deluxe-d-ep"
+                rows={3}
+                value={addRateplan}
+                onChange={(e) => setAddRateplan(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => saveNewLine()} disabled={addSaving}>
+              {addSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Guardar linha
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar mapeamento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pairToDelete ? (
+                <>
+                  Esta ação remove a linha de Tarifas por canal para{" "}
+                  <strong>{pairToDelete.categoryName}</strong> — {pairToDelete.planName}. A
+                  sincronização deixará de enviar estes códigos até voltar a criar o mapeamento.
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                void confirmDeleteRow();
+              }}
+            >
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
