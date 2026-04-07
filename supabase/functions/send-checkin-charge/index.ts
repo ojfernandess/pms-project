@@ -329,7 +329,8 @@ serve(async (req) => {
           .from("reservations")
           .select(`
             id, establishment_id, reservation_code, checkin_date, checkout_date,
-            total_amount, paid_amount, status, guest_id, client_id, guest_name
+            total_amount, paid_amount, status, guest_id, client_id, guest_name,
+            ota_reservations ( ota_guest_name, ota_guest_phone )
           `)
           .eq("id", reservationId)
           .single();
@@ -476,13 +477,37 @@ serve(async (req) => {
         }
         const webCheckinLink = webCheckinLocator ? `${baseUrl}/web-checkin/${webCheckinLocator}` : "";
 
-        const { data: guest } = await supabase
-          .from("clients")
-          .select("full_name")
-          .eq("id", reservation.guest_id || reservation.client_id)
-          .maybeSingle();
+        const otaList = reservation.ota_reservations as
+          | { ota_guest_name?: string | null; ota_guest_phone?: string | null }[]
+          | null
+          | undefined;
+        const ota = Array.isArray(otaList) && otaList.length > 0 ? otaList[0] : null;
 
-        const guestName = guest?.full_name || reservation.guest_name || "Hóspede";
+        const idSet = [...new Set([reservation.guest_id, reservation.client_id].filter(Boolean))] as string[];
+        let guestRow: { full_name: string | null; phone: string | null } | null = null;
+        let finRow: { full_name: string | null; phone: string | null } | null = null;
+        if (idSet.length > 0) {
+          const { data: clientRows } = await supabase
+            .from("clients")
+            .select("id, full_name, phone")
+            .in("id", idSet);
+          const byId = new Map((clientRows ?? []).map((c: { id: string; full_name: string | null; phone: string | null }) => [c.id, c]));
+          if (reservation.guest_id) guestRow = byId.get(reservation.guest_id as string) ?? null;
+          if (reservation.client_id) finRow = byId.get(reservation.client_id as string) ?? null;
+        }
+
+        const guestName =
+          (guestRow?.full_name && String(guestRow.full_name).trim()) ||
+          (finRow?.full_name && String(finRow.full_name).trim()) ||
+          (ota?.ota_guest_name && String(ota.ota_guest_name).trim()) ||
+          (reservation.guest_name && String(reservation.guest_name).trim()) ||
+          "Hóspede";
+
+        const guestPhoneFromDb =
+          (guestRow?.phone && String(guestRow.phone).trim()) ||
+          (finRow?.phone && String(finRow.phone).trim()) ||
+          (ota?.ota_guest_phone && String(ota.ota_guest_phone).trim()) ||
+          "";
         const checkinDateStr = reservation.checkin_date
           ? new Date(reservation.checkin_date).toISOString().split("T")[0]
           : "";
@@ -570,8 +595,7 @@ Qualquer dúvida, responda esta mensagem.`;
           }
         }
 
-        const guestPhone = (await supabase.from("clients").select("phone").eq("id", reservation.guest_id || reservation.client_id).maybeSingle()).data?.phone as string | undefined;
-        const toRaw = (phoneOverrides?.[reservationId] ?? guestPhone ?? "").trim();
+        const toRaw = (phoneOverrides?.[reservationId] ?? guestPhoneFromDb ?? "").trim();
         const to = normalizePhoneForWhatsApp(toRaw);
 
         if (!to) {

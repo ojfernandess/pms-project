@@ -34,6 +34,10 @@ import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import {
+  reservationGuestContactFields,
+  reservationGuestDisplayName,
+} from "@/lib/reservationChannelDisplay";
+import {
   CreditCard,
   Loader2,
   Save,
@@ -200,6 +204,37 @@ function formatCurrency(value: number): string {
 /** IDs únicos para PostgREST `.in()` — evita `id=in.(null)` ou lista vazia quando `client_id` é null. */
 function uniqueNonNullClientIds(ids: (string | null | undefined)[]): string[] {
   return [...new Set(ids.filter((id): id is string => id != null && id !== ""))];
+}
+
+type OtaGuestRowLite = { ota_guest_name?: string | null; ota_guest_phone?: string | null };
+
+/** Nome/telefone: cliente (guest_id / client_id) + coluna guest_name + OTA/Aiosell (ota_reservations). */
+function guestFieldsFromReservationAndClients(
+  r: {
+    client_id: string | null;
+    guest_id?: string | null;
+    guest_name?: string | null;
+    ota_reservations?: OtaGuestRowLite[] | null;
+  },
+  clientsMap: Map<string, { name: string; phone: string | null }>
+): { guest_name: string | null; guest_phone: string | null } {
+  const guestClient = r.guest_id ? clientsMap.get(r.guest_id) : undefined;
+  const finClient = r.client_id ? clientsMap.get(r.client_id) : undefined;
+  const guestLm = guestClient ? { full_name: guestClient.name, phone: guestClient.phone } : null;
+  const finLm = finClient ? { full_name: finClient.name, phone: finClient.phone } : null;
+  const display = reservationGuestDisplayName({
+    guest: guestLm,
+    financial_responsible: finLm,
+    ota_reservations: r.ota_reservations ?? undefined,
+    guest_name: r.guest_name ?? null,
+  });
+  const { phone } = reservationGuestContactFields({
+    guest: guestLm,
+    financial_responsible: finLm,
+    ota_reservations: r.ota_reservations ?? undefined,
+  });
+  const guest_name = display === "Hóspede" ? null : display;
+  return { guest_name, guest_phone: phone };
 }
 
 /** Converte string de data (YYYY-MM-DD) para Date em horário local, evitando deslocamento de 1 dia por UTC. */
@@ -502,7 +537,9 @@ export default function CheckinChargeSettings() {
       const range = getCheckinDateRange(checkinDateFilter);
       const { data: reservations, error } = await supabase
         .from("reservations")
-        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id, web_checkin(status)")
+        .select(
+          "id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id, guest_id, guest_name, web_checkin(status), ota_reservations(ota_guest_name, ota_guest_phone)"
+        )
         .eq("establishment_id", establishmentUuid)
         .gte("checkin_date", range.start)
         .lt("checkin_date", range.end)
@@ -514,7 +551,9 @@ export default function CheckinChargeSettings() {
         (r) => !(Array.isArray(r.web_checkin) ? r.web_checkin : r.web_checkin ? [r.web_checkin] : []).some((w) => w?.status === "completed")
       );
       const ids = (withCheckin as { id: string }[]).map((r) => r.id);
-      const clientIds = uniqueNonNullClientIds((withCheckin as { client_id: string | null }[]).map((r) => r.client_id));
+      const clientIds = uniqueNonNullClientIds(
+        (withCheckin as { client_id: string | null; guest_id?: string | null }[]).flatMap((r) => [r.client_id, r.guest_id])
+      );
       const [clientsRes, chargesRes] = await Promise.all([
         clientIds.length
           ? supabase.from("clients").select("id, full_name, phone").in("id", clientIds)
@@ -529,13 +568,27 @@ export default function CheckinChargeSettings() {
         ])
       );
       const list: PendingReservationRow[] = withCheckin.map((r) => {
-        const { web_checkin: _wc, ...rest } = r as { web_checkin?: unknown; [k: string]: unknown };
+        const row = r as typeof r & {
+          ota_reservations?: OtaGuestRowLite[] | null;
+          guest_id?: string | null;
+          guest_name?: string | null;
+          client_id: string | null;
+        };
+        const { web_checkin: _wc, ota_reservations, ...rest } = row;
         const charge = chargesMap.get(r.id);
-        const client = clientsMap.get(r.client_id);
+        const { guest_name, guest_phone } = guestFieldsFromReservationAndClients(
+          {
+            client_id: row.client_id,
+            guest_id: row.guest_id ?? null,
+            guest_name: row.guest_name ?? null,
+            ota_reservations: ota_reservations ?? null,
+          },
+          clientsMap
+        );
         return {
           ...rest,
-          guest_name: client?.name ?? null,
-          guest_phone: client?.phone ?? null,
+          guest_name,
+          guest_phone,
           charge_id: charge?.id ?? null,
           charge_status: charge?.status ?? null,
           charge_sent_at: charge?.sent_at ?? null,
@@ -576,7 +629,9 @@ export default function CheckinChargeSettings() {
       const withCheckIn = includeCheckedInPayment;
       let query = supabase
         .from("reservations")
-        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id, web_checkin(status)")
+        .select(
+          "id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id, guest_id, guest_name, web_checkin(status), ota_reservations(ota_guest_name, ota_guest_phone)"
+        )
         .eq("establishment_id", establishmentUuid)
         .in("status", withCheckIn ? ["pending", "unpaid", "confirmed", "checkedin"] : ["pending", "unpaid", "confirmed"]);
       if (paymentListView === "recent_and_future") {
@@ -605,7 +660,9 @@ export default function CheckinChargeSettings() {
         : byPayment.filter((r) => !hasCheckinDone(r));
 
       const ids = list.map((r) => r.id);
-      const clientIds = uniqueNonNullClientIds(list.map((r) => r.client_id));
+      const clientIds = uniqueNonNullClientIds(
+        list.flatMap((r) => [(r as { client_id: string | null }).client_id, (r as { guest_id?: string | null }).guest_id])
+      );
       const [clientsRes, chargesRes] = await Promise.all([
         clientIds.length
           ? supabase.from("clients").select("id, full_name, phone").in("id", clientIds)
@@ -620,13 +677,26 @@ export default function CheckinChargeSettings() {
         ])
       );
       return list.map((r) => {
-        const { web_checkin: _wc, ...rest } = r as RowWithWebCheckin;
+        const row = r as RowWithWebCheckin & {
+          ota_reservations?: OtaGuestRowLite[] | null;
+          guest_id?: string | null;
+          guest_name?: string | null;
+        };
+        const { web_checkin: _wc, ota_reservations, ...rest } = row;
         const charge = chargesMap.get(r.id);
-        const client = clientsMap.get(r.client_id);
+        const { guest_name, guest_phone } = guestFieldsFromReservationAndClients(
+          {
+            client_id: row.client_id,
+            guest_id: row.guest_id ?? null,
+            guest_name: row.guest_name ?? null,
+            ota_reservations: ota_reservations ?? null,
+          },
+          clientsMap
+        );
         return {
           ...rest,
-          guest_name: client?.name ?? null,
-          guest_phone: client?.phone ?? null,
+          guest_name,
+          guest_phone,
           charge_id: charge?.id ?? null,
           charge_status: charge?.status ?? null,
           charge_sent_at: charge?.sent_at ?? null,
@@ -665,7 +735,9 @@ export default function CheckinChargeSettings() {
       const withCheckIn = includeCheckedInMessage;
       const { data: reservations, error } = await supabase
         .from("reservations")
-        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id, web_checkin(status)")
+        .select(
+          "id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id, guest_id, guest_name, web_checkin(status), ota_reservations(ota_guest_name, ota_guest_phone)"
+        )
         .eq("establishment_id", establishmentUuid)
         .gte("checkin_date", range.start)
         .lt("checkin_date", range.end)
@@ -686,7 +758,9 @@ export default function CheckinChargeSettings() {
         list = list.filter((r) => Number(r.paid_amount ?? 0) < Number(r.total_amount ?? 0));
       }
       const ids = list.map((r) => r.id);
-      const clientIds = uniqueNonNullClientIds(list.map((r) => r.client_id));
+      const clientIds = uniqueNonNullClientIds(
+        list.flatMap((r) => [(r as { client_id: string | null }).client_id, (r as { guest_id?: string | null }).guest_id])
+      );
       const [clientsRes, chargesRes] = await Promise.all([
         clientIds.length
           ? supabase.from("clients").select("id, full_name, phone").in("id", clientIds)
@@ -701,13 +775,26 @@ export default function CheckinChargeSettings() {
         ])
       );
       return list.map((r) => {
-        const { web_checkin: _wc, ...rest } = r as RowWithWebCheckinMsg;
+        const row = r as RowWithWebCheckinMsg & {
+          ota_reservations?: OtaGuestRowLite[] | null;
+          guest_id?: string | null;
+          guest_name?: string | null;
+        };
+        const { web_checkin: _wc, ota_reservations, ...rest } = row;
         const charge = chargesMap.get(r.id);
-        const client = clientsMap.get(r.client_id);
+        const { guest_name, guest_phone } = guestFieldsFromReservationAndClients(
+          {
+            client_id: row.client_id,
+            guest_id: row.guest_id ?? null,
+            guest_name: row.guest_name ?? null,
+            ota_reservations: ota_reservations ?? null,
+          },
+          clientsMap
+        );
         return {
           ...rest,
-          guest_name: client?.name ?? null,
-          guest_phone: client?.phone ?? null,
+          guest_name,
+          guest_phone,
           charge_id: charge?.id ?? null,
           charge_status: charge?.status ?? null,
           charge_sent_at: charge?.sent_at ?? null,
@@ -724,7 +811,9 @@ export default function CheckinChargeSettings() {
       const range = getCheckinDateRange(checkoutDateFilter);
       const { data: reservations, error } = await supabase
         .from("reservations")
-        .select("id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id")
+        .select(
+          "id, reservation_code, checkin_date, checkout_date, total_amount, paid_amount, status, client_id, guest_id, guest_name, ota_reservations(ota_guest_name, ota_guest_phone)"
+        )
         .eq("establishment_id", establishmentUuid)
         .gte("checkout_date", range.start)
         .lt("checkout_date", range.end)
@@ -733,7 +822,9 @@ export default function CheckinChargeSettings() {
       if (error) throw error;
       if (!reservations?.length) return [];
       const ids = (reservations as { id: string }[]).map((r) => r.id);
-      const clientIds = uniqueNonNullClientIds((reservations as { client_id: string | null }[]).map((r) => r.client_id));
+      const clientIds = uniqueNonNullClientIds(
+        (reservations as { client_id: string | null; guest_id?: string | null }[]).flatMap((r) => [r.client_id, r.guest_id])
+      );
       const [clientsRes, chargesRes] = await Promise.all([
         clientIds.length
           ? supabase.from("clients").select("id, full_name, phone").in("id", clientIds)
@@ -748,12 +839,26 @@ export default function CheckinChargeSettings() {
         ])
       );
       return (reservations as PendingReservationRow[]).map((r) => {
+        const row = r as PendingReservationRow & {
+          ota_reservations?: OtaGuestRowLite[] | null;
+          guest_id?: string | null;
+          guest_name?: string | null;
+        };
+        const { ota_reservations, ...restBase } = row;
         const charge = chargesMap.get(r.id);
-        const client = clientsMap.get(r.client_id);
+        const { guest_name, guest_phone } = guestFieldsFromReservationAndClients(
+          {
+            client_id: row.client_id,
+            guest_id: row.guest_id ?? null,
+            guest_name: row.guest_name ?? null,
+            ota_reservations: ota_reservations ?? null,
+          },
+          clientsMap
+        );
         return {
-          ...r,
-          guest_name: client?.name ?? null,
-          guest_phone: client?.phone ?? null,
+          ...restBase,
+          guest_name,
+          guest_phone,
           charge_id: charge?.id ?? null,
           charge_status: charge?.status ?? null,
           charge_sent_at: charge?.sent_at ?? null,

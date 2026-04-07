@@ -3,6 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { triggerEmail } from "@/lib/emailService";
 import { logActivity } from "@/lib/activityLogger";
+import {
+  reservationGuestContactFields,
+  reservationGuestDisplayName,
+} from "@/lib/reservationChannelDisplay";
 
 export const useWebCheckin = () => {
   const queryClient = useQueryClient();
@@ -131,7 +135,8 @@ export const useWebCheckin = () => {
             guest_id,
             client_id,
             room_id,
-            category_id
+            category_id,
+            ota_reservations(ota_guest_name, ota_guest_email, ota_guest_phone)
           `)
           .eq("id", webCheckinData.reservation_id)
           .maybeSingle();
@@ -171,6 +176,25 @@ export const useWebCheckin = () => {
             .eq("id", reservationFullData.client_id)
             .single();
           financialResponsible = financialData;
+        }
+
+        const displayName = reservationGuestDisplayName({
+          guest: guest as { full_name?: string | null } | null,
+          financial_responsible: financialResponsible as { full_name?: string | null } | null,
+          ota_reservations: (reservationFullData as any).ota_reservations ?? null,
+          guest_name: null,
+        });
+        const contact = reservationGuestContactFields({
+          guest: guest as { email?: string | null; phone?: string | null } | null,
+          financial_responsible: financialResponsible as { email?: string | null; phone?: string | null } | null,
+          ota_reservations: (reservationFullData as any).ota_reservations ?? null,
+        });
+        if (!guest && (displayName !== "Hóspede" || contact.email || contact.phone)) {
+          guest = {
+            full_name: displayName === "Hóspede" ? null : displayName,
+            email: contact.email,
+            phone: contact.phone,
+          };
         }
 
         // Buscar dados do quarto
@@ -425,7 +449,8 @@ export const useWebCheckin = () => {
             guest_id,
             client_id,
             room_id,
-            category_id
+            category_id,
+            ota_reservations(ota_guest_name, ota_guest_email, ota_guest_phone)
           `)
           .eq("id", webCheckinData.reservation_id)
           .maybeSingle();
@@ -470,6 +495,25 @@ export const useWebCheckin = () => {
             .eq("id", reservationData.client_id)
             .single();
           financialResponsible = financialData;
+        }
+
+        const displayName = reservationGuestDisplayName({
+          guest: guest as { full_name?: string | null } | null,
+          financial_responsible: financialResponsible as { full_name?: string | null } | null,
+          ota_reservations: (reservationData as any).ota_reservations ?? null,
+          guest_name: null,
+        });
+        const contact = reservationGuestContactFields({
+          guest: guest as { email?: string | null; phone?: string | null } | null,
+          financial_responsible: financialResponsible as { email?: string | null; phone?: string | null } | null,
+          ota_reservations: (reservationData as any).ota_reservations ?? null,
+        });
+        if (!guest && (displayName !== "Hóspede" || contact.email || contact.phone)) {
+          guest = {
+            full_name: displayName === "Hóspede" ? null : displayName,
+            email: contact.email,
+            phone: contact.phone,
+          };
         }
 
         // Buscar dados do quarto

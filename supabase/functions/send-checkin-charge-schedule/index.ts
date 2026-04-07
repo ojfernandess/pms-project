@@ -105,7 +105,7 @@ serve(async (req) => {
           .eq("establishment_id", config.establishment_id)
           .gte("created_at", since.toISOString())
           .in("status", ["pending", "unpaid", "confirmed"])
-          .in("channel", ["booking", "expedia", "ota"]);
+          .neq("channel", "direct");
 
         for (const r of reservations ?? []) {
           if (!sentIds.has(r.id)) allReservationIds.push(r.id);

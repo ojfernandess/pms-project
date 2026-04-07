@@ -2033,6 +2033,84 @@ function findChannelPricingMapping(
   return { category_id: mapping.category_id as string, pricing_plan_id: (mapping.pricing_plan_id as string) ?? null };
 }
 
+/**
+ * Mensagens & Cobranças: espelha `useReservations` ao criar reserva no PMS.
+ * Reservas Aiosell chegam com `status: pending` e `channel: ota`; o cliente só disparava com `confirmed`.
+ */
+async function maybeSendCheckinChargeAutomationsForAiosellReservation(
+  supabase: SupabaseClient,
+  reservationId: string,
+  establishmentId: string,
+  logPrefix: string,
+): Promise<void> {
+  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/$/, "");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!supabaseUrl || !serviceKey) return;
+
+  const postIntent = async (intent: "checkin_reminder" | "payment_pending") => {
+    const res = await fetch(`${supabaseUrl}/functions/v1/send-checkin-charge`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ reservation_id: reservationId, intent }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      results?: Array<{ success?: boolean; error?: string }>;
+      error?: string;
+    };
+    const first = data.results?.[0];
+    if (!res.ok || !first?.success) {
+      console.warn(`${logPrefix}: send-checkin-charge ${intent}`, first?.error ?? data.error ?? res.statusText);
+    }
+  };
+
+  const { data: config } = await supabase
+    .from("checkin_charge_config")
+    .select("send_timing")
+    .eq("establishment_id", establishmentId)
+    .eq("enabled", true)
+    .maybeSingle();
+
+  if (!config) return;
+
+  const { data: row } = await supabase
+    .from("reservations")
+    .select("status, total_amount, paid_amount, channel")
+    .eq("id", reservationId)
+    .maybeSingle();
+
+  if (!row) return;
+
+  const status = String(row.status ?? "");
+  const ch = String(row.channel ?? "direct");
+  const isOta = ch !== "direct";
+
+  const checkinEligibleStatus =
+    status === "confirmed" || (isOta && (status === "pending" || status === "preregistration"));
+
+  const total = Number(row.total_amount ?? 0);
+  const paid = Number(row.paid_amount ?? 0);
+  const hasPendingPayment = total > 0 && paid < total;
+
+  // Evita 2 mensagens na mesma criação OTA:
+  // se há pendência, prioriza "payment_pending" e não envia "checkin_reminder".
+  if (hasPendingPayment) {
+    await postIntent("payment_pending");
+    return;
+  }
+
+  if (config.send_timing === "after_confirmation" && checkinEligibleStatus) {
+    await postIntent("checkin_reminder");
+  }
+
+  if (
+    config.send_timing === "after_ota" &&
+    isOta &&
+    checkinEligibleStatus
+  ) {
+    await postIntent("checkin_reminder");
+  }
+}
+
 async function applyAiosellReservationPayload(
   supabase: SupabaseClient,
   channel: Record<string, unknown>,
@@ -2397,6 +2475,12 @@ async function applyAiosellReservationPayload(
       } catch (e) {
         console.warn(`${logPrefix} guest notification email`, e);
       }
+
+      try {
+        await maybeSendCheckinChargeAutomationsForAiosellReservation(supabase, rid, establishmentId, logPrefix);
+      } catch (e) {
+        console.warn(`${logPrefix} checkin-charge automations`, e);
+      }
     }
 
     return {
@@ -2561,6 +2645,12 @@ async function applyAiosellReservationPayload(
     });
   } catch (e) {
     console.warn(`${logPrefix} guest notification email`, e);
+  }
+
+  try {
+    await maybeSendCheckinChargeAutomationsForAiosellReservation(supabase, rid, establishmentId, logPrefix);
+  } catch (e) {
+    console.warn(`${logPrefix} checkin-charge automations`, e);
   }
 
   return {

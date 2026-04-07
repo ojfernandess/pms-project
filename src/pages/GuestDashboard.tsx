@@ -55,6 +55,10 @@ import { StayReviewForm } from "@/components/reviews/StayReviewForm";
 import { useStayReviews } from "@/hooks/useStayReviews";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
+import {
+  reservationGuestContactFields,
+  reservationGuestDisplayName,
+} from "@/lib/reservationChannelDisplay";
 import { FiscalDocumentRequest } from "@/components/webcheckin/FiscalDocumentRequest";
 import { SpecialRequestsDialog } from "@/components/webcheckin/SpecialRequestsDialog";
 import { WebCheckoutDialog } from "@/components/webcheckin/WebCheckoutDialog";
@@ -230,6 +234,35 @@ function ActionCard({
       <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 mt-2 group-hover:translate-x-1 transition-transform" />
     </button>
   );
+}
+
+function withOtaGuestFallback<T extends Record<string, any>>(
+  reservation: T,
+  guest: { full_name?: string | null; email?: string | null; phone?: string | null } | null,
+  financialResponsible: { full_name?: string | null; email?: string | null; phone?: string | null } | null
+) {
+  const displayName = reservationGuestDisplayName({
+    guest,
+    financial_responsible: financialResponsible,
+    ota_reservations: (reservation as any).ota_reservations ?? null,
+    guest_name: null,
+  });
+  const contact = reservationGuestContactFields({
+    guest,
+    financial_responsible: financialResponsible,
+    ota_reservations: (reservation as any).ota_reservations ?? null,
+  });
+  if (!guest && (displayName !== "Hóspede" || contact.email || contact.phone)) {
+    return {
+      guest: {
+        full_name: displayName === "Hóspede" ? null : displayName,
+        email: contact.email,
+        phone: contact.phone,
+      },
+      financialResponsible,
+    };
+  }
+  return { guest, financialResponsible };
 }
 
 // Componente ServiceItem moderno
@@ -517,6 +550,7 @@ export default function GuestDashboard() {
             .from("reservations")
             .select(`
               *,
+              ota_reservations(ota_guest_name, ota_guest_email, ota_guest_phone),
               rooms(room_number, name, fixed_password, authentication_type),
               room_categories(name),
               establishment:establishments(name)
@@ -558,6 +592,9 @@ export default function GuestDashboard() {
               .maybeSingle();
             financialResponsible = financialData;
           }
+          const resolved = withOtaGuestFallback(reservation as any, guest, financialResponsible);
+          guest = resolved.guest;
+          financialResponsible = resolved.financialResponsible;
 
           // Buscar dados do building separadamente (se category_id existir e tiver building_id)
           let building = null;
@@ -653,6 +690,7 @@ export default function GuestDashboard() {
         .from("reservations")
         .select(`
           *,
+          ota_reservations(ota_guest_name, ota_guest_email, ota_guest_phone),
           rooms(room_number, name, fixed_password, authentication_type),
           room_categories(name),
           establishment:establishments(name)
@@ -688,6 +726,9 @@ export default function GuestDashboard() {
           .maybeSingle();
         financialResponsible = financialData;
       }
+      const resolved = withOtaGuestFallback(reservation as any, guest, financialResponsible);
+      guest = resolved.guest;
+      financialResponsible = resolved.financialResponsible;
 
       // Buscar dados do building
       let building = null;
