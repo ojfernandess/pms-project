@@ -565,7 +565,7 @@ function isPlanTariffClosedInCalendar(row: Record<string, unknown>): boolean {
  * Formato de restrições inventário/tarifa (PMS → CM / OTA).
  * Doc. Aiosell «Rates Restrictions POST from Aiosell to 3rd Party»: mesmo conjunto de chaves que o exemplo
  * (campos não usados pelo PMS permanecem explicitamente `null`).
- * LOS mínimo só é enviado quando o PMS tem ≥ 2 noites; 0/1/null = sem regra explícita (`minimumStay: null`).
+ * LOS mínimo é enviado quando o PMS tem ≥ 1 noite; 0/null = sem regra explícita (`minimumStay: null`).
  */
 function aiosellRestrictionShape(
   minStay: number | null,
@@ -577,7 +577,7 @@ function aiosellRestrictionShape(
   maxAdvanceDays: number | null = null
 ): Record<string, unknown> {
   const minStayOut =
-    minStay != null && Number.isFinite(Number(minStay)) && Number(minStay) >= 2
+    minStay != null && Number.isFinite(Number(minStay)) && Number(minStay) >= 1
       ? Math.floor(Number(minStay))
       : null;
   const minAdv =
@@ -625,7 +625,7 @@ function aggregateRowsToAiosellInvRestrictions(
     const ss = row.stop_sell_ota ?? row.stop_sell_booking_engine;
     const mad = row.min_advance_days ?? row.min_advance_reservation;
     const xad = row.max_advance_days ?? row.max_advance_reservation;
-    if (ms != null && Number(ms) >= 2) {
+    if (ms != null && Number(ms) >= 1) {
       const v = Math.floor(Number(ms));
       minStay = minStay == null ? v : Math.max(minStay, v);
       hasAny = true;
@@ -680,7 +680,7 @@ function rowToAiosellRateRestrictions(row: Record<string, unknown>): Record<stri
   const xad = row.max_advance_days ?? row.max_advance_reservation;
   const planTariffClosed = isPlanTariffClosedInCalendar(row);
   const minStayForApi =
-    ms != null && Number(ms) >= 2 ? Math.floor(Number(ms)) : null;
+    ms != null && Number(ms) >= 1 ? Math.floor(Number(ms)) : null;
   const maxStay = xs != null ? Number(xs) : null;
   const minAdvance =
     mad != null && Number(mad) > 0 ? Math.floor(Number(mad)) : null;
@@ -688,7 +688,7 @@ function rowToAiosellRateRestrictions(row: Record<string, unknown>): Record<stri
     xad != null && Number(xad) > 0 ? Math.floor(Number(xad)) : null;
   const has =
     planTariffClosed ||
-    (ms != null && Number(ms) >= 2) ||
+    (ms != null && Number(ms) >= 1) ||
     xs != null ||
     cta ||
     ctd ||
@@ -755,11 +755,11 @@ function mergeAiosellUpdatesByDateRange(
 
 function mergeMinimumStayLos(a: unknown, b: unknown): number | null {
   const na =
-    a != null && a !== "" && Number.isFinite(Number(a)) && Number(a) >= 2
+    a != null && a !== "" && Number.isFinite(Number(a)) && Number(a) >= 1
       ? Math.floor(Number(a))
       : null;
   const nb =
-    b != null && b !== "" && Number.isFinite(Number(b)) && Number(b) >= 2
+    b != null && b !== "" && Number.isFinite(Number(b)) && Number(b) >= 1
       ? Math.floor(Number(b))
       : null;
   if (na != null && nb != null) return Math.max(na, nb);
@@ -1017,6 +1017,29 @@ serve(async (req) => {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  }
+
+  /**
+   * Evita tempestade de sync (ex.: várias alterações rápidas na grade ARI):
+   * múltiplos POSTs quase simultâneos para o mesmo canal podem ser aceitos pela API
+   * ("Request Received Successfully") mas processados fora de ordem no CM.
+   */
+  const isSyncing = String(channel.sync_status ?? "").toLowerCase() === "syncing";
+  const lastSyncAtRaw = String(channel.last_sync_at ?? "");
+  const lastSyncMs = lastSyncAtRaw ? Date.parse(lastSyncAtRaw) : NaN;
+  const nowMs = Date.now();
+  const THROTTLE_MS = 45_000;
+  const recentlyStarted = Number.isFinite(lastSyncMs) && nowMs - lastSyncMs < THROTTLE_MS;
+  if (isSyncing && recentlyStarted) {
+    return new Response(
+      JSON.stringify({
+        success: true,
+        skipped: true,
+        reason:
+          "Sincronização já em andamento para este canal. Ignorado para evitar concorrência e processamento fora de ordem no Aiosell.",
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 
   const fromChannel = channel.establishment_id as string | null;
@@ -1826,7 +1849,7 @@ serve(async (req) => {
     payload: Record<string, unknown>,
     label: string
   ): Promise<
-    | { ok: true; aiosellMessage?: string }
+    | { ok: true; aiosellMessage?: string; acceptedDespiteHttpError?: boolean }
     | { ok: false; msg: string }
   > {
     const res = await fetch(url, {
@@ -1846,7 +1869,14 @@ serve(async (req) => {
         parsed = null;
       }
     }
-    if (!res.ok) {
+    const parsedMessage =
+      parsed && typeof parsed.message === "string" ? parsed.message.trim() : "";
+    const acceptedDespiteHttpError =
+      !res.ok &&
+      parsed?.success === true &&
+      /^request received successfully\.?$/i.test(parsedMessage);
+
+    if (!res.ok && !acceptedDespiteHttpError) {
       const msg = `${label} (HTTP ${res.status}): ${text || res.statusText}`;
       await db
         .from("ota_channels")
@@ -1867,9 +1897,21 @@ serve(async (req) => {
         .eq("id", channelId);
       return { ok: false, msg };
     }
-    const aiosellMessage =
-      parsed && typeof parsed.message === "string" ? parsed.message : undefined;
-    return { ok: true, aiosellMessage };
+    const aiosellMessage = parsedMessage || undefined;
+    if (acceptedDespiteHttpError) {
+      console.warn(
+        "[aiosell-sync] aiosell_http_error_but_acknowledged",
+        JSON.stringify({
+          label,
+          status: res.status,
+          statusText: res.statusText,
+          message: aiosellMessage ?? null,
+          hint:
+            "Aiosell respondeu HTTP não-2xx, mas com payload de ACK (success=true, Request Received Successfully). O sync segue como aceite para evitar falso negativo no PMS.",
+        })
+      );
+    }
+    return { ok: true, aiosellMessage, acceptedDespiteHttpError };
   }
 
   try {

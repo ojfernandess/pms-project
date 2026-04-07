@@ -26,6 +26,7 @@ import { useCurrentEmployeeRole } from "@/hooks/useEmployees";
 import { useIsSuperAdmin } from "@/hooks/useUsers";
 import RoomDisplayConfig from "@/components/settings/RoomDisplayConfig";
 import DiscountCouponsManager from "@/components/settings/DiscountCouponsManager";
+import { CompanyApiCredentialsCard } from "@/components/settings/CompanyApiCredentialsCard";
 import {
   Table,
   TableBody,
@@ -46,8 +47,17 @@ const Settings = () => {
   const { isSuperAdmin } = useIsSuperAdmin();
   const { settings: siteSettings } = useSiteSettings();
   
-  // Verificar se a funcionalidade de integrações está habilitada
-  const isApiIntegrationsEnabled = siteSettings?.features_enabled?.api_integrations !== false;
+  // Integrações de API: quando em formato objeto, exige seleção explícita por estabelecimento.
+  const apiIntegrationsConfig = (siteSettings?.features_enabled as Record<string, unknown> | undefined)?.api_integrations;
+  const isApiIntegrationsEnabled = useMemo(() => {
+    if (!selectedEstablishment?.id) return false;
+    if (typeof apiIntegrationsConfig === "boolean") return apiIntegrationsConfig;
+    if (typeof apiIntegrationsConfig !== "object" || apiIntegrationsConfig === null) return false;
+    const cfg = apiIntegrationsConfig as { enabled?: boolean; establishment_ids?: unknown };
+    if (cfg.enabled !== true) return false;
+    if (!Array.isArray(cfg.establishment_ids)) return false;
+    return cfg.establishment_ids.includes(selectedEstablishment.id);
+  }, [apiIntegrationsConfig, selectedEstablishment?.id]);
 
   // Ler parâmetro da URL para determinar a aba inicial
   const tabFromUrl = searchParams.get("tab");
@@ -995,7 +1005,7 @@ const Settings = () => {
 
         {isApiIntegrationsEnabled && (
           <TabsContent value="integration">
-            <ApiSettingsManager />
+            <ApiSettingsManager isApiIntegrationsEnabled={isApiIntegrationsEnabled} />
           </TabsContent>
         )}
 
@@ -1656,7 +1666,8 @@ const PoliciesManager = () => {
 };
 
 // Componente de Gerenciamento de Configurações de API
-const ApiSettingsManager = () => {
+const ApiSettingsManager = ({ isApiIntegrationsEnabled }: { isApiIntegrationsEnabled: boolean }) => {
+  const { selectedEstablishment } = useEstablishment();
   const { apiSettings, isLoading, saveApiSetting, deleteApiSetting, isSaving } = useApiSettings();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
@@ -1789,6 +1800,12 @@ const ApiSettingsManager = () => {
   return (
     <Card className="p-6">
       <div className="space-y-6">
+        <CompanyApiCredentialsCard
+          companyId={selectedEstablishment?.company_id}
+          supabaseProjectUrl={import.meta.env.VITE_SUPABASE_URL ?? null}
+          isFeatureEnabled={isApiIntegrationsEnabled}
+        />
+
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">

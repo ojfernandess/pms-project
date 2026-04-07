@@ -23,6 +23,11 @@ import {
   Layers,
   Percent,
   ToggleLeft,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  Copy,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -100,6 +105,9 @@ const aiosellReservationWebhookBase =
 export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialogProps) => {
   const { channels, createChannel, updateChannel, isCreating } = useChannelManager();
   const [loading, setLoading] = useState(false);
+  const [webhookSecretLength, setWebhookSecretLength] = useState("48");
+  const [showWebhookSecret, setShowWebhookSecret] = useState(false);
+  const [copiedWebhookSecret, setCopiedWebhookSecret] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -243,6 +251,41 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const generateUrlSafeSecret = (length: number): string => {
+    const safeLength = Math.min(64, Math.max(32, Math.floor(length) || 48));
+    const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const bytes = new Uint32Array(safeLength);
+    crypto.getRandomValues(bytes);
+    let result = "";
+    for (let i = 0; i < safeLength; i += 1) {
+      result += charset[bytes[i] % charset.length];
+    }
+    return result;
+  };
+
+  const handleGenerateWebhookSecret = () => {
+    const length = Number(webhookSecretLength);
+    const next = generateUrlSafeSecret(length);
+    setFormData((prev) => ({ ...prev, aiosell_webhook_secret: next }));
+    toast.success(`Secret gerado com ${next.length} caracteres.`);
+  };
+
+  const handleCopyWebhookSecret = async () => {
+    const value = formData.aiosell_webhook_secret || "";
+    if (!value) {
+      toast.error("Gere ou informe um secret para copiar.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedWebhookSecret(true);
+      setTimeout(() => setCopiedWebhookSecret(false), 1500);
+      toast.success("Secret copiado.");
+    } catch {
+      toast.error("Não foi possível copiar o secret.");
     }
   };
 
@@ -654,14 +697,67 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
                     <Label htmlFor="aiosell_webhook_secret" className={labelClass}>
                       Secret (opcional)
                     </Label>
-                    <Input
-                      id="aiosell_webhook_secret"
-                      type="password"
-                      value={formData.aiosell_webhook_secret}
-                      onChange={(e) => setFormData({ ...formData, aiosell_webhook_secret: e.target.value })}
-                      placeholder="Header X-Aiosell-Secret deve coincidir"
-                      autoComplete="off"
-                    />
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_110px_auto_auto_auto]">
+                      <Input
+                        id="aiosell_webhook_secret"
+                        type={showWebhookSecret ? "text" : "password"}
+                        value={formData.aiosell_webhook_secret}
+                        onChange={(e) => setFormData({ ...formData, aiosell_webhook_secret: e.target.value })}
+                        placeholder="Header X-Aiosell-Secret deve coincidir"
+                        autoComplete="off"
+                        className="font-mono text-xs sm:text-sm"
+                      />
+                      <Select value={webhookSecretLength} onValueChange={setWebhookSecretLength}>
+                        <SelectTrigger aria-label="Tamanho do secret">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="32">32 chars</SelectItem>
+                          <SelectItem value="40">40 chars</SelectItem>
+                          <SelectItem value="48">48 chars</SelectItem>
+                          <SelectItem value="56">56 chars</SelectItem>
+                          <SelectItem value="64">64 chars</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button type="button" variant="secondary" onClick={handleGenerateWebhookSecret}>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Gerar
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setShowWebhookSecret((v) => !v)}
+                      >
+                        {showWebhookSecret ? (
+                          <>
+                            <EyeOff className="h-4 w-4 mr-2" />
+                            Ocultar
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="h-4 w-4 mr-2" />
+                            Ver
+                          </>
+                        )}
+                      </Button>
+                      <Button type="button" variant="outline" onClick={handleCopyWebhookSecret}>
+                        {copiedWebhookSecret ? (
+                          <>
+                            <Check className="h-4 w-4 mr-2" />
+                            Copiado
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-4 w-4 mr-2" />
+                            Copiar
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <FieldHint>
+                      Gere um secret URL-safe entre 32 e 64 caracteres para usar na query{" "}
+                      <code className="text-xs">?secret=</code>.
+                    </FieldHint>
                     <div className="flex items-start justify-between gap-3 rounded-lg border border-border/80 bg-muted/20 px-3 py-2.5 mt-3">
                       <div className="space-y-1 min-w-0">
                         <Label htmlFor="aiosell_webhook_trust_hotel_only" className={labelClass}>

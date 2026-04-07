@@ -3171,7 +3171,7 @@ const FeatureFlagsManager = () => {
   const { establishments } = useEstablishments();
   const navigate = useNavigate();
   const [features, setFeatures] = useState<any>({
-    api_integrations: true,
+    api_integrations: { enabled: false, establishment_ids: [] },
     stripe: true,
     email: { enabled: false, establishment_ids: [] },
     web_checkin: true,
@@ -3190,7 +3190,9 @@ const FeatureFlagsManager = () => {
     if (settings?.features_enabled) {
       const fe = settings.features_enabled as any;
       setFeatures({
-        api_integrations: typeof fe.api_integrations === 'boolean' ? fe.api_integrations : (fe.api_integrations?.enabled ?? true),
+        api_integrations: typeof fe.api_integrations === 'boolean'
+          ? { enabled: fe.api_integrations, establishment_ids: [] }
+          : (fe.api_integrations || { enabled: false, establishment_ids: [] }),
         stripe: typeof fe.stripe === 'boolean' ? fe.stripe : (fe.stripe?.enabled ?? true),
         email: typeof fe.email === 'boolean' 
           ? { enabled: fe.email, establishment_ids: [] }
@@ -3238,6 +3240,7 @@ const FeatureFlagsManager = () => {
     // Features que usam estrutura de objeto (enabled + ids)
     const isStructured =
       feature === 'dynamic_pricing_automation' ||
+      feature === 'api_integrations' ||
       feature === 'stay_reviews' ||
       feature === 'client_deduplication' ||
       feature === 'email' ||
@@ -3461,6 +3464,7 @@ const FeatureFlagsManager = () => {
       description: "Permite que estabelecimentos configurem integrações com APIs externas (Booking Engine, Channel Manager, etc.)",
       icon: Key,
       supportsCompanies: false,
+      supportsEstablishments: true,
     },
     {
       key: "stripe" as const,
