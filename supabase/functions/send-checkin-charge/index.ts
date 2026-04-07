@@ -93,6 +93,155 @@ async function sendViaChannelMetaTemplate(
   }
 }
 
+function parseCsvVariables(value: unknown, fallback: string[]): string[] {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v).trim()).filter(Boolean);
+  }
+  if (typeof value !== "string") return fallback;
+  const arr = value.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
+  return arr.length ? arr : fallback;
+}
+
+function resolveMetaTemplateForIntent(
+  config: Record<string, unknown>,
+  intent: string | undefined,
+  channelConfig: Record<string, unknown>
+): { name: string | null; language: string; variables: string[] } {
+  const defaultVars = ["guest_name", "reservation_code", "checkin_date", "amount", "payment_link", "web_checkin_link", "establishment_name", "establishment_address"];
+  const byIntent = (channelConfig.meta_templates_by_intent as Record<string, { name?: string; language?: string; variables?: string | string[] }> | undefined) ?? {};
+  const intentKey =
+    intent === "checkin_reminder" || intent === "payment_pending" || intent === "checkout_reminder"
+      ? intent
+      : "fallback";
+  const selected = byIntent[intentKey] ?? byIntent.fallback;
+  const name = (selected?.name || (config.meta_template_name as string) || "").trim() || null;
+  const language = (selected?.language || (config.meta_template_language as string) || "pt_BR").trim() || "pt_BR";
+  const variables = parseCsvVariables(selected?.variables ?? config.meta_template_body_variables, defaultVars);
+  return { name, language, variables };
+}
+
+async function sendViaChatwootMetaTemplate(
+  channelConfig: Record<string, unknown>,
+  to: string,
+  templateName: string,
+  languageCode: string,
+  bodyParameters: string[]
+): Promise<{ ok: boolean; externalId?: string; error?: string }> {
+  const baseUrl = (channelConfig.base_url as string) || "";
+  const accountId = (channelConfig.account_id as number) || 0;
+  const inboxId = (channelConfig.inbox_id as number) || 0;
+  const apiKey = (channelConfig.api_key as string) || "";
+  if (!baseUrl || !apiKey || !to) return { ok: false, error: "Chatwoot: config ou destinatário ausente" };
+  const headers = { "api_access_token": apiKey, "Content-Type": "application/json" };
+  const apiBase = baseUrl.replace(/\/$/, "");
+  const phoneDigits = to.replace(/\D/g, "") || to;
+  const phoneE164 = to.startsWith("+") ? to : `+${phoneDigits}`;
+  try {
+    let sourceId: string | null = null;
+    let contactId: number | null = null;
+    const createContactRes = await fetch(`${apiBase}/api/v1/accounts/${accountId}/contacts`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        inbox_id: inboxId,
+        phone_number: phoneE164,
+        identifier: phoneDigits,
+      }),
+    });
+    const contactData = await createContactRes.json().catch(() => ({}));
+    const contactPayload = contactData?.payload ?? contactData;
+    const payloadContact = contactPayload?.contact ?? contactPayload;
+    contactId = payloadContact?.id ?? contactPayload?.id ?? null;
+    const contactInboxes = contactPayload?.contact_inboxes ?? payloadContact?.contact_inboxes ?? contactData?.contact_inboxes ?? [];
+    if (createContactRes.ok && contactInboxes.length > 0) {
+      const inboxMatch = contactInboxes.find((ci: { inbox?: { id: number } }) => ci.inbox?.id === inboxId);
+      sourceId = (inboxMatch?.source_id ?? contactInboxes[0]?.source_id) ?? null;
+    }
+    if (createContactRes.ok && !sourceId && contactId) {
+      const createCibRes = await fetch(`${apiBase}/api/v1/accounts/${accountId}/contacts/${contactId}/contact_inboxes`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ inbox_id: inboxId, source_id: phoneDigits }),
+      });
+      const cibData = await createCibRes.json().catch(() => ({}));
+      const cibPayload = cibData?.payload ?? cibData;
+      sourceId = cibPayload?.source_id ?? phoneDigits;
+    }
+    if (!sourceId && (createContactRes.status === 422 || createContactRes.status === 404)) {
+      const searchRes = await fetch(
+        `${apiBase}/api/v1/accounts/${accountId}/contacts/search?q=${encodeURIComponent(phoneDigits)}`,
+        { headers }
+      );
+      const searchData = await searchRes.json().catch(() => ({}));
+      const list = searchData?.payload ?? searchData?.data ?? searchData;
+      const contacts = Array.isArray(list) ? list : list?.contacts ?? [];
+      const contact = contacts.find((c: { contact_inboxes?: Array<{ source_id: string; inbox?: { id: number } }> }) =>
+        (c.contact_inboxes ?? []).some((ci: { inbox?: { id: number } }) => ci.inbox?.id === inboxId)
+      ) ?? contacts[0];
+      const ci = contact?.contact_inboxes ?? [];
+      if (ci.length > 0) {
+        const inboxMatch = ci.find((cib: { inbox?: { id: number } }) => cib.inbox?.id === inboxId);
+        sourceId = inboxMatch?.source_id ?? ci[0]?.source_id ?? null;
+      }
+      if (!sourceId && contact?.id) {
+        const createCibRes = await fetch(`${apiBase}/api/v1/accounts/${accountId}/contacts/${contact.id}/contact_inboxes`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ inbox_id: inboxId, source_id: phoneDigits }),
+        });
+        const cibData = await createCibRes.json().catch(() => ({}));
+        const cibPayload = cibData?.payload ?? cibData;
+        sourceId = cibPayload?.source_id ?? phoneDigits;
+      }
+    }
+    if (!sourceId) sourceId = phoneDigits;
+
+    const convRes = await fetch(`${apiBase}/api/v1/accounts/${accountId}/conversations`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        source_id: sourceId,
+        inbox_id: inboxId,
+        message: { content: " " },
+      }),
+    });
+    const convData = await convRes.json().catch(() => ({}));
+    if (!convRes.ok) {
+      return { ok: false, error: convData?.message || convData?.errors?.[0]?.message || String(convRes.status) };
+    }
+    const conversationId = convData?.id ?? convData?.payload?.id;
+    if (!conversationId) return { ok: false, error: "Chatwoot: conversa não encontrada" };
+
+    const bodyMap = bodyParameters.reduce((acc, val, idx) => {
+      acc[String(idx + 1)] = val ?? "";
+      return acc;
+    }, {} as Record<string, string>);
+    const msgRes = await fetch(`${apiBase}/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        content: "Template WhatsApp",
+        message_type: "outgoing",
+        private: false,
+        content_type: "text",
+        template_params: {
+          name: templateName,
+          category: "UTILITY",
+          language: languageCode,
+          processed_params: {
+            body: bodyMap,
+          },
+        },
+      }),
+    });
+    const msgData = await msgRes.json().catch(() => ({}));
+    if (!msgRes.ok) return { ok: false, error: msgData?.message || msgData?.errors?.[0]?.message || String(msgRes.status) };
+    return { ok: true, externalId: String(msgData?.id ?? conversationId) };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
 async function sendViaChannel(
   channel: string,
   channelConfig: Record<string, unknown>,
@@ -606,12 +755,14 @@ Qualquer dúvida, responda esta mensagem.`;
         const channelConfig = (config.channel_config as Record<string, unknown>) || {};
         let sendResult: { ok: boolean; externalId?: string; error?: string };
 
-        if (templateSource === "meta" && config.meta_template_name) {
-          const metaName = config.meta_template_name as string;
-          const metaLang = (config.meta_template_language as string) || "pt_BR";
-          const bodyVarNames = (config.meta_template_body_variables as string[]) || ["guest_name", "reservation_code", "checkin_date", "amount", "payment_link", "web_checkin_link", "establishment_name", "establishment_address"];
-          const bodyParams = bodyVarNames.map((key) => vars[key] ?? "");
-          sendResult = await sendViaChannelMetaTemplate(channelConfig, to, metaName, metaLang, bodyParams);
+        const selectedMeta = resolveMetaTemplateForIntent(config as Record<string, unknown>, intent, channelConfig);
+        if (templateSource === "meta" && selectedMeta.name) {
+          const bodyParams = selectedMeta.variables.map((key) => vars[key] ?? "");
+          if (config.channel === "chatwoot") {
+            sendResult = await sendViaChatwootMetaTemplate(channelConfig, to, selectedMeta.name, selectedMeta.language, bodyParams);
+          } else {
+            sendResult = await sendViaChannelMetaTemplate(channelConfig, to, selectedMeta.name, selectedMeta.language, bodyParams);
+          }
         } else {
           sendResult = await sendViaChannel(config.channel, channelConfig, to, message, reservationId);
         }

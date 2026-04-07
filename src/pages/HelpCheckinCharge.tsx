@@ -127,19 +127,28 @@ wget -O docker-compose.yaml https://raw.githubusercontent.com/chatwoot/chatwoot/
               <div className="space-y-3">
                 <h4 className="font-medium flex items-center gap-2">
                   <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">2</span>
-                  Obter URL e token
+                  Onde achar URL, Account ID e Token no Chatwoot
                 </h4>
-                <p className="text-sm text-muted-foreground">
-                  Após instalar, acesse seu Chatwoot. Em <strong>Configurações → Perfil → Access Token</strong> ou na API,
-                  obtenha o token de um usuário admin. O <code className="px-1 py-0.5 bg-muted rounded">accountId</code> é o ID da conta
-                  (geralmente 1 na primeira conta).
-                </p>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground pl-2">
+                  <li>
+                    <strong>URL base:</strong> é o endereço onde você acessa o Chatwoot (ex.: <code className="px-1 py-0.5 bg-muted rounded">https://chat.suaempresa.com</code>).
+                  </li>
+                  <li>
+                    <strong>Token:</strong> no Chatwoot, vá em <strong>Profile Settings → Access Token</strong> e copie o token do usuário admin.
+                  </li>
+                  <li>
+                    <strong>Account ID:</strong> normalmente aparece na URL após entrar na conta (ex.: <code className="px-1 py-0.5 bg-muted rounded">/app/accounts/1/...</code> → Account ID = <strong>1</strong>).
+                  </li>
+                  <li>
+                    <strong>Inbox ID:</strong> em <strong>Settings → Inboxes</strong>, abra o inbox desejado e copie o ID na URL (ex.: <code className="px-1 py-0.5 bg-muted rounded">/accounts/1/inboxes/7</code> → Inbox ID = <strong>7</strong>).
+                  </li>
+                </ol>
               </div>
 
               <Separator />
 
               <p className="text-xs text-muted-foreground">
-                Para conectar WhatsApp ao Chatwoot, você pode usar Evolution API (próxima seção) ou o fluxo oficial da Meta.
+                Se você não tiver WhatsApp Cloud API, use o fluxo da próxima seção (Chatwoot + Evolution API), que funciona com QR Code.
               </p>
             </div>
           </CollapsibleContent>
@@ -175,8 +184,7 @@ wget -O docker-compose.yaml https://raw.githubusercontent.com/chatwoot/chatwoot/
           <CollapsibleContent>
             <div className="px-4 pb-4 pt-2 space-y-4 border-t">
               <p className="text-sm text-muted-foreground">
-                A Evolution API conecta WhatsApp (via QR Code) ao Chatwoot. Você não precisa de conta Meta/WhatsApp Business
-                para enviar mensagens.
+                Fluxo indicado para clientes sem WhatsApp Cloud API. Você cria uma instância na Evolution, conecta o WhatsApp por QR Code e integra ao Chatwoot.
               </p>
 
               <div className="space-y-3">
@@ -185,7 +193,7 @@ wget -O docker-compose.yaml https://raw.githubusercontent.com/chatwoot/chatwoot/
                   Instalar Evolution API
                 </h4>
                 <p className="text-sm text-muted-foreground">
-                  Use Docker para subir a Evolution API. Consulte o repositório oficial no GitHub ou a documentação.
+                  Suba a Evolution API em um servidor (Docker). Após subir, valide que a API está acessível na URL pública.
                 </p>
                 <a
                   href={DOC_LINKS.evolutionApi}
@@ -202,23 +210,37 @@ wget -O docker-compose.yaml https://raw.githubusercontent.com/chatwoot/chatwoot/
               <div className="space-y-3">
                 <h4 className="font-medium flex items-center gap-2">
                   <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">2</span>
-                  Criar instância e conectar WhatsApp
+                  Criar instância na Evolution e vincular WhatsApp
                 </h4>
                 <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground pl-2">
-                  <li>Crie uma instância via API: <code className="px-1 py-0.5 bg-muted rounded">POST /instance/create</code></li>
-                  <li>Use <code className="px-1 py-0.5 bg-muted rounded">qrcode: true</code> para gerar QR Code.</li>
-                  <li>Escaneie o QR Code com o WhatsApp no celular (apenas uma vez).</li>
+                  <li>Crie uma instância (nome sugerido: <code className="px-1 py-0.5 bg-muted rounded">hotel-01</code>).</li>
+                  <li>Solicite o QR Code da instância.</li>
+                  <li>No celular, abra WhatsApp → Dispositivos conectados → Conectar dispositivo e escaneie o QR Code.</li>
+                  <li>Confirme que a instância ficou com status <strong>connected/open</strong>.</li>
                 </ol>
               </div>
 
               <div className="space-y-3">
                 <h4 className="font-medium flex items-center gap-2">
                   <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">3</span>
-                  Configurar Chatwoot na Evolution
+                  Conectar a instância Evolution no Chatwoot
                 </h4>
                 <p className="text-sm text-muted-foreground">
-                  Envie um POST para <code className="px-1 py-0.5 bg-muted rounded">{`/chatwoot/set/{{instance}}`}</code> com:
+                  Você pode fazer de duas formas na Evolution API (conforme documentação oficial):
                 </p>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <p>
+                    <strong>Opção A (direto na criação da instância):</strong> use <code className="px-1 py-0.5 bg-muted rounded">POST /instance/create</code> e já envie os campos
+                    <code className="px-1 py-0.5 bg-muted rounded ml-1">chatwootAccountId</code>,
+                    <code className="px-1 py-0.5 bg-muted rounded ml-1">chatwootToken</code>,
+                    <code className="px-1 py-0.5 bg-muted rounded ml-1">chatwootUrl</code>,
+                    <code className="px-1 py-0.5 bg-muted rounded ml-1">chatwootNameInbox</code>.
+                  </p>
+                  <p>
+                    <strong>Opção B (instância já criada):</strong> abra as opções da instância no painel da Evolution e configure Chatwoot
+                    (equivalente ao endpoint <code className="px-1 py-0.5 bg-muted rounded">{`POST /chatwoot/set/{{instance}}`}</code>).
+                  </p>
+                </div>
                 <pre className="p-3 bg-muted rounded-lg text-xs overflow-x-auto">
 {`{
   "enabled": true,
@@ -227,14 +249,25 @@ wget -O docker-compose.yaml https://raw.githubusercontent.com/chatwoot/chatwoot/
   "url": "https://seu-chatwoot.com",
   "signMsg": true,
   "reopenConversation": true,
-  "nameInbox": "evolution"
+  "conversationPending": false,
+  "nameInbox": "evolution",
+  "mergeBrazilContacts": true,
+  "importContacts": true,
+  "importMessages": true,
+  "daysLimitImportMessages": 2,
+  "autoCreate": true
 }`}
                 </pre>
                 <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-                  <li><strong>accountId</strong>: ID da conta no Chatwoot (geralmente 1)</li>
-                  <li><strong>token</strong>: Token de API de um usuário admin</li>
-                  <li><strong>url</strong>: URL base do Chatwoot (sem barra no final)</li>
+                  <li><strong>accountId</strong>: ID da conta no Chatwoot (visto na URL da conta)</li>
+                  <li><strong>token</strong>: Access Token do usuário admin no Chatwoot</li>
+                  <li><strong>url</strong>: URL base do Chatwoot, sem barra final</li>
+                  <li><strong>nameInbox</strong>: nome da Inbox que será criada/associada no Chatwoot</li>
+                  <li><strong>autoCreate</strong>: recomenda-se <strong>true</strong> para a Evolution criar/ligar inbox automaticamente</li>
                 </ul>
+                <p className="text-xs text-muted-foreground">
+                  No painel da Evolution, procure a seção da instância relacionada a <strong>Integrações</strong> ou <strong>Chatwoot</strong> e preencha os mesmos campos acima.
+                </p>
                 <a
                   href={DOC_LINKS.evolutionChatwoot}
                   target="_blank"
@@ -250,11 +283,98 @@ wget -O docker-compose.yaml https://raw.githubusercontent.com/chatwoot/chatwoot/
               <div className="space-y-3">
                 <h4 className="font-medium flex items-center gap-2">
                   <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">4</span>
-                  Conectar ao PMS
+                  Configurar na seção Mensagens & Cobranças (PMS)
                 </h4>
-                <p className="text-sm text-muted-foreground">
-                  Em Mensagens & Cobranças → Configuração, preencha a URL da Evolution API e a chave (API Key). Em Chatwoot,
-                  preencha a URL do Chatwoot e o token. O sistema enviará mensagens via Chatwoot (que usa a Evolution para WhatsApp).
+                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground pl-2">
+                  <li>Abra <strong>Mensagens & Cobranças → Configuração</strong>.</li>
+                  <li>Em <strong>Canal de envio</strong>, selecione <strong>Chatwoot</strong>.</li>
+                  <li>Preencha: <strong>URL base</strong>, <strong>Account ID</strong>, <strong>Inbox ID</strong>, <strong>API Key</strong>.</li>
+                  <li>Em <strong>Origem do template</strong>, escolha:
+                    <ul className="list-disc list-inside mt-1 ml-3">
+                      <li><strong>Chatwoot (Canned Responses)</strong> para respostas rápidas do Chatwoot, ou</li>
+                      <li><strong>Meta</strong> quando sua inbox for detectada como WhatsApp Cloud API.</li>
+                    </ul>
+                  </li>
+                  <li>Clique em <strong>Salvar configuração</strong> e faça um envio de teste na aba de reservas.</li>
+                </ol>
+              </div>
+
+              <div className="space-y-3">
+                <h4 className="font-medium flex items-center gap-2">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">5</span>
+                  Mapeamento rápido: PMS ↔ Evolution ↔ Chatwoot
+                </h4>
+                <div className="rounded-lg border overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr className="text-left">
+                        <th className="px-3 py-2 font-medium">No PMS (Mensagens & Cobranças)</th>
+                        <th className="px-3 py-2 font-medium">Na Evolution API</th>
+                        <th className="px-3 py-2 font-medium">No Chatwoot</th>
+                        <th className="px-3 py-2 font-medium">Observação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-t">
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <code className="px-1 py-0.5 bg-muted rounded">URL base</code>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">Obrigatório</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2"><code className="px-1 py-0.5 bg-muted rounded">url</code> (chatwoot set)</td>
+                        <td className="px-3 py-2">URL do seu Chatwoot</td>
+                        <td className="px-3 py-2">Ex.: <code className="px-1 py-0.5 bg-muted rounded">https://chat.suaempresa.com</code> (sem barra final)</td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <code className="px-1 py-0.5 bg-muted rounded">Account ID</code>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">Obrigatório</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2"><code className="px-1 py-0.5 bg-muted rounded">accountId</code></td>
+                        <td className="px-3 py-2">ID da conta na URL</td>
+                        <td className="px-3 py-2">Ex.: <code className="px-1 py-0.5 bg-muted rounded">/accounts/1/...</code> → <strong>1</strong></td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <code className="px-1 py-0.5 bg-muted rounded">API Key</code>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">Obrigatório</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2"><code className="px-1 py-0.5 bg-muted rounded">token</code></td>
+                        <td className="px-3 py-2">Access Token do admin</td>
+                        <td className="px-3 py-2">Chatwoot: Profile Settings → Access Token</td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <code className="px-1 py-0.5 bg-muted rounded">Inbox ID</code>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">Obrigatório</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2"><code className="px-1 py-0.5 bg-muted rounded">nameInbox</code> + <code className="px-1 py-0.5 bg-muted rounded">autoCreate</code></td>
+                        <td className="px-3 py-2">ID da Inbox</td>
+                        <td className="px-3 py-2">Se <code className="px-1 py-0.5 bg-muted rounded">autoCreate=true</code>, a Evolution pode criar a inbox; depois copie o ID no Chatwoot.</td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <code className="px-1 py-0.5 bg-muted rounded">Origem do template</code>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">Opcional</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2"><code className="px-1 py-0.5 bg-muted rounded">nameInbox / provider</code></td>
+                        <td className="px-3 py-2">Canned Responses ou WhatsApp Templates</td>
+                        <td className="px-3 py-2">Use Chatwoot (canned) por padrão; use Meta quando a inbox for detectada como WhatsApp Cloud API.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Dica: primeiro conecte Evolution ↔ Chatwoot, confirme que a inbox foi criada/ativa no Chatwoot e só depois finalize os campos no PMS.
                 </p>
               </div>
             </div>

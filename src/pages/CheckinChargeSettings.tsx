@@ -149,6 +149,7 @@ type SendTiming = "after_confirmation" | "days_before_checkin" | "after_ota" | "
 type AmountType = "total" | "percent" | "fixed";
 type ChannelType = "whatsapp_cloud" | "chatwoot" | "evolution_api" | "webhook";
 type TemplateSource = "internal" | "meta" | "chatwoot";
+type MetaIntentKey = "checkin_reminder" | "payment_pending" | "checkout_reminder" | "fallback";
 
 type TemplateType = "checkin_reminder" | "payment_pending" | "checkout_reminder" | "custom";
 
@@ -189,6 +190,16 @@ interface CheckinChargeTemplateRow {
   created_at: string;
   updated_at: string;
 }
+
+type MetaTemplateSelection = { name: string; language: string; variables: string };
+type MetaTemplatesByIntent = Record<MetaIntentKey, MetaTemplateSelection>;
+
+const DEFAULT_META_TEMPLATES_BY_INTENT: MetaTemplatesByIntent = {
+  checkin_reminder: { name: "", language: "pt_BR", variables: "guest_name, reservation_code, checkin_date, web_checkin_link" },
+  payment_pending: { name: "", language: "pt_BR", variables: "guest_name, reservation_code, amount, payment_link" },
+  checkout_reminder: { name: "", language: "pt_BR", variables: "guest_name, reservation_code, checkout_date" },
+  fallback: { name: "", language: "pt_BR", variables: "guest_name, reservation_code, checkin_date, amount, payment_link, web_checkin_link" },
+};
 
 const CHANNEL_LABELS: Record<ChannelType, string> = {
   whatsapp_cloud: "WhatsApp Cloud API",
@@ -462,9 +473,7 @@ export default function CheckinChargeSettings() {
   const [channelConfig, setChannelConfig] = useState<Record<string, unknown>>({});
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [templateSource, setTemplateSource] = useState<TemplateSource>("internal");
-  const [metaTemplateName, setMetaTemplateName] = useState("");
-  const [metaTemplateLanguage, setMetaTemplateLanguage] = useState("pt_BR");
-  const [metaTemplateBodyVariables, setMetaTemplateBodyVariables] = useState("guest_name, reservation_code, checkin_date, amount, payment_link, web_checkin_link");
+  const [metaTemplatesByIntent, setMetaTemplatesByIntent] = useState<MetaTemplatesByIntent>(DEFAULT_META_TEMPLATES_BY_INTENT);
   const [chatwootCannedResponseId, setChatwootCannedResponseId] = useState<number | null>(null);
   const [chatwootCannedResponseShortCode, setChatwootCannedResponseShortCode] = useState("");
   const [paymentLinkExpiresDays, setPaymentLinkExpiresDays] = useState(7);
@@ -970,22 +979,41 @@ export default function CheckinChargeSettings() {
     setChannelConfig((config.channel_config as Record<string, unknown>) ?? {});
     setTemplateId(config.template_id);
     setTemplateSource((config.template_source as TemplateSource) ?? "internal");
-    setMetaTemplateName(config.meta_template_name ?? "");
-    setMetaTemplateLanguage(config.meta_template_language ?? "pt_BR");
-    setMetaTemplateBodyVariables(
-      Array.isArray(config.meta_template_body_variables)
-        ? config.meta_template_body_variables.join(", ")
-        : "guest_name, reservation_code, checkin_date, amount, payment_link, web_checkin_link"
-    );
     setChatwootCannedResponseId(config.chatwoot_canned_response_id ?? null);
     setChatwootCannedResponseShortCode(config.chatwoot_canned_response_short_code ?? "");
+    const cc = (config.channel_config as Record<string, unknown>) ?? {};
+    const byIntent = (cc.meta_templates_by_intent as Partial<Record<MetaIntentKey, Partial<MetaTemplateSelection>>>) ?? {};
+    const fallbackVars =
+      Array.isArray(config.meta_template_body_variables)
+        ? config.meta_template_body_variables.join(", ")
+        : DEFAULT_META_TEMPLATES_BY_INTENT.fallback.variables;
+    setMetaTemplatesByIntent({
+      checkin_reminder: {
+        ...DEFAULT_META_TEMPLATES_BY_INTENT.checkin_reminder,
+        ...(byIntent.checkin_reminder ?? {}),
+      },
+      payment_pending: {
+        ...DEFAULT_META_TEMPLATES_BY_INTENT.payment_pending,
+        ...(byIntent.payment_pending ?? {}),
+      },
+      checkout_reminder: {
+        ...DEFAULT_META_TEMPLATES_BY_INTENT.checkout_reminder,
+        ...(byIntent.checkout_reminder ?? {}),
+      },
+      fallback: {
+        ...DEFAULT_META_TEMPLATES_BY_INTENT.fallback,
+        name: config.meta_template_name ?? byIntent.fallback?.name ?? "",
+        language: config.meta_template_language ?? byIntent.fallback?.language ?? "pt_BR",
+        variables: fallbackVars || byIntent.fallback?.variables || DEFAULT_META_TEMPLATES_BY_INTENT.fallback.variables,
+      },
+    });
     setPaymentLinkExpiresDays(config.payment_link_expires_days ?? 7);
     setTemplateIdReminder(config.template_id_reminder ?? null);
     setTemplateIdPayment(config.template_id_payment ?? null);
     setTemplateIdCheckout(config.template_id_checkout ?? null);
   }, [config]);
 
-  const { data: channelTemplates, isLoading: channelTemplatesLoading } = useQuery({
+  const { data: channelTemplates, isLoading: channelTemplatesLoading, isFetching: channelTemplatesFetching, refetch: refetchChannelTemplates } = useQuery({
     queryKey: ["list-channel-templates", establishmentUuid, channel],
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke("list-channel-templates", {
@@ -996,15 +1024,61 @@ export default function CheckinChargeSettings() {
         internal: Array<{ id: string; name: string; body: string }>;
         meta?: Array<{ name: string; language: string; status?: string }>;
         chatwoot?: Array<{ id: number; short_code: string; content: string }>;
+        chatwoot_inbox?: { id: number; channel_type?: string; provider?: string; is_whatsapp_cloud: boolean };
       };
     },
     enabled: !!establishmentUuid && !!config && (channel === "whatsapp_cloud" || channel === "chatwoot"),
   });
+  const chatwootSupportsMeta = channel === "chatwoot" && channelTemplates?.chatwoot_inbox?.is_whatsapp_cloud === true;
+  const metaAvailableForCurrentChannel = channel === "whatsapp_cloud" || chatwootSupportsMeta;
+
+  const updateMetaIntent = (intent: MetaIntentKey, patch: Partial<MetaTemplateSelection>) => {
+    setMetaTemplatesByIntent((prev) => ({
+      ...prev,
+      [intent]: {
+        ...prev[intent],
+        ...patch,
+      },
+    }));
+  };
 
   const saveConfig = async () => {
     if (!establishmentUuid) return;
     setConfigSaving(true);
     try {
+      const normalizedMetaByIntent: MetaTemplatesByIntent = {
+        checkin_reminder: {
+          name: metaTemplatesByIntent.checkin_reminder.name.trim(),
+          language: (metaTemplatesByIntent.checkin_reminder.language || "pt_BR").trim(),
+          variables: metaTemplatesByIntent.checkin_reminder.variables.trim(),
+        },
+        payment_pending: {
+          name: metaTemplatesByIntent.payment_pending.name.trim(),
+          language: (metaTemplatesByIntent.payment_pending.language || "pt_BR").trim(),
+          variables: metaTemplatesByIntent.payment_pending.variables.trim(),
+        },
+        checkout_reminder: {
+          name: metaTemplatesByIntent.checkout_reminder.name.trim(),
+          language: (metaTemplatesByIntent.checkout_reminder.language || "pt_BR").trim(),
+          variables: metaTemplatesByIntent.checkout_reminder.variables.trim(),
+        },
+        fallback: {
+          name: metaTemplatesByIntent.fallback.name.trim(),
+          language: (metaTemplatesByIntent.fallback.language || "pt_BR").trim(),
+          variables: metaTemplatesByIntent.fallback.variables.trim(),
+        },
+      };
+      const channelConfigForSave =
+        templateSource === "meta"
+          ? {
+              ...channelConfig,
+              meta_templates_by_intent: normalizedMetaByIntent,
+            }
+          : channelConfig;
+      const fallbackMetaVars = normalizedMetaByIntent.fallback.variables
+        .split(/[,;\n]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
       const payload = {
         establishment_id: establishmentUuid,
         enabled,
@@ -1014,18 +1088,13 @@ export default function CheckinChargeSettings() {
         amount_value: amountType === "total" ? null : (amountValue ? Number(amountValue) : null),
         due_date_days: dueDateDays,
         channel,
-        channel_config: channelConfig,
+        channel_config: channelConfigForSave,
         template_id: templateSource === "internal" ? (templateId || null) : null,
         template_source: templateSource,
-        meta_template_name: templateSource === "meta" ? metaTemplateName || null : null,
-        meta_template_language: templateSource === "meta" ? metaTemplateLanguage || null : null,
+        meta_template_name: templateSource === "meta" ? normalizedMetaByIntent.fallback.name || null : null,
+        meta_template_language: templateSource === "meta" ? normalizedMetaByIntent.fallback.language || null : null,
         meta_template_body_variables:
-          templateSource === "meta"
-            ? metaTemplateBodyVariables
-                .split(/[,;\n]+/)
-                .map((s) => s.trim())
-                .filter(Boolean)
-            : null,
+          templateSource === "meta" ? fallbackMetaVars : null,
         chatwoot_canned_response_id: templateSource === "chatwoot" ? chatwootCannedResponseId : null,
         chatwoot_canned_response_short_code: templateSource === "chatwoot" ? (chatwootCannedResponseShortCode || null) : null,
         payment_link_expires_days: paymentLinkExpiresDays,
@@ -1680,13 +1749,21 @@ export default function CheckinChargeSettings() {
                   <p className="text-sm text-muted-foreground">
                     Internal/Evolution: templates criados aqui. Meta: templates aprovados no WhatsApp. Chatwoot: Canned Responses da conta.
                   </p>
+                  {channel === "chatwoot" && (
+                    <p className="text-xs text-muted-foreground">
+                      Inbox detectada:{" "}
+                      {chatwootSupportsMeta
+                        ? "WhatsApp Cloud API (templates Meta habilitados)."
+                        : "não é WhatsApp Cloud API (templates Meta indisponíveis)."}
+                    </p>
+                  )}
                   <Select value={templateSource} onValueChange={(v) => setTemplateSource(v as TemplateSource)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="internal">Sistema / Evolution API (criar templates abaixo)</SelectItem>
-                      <SelectItem value="meta" disabled={channel !== "whatsapp_cloud"}>Meta (WhatsApp oficial)</SelectItem>
+                      <SelectItem value="meta" disabled={!metaAvailableForCurrentChannel}>Meta (WhatsApp oficial)</SelectItem>
                       <SelectItem value="chatwoot" disabled={channel !== "chatwoot"}>Chatwoot (Canned Responses)</SelectItem>
                     </SelectContent>
                   </Select>
@@ -1763,76 +1840,89 @@ export default function CheckinChargeSettings() {
                       </div>
                     </div>
                   )}
-                  {templateSource === "meta" && channel === "whatsapp_cloud" && (
+                  {templateSource === "meta" && metaAvailableForCurrentChannel && (
                     <div className="space-y-4">
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label>Template Meta</Label>
-                          <Select
-                            value={metaTemplateName ? `${metaTemplateName}|${metaTemplateLanguage || "pt_BR"}` : "none"}
-                            onValueChange={(v) => {
-                              if (v === "none") { setMetaTemplateName(""); return; }
-                              const [name, lang] = v.split("|");
-                              setMetaTemplateName(name || "");
-                              setMetaTemplateLanguage(lang || "pt_BR");
-                            }}
-                            disabled={channelTemplatesLoading}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Carregar templates..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">Selecione um template</SelectItem>
-                              {(channelTemplates?.meta ?? []).map((t) => (
-                                <SelectItem key={`${t.name}-${t.language}`} value={`${t.name}|${t.language || "pt_BR"}`}>
-                                  {t.name} ({t.language})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Idioma do template</Label>
-                          <Input
-                            value={metaTemplateLanguage}
-                            onChange={(e) => setMetaTemplateLanguage(e.target.value)}
-                            placeholder="pt_BR"
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Ordem dos parâmetros do body no template Meta (correspondência com {"{{1}}"}, {"{{2}}"}, etc.)</Label>
+                      <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/10">
                         <p className="text-xs text-muted-foreground">
-                          Defina a ordem em que as variáveis preenchem os placeholders do template aprovado na Meta. Use vírgula ou quebra de linha.
+                          Sincronize para buscar os templates mais recentes aprovados no canal atual.
                         </p>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setMetaTemplateBodyVariables("guest_name, reservation_code, checkin_date, web_checkin_link")}
-                          >
-                            Mensagem (nome, localizador, check-in, link check-in)
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setMetaTemplateBodyVariables("guest_name, reservation_code, amount, payment_link")}
-                          >
-                            Cobrança (nome, localizador, valor, link pagamento)
-                          </Button>
-                        </div>
-                        <Input
-                          value={metaTemplateBodyVariables}
-                          onChange={(e) => setMetaTemplateBodyVariables(e.target.value)}
-                          placeholder="guest_name, reservation_code, payment_link, ..."
-                          className="font-mono text-sm"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Variáveis: guest_name, reservation_code (localizador), checkin_date, checkout_date, amount, payment_link, web_checkin_link, establishment_name, establishment_address
-                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={channelTemplatesFetching}
+                          onClick={async () => {
+                            const { error } = await refetchChannelTemplates();
+                            if (error) {
+                              toast.error("Falha ao sincronizar templates Meta.");
+                              return;
+                            }
+                            toast.success("Templates Meta sincronizados.");
+                          }}
+                        >
+                          {channelTemplatesFetching ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                          Sincronizar templates Meta
+                        </Button>
                       </div>
+                      {([
+                        ["checkin_reminder", "Lembrete de check-in"],
+                        ["payment_pending", "Pagamento pendente"],
+                        ["checkout_reminder", "Lembrete de checkout"],
+                        ["fallback", "Template geral (fallback)"],
+                      ] as Array<[MetaIntentKey, string]>).map(([intentKey, intentLabel]) => (
+                        <div key={intentKey} className="space-y-3 rounded-lg border p-4 bg-muted/20">
+                          <Label className="text-sm">{intentLabel}</Label>
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label>Template Meta</Label>
+                              <Select
+                                value={metaTemplatesByIntent[intentKey].name ? `${metaTemplatesByIntent[intentKey].name}|${metaTemplatesByIntent[intentKey].language || "pt_BR"}` : "none"}
+                                onValueChange={(v) => {
+                                  if (v === "none") {
+                                    updateMetaIntent(intentKey, { name: "" });
+                                    return;
+                                  }
+                                  const [name, lang] = v.split("|");
+                                  updateMetaIntent(intentKey, { name: name || "", language: lang || "pt_BR" });
+                                }}
+                                disabled={channelTemplatesLoading}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Carregar templates..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Selecione um template</SelectItem>
+                                  {(channelTemplates?.meta ?? []).map((t) => (
+                                    <SelectItem key={`${intentKey}-${t.name}-${t.language}`} value={`${t.name}|${t.language || "pt_BR"}`}>
+                                      {t.name} ({t.language})
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Idioma do template</Label>
+                              <Input
+                                value={metaTemplatesByIntent[intentKey].language}
+                                onChange={(e) => updateMetaIntent(intentKey, { language: e.target.value })}
+                                placeholder="pt_BR"
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Variáveis do body ({`{{1}}, {{2}}, ...`})</Label>
+                            <Input
+                              value={metaTemplatesByIntent[intentKey].variables}
+                              onChange={(e) => updateMetaIntent(intentKey, { variables: e.target.value })}
+                              placeholder="guest_name, reservation_code, payment_link, ..."
+                              className="font-mono text-sm"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      <p className="text-xs text-muted-foreground">
+                        Variáveis disponíveis: guest_name, reservation_code, localizador, checkin_date, checkout_date, amount, payment_link, web_checkin_link, establishment_name, establishment_address.
+                      </p>
                     </div>
                   )}
                   {templateSource === "chatwoot" && channel === "chatwoot" && (

@@ -50,7 +50,13 @@ serve(async (req) => {
 
     const channel = config.channel as string;
     const channelConfig = (config.channel_config as Record<string, unknown>) || {};
-    const result: { channel: string; internal: Array<{ id: string; name: string; body: string }>; meta?: Array<{ name: string; language: string; status?: string }>; chatwoot?: Array<{ id: number; short_code: string; content: string }> } = {
+    const result: {
+      channel: string;
+      internal: Array<{ id: string; name: string; body: string }>;
+      meta?: Array<{ name: string; language: string; status?: string }>;
+      chatwoot?: Array<{ id: number; short_code: string; content: string }>;
+      chatwoot_inbox?: { id: number; channel_type?: string; provider?: string; is_whatsapp_cloud: boolean };
+    } = {
       channel,
       internal: [],
     };
@@ -96,11 +102,40 @@ serve(async (req) => {
     if (channel === "chatwoot") {
       const baseUrl = (channelConfig.base_url as string) || "";
       const accountId = (channelConfig.account_id as number) || 0;
+      const inboxId = (channelConfig.inbox_id as number) || 0;
       const apiKey = (channelConfig.api_key as string) || "";
       if (baseUrl && apiKey) {
         try {
+          const apiBase = String(baseUrl).replace(/\/$/, "");
+          if (accountId && inboxId) {
+            const inboxRes = await fetch(`${apiBase}/api/v1/accounts/${accountId}/inboxes/${inboxId}`, {
+              headers: {
+                "api_access_token": apiKey,
+                "Content-Type": "application/json",
+              },
+            });
+            const inboxData = await inboxRes.json().catch(() => ({}));
+            const inbox = (inboxData?.payload ?? inboxData) as {
+              id?: number;
+              channel_type?: string;
+              provider?: string;
+            };
+            const provider = String(inbox?.provider ?? "").toLowerCase();
+            const channelType = String(inbox?.channel_type ?? "");
+            result.chatwoot_inbox = {
+              id: Number(inbox?.id ?? inboxId),
+              channel_type: channelType || undefined,
+              provider: provider || undefined,
+              is_whatsapp_cloud:
+                provider === "whatsapp_cloud" ||
+                (channelType === "Channel::Whatsapp" && (provider === "" || provider === "cloud")),
+            };
+          } else {
+            result.chatwoot_inbox = { id: Number(inboxId || 0), is_whatsapp_cloud: false };
+          }
+
           const res = await fetch(
-            `${String(baseUrl).replace(/\/$/, "")}/api/v1/accounts/${accountId}/canned_responses`,
+            `${apiBase}/api/v1/accounts/${accountId}/canned_responses`,
             {
               headers: {
                 "api_access_token": apiKey,
@@ -119,11 +154,50 @@ serve(async (req) => {
               content: c.content ?? "",
             })) : [];
           }
+
+          if (result.chatwoot_inbox?.is_whatsapp_cloud && accountId) {
+            const templateEndpoints = [
+              `${apiBase}/api/v1/accounts/${accountId}/inboxes/${inboxId}/whatsapp_templates`,
+              `${apiBase}/api/v1/accounts/${accountId}/whatsapp_templates`,
+              `${apiBase}/api/v1/accounts/${accountId}/inboxes/${inboxId}/message_templates`,
+            ];
+            let templates: Array<{ name: string; language: string; status?: string }> = [];
+            for (const endpoint of templateEndpoints) {
+              const tRes = await fetch(endpoint, {
+                headers: {
+                  "api_access_token": apiKey,
+                  "Content-Type": "application/json",
+                },
+              });
+              const tData = await tRes.json().catch(() => ({}));
+              if (!tRes.ok) continue;
+              const list = (tData?.payload ?? tData?.data ?? tData ?? []) as Array<{
+                name?: string;
+                language?: string;
+                locale?: string;
+                status?: string;
+              }>;
+              if (!Array.isArray(list) || list.length === 0) continue;
+              templates = list
+                .filter((t) => !!t?.name)
+                .map((t) => ({
+                  name: String(t.name),
+                  language: String(t.language ?? t.locale ?? "pt_BR"),
+                  status: t.status,
+                }));
+              if (templates.length > 0) break;
+            }
+            result.meta = templates;
+          }
         } catch {
           result.chatwoot = [];
+          if (!result.meta) result.meta = [];
+          if (!result.chatwoot_inbox) result.chatwoot_inbox = { id: Number(inboxId || 0), is_whatsapp_cloud: false };
         }
       } else {
         result.chatwoot = [];
+        result.meta = [];
+        result.chatwoot_inbox = { id: Number(inboxId || 0), is_whatsapp_cloud: false };
       }
     }
 
