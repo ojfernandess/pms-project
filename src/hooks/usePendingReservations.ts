@@ -29,6 +29,24 @@ export const usePendingReservations = () => {
     return getSelectedEstablishmentId();
   };
 
+  const isChannelReservation = (reservation: any): boolean => {
+    const channel = String(reservation?.channel ?? "").trim().toLowerCase();
+    const hasOtaPayload = Array.isArray(reservation?.ota_reservations) && reservation.ota_reservations.length > 0;
+    if (hasOtaPayload) return true;
+    if (!channel) {
+      // Reservas importadas por integração normalmente não têm created_by.
+      return reservation?.created_by == null;
+    }
+    if (channel === "direct") return false;
+    if (["ota", "channel_manager", "channel manager", "aiosell", "bukly"].includes(channel)) return true;
+    // Qualquer canal não-direto é tratado como integração externa.
+    return true;
+  };
+
+  const isCounterReservation = (reservation: any): boolean => {
+    return !isChannelReservation(reservation);
+  };
+
   // Buscar novas reservas de OTA/Channel Manager (últimas 7 dias)
   const newOTAReservationsQuery = useQuery({
     queryKey: ["pending", "new-ota-reservations", selectedEstablishment?.id],
@@ -66,11 +84,9 @@ export const usePendingReservations = () => {
         return [];
       }
 
-      // Filtrar apenas reservas de OTA (channel != 'direct' E created_by é null) E não resolvidas
+      // Filtrar reservas vindas de channel manager/OTA e não resolvidas
       const otaReservations = (allReservations || []).filter((reservation: any) => {
-        return reservation.channel !== "direct" && 
-               reservation.created_by === null &&
-               reservation.pending_resolved_at === null;
+        return isChannelReservation(reservation) && reservation.pending_resolved_at === null;
       });
 
       return otaReservations;
@@ -114,10 +130,9 @@ export const usePendingReservations = () => {
         return [];
       }
 
-      // Filtrar apenas reservas de balcão (channel = 'direct' OU created_by não é null) E não resolvidas
+      // Filtrar reservas criadas no PMS/balcão e não resolvidas
       const counterReservations = (allReservations || []).filter((reservation: any) => {
-        return (reservation.channel === "direct" || reservation.created_by !== null) &&
-               reservation.pending_resolved_at === null;
+        return isCounterReservation(reservation) && reservation.pending_resolved_at === null;
       });
 
       return counterReservations;

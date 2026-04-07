@@ -2,7 +2,7 @@
  * Componente de Listagem de Contas a Receber
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
@@ -42,6 +42,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { Separator } from "@/components/ui/separator";
+import { formatReservationChannelOrigin } from "@/lib/reservationChannelDisplay";
 
 const originLabels: Record<AccountsReceivable['origin'], string> = {
   reservation: "Reserva",
@@ -69,6 +70,27 @@ const statusColors: Record<AccountsReceivable['status'], string> = {
   overdue: "bg-red-100 text-red-800",
   cancelled: "bg-gray-100 text-gray-800",
 };
+
+function toDisplayManagerName(raw: string | null | undefined): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "Channel Manager";
+  const lower = value.toLowerCase();
+  if (lower.includes("aiosell")) return "Aiosell";
+  if (lower.includes("bukly")) return "Bukly";
+  return value;
+}
+
+function toDisplayPartnerName(raw: string | null | undefined): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "não informado";
+  const lower = value.toLowerCase();
+  if (lower === "ota" || lower === "channel_manager" || lower === "channel manager") return "não informado";
+  if (lower === "direct") return "Direct";
+  if (lower === "booking.com" || lower === "booking") return "Booking.com";
+  if (lower === "airbnb") return "Airbnb";
+  if (lower === "expedia") return "Expedia";
+  return value;
+}
 
 export const AccountsReceivableList = () => {
   const { establishmentId } = useParams<{ establishmentId?: string }>();
@@ -138,6 +160,167 @@ export const AccountsReceivableList = () => {
       r.client_id?.toLowerCase().includes(term)
     );
   });
+
+  const reservationIds = useMemo(
+    () => [...new Set(filteredReceivables.map((r) => r.reservation_id).filter((id): id is string => !!id))],
+    [filteredReceivables]
+  );
+
+  const { data: reservationOriginsMap = {} } = useQuery({
+    queryKey: ["accounts-receivable-reservation-origins", reservationIds],
+    queryFn: async () => {
+      if (!reservationIds.length) return {} as Record<string, string>;
+      // Evita 400 por URL longa (id=in.(...)) quando a lista é grande.
+      const CHUNK_SIZE = 10;
+      const allRows: Array<{
+        id: string;
+        channel?: string | null;
+        ota_reservations?: Array<{
+          ota_source_channel_name?: string | null;
+          ota_segment?: string | null;
+          ota_channels?: { name?: string | null; channel_manager_type?: string | null } | null;
+        }> | null;
+      }> = [];
+
+      for (let i = 0; i < reservationIds.length; i += CHUNK_SIZE) {
+        const chunk = reservationIds.slice(i, i + CHUNK_SIZE);
+        const { data, error } = await supabase
+          .from("reservations")
+          .select(`
+            id,
+            channel,
+            ota_reservations (
+              ota_source_channel_name,
+              ota_segment,
+              ota_channels (
+                name,
+                channel_manager_type
+              )
+            )
+          `)
+          .in("id", chunk);
+        if (!error) {
+          allRows.push(...((data ?? []) as typeof allRows));
+          continue;
+        }
+
+        // Fallback defensivo: se um lote falhar (ex.: URL ainda extensa), busca 1 a 1.
+        for (const reservationId of chunk) {
+          const { data: singleData, error: singleError } = await supabase
+            .from("reservations")
+            .select(`
+              id,
+              channel,
+              ota_reservations (
+                ota_source_channel_name,
+                ota_segment,
+                ota_channels (
+                  name,
+                  channel_manager_type
+                )
+              )
+            `)
+            .eq("id", reservationId)
+            .limit(1);
+          if (singleError) continue;
+          allRows.push(...((singleData ?? []) as typeof allRows));
+        }
+      }
+
+      const map: Record<string, string> = {};
+      allRows.forEach((reservation) => {
+        map[reservation.id] = formatReservationChannelOrigin(reservation);
+      });
+
+      return map;
+    },
+    enabled: reservationIds.length > 0,
+  });
+
+  const resolveReservationOriginLabel = (receivable: AccountsReceivable): string => {
+    if (!receivable.reservation_id) return "—";
+    const md = (receivable.metadata ?? {}) as Record<string, unknown>;
+    const metadataManagerHint =
+      (typeof md.channel_manager === "string" && md.channel_manager.trim()) ||
+      (typeof md.manager === "string" && md.manager.trim()) ||
+      (typeof md.source_manager === "string" && md.source_manager.trim()) ||
+      "";
+    const metadataPartnerHint =
+      (typeof md.ota_source_channel_name === "string" && md.ota_source_channel_name.trim()) ||
+      (typeof md.source_channel === "string" && md.source_channel.trim()) ||
+      (typeof md.channel_name === "string" && md.channel_name.trim()) ||
+      (typeof md.partner === "string" && md.partner.trim()) ||
+      (typeof md.channel === "string" && md.channel.trim()) ||
+      (typeof md.origin === "string" && md.origin.trim()) ||
+      "";
+
+    const fromReservation = reservationOriginsMap[receivable.reservation_id];
+    if (fromReservation && fromReservation.trim()) {
+      const normalized = fromReservation.toLowerCase();
+      // Padroniza visual para reservas vindas de channel: "Aiosell / Booking.com" ou "Aiosell / Direct"
+      if (normalized.includes("ota / channel manager")) {
+        const partnerMatch = fromReservation.match(/Canal parceiro:\s*([^·]+)/i);
+        const managerBits = fromReservation.split("·").map((s) => s.trim());
+        const managerName = managerBits.find(
+          (bit) =>
+            bit &&
+            !bit.toLowerCase().includes("ota / channel manager") &&
+            !bit.toLowerCase().includes("canal parceiro:") &&
+            !bit.toLowerCase().includes("segmento:")
+        );
+        const partner = toDisplayPartnerName(partnerMatch?.[1]?.trim());
+        const managerLabel = toDisplayManagerName(managerName);
+        if (managerName || partner) {
+          return `${managerLabel} / ${partner || "não informado"}`;
+        }
+        const fallbackManager = toDisplayManagerName(metadataManagerHint || "Aiosell");
+        const fallbackPartner = toDisplayPartnerName(metadataPartnerHint || "");
+        return `${fallbackManager} / ${fallbackPartner}`;
+      }
+      return fromReservation;
+    }
+
+    const rawHints = [
+      md.origin,
+      md.channel,
+      md.channel_name,
+      md.source,
+      md.source_channel,
+      md.ota_source_channel_name,
+      md.channel_manager,
+    ]
+      .map((v) => (typeof v === "string" ? v.trim().toLowerCase() : ""))
+      .filter(Boolean);
+
+    const joined = rawHints.join(" ");
+    const looksLikeChannel =
+      joined.includes("ota") ||
+      joined.includes("channel") ||
+      joined.includes("booking") ||
+      joined.includes("airbnb") ||
+      joined.includes("expedia") ||
+      joined.includes("aiosell");
+
+    if (looksLikeChannel) {
+      const managerHint =
+        rawHints.find((h) => h.includes("aiosell")) ||
+        rawHints.find((h) => h.includes("bukly")) ||
+        "Channel Manager";
+      const partnerHint =
+        (typeof md.ota_source_channel_name === "string" && md.ota_source_channel_name.trim()) ||
+        (typeof md.channel_name === "string" && md.channel_name.trim()) ||
+        (typeof md.source_channel === "string" && md.source_channel.trim()) ||
+        (typeof md.channel === "string" && md.channel.trim()) ||
+        (typeof md.origin === "string" && md.origin.trim()) ||
+        "não informado";
+      const managerLabel =
+        toDisplayManagerName(managerHint);
+      return `${managerLabel} / ${toDisplayPartnerName(String(partnerHint))}`;
+    }
+
+    // Sem indícios de OTA/channel manager: tratar como reserva do PMS/balcão.
+    return "Direto (PMS / balcão)";
+  };
 
   const handlePayReceivable = () => {
     if (!selectedReceivable || !paymentAmount) return;
@@ -282,6 +465,7 @@ export const AccountsReceivableList = () => {
               <TableRow>
                 <TableHead>Descrição</TableHead>
                 <TableHead>Origem</TableHead>
+                <TableHead>Origem da Reserva</TableHead>
                 <TableHead>Vencimento</TableHead>
                 <TableHead>Valor</TableHead>
                 <TableHead>Pago</TableHead>
@@ -303,6 +487,9 @@ export const AccountsReceivableList = () => {
                     </TableCell>
                     <TableCell>
                       {originLabels[receivable.origin]}
+                    </TableCell>
+                    <TableCell>
+                      {resolveReservationOriginLabel(receivable)}
                     </TableCell>
                     <TableCell>
                       <span className={isOverdue ? "text-red-600 font-semibold" : ""}>

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -64,7 +65,7 @@ export const useNotifications = () => {
 
       return (data || []) as Notification[];
     },
-    refetchInterval: 30000, // Refetch a cada 30 segundos
+    refetchInterval: 60000, // fallback de segurança; realtime faz atualização imediata
     refetchOnWindowFocus: true,
   });
 
@@ -89,7 +90,7 @@ export const useNotifications = () => {
 
       return (data || []) as Notification[];
     },
-    refetchInterval: 30000,
+    refetchInterval: 60000,
     refetchOnWindowFocus: true,
   });
 
@@ -216,6 +217,43 @@ export const useNotifications = () => {
       toast.error(error.message || "Erro ao limpar notificações");
     },
   });
+
+  // Mantido ao final para preservar ordem dos hooks em ambiente com React Refresh.
+  useEffect(() => {
+    let mounted = true;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    const setupRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!mounted || !user?.id) return;
+
+      channel = supabase
+        .channel(`notifications-realtime-${user.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${user.id}`,
+          },
+          () => {
+            queryClient.invalidateQueries({ queryKey: ["notifications"] });
+            queryClient.invalidateQueries({ queryKey: ["notifications", "unread"] });
+          }
+        )
+        .subscribe();
+    };
+
+    setupRealtime();
+
+    return () => {
+      mounted = false;
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [queryClient]);
 
   return {
     notifications: notificationsQuery.data || [],

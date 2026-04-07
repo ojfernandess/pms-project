@@ -69,6 +69,8 @@ export const useHotelSettings = (establishmentId?: string) => {
       checkout_time?: string;
       auto_payment_ota?: boolean;
       auto_payment_carrier_id?: string;
+      auto_payment_channel_carrier_id?: string;
+      auto_payment_ota_channels?: string[];
       policies?: any;
       fiscal_document_type?: string;
       invoice_email?: string;

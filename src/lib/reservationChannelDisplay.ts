@@ -4,6 +4,26 @@ type OtaBookingShape = {
   ota_channels?: { name?: string | null; channel_manager_type?: string | null } | null;
 };
 
+function normalizeManagerName(raw: string | null | undefined): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "Channel Manager";
+  const lower = value.toLowerCase();
+  if (lower.includes("aiosell")) return "Aiosell";
+  if (lower.includes("bukly")) return "Bukly";
+  return value;
+}
+
+function normalizePartnerName(raw: string | null | undefined): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "não informado";
+  const lower = value.toLowerCase();
+  if (lower === "direct") return "Direct";
+  if (lower === "booking" || lower === "booking.com") return "Booking.com";
+  if (lower === "airbnb") return "Airbnb";
+  if (lower === "expedia") return "Expedia";
+  return value;
+}
+
 /** Texto único para «Origem / Canal» na ficha da reserva ou listas. */
 export function formatReservationChannelOrigin(r: {
   channel?: string | null;
@@ -25,12 +45,11 @@ export function formatReservationChannelOrigin(r: {
   }
 
   if (ota || ch === "ota") {
-    const bits: string[] = [];
-    bits.push("OTA / Channel Manager");
-    if (cmName) bits.push(cmName);
-    if (partner) bits.push(`Canal parceiro: ${partner}`);
-    if (seg) bits.push(`Segmento: ${seg}`);
-    return bits.join(" · ");
+    const manager = normalizeManagerName(cmName);
+    const partnerName = normalizePartnerName(partner);
+    // Ex.: "Aiosell / Booking.com" ou "Aiosell / Direct"
+    // Segmento fica fora da exibição principal para evitar ruído no Financeiro/Detalhes.
+    return `${manager} / ${partnerName}`;
   }
 
   return ch ? String(ch) : "—";

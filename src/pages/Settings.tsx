@@ -46,6 +46,7 @@ const Settings = () => {
   const { role } = useCurrentEmployeeRole();
   const { isSuperAdmin } = useIsSuperAdmin();
   const { settings: siteSettings } = useSiteSettings();
+  const OTA_PARTNER_OPTIONS = ["Booking.com", "Airbnb", "Expedia", "Direct", "Outros"];
   
   // Integrações de API: quando em formato objeto, exige seleção explícita por estabelecimento.
   const apiIntegrationsConfig = (siteSettings?.features_enabled as Record<string, unknown> | undefined)?.api_integrations;
@@ -93,6 +94,8 @@ const Settings = () => {
     checkout_time: "12:00",
     auto_payment_ota: false,
     auto_payment_carrier_id: "",
+    auto_payment_channel_carrier_id: "",
+    auto_payment_ota_channels: [] as string[],
     enable_cleaning_notifications: true,
     fiscal_document_type: "both",
     invoice_email: "",
@@ -149,6 +152,8 @@ const Settings = () => {
         checkout_time: "12:00",
         auto_payment_ota: false,
         auto_payment_carrier_id: "",
+        auto_payment_channel_carrier_id: "",
+        auto_payment_ota_channels: [] as string[],
         enable_cleaning_notifications: true,
         fiscal_document_type: "both",
         invoice_email: "",
@@ -206,6 +211,8 @@ const Settings = () => {
         checkout_time: settings.checkout_time ? settings.checkout_time.substring(0, 5) : "12:00",
         auto_payment_ota: settings.auto_payment_ota ?? false,
         auto_payment_carrier_id: settings.auto_payment_carrier_id || "",
+        auto_payment_channel_carrier_id: settings.auto_payment_channel_carrier_id || "",
+        auto_payment_ota_channels: Array.isArray(settings.auto_payment_ota_channels) ? settings.auto_payment_ota_channels : [],
         enable_cleaning_notifications: settings.enable_cleaning_notifications !== undefined ? settings.enable_cleaning_notifications : true,
         fiscal_document_type: settings.fiscal_document_type || "both",
         invoice_email: settings.invoice_email || "",
@@ -327,6 +334,8 @@ const Settings = () => {
         checkin_time: `${formData.checkin_time}:00`,
         checkout_time: `${formData.checkout_time}:00`,
         auto_payment_carrier_id: formData.auto_payment_carrier_id || undefined,
+        auto_payment_channel_carrier_id: formData.auto_payment_channel_carrier_id || undefined,
+        auto_payment_ota_channels: formData.auto_payment_ota_channels,
         timezone: formData.timezone,
       });
 
@@ -772,37 +781,68 @@ const Settings = () => {
                   </div>
 
                   {formData.auto_payment_ota && (
-                    <div>
-                      <Label htmlFor="auto_payment_carrier_id">Portador de Pagamento *</Label>
-                      <Select
-                        value={formData.auto_payment_carrier_id || "__none__"}
-                        onValueChange={(value) =>
-                          setFormData({
-                            ...formData,
-                            auto_payment_carrier_id: value === "__none__" ? "" : value,
-                          })
-                        }
-                        required={formData.auto_payment_ota}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione um portador" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Selecione um portador</SelectItem>
-                          {carriers
-                            .filter((c: any) => c.is_active)
-                            .map((carrier: any) => (
-                              <SelectItem key={carrier.id} value={carrier.id}>
-                                {carrier.code} - {carrier.description}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Os pagamentos automáticos serão vinculados a este portador para aparecer
-                        nos relatórios financeiros
-                      </p>
-                    </div>
+                    <>
+                      <div>
+                        <Label>OTAs com Pagamento Automático</Label>
+                        <p className="text-sm text-muted-foreground mb-2">
+                          Selecione os parceiros OTA que podem gerar pagamento automático (ex.: Booking.com, Airbnb).
+                        </p>
+                        <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
+                          {OTA_PARTNER_OPTIONS.map((partner) => {
+                            const checked = formData.auto_payment_ota_channels.includes(partner);
+                            return (
+                              <label key={partner} className="flex items-center gap-2 text-sm">
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={(value) => {
+                                    setFormData((prev) => {
+                                      const next = new Set(prev.auto_payment_ota_channels);
+                                      if (value) next.add(partner);
+                                      else next.delete(partner);
+                                      return { ...prev, auto_payment_ota_channels: Array.from(next) };
+                                    });
+                                  }}
+                                />
+                                {partner}
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Se nenhum parceiro for selecionado, o sistema aceita todos os parceiros OTA.
+                        </p>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="auto_payment_channel_carrier_id">Portador de Pagamento do Channel *</Label>
+                        <Select
+                          value={formData.auto_payment_channel_carrier_id || "__none__"}
+                          onValueChange={(value) =>
+                            setFormData({
+                              ...formData,
+                              auto_payment_channel_carrier_id: value === "__none__" ? "" : value,
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione um portador" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Selecione um portador</SelectItem>
+                            {carriers
+                              .filter((c: any) => c.is_active)
+                              .map((carrier: any) => (
+                                <SelectItem key={carrier.id} value={carrier.id}>
+                                  {carrier.code} - {carrier.description}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Os pagamentos automáticos de reservas do channel serão vinculados a este portador.
+                        </p>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>

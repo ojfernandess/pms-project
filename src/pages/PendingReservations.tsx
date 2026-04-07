@@ -79,7 +79,7 @@ const PendingReservations = () => {
       <Tabs defaultValue="ota" className="space-y-4">
         <TabsList>
           <TabsTrigger value="ota" className="relative">
-            Reservas OTA
+            Reservas de Canal
             {newOTAReservations.length > 0 && (
               <Badge variant="destructive" className="ml-2">
                 {newOTAReservations.length}
@@ -118,7 +118,7 @@ const PendingReservations = () => {
             <div className="p-6">
               <div className="flex items-center gap-2 mb-4">
                 <Calendar className="h-5 w-5" />
-                <h2 className="text-xl font-semibold">Novas Reservas OTA/Channel Manager (Últimos 7 dias)</h2>
+                <h2 className="text-xl font-semibold">Novas Reservas de Canal (Últimos 7 dias)</h2>
               </div>
 
               {isLoading ? (
@@ -129,7 +129,7 @@ const PendingReservations = () => {
                 <Alert>
                   <CheckCircle2 className="h-4 w-4" />
                   <AlertDescription>
-                    Não há novas reservas de OTA nos últimos 7 dias.
+                    Não há novas reservas de canal nos últimos 7 dias.
                   </AlertDescription>
                 </Alert>
               ) : (
