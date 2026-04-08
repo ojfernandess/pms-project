@@ -29,7 +29,10 @@ import { SplitReservationDialog } from "@/components/reservations/SplitReservati
 import { ChangeRoomDialog } from "@/components/reservations/ChangeRoomDialog";
 import { formatCurrency, formatDate } from "@/lib/reservationUtils";
 import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
-import { formatReservationChannelOrigin } from "@/lib/reservationChannelDisplay";
+import {
+  formatReservationChannelOrigin,
+  resolveReservationBookingSourceLogo,
+} from "@/lib/reservationChannelDisplay";
 import { useNavigate, useParams } from "react-router-dom";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -170,9 +173,24 @@ const PendingReservations = () => {
                         <TableCell>
                           <Badge
                             variant="outline"
-                            className="max-w-[min(100%,280px)] whitespace-normal text-left font-normal"
+                            className="max-w-[min(100%,280px)] whitespace-normal text-left font-normal inline-flex items-center gap-2"
                             title={formatReservationChannelOrigin(reservation)}
                           >
+                            {(() => {
+                              const source = resolveReservationBookingSourceLogo(
+                                reservation as Parameters<typeof resolveReservationBookingSourceLogo>[0]
+                              );
+                              if (!source.logoUrl) return null;
+                              return (
+                                <img
+                                  src={source.logoUrl}
+                                  alt={source.sourceCode ? `Logo OTA ${source.sourceCode}` : "Logo OTA"}
+                                  className="h-3.5 w-3.5 rounded-sm object-contain"
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                />
+                              );
+                            })()}
                             {formatReservationChannelOrigin(reservation)}
                           </Badge>
                         </TableCell>

@@ -17,3 +17,18 @@ verify_jwt = true
 
 [functions.company-public-api]
 verify_jwt = false
+
+[functions.channex-sync]
+verify_jwt = true
+
+[functions.channex-reservations-sync]
+verify_jwt = true
+
+[functions.channex-reservation-webhook]
+verify_jwt = false
+
+[functions.channex-ack-worker]
+verify_jwt = true
+
+[functions.channex-mapping-options]
+verify_jwt = true

@@ -64,7 +64,8 @@ export const ChannelPricingDialog = ({
   const selectedChannel = channels.find((c: any) => c.id === formData.ota_channel_id);
   const showChannelCodes =
     selectedChannel?.channel_manager_type === "aiosell" ||
-    selectedChannel?.channel_manager_type === "bukly";
+    selectedChannel?.channel_manager_type === "bukly" ||
+    selectedChannel?.channel_manager_type === "channex";
 
   useEffect(() => {
     if (pricingId && open) {
@@ -269,19 +270,27 @@ export const ChannelPricingDialog = ({
                 <Label htmlFor="channel_room_code">
                   {selectedChannel?.channel_manager_type === "aiosell"
                     ? "Room Code (Aiosell)"
+                    : selectedChannel?.channel_manager_type === "channex"
+                      ? "Room Type ID (Channex)"
                     : "Código externo do quarto"}
                 </Label>
                 <Input
                   id="channel_room_code"
                   value={formData.channel_room_code}
                   onChange={(e) => setFormData({ ...formData, channel_room_code: e.target.value })}
-                  placeholder="Ex.: EXECUTIVE"
+                  placeholder={
+                    selectedChannel?.channel_manager_type === "channex"
+                      ? "UUID do room_type no Channex"
+                      : "Ex.: EXECUTIVE"
+                  }
                 />
               </div>
               <div>
                 <Label htmlFor="channel_rate_plan_code">
                   {selectedChannel?.channel_manager_type === "aiosell"
                     ? "Rate Plan Code (Aiosell)"
+                    : selectedChannel?.channel_manager_type === "channex"
+                      ? "Rate Plan ID (Channex)"
                     : "Código externo do plano"}
                 </Label>
                 <Input
@@ -290,7 +299,11 @@ export const ChannelPricingDialog = ({
                   onChange={(e) =>
                     setFormData({ ...formData, channel_rate_plan_code: e.target.value })
                   }
-                  placeholder="Ex.: EXECUTIVE-BAR"
+                  placeholder={
+                    selectedChannel?.channel_manager_type === "channex"
+                      ? "UUID do rate_plan no Channex"
+                      : "Ex.: EXECUTIVE-BAR"
+                  }
                 />
               </div>
             </div>
@@ -302,6 +315,13 @@ export const ChannelPricingDialog = ({
               Manager Aiosell (a API não aceita substitutos derivados do PMS). Se o mesmo par room+rate plan na
               Aiosell servir para todos os planos desta categoria, escolha «Nenhum plano» e guarde — assim uma linha
               cobre o calendário inteiro.
+            </p>
+          )}
+
+          {selectedChannel?.channel_manager_type === "channex" && (
+            <p className="text-xs text-muted-foreground">
+              Para Channex, use os IDs remotos (UUID) de <code>room_type</code> e <code>rate_plan</code>. Esses
+              valores serão usados no push ARI e no vínculo das revisões de reserva.
             </p>
           )}
 

@@ -8,7 +8,7 @@ interface SyncStatusCardProps {
   channel: any;
   onSync: (channelId: string) => void;
   isSyncing: boolean;
-  /** Aiosell: importar reservas (GET ou payloads em lote). */
+  /** Channel manager: importar reservas (pull/feed/webhook). */
   onSyncReservations?: (channelId: string) => void;
   isSyncingReservations?: boolean;
 }
@@ -86,6 +86,17 @@ export const SyncStatusCard = ({
         </div>
       )}
 
+      {channel.channel_manager_type === "channex" && (
+        <div className="mb-3 p-2 bg-violet-50 rounded text-xs text-violet-800">
+          <p className="font-semibold">Channex Channel Manager</p>
+          <p>ARI em chamadas separadas e reservas via booking revisions feed com ACK.</p>
+          <p className="mt-1">
+            Estado Channex: <strong>{channel.channex_sync_status || "idle"}</strong>
+            {channel.channex_last_sync_at ? ` · ${formatDate(channel.channex_last_sync_at)}` : ""}
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm text-muted-foreground">
           {channel.channel_type === "channel_manager" ? (
@@ -109,7 +120,8 @@ export const SyncStatusCard = ({
             <RefreshCw className="h-4 w-4 mr-2" />
             Tarifas / inventário
           </Button>
-          {channel.channel_manager_type === "aiosell" && onSyncReservations && (
+          {(channel.channel_manager_type === "aiosell" || channel.channel_manager_type === "channex") &&
+            onSyncReservations && (
             <Button
               variant="secondary"
               size="sm"

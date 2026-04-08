@@ -1,5 +1,6 @@
 type OtaBookingShape = {
   ota_source_channel_name?: string | null;
+  ota_reservation_code?: string | null;
   ota_segment?: string | null;
   ota_channels?: { name?: string | null; channel_manager_type?: string | null } | null;
 };
@@ -10,6 +11,7 @@ function normalizeManagerName(raw: string | null | undefined): string {
   const lower = value.toLowerCase();
   if (lower.includes("aiosell")) return "Aiosell";
   if (lower.includes("bukly")) return "Bukly";
+  if (lower.includes("channex")) return "Channex";
   return value;
 }
 
@@ -53,6 +55,64 @@ export function formatReservationChannelOrigin(r: {
   }
 
   return ch ? String(ch) : "—";
+}
+
+const OTA_SOURCE_CODE_TO_DOMAIN: Record<string, string> = {
+  BDC: "booking.com",
+  ABB: "airbnb.com",
+  EXP: "expedia.com",
+  HTL: "hotels.com",
+  AGO: "agoda.com",
+  HBD: "hotelbeds.com",
+  HWL: "hostelworld.com",
+  TRK: "traveloka.com",
+  VRB: "vrbo.com",
+  CTP: "trip.com",
+  DDC: "despegar.com",
+};
+
+function sourceCodeFromOtaBooking(ota: OtaBookingShape | null | undefined): string | null {
+  const raw = String(ota?.ota_reservation_code ?? "").trim();
+  if (!raw) return null;
+  const code = raw.split("-")[0]?.trim().toUpperCase();
+  if (!code || code.length < 3 || code.length > 5) return null;
+  return code;
+}
+
+function domainFromPartnerName(name: string | null | undefined): string | null {
+  const v = String(name ?? "").trim().toLowerCase();
+  if (!v) return null;
+  if (v.includes("booking")) return "booking.com";
+  if (v.includes("airbnb")) return "airbnb.com";
+  if (v.includes("expedia")) return "expedia.com";
+  if (v.includes("hotels.com") || v === "hotels") return "hotels.com";
+  if (v.includes("agoda")) return "agoda.com";
+  if (v.includes("hotelbeds")) return "hotelbeds.com";
+  if (v.includes("hostelworld")) return "hostelworld.com";
+  if (v.includes("trip.com") || v === "trip") return "trip.com";
+  if (v.includes("traveloka")) return "traveloka.com";
+  if (v.includes("vrbo")) return "vrbo.com";
+  if (v.includes("despegar") || v.includes("decolar")) return "despegar.com";
+  return null;
+}
+
+export function resolveReservationBookingSourceLogo(r: {
+  ota_booking?: OtaBookingShape | null;
+  ota_reservations?: OtaBookingShape[] | null;
+}): { logoUrl: string | null; sourceCode: string | null } {
+  const ota = r.ota_booking ?? r.ota_reservations?.[0] ?? null;
+  if (!ota) return { logoUrl: null, sourceCode: null };
+
+  const sourceCode = sourceCodeFromOtaBooking(ota);
+  const byCode = sourceCode ? OTA_SOURCE_CODE_TO_DOMAIN[sourceCode] ?? null : null;
+  const byName = domainFromPartnerName(ota.ota_source_channel_name);
+  const domain = byCode || byName;
+  if (!domain) return { logoUrl: null, sourceCode };
+
+  return {
+    logoUrl: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`,
+    sourceCode,
+  };
 }
 
 /** Email e telefone: cliente cadastrado ou dados do payload OTA (Aiosell). */

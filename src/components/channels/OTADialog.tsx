@@ -51,6 +51,7 @@ const OTA_OPTIONS = [
 const CHANNEL_MANAGER_OPTIONS = [
   { value: "bukly", label: "Bukly Channel Manager", type: "channel_manager" },
   { value: "aiosell", label: "Aiosell Channel Manager", type: "channel_manager" },
+  { value: "channex", label: "Channex Channel Manager", type: "channel_manager" },
 ];
 
 function FormSection({
@@ -130,6 +131,10 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
     aiosell_bookings_list_path: "",
     aiosell_webhook_secret: "",
     aiosell_webhook_trust_hotel_only: true,
+    channex_base_url: "https://staging.channex.io",
+    channex_api_key: "",
+    channex_property_id: "",
+    channex_use_webhook: true,
   });
 
   useEffect(() => {
@@ -164,6 +169,11 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
           aiosell_webhook_secret: channel.aiosell_webhook_secret || "",
           aiosell_webhook_trust_hotel_only: !!(channel as { aiosell_webhook_trust_hotel_only?: boolean })
             .aiosell_webhook_trust_hotel_only,
+          channex_base_url:
+            (channel as { channex_base_url?: string | null }).channex_base_url || "https://staging.channex.io",
+          channex_api_key: (channel as { channex_api_key?: string | null }).channex_api_key || "",
+          channex_property_id: (channel as { channex_property_id?: string | null }).channex_property_id || "",
+          channex_use_webhook: (channel as { channex_use_webhook?: boolean | null }).channex_use_webhook ?? true,
         });
       }
     } else if (!channelId && open) {
@@ -188,6 +198,10 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
         aiosell_bookings_list_path: "",
         aiosell_webhook_secret: "",
         aiosell_webhook_trust_hotel_only: true,
+        channex_base_url: "https://staging.channex.io",
+        channex_api_key: "",
+        channex_property_id: "",
+        channex_use_webhook: true,
       });
     }
   }, [channelId, open, channels]);
@@ -525,6 +539,100 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
                         className="text-xs sm:text-sm font-medium text-blue-700 dark:text-blue-300 underline underline-offset-2 inline-block pt-1"
                       >
                         www.bukly.com.br
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {formData.channel_manager_type === "channex" && (
+              <>
+                <FormSection
+                  title="Conexão Channex"
+                  description="Defina ambiente, API key e propriedade vinculada."
+                  icon={Globe}
+                >
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="channex_base_url" className={labelClass}>
+                        URL base
+                      </Label>
+                      <Input
+                        id="channex_base_url"
+                        value={formData.channex_base_url}
+                        onChange={(e) => setFormData({ ...formData, channex_base_url: e.target.value })}
+                        placeholder="https://staging.channex.io"
+                        className="font-mono text-sm"
+                      />
+                    </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="channex_api_key" className={labelClass}>
+                        API Key (header user-api-key) *
+                      </Label>
+                      <Input
+                        id="channex_api_key"
+                        type="password"
+                        value={formData.channex_api_key}
+                        onChange={(e) => setFormData({ ...formData, channex_api_key: e.target.value })}
+                        placeholder="Chave da API Channex"
+                        required
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="channex_property_id" className={labelClass}>
+                        Property ID (UUID) *
+                      </Label>
+                      <Input
+                        id="channex_property_id"
+                        value={formData.channex_property_id}
+                        onChange={(e) => setFormData({ ...formData, channex_property_id: e.target.value })}
+                        placeholder="UUID da propriedade no Channex"
+                        required
+                      />
+                      <FieldHint>
+                        O mapeamento de quartos e tarifas usará IDs remotos do Channex para ARI e reservas.
+                      </FieldHint>
+                    </div>
+                    <div className="sm:col-span-2 rounded-lg border border-border/80 bg-muted/20 px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="channex_use_webhook" className={labelClass}>
+                            Webhook como trigger de pull do feed
+                          </Label>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            Recomendado: webhook dispara sincronização e o PMS busca revisões pendentes no feed.
+                          </p>
+                        </div>
+                        <Switch
+                          id="channex_use_webhook"
+                          checked={formData.channex_use_webhook}
+                          onCheckedChange={(checked) =>
+                            setFormData({ ...formData, channex_use_webhook: checked })
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </FormSection>
+                <div className="rounded-xl border border-violet-200/90 bg-violet-50/90 dark:bg-violet-950/30 dark:border-violet-800/70 p-4 sm:p-5">
+                  <div className="flex gap-3">
+                    <Info className="h-5 w-5 text-violet-700 dark:text-violet-300 shrink-0 mt-0.5" />
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold text-violet-900 dark:text-violet-100">Channex</p>
+                      <ul className="text-xs sm:text-sm text-violet-800 dark:text-violet-200 space-y-1.5 list-disc list-inside leading-relaxed">
+                        <li>Push ARI separado: disponibilidade e tarifas/restrições.</li>
+                        <li>Reservas via booking revisions feed com ACK após persistência.</li>
+                        <li>Webhook é tratado como trigger; a ordem de chegada não é confiável.</li>
+                      </ul>
+                      <a
+                        href="https://docs.channex.io/guides/pms-integration-guide"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs sm:text-sm font-medium text-violet-700 dark:text-violet-300 underline underline-offset-2 inline-block"
+                      >
+                        PMS Integration Guide
                       </a>
                     </div>
                   </div>

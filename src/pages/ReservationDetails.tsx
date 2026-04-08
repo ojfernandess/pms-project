@@ -69,6 +69,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 import {
   formatReservationChannelOrigin,
+  resolveReservationBookingSourceLogo,
   reservationGuestContactFields,
   formatOtaGuestAddressLines,
 } from "@/lib/reservationChannelDisplay";
@@ -2316,7 +2317,22 @@ const ReservationDetails = () => {
                     <Label className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2 block">
                       Origem / Canal
                     </Label>
-                    <div className="text-base font-medium text-slate-900">
+                    <div className="text-base font-medium text-slate-900 flex items-center gap-2">
+                      {(() => {
+                        const source = resolveReservationBookingSourceLogo(
+                          reservation as Parameters<typeof resolveReservationBookingSourceLogo>[0]
+                        );
+                        if (!source.logoUrl) return null;
+                        return (
+                          <img
+                            src={source.logoUrl}
+                            alt={source.sourceCode ? `Logo OTA ${source.sourceCode}` : "Logo OTA"}
+                            className="h-4 w-4 rounded-sm object-contain"
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                          />
+                        );
+                      })()}
                       {formatReservationChannelOrigin(
                         reservation as Parameters<typeof formatReservationChannelOrigin>[0]
                       )}

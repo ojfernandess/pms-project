@@ -42,7 +42,10 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { Separator } from "@/components/ui/separator";
-import { formatReservationChannelOrigin } from "@/lib/reservationChannelDisplay";
+import {
+  formatReservationChannelOrigin,
+  resolveReservationBookingSourceLogo,
+} from "@/lib/reservationChannelDisplay";
 
 const originLabels: Record<AccountsReceivable['origin'], string> = {
   reservation: "Reserva",
@@ -77,6 +80,7 @@ function toDisplayManagerName(raw: string | null | undefined): string {
   const lower = value.toLowerCase();
   if (lower.includes("aiosell")) return "Aiosell";
   if (lower.includes("bukly")) return "Bukly";
+  if (lower.includes("channex")) return "Channex";
   return value;
 }
 
@@ -169,13 +173,14 @@ export const AccountsReceivableList = () => {
   const { data: reservationOriginsMap = {} } = useQuery({
     queryKey: ["accounts-receivable-reservation-origins", reservationIds],
     queryFn: async () => {
-      if (!reservationIds.length) return {} as Record<string, string>;
+      if (!reservationIds.length) return {} as Record<string, { label: string; logoUrl: string | null }>;
       // Evita 400 por URL longa (id=in.(...)) quando a lista é grande.
       const CHUNK_SIZE = 10;
       const allRows: Array<{
         id: string;
         channel?: string | null;
         ota_reservations?: Array<{
+          ota_reservation_code?: string | null;
           ota_source_channel_name?: string | null;
           ota_segment?: string | null;
           ota_channels?: { name?: string | null; channel_manager_type?: string | null } | null;
@@ -190,6 +195,7 @@ export const AccountsReceivableList = () => {
             id,
             channel,
             ota_reservations (
+              ota_reservation_code,
               ota_source_channel_name,
               ota_segment,
               ota_channels (
@@ -212,6 +218,7 @@ export const AccountsReceivableList = () => {
               id,
               channel,
               ota_reservations (
+                ota_reservation_code,
                 ota_source_channel_name,
                 ota_segment,
                 ota_channels (
@@ -227,9 +234,15 @@ export const AccountsReceivableList = () => {
         }
       }
 
-      const map: Record<string, string> = {};
+      const map: Record<string, { label: string; logoUrl: string | null }> = {};
       allRows.forEach((reservation) => {
-        map[reservation.id] = formatReservationChannelOrigin(reservation);
+        const logo = resolveReservationBookingSourceLogo(
+          reservation as Parameters<typeof resolveReservationBookingSourceLogo>[0]
+        );
+        map[reservation.id] = {
+          label: formatReservationChannelOrigin(reservation),
+          logoUrl: logo.logoUrl,
+        };
       });
 
       return map;
@@ -255,12 +268,12 @@ export const AccountsReceivableList = () => {
       "";
 
     const fromReservation = reservationOriginsMap[receivable.reservation_id];
-    if (fromReservation && fromReservation.trim()) {
-      const normalized = fromReservation.toLowerCase();
+    if (fromReservation?.label && fromReservation.label.trim()) {
+      const normalized = fromReservation.label.toLowerCase();
       // Padroniza visual para reservas vindas de channel: "Aiosell / Booking.com" ou "Aiosell / Direct"
       if (normalized.includes("ota / channel manager")) {
-        const partnerMatch = fromReservation.match(/Canal parceiro:\s*([^·]+)/i);
-        const managerBits = fromReservation.split("·").map((s) => s.trim());
+        const partnerMatch = fromReservation.label.match(/Canal parceiro:\s*([^·]+)/i);
+        const managerBits = fromReservation.label.split("·").map((s) => s.trim());
         const managerName = managerBits.find(
           (bit) =>
             bit &&
@@ -277,7 +290,7 @@ export const AccountsReceivableList = () => {
         const fallbackPartner = toDisplayPartnerName(metadataPartnerHint || "");
         return `${fallbackManager} / ${fallbackPartner}`;
       }
-      return fromReservation;
+      return fromReservation.label;
     }
 
     const rawHints = [
@@ -489,7 +502,18 @@ export const AccountsReceivableList = () => {
                       {originLabels[receivable.origin]}
                     </TableCell>
                     <TableCell>
-                      {resolveReservationOriginLabel(receivable)}
+                      <div className="flex items-center gap-2">
+                        {receivable.reservation_id && reservationOriginsMap[receivable.reservation_id]?.logoUrl ? (
+                          <img
+                            src={reservationOriginsMap[receivable.reservation_id]?.logoUrl || ""}
+                            alt="Logo OTA"
+                            className="h-4 w-4 rounded-sm object-contain"
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : null}
+                        <span>{resolveReservationOriginLabel(receivable)}</span>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <span className={isOverdue ? "text-red-600 font-semibold" : ""}>

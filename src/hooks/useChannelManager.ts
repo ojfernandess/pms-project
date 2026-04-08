@@ -6,6 +6,8 @@ import { invokeBuklySync } from "@/lib/buklySyncInvoke";
 import { invokeAiosellSync } from "@/lib/aiosellSyncInvoke";
 import { getAiosellSyncMappingDebug } from "@/lib/aiosellSyncSummary";
 import { invokeAiosellReservationsSync } from "@/lib/aiosellReservationsSyncInvoke";
+import { invokeChannexSync } from "@/lib/channexSyncInvoke";
+import { invokeChannexReservationsSync } from "@/lib/channexReservationsSyncInvoke";
 
 export const useChannelManager = () => {
   const queryClient = useQueryClient();
@@ -289,6 +291,22 @@ export const useChannelManager = () => {
     return payload.channel;
   };
 
+  const syncChannexChannel = async (
+    channelId: string,
+    establishmentId: string,
+    opts?: { silent?: boolean }
+  ) => {
+    const payload = await invokeChannexSync(channelId, establishmentId);
+    if (!opts?.silent) {
+      const availabilityTasks = payload.availabilityTasks?.length ?? 0;
+      const restrictionTasks = payload.restrictionTasks?.length ?? 0;
+      toast.success(
+        `Channex: envio ARI concluído (${availabilityTasks} task(s) availability, ${restrictionTasks} task(s) restrictions).`
+      );
+    }
+    return payload;
+  };
+
   type SyncChannelArg =
     | string
     | { channelId: string; silent?: boolean; skipInvalidate?: boolean };
@@ -328,6 +346,9 @@ export const useChannelManager = () => {
 
       if (channel.channel_type === "channel_manager" && channel.channel_manager_type === "aiosell") {
         return await syncAiosellChannel(channelId, establishmentId, { silent });
+      }
+      if (channel.channel_type === "channel_manager" && channel.channel_manager_type === "channex") {
+        return await syncChannexChannel(channelId, establishmentId, { silent });
       }
 
       // Sincronização padrão para OTAs diretas
@@ -479,6 +500,27 @@ export const useChannelManager = () => {
     },
   });
 
+  const syncChannexReservationsMutation = useMutation({
+    mutationFn: async (args: { channelId: string; establishmentId: string }) => {
+      return invokeChannexReservationsSync(args.channelId, args.establishmentId);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["ota_reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      const processed = data.processed ?? 0;
+      const created = data.created ?? 0;
+      const modified = data.modified ?? 0;
+      const cancelled = data.cancelled ?? 0;
+      const failed = data.failed ?? 0;
+      toast.success(
+        `Channex: ${processed} revisão(ões), ${created} nova(s), ${modified} alterada(s), ${cancelled} cancelada(s), ${failed} erro(s).`
+      );
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Erro ao sincronizar reservas Channex");
+    },
+  });
+
   return {
     channels: channelsQuery.data || [],
     otaReservations: otaReservationsQuery.data || [],
@@ -502,6 +544,8 @@ export const useChannelManager = () => {
     isSyncing: syncChannel.isPending,
     syncAiosellReservations: syncAiosellReservationsMutation.mutateAsync,
     isSyncingAiosellReservations: syncAiosellReservationsMutation.isPending,
+    syncChannexReservations: syncChannexReservationsMutation.mutateAsync,
+    isSyncingChannexReservations: syncChannexReservationsMutation.isPending,
     isCreating: createChannel.isPending || createChannelPricing.isPending,
   };
 };

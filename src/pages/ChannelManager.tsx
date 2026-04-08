@@ -27,11 +27,13 @@ import { OTADialog } from "@/components/channels/OTADialog";
 import { ChannelPricingDialog } from "@/components/channels/ChannelPricingDialog";
 import { SyncStatusCard } from "@/components/channels/SyncStatusCard";
 import { AiosellMappingPanel } from "@/components/channels/AiosellMappingPanel";
+import { ChannexMappingPanel } from "@/components/channels/ChannexMappingPanel";
 import { formatDate } from "@/lib/reservationUtils";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { toast } from "sonner";
 import { validateAiosellChannelForReservationsPull } from "@/lib/aiosellReservationsSyncInvoke";
+import { validateChannexChannelForReservationsPull } from "@/lib/channexReservationsSyncInvoke";
 
 const ChannelManager = () => {
   const {
@@ -46,6 +48,8 @@ const ChannelManager = () => {
     isSyncing,
     syncAiosellReservations,
     isSyncingAiosellReservations,
+    syncChannexReservations,
+    isSyncingChannexReservations,
   } = useChannelManager();
 
   const [otaDialogOpen, setOtaDialogOpen] = useState(false);
@@ -94,13 +98,20 @@ const ChannelManager = () => {
       return;
     }
     const channel = channels.find((c: { id: string }) => c.id === channelId);
-    const check = validateAiosellChannelForReservationsPull(channel);
+    const check =
+      channel?.channel_manager_type === "channex"
+        ? validateChannexChannelForReservationsPull(channel)
+        : validateAiosellChannelForReservationsPull(channel);
     if (!check.ok) {
       toast.error(check.message);
       return;
     }
     try {
-      await syncAiosellReservations({ channelId, establishmentId: est, pull: true });
+      if (channel?.channel_manager_type === "channex") {
+        await syncChannexReservations({ channelId, establishmentId: est });
+      } else {
+        await syncAiosellReservations({ channelId, establishmentId: est, pull: true });
+      }
     } catch (error) {
       console.error(error);
     }
@@ -121,6 +132,9 @@ const ChannelManager = () => {
           <TabsTrigger value="pricing">Tarifas por Canal</TabsTrigger>
           {channels.some((c: { channel_manager_type?: string }) => c.channel_manager_type === "aiosell") && (
             <TabsTrigger value="aiosell-mapping">Mapeamento Aiosell</TabsTrigger>
+          )}
+          {channels.some((c: { channel_manager_type?: string }) => c.channel_manager_type === "channex") && (
+            <TabsTrigger value="channex-mapping">Mapeamento Channex</TabsTrigger>
           )}
           <TabsTrigger value="reservations">Reservas OTA</TabsTrigger>
         </TabsList>
@@ -162,7 +176,7 @@ const ChannelManager = () => {
                     onSync={handleSync}
                     isSyncing={isSyncing}
                     onSyncReservations={handleSyncAiosellReservations}
-                    isSyncingReservations={isSyncingAiosellReservations}
+                    isSyncingReservations={isSyncingAiosellReservations || isSyncingChannexReservations}
                   />
                 ))}
               </div>
@@ -208,6 +222,29 @@ const ChannelManager = () => {
                         className="underline"
                       >
                         Aiosell REST API (PMS → Channel Manager)
+                      </a>
+                    </p>
+                  </div>
+                </Card>
+              )}
+
+              {channels.some((c: any) => c.channel_manager_type === "channex") && (
+                <Card className="p-4 bg-violet-50 border-violet-200">
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-violet-900 mb-2">Channex Channel Manager</h4>
+                    <p className="text-sm text-violet-800 mb-2">
+                      Configure API Key e Property ID para enviar ARI (availability/restrictions) e receber
+                      reservas via feed/webhook com ACK automático.
+                    </p>
+                    <p className="text-xs text-violet-700">
+                      Documentação:{" "}
+                      <a
+                        href="https://docs.channex.io/guides/pms-integration-guide"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                      >
+                        Channex PMS Integration Guide
                       </a>
                     </p>
                   </div>
@@ -373,6 +410,10 @@ const ChannelManager = () => {
 
         <TabsContent value="aiosell-mapping" className="space-y-4">
           <AiosellMappingPanel />
+        </TabsContent>
+
+        <TabsContent value="channex-mapping" className="space-y-4">
+          <ChannexMappingPanel />
         </TabsContent>
 
         <TabsContent value="reservations">
