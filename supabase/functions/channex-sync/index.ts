@@ -15,6 +15,16 @@ function json(body: unknown, status = 200) {
   });
 }
 
+function toIsoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(date: Date, days: number): Date {
+  const d = new Date(date);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
+}
+
 async function postChannex(baseUrl: string, apiKey: string, path: string, payload: unknown) {
   return fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
     method: "POST",
@@ -44,22 +54,131 @@ async function postChannexWithRetry(
   return lastResp as Response;
 }
 
+function toPositiveIntOrNull(value: unknown): number | null {
+  if (value == null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const v = Math.floor(n);
+  return v > 0 ? v : null;
+}
+
+function toNonNegativeIntOrNull(value: unknown): number | null {
+  if (value == null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const v = Math.floor(n);
+  return v >= 0 ? v : null;
+}
+
+function rowToChannexRestrictionFields(row: AnyObj): {
+  closed_to_arrival?: boolean;
+  closed_to_departure?: boolean;
+  stop_sell?: boolean;
+  min_stay_arrival?: number;
+  min_stay_through?: number;
+  max_stay?: number;
+} {
+  const minStayRaw = row.min_stay ?? row.min_los;
+  const maxStayRaw = row.max_stay ?? row.max_los;
+  const ctaRaw = row.closed_to_arrival ?? row.cta;
+  const ctdRaw = row.closed_to_departure ?? row.ctd;
+  const stopSellRaw = row.stop_sell_ota ?? row.stop_sell_booking_engine ?? row.stop_sell;
+
+  const minStay = toPositiveIntOrNull(minStayRaw);
+  const maxStay = toNonNegativeIntOrNull(maxStayRaw);
+  const cta = Boolean(ctaRaw);
+  const ctd = Boolean(ctdRaw);
+  const stopSell = Boolean(stopSellRaw);
+
+  const payload: {
+    closed_to_arrival?: boolean;
+    closed_to_departure?: boolean;
+    stop_sell?: boolean;
+    min_stay_arrival?: number;
+    min_stay_through?: number;
+    max_stay?: number;
+  } = {};
+
+  // RATE -> rate
+  // CTA -> closed_to_arrival
+  // CTD -> closed_to_departure
+  // SS -> stop_sell
+  // MSA -> min_stay_arrival
+  // MST -> min_stay_through
+  // MXS -> max_stay
+  if (minStay != null) {
+    payload.min_stay_arrival = minStay;
+    payload.min_stay_through = minStay;
+  }
+  if (maxStay != null) payload.max_stay = maxStay;
+  if (cta) payload.closed_to_arrival = true;
+  if (ctd) payload.closed_to_departure = true;
+  if (stopSell) payload.stop_sell = true;
+
+  return payload;
+}
+
+/** Mesma chave que aiosell-sync / rates-map: preço BAR com 2 adultos por (categoria, data, plano). */
+function dynamicPricingKeyChannex(catId: string, dateRaw: unknown, planId: unknown): string {
+  const d = String(dateRaw ?? "").slice(0, 10);
+  const pid = planId == null || planId === "" ? "" : String(planId);
+  return `${String(catId).trim()}\0${d}\0${pid}`;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ success: false, error: "Method not allowed" }, 405);
 
   try {
-    const body = (await req.json()) as { channel_id?: string; establishment_id?: string };
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return json({ success: false, error: "Não autorizado" }, 401);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const internalServiceAuth = serviceRoleKey.length > 0 && bearerToken === serviceRoleKey;
+
+    let supabaseUser: ReturnType<typeof createClient>;
+    let authUserId: string | null = null;
+
+    if (internalServiceAuth) {
+      supabaseUser = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    } else {
+      supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabaseUser.auth.getUser();
+      if (userErr || !user) {
+        return json({ success: false, error: "Sessão inválida ou expirada" }, 401);
+      }
+      authUserId = user.id;
+    }
+
+    let body: { channel_id?: string; establishment_id?: string };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ success: false, error: "JSON inválido" }, 400);
+    }
+
     const channelId = String(body?.channel_id ?? "").trim();
     const establishmentId = String(body?.establishment_id ?? "").trim();
     if (!channelId || !establishmentId) {
       return json({ success: false, error: "channel_id e establishment_id são obrigatórios" }, 400);
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-    );
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const { data: channel, error: channelErr } = await supabase
       .from("ota_channels")
@@ -67,6 +186,30 @@ serve(async (req) => {
       .eq("id", channelId)
       .maybeSingle();
     if (channelErr || !channel) return json({ success: false, error: "Canal não encontrado" }, 404);
+
+    if (String((channel as AnyObj).establishment_id ?? "").trim() !== establishmentId) {
+      return json({ success: false, error: "Canal não pertence ao estabelecimento informado" }, 403);
+    }
+
+    if (!internalServiceAuth && authUserId) {
+      const { data: canAccess, error: accessRpcError } = await supabaseUser.rpc("user_can_access_establishment", {
+        p_user_id: authUserId,
+        p_establishment_id: establishmentId,
+      });
+      if (accessRpcError) {
+        return json(
+          { success: false, error: `Não foi possível validar permissão: ${accessRpcError.message}` },
+          500,
+        );
+      }
+      if (canAccess !== true) {
+        return json({ success: false, error: "Sem permissão para este estabelecimento" }, 403);
+      }
+    }
+
+    if (String((channel as AnyObj).channel_manager_type ?? "") !== "channex") {
+      return json({ success: false, error: "Canal informado não é do tipo Channex" }, 400);
+    }
 
     const apiKey = String((channel as AnyObj).channex_api_key ?? "").trim();
     const propertyId = String((channel as AnyObj).channex_property_id ?? "").trim();
@@ -90,22 +233,35 @@ serve(async (req) => {
       { data: mappingRows, error: mapErr },
       { data: rooms, error: roomsErr },
       { data: roomCategories, error: categoriesErr },
+      { data: reservations, error: reservationsErr },
+      { data: hotelSettings },
     ] = await Promise.all([
       supabase
         .from("rate_calendar")
-        .select("date, category_id, pricing_plan_id, base_price, adult_price, child_price")
+        .select(
+          "date, category_id, pricing_plan_id, base_price, adult_price, child_price, min_stay, max_stay, closed_to_arrival, closed_to_departure, stop_sell_ota, stop_sell_booking_engine, min_advance_days, max_advance_days"
+        )
         .eq("establishment_id", establishmentId)
         .gte("date", today)
         .lte("date", futureDate),
       supabase.from("channel_pricing").select("*").eq("ota_channel_id", channelId).eq("is_active", true),
       supabase.from("rooms").select("id, category_id, status"),
       supabase.from("room_categories").select("id, base_price"),
+      supabase
+        .from("reservations")
+        .select("id, category_id, checkin_date, checkout_date, status")
+        .eq("establishment_id", establishmentId)
+        .gte("checkout_date", today)
+        .lte("checkin_date", futureDate),
+      supabase.from("hotel_settings").select("rate_system_settings").eq("establishment_id", establishmentId).maybeSingle(),
     ]);
     if (rcErr) throw rcErr;
     if (mapErr) throw mapErr;
     if (roomsErr) throw roomsErr;
     if (categoriesErr) throw categoriesErr;
+    if (reservationsErr) throw reservationsErr;
 
+    const availabilityMap = new Map<string, AnyObj>();
     const availabilityValues: AnyObj[] = [];
     const restrictionValues: AnyObj[] = [];
     const missingMappings: Array<{ category_id: string; pricing_plan_id: string }> = [];
@@ -119,6 +275,38 @@ serve(async (req) => {
       const isUnavailable = status === "maintenance" || status === "blocked";
       const current = roomAvailabilityByCategory.get(categoryId) ?? 0;
       roomAvailabilityByCategory.set(categoryId, current + (isUnavailable ? 0 : 1));
+    }
+
+    // Ocupação enviada ao Channex segue o PMS: só deixa de contar quando a reserva está inativa aqui
+    // (ex.: cancelada). Cancelamentos só na OTA/Channex em pendência mantêm a reserva ativa no PMS
+    // até o staff cancelar — o inventário no push continua coerente com quartos ocupados localmente.
+    const bookedByCategoryDate = new Map<string, number>();
+    const inactiveReservationStatuses = new Set(["cancelled", "canceled", "checkedout", "checked_out"]);
+    for (const reservation of reservations ?? []) {
+      const rr = reservation as AnyObj;
+      const categoryId = String(rr.category_id ?? "").trim();
+      if (!categoryId) continue;
+
+      const status = String(rr.status ?? "").toLowerCase();
+      if (inactiveReservationStatuses.has(status)) continue;
+
+      const checkin = String(rr.checkin_date ?? "").slice(0, 10);
+      const checkout = String(rr.checkout_date ?? "").slice(0, 10);
+      if (!checkin || !checkout) continue;
+
+      // Inventário usa noites: inclui checkin e exclui checkout.
+      let cursor = new Date(`${checkin}T00:00:00.000Z`);
+      const end = new Date(`${checkout}T00:00:00.000Z`);
+      const min = new Date(`${today}T00:00:00.000Z`);
+      const maxExclusive = addDays(new Date(`${futureDate}T00:00:00.000Z`), 1);
+      if (cursor < min) cursor = min;
+      const loopEnd = end < maxExclusive ? end : maxExclusive;
+      while (cursor < loopEnd) {
+        const d = toIsoDate(cursor);
+        const key = `${categoryId}::${d}`;
+        bookedByCategoryDate.set(key, (bookedByCategoryDate.get(key) ?? 0) + 1);
+        cursor = addDays(cursor, 1);
+      }
     }
 
     const useRateCalendar = Array.isArray(rateCalendar) && rateCalendar.length > 0;
@@ -150,6 +338,112 @@ serve(async (req) => {
           });
         }
       }
+    }
+
+    const rawRs = (hotelSettings as AnyObj | null | undefined)?.rate_system_settings as
+      | Record<string, unknown>
+      | undefined;
+    const autoApplyDynamicRules =
+      rawRs?.auto_apply_dynamic_rules === true ||
+      String(rawRs?.auto_apply_dynamic_rules ?? "").toLowerCase() === "true";
+    const persistDynamicRates =
+      rawRs?.persist_dynamic_rates === true ||
+      String(rawRs?.persist_dynamic_rates ?? "").toLowerCase() === "true";
+
+    const dynamicPriceByKey = new Map<string, number>();
+    let dynamicPersistRowsLoaded = 0;
+    let dynamicRpcPrefetched = 0;
+
+    if (autoApplyDynamicRules) {
+      if (persistDynamicRates) {
+        const { data: dynRows, error: dynErr } = await supabase
+          .from("dynamic_pricing_results")
+          .select("category_id, rate_plan_id, date, final_price")
+          .eq("establishment_id", establishmentId)
+          .gte("date", today)
+          .lte("date", futureDate);
+        if (dynErr) {
+          console.warn("[channex-sync] dynamic_pricing_results:", dynErr.message);
+        } else {
+          for (const dr of dynRows ?? []) {
+            const row = dr as AnyObj;
+            const fp = Number(row.final_price);
+            if (!Number.isFinite(fp) || fp <= 0) continue;
+            const k = dynamicPricingKeyChannex(String(row.category_id), row.date, row.rate_plan_id);
+            dynamicPriceByKey.set(k, fp);
+          }
+          dynamicPersistRowsLoaded = dynamicPriceByKey.size;
+        }
+      } else {
+        const uniqueKeys = new Set<string>();
+        for (const row of calendarLikeRows) {
+          const rr = row as AnyObj;
+          const pid = String(rr.pricing_plan_id ?? "").trim();
+          if (!pid) continue;
+          uniqueKeys.add(dynamicPricingKeyChannex(String(rr.category_id), rr.date, pid));
+        }
+        const rawMax = (Deno.env.get("CHANNEX_DYNAMIC_RPC_MAX_KEYS") ?? "").trim();
+        const parsedMax = parseInt(rawMax, 10);
+        const maxKeys =
+          Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(20_000, parsedMax) : 12_000;
+        const keysArr = [...uniqueKeys];
+        const limited = keysArr.length > maxKeys ? keysArr.slice(0, maxKeys) : keysArr;
+        if (keysArr.length > maxKeys) {
+          console.warn(
+            "[channex-sync] dynamic_pricing_rpc_cap",
+            JSON.stringify({
+              keys_total: keysArr.length,
+              keys_prefetched: maxKeys,
+              hint:
+                "Ative «Persistir preços dinâmicos» e cron recalc-rates para usar dynamic_pricing_results, ou aumente CHANNEX_DYNAMIC_RPC_MAX_KEYS.",
+            }),
+          );
+        }
+        const RPC_BATCH = 50;
+        for (let i = 0; i < limited.length; i += RPC_BATCH) {
+          const batch = limited.slice(i, i + RPC_BATCH);
+          const results = await Promise.all(
+            batch.map(async (key) => {
+              const parts = key.split("\0");
+              const catId = parts[0];
+              const dateStr = parts[1];
+              const planId = parts[2];
+              if (!planId) return null;
+              const { data, error: rpcErr } = await supabase.rpc("calculate_rate_price", {
+                p_establishment_id: establishmentId,
+                p_category_id: catId,
+                p_pricing_plan_id: planId,
+                p_date: dateStr,
+                p_adults: 2,
+                p_children: 0,
+              });
+              if (rpcErr) {
+                console.warn("[channex-sync] calculate_rate_price:", rpcErr.message, key);
+                return null;
+              }
+              const n = Number(data ?? 0);
+              if (!Number.isFinite(n) || n <= 0) return null;
+              return { key, price: n };
+            }),
+          );
+          for (const p of results) {
+            if (p) dynamicPriceByKey.set(p.key, p.price);
+          }
+        }
+        dynamicRpcPrefetched = dynamicPriceByKey.size;
+      }
+    }
+
+    if (autoApplyDynamicRules) {
+      console.info(
+        "[channex-sync] dynamic_pricing",
+        JSON.stringify({
+          persist_dynamic_rates: persistDynamicRates,
+          map_size: dynamicPriceByKey.size,
+          persist_rows_loaded: dynamicPersistRowsLoaded,
+          rpc_keys_prefetched: dynamicRpcPrefetched,
+        }),
+      );
     }
 
     for (const row of calendarLikeRows) {
@@ -188,25 +482,45 @@ serve(async (req) => {
       const ratePlanId = String(mapping.channel_rate_plan_code ?? "").trim();
       if (!roomTypeId || !ratePlanId) continue;
 
-      const basePrice = Number(r.base_price ?? 0);
+      let basePrice = Number(r.base_price ?? 0);
+      const planForDyn = String(r.pricing_plan_id ?? "").trim();
+      if (autoApplyDynamicRules && planForDyn) {
+        const dk = dynamicPricingKeyChannex(categoryId, r.date, planForDyn);
+        const dynBar = dynamicPriceByKey.get(dk);
+        if (dynBar != null && dynBar > 0) {
+          basePrice = dynBar;
+        }
+      }
       const multiplier = Number(mapping.price_multiplier ?? 1);
       const fixedPrice = mapping.fixed_price != null ? Number(mapping.fixed_price) : null;
       const finalPrice = fixedPrice != null && !Number.isNaN(fixedPrice) ? fixedPrice : basePrice * multiplier;
       const cents = Math.max(0, Math.round(finalPrice * 100));
 
-      availabilityValues.push({
-        property_id: propertyId,
-        room_type_id: roomTypeId,
-        date: String(r.date ?? ""),
-        availability: Math.max(0, roomAvailabilityByCategory.get(categoryId) ?? 0),
-      });
+      const date = String(r.date ?? "");
+      if (date) {
+        const availabilityKey = `${roomTypeId}::${date}`;
+        if (!availabilityMap.has(availabilityKey)) {
+          const totalInventory = Math.max(0, roomAvailabilityByCategory.get(categoryId) ?? 0);
+          const booked = bookedByCategoryDate.get(`${categoryId}::${date}`) ?? 0;
+          const netAvailability = Math.max(0, totalInventory - booked);
+          availabilityMap.set(availabilityKey, {
+            property_id: propertyId,
+            room_type_id: roomTypeId,
+            date,
+            availability: netAvailability,
+          });
+        }
+      }
       restrictionValues.push({
+        ...rowToChannexRestrictionFields(r),
         property_id: propertyId,
         rate_plan_id: ratePlanId,
-        date: String(r.date ?? ""),
+        date,
         rate: cents,
       });
     }
+
+    availabilityValues.push(...availabilityMap.values());
 
     if (availabilityValues.length === 0 || restrictionValues.length === 0) {
       const hint =
@@ -219,6 +533,13 @@ serve(async (req) => {
         endpoint: "/api/v1/availability + /api/v1/restrictions",
         request_payload: {
           source: useRateCalendar ? "rate_calendar" : "fallback_channel_pricing",
+          dynamic_pricing: autoApplyDynamicRules
+            ? persistDynamicRates
+              ? { mode: "dynamic_pricing_results", rows_loaded: dynamicPersistRowsLoaded }
+              : { mode: "calculate_rate_price", keys_prefetched: dynamicRpcPrefetched }
+            : { mode: "off" },
+          supportedCodes: ["RATE", "AVL", "CTA", "CTD", "SS", "MSA", "MST", "MXS"],
+          readOnlyCodesIgnored: ["AVO", "MAL"],
           availabilityCount: availabilityValues.length,
           restrictionsCount: restrictionValues.length,
           missingMappings: missingMappings.slice(0, 20),
@@ -298,10 +619,20 @@ serve(async (req) => {
       direction: "push_ari",
       status: "success",
       endpoint: "/api/v1/availability + /api/v1/restrictions",
-      request_payload: { availabilityCount: availabilityValues.length, restrictionsCount: restrictionValues.length },
+      request_payload: {
+        availabilityCount: availabilityValues.length,
+        restrictionsCount: restrictionValues.length,
+        dynamic_pricing: autoApplyDynamicRules
+          ? persistDynamicRates
+            ? { mode: "dynamic_pricing_results", rows_loaded: dynamicPersistRowsLoaded }
+            : { mode: "calculate_rate_price", keys_prefetched: dynamicRpcPrefetched }
+          : { mode: "off" },
+      },
       response_payload: {
         availabilityStatus: availabilityResp?.status ?? null,
         restrictionsStatus: restrictionsResp?.status ?? null,
+        supportedCodes: ["RATE", "AVL", "CTA", "CTD", "SS", "MSA", "MST", "MXS"],
+        readOnlyCodesIgnored: ["AVO", "MAL"],
         availabilityWarnings: (availabilityJson as AnyObj)?.meta ?? null,
         restrictionsWarnings: (restrictionsJson as AnyObj)?.meta ?? null,
       },

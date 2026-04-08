@@ -19,6 +19,161 @@ function ensureString(v: unknown) {
   return String(v ?? "").trim();
 }
 
+function nestedValue(obj: AnyObj | null | undefined, path: string): unknown {
+  if (!obj) return undefined;
+  const parts = path.split(".");
+  let cursor: unknown = obj;
+  for (const part of parts) {
+    if (!cursor || typeof cursor !== "object") return undefined;
+    cursor = (cursor as AnyObj)[part];
+  }
+  return cursor;
+}
+
+function parseIsoMs(value: unknown): number | null {
+  const raw = ensureString(value);
+  if (!raw) return null;
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function parseDateOnly(value: unknown): Date | null {
+  const raw = ensureString(value).slice(0, 10);
+  if (!raw) return null;
+  const d = new Date(`${raw}T00:00:00.000Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function daysBetweenUtc(start: Date, end: Date): number {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.floor((end.getTime() - start.getTime()) / msPerDay);
+}
+
+function parseDaysFromText(raw: unknown): number | null {
+  const text = ensureString(raw).toLowerCase();
+  if (!text) return null;
+  const match = text.match(/(\d+)\s*dias?/i);
+  if (!match) return null;
+  const n = Number(match[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function applyChannelCancellationWithPolicy(
+  supabase: ReturnType<typeof createClient>,
+  args: {
+    reservationId: string;
+    reason: string;
+  },
+): Promise<{ penalty: number; policyId: string | null; details: AnyObj | null }> {
+  const { data: reservation } = await supabase
+    .from("reservations")
+    .select("id, checkin_date, checkout_date, total_amount, pricing_plan_id, cancellation_policy_id")
+    .eq("id", args.reservationId)
+    .maybeSingle();
+
+  if (!reservation?.id) {
+    return { penalty: 0, policyId: null, details: null };
+  }
+
+  let policyId = ensureString((reservation as AnyObj).cancellation_policy_id) || null;
+  if (!policyId) {
+    const pricingPlanId = ensureString((reservation as AnyObj).pricing_plan_id);
+    if (pricingPlanId) {
+      const { data: pricingPlan } = await supabase
+        .from("pricing_plans")
+        .select("cancellation_policy_id")
+        .eq("id", pricingPlanId)
+        .maybeSingle();
+      policyId = ensureString((pricingPlan as AnyObj | null)?.cancellation_policy_id) || null;
+    }
+  }
+
+  let penalty = 0;
+  let details: AnyObj | null = null;
+  if (policyId) {
+    const { data: policy } = await supabase
+      .from("cancellation_policies")
+      .select("*")
+      .eq("id", policyId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (policy) {
+      const totalAmount = Math.max(0, Number((reservation as AnyObj).total_amount ?? 0));
+      const checkin = parseDateOnly((reservation as AnyObj).checkin_date);
+      const checkout = parseDateOnly((reservation as AnyObj).checkout_date);
+      const today = parseDateOnly(new Date().toISOString()) ?? new Date();
+      const nights =
+        checkin && checkout ? Math.max(1, daysBetweenUtc(checkin, checkout)) : 1;
+      const firstNight = totalAmount > 0 ? totalAmount / nights : 0;
+      const daysBeforeCheckin = checkin ? daysBetweenUtc(today, checkin) : 0;
+
+      const hasFree = Boolean((policy as AnyObj).has_free_cancellation);
+      const freeDeadlineDays = parseDaysFromText((policy as AnyObj).free_cancellation_deadline);
+      const insideFreeWindow =
+        hasFree && freeDeadlineDays != null ? daysBeforeCheckin >= freeDeadlineDays : false;
+
+      let feeType = ensureString((policy as AnyObj).cancellation_fee_type).toLowerCase();
+      let feePct = Number((policy as AnyObj).cancellation_fee_percentage ?? 0);
+      if (hasFree && !insideFreeWindow) {
+        const afterType = ensureString((policy as AnyObj).cancellation_fee_after_deadline_type).toLowerCase();
+        const afterPct = Number((policy as AnyObj).cancellation_fee_after_deadline_percentage ?? 0);
+        if (afterType) feeType = afterType;
+        if (afterPct > 0) feePct = afterPct;
+      }
+
+      if (insideFreeWindow) {
+        penalty = 0;
+      } else if (feeType === "percentage" && feePct > 0) {
+        penalty = (totalAmount * feePct) / 100;
+      } else if (feeType === "first_night") {
+        penalty = firstNight;
+      } else {
+        penalty = 0;
+      }
+
+      penalty = Math.max(0, Math.min(totalAmount, Number(penalty.toFixed(2))));
+      details = {
+        source: "channex_channel",
+        computed_at: new Date().toISOString(),
+        has_free_cancellation: hasFree,
+        free_deadline_days: freeDeadlineDays,
+        days_before_checkin: daysBeforeCheckin,
+        inside_free_window: insideFreeWindow,
+        fee_type: feeType || null,
+        fee_percentage: feeType === "percentage" ? feePct : null,
+        first_night_amount: firstNight,
+        total_amount: totalAmount,
+        penalty,
+      };
+    }
+  }
+
+  const { data: updatedRows, error: updateErr } = await supabase
+    .from("reservations")
+    .update({
+      status: "cancelled",
+      cancelled_at: new Date().toISOString(),
+      cancellation_reason: args.reason,
+      cancellation_penalty: penalty,
+      cancellation_policy_applied: policyId,
+      cancellation_calculation_details: details,
+      notes: args.reason,
+    })
+    .eq("id", args.reservationId)
+    .select("id");
+
+  if (updateErr) {
+    throw new Error(`Falha ao cancelar reserva no PMS: ${updateErr.message}`);
+  }
+  if (!updatedRows?.length) {
+    throw new Error(
+      "Nenhuma reserva foi atualizada (id inválido ou linha inexistente). Verifique o vínculo ota_reservations / revisão Channex.",
+    );
+  }
+
+  return { penalty, policyId, details };
+}
+
 function normalizeRevisionStatus(raw: unknown): "new" | "modified" | "cancelled" | "" {
   const s = ensureString(raw).toLowerCase();
   if (!s) return "";
@@ -409,6 +564,131 @@ async function fetchChannex(baseUrl: string, apiKey: string, path: string) {
   return { resp, data };
 }
 
+function parseFeedList(feedData: unknown): AnyObj[] {
+  const root = (feedData ?? {}) as AnyObj;
+  if (Array.isArray(root.data)) return root.data as AnyObj[];
+  if (root.data && typeof root.data === "object") return [root.data as AnyObj];
+  return [];
+}
+
+/** Códigos candidatos para bater com ota_reservations.ota_reservation_code (Channex pode enviar PREFIX-código; o PMS pode ter guardado só o sufixo ou outro formato). */
+function otaReservationLookupCodes(uniqueId: string, bookingId: string): string[] {
+  const u = ensureString(uniqueId);
+  const b = ensureString(bookingId);
+  const out: string[] = [];
+  const push = (x: string) => {
+    const t = x.trim();
+    if (!t) return;
+    out.push(t);
+    const low = t.toLowerCase();
+    if (low !== t) out.push(low);
+  };
+  push(u);
+  push(b);
+  const m = u.match(/^([A-Za-z]{2,10})-(.+)$/);
+  if (m?.[2]) push(m[2].trim());
+  const seen = new Set<string>();
+  return out.filter((x) => {
+    const k = x.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+async function findOtaReservationForChannel(
+  supabase: ReturnType<typeof createClient>,
+  channelId: string,
+  uniqueId: string,
+  bookingId: string,
+): Promise<{ id: string; reservation_id: string | null } | null> {
+  const codes = otaReservationLookupCodes(uniqueId, bookingId);
+  if (codes.length === 0) return null;
+  const { data, error } = await supabase
+    .from("ota_reservations")
+    .select("id, reservation_id")
+    .eq("ota_channel_id", channelId)
+    .in("ota_reservation_code", codes)
+    .limit(1);
+  if (error) {
+    console.warn("findOtaReservationForChannel", error.message, codes);
+    return null;
+  }
+  const row = (data?.[0] ?? null) as { id: string; reservation_id: string | null } | null;
+  if (!row?.id) return null;
+  return row;
+}
+
+function channexWebhookSummaryMatchesItem(
+  ws: AnyObj,
+  ctx: {
+    revisionId: string;
+    bookingId: string;
+    uniqueId: string;
+    revisionFilter: string;
+    bookingIdFilter: string;
+    bookingUniqueIdFilter: string;
+  },
+): boolean {
+  const wsRev = ensureString(ws.booking_revision_id ?? ws.revision_id);
+  const wsBook = ensureString(ws.booking_id);
+  const wsUnique = ensureString(ws.booking_unique_id ?? ws.unique_id);
+  if (ctx.revisionFilter && wsRev && wsRev === ctx.revisionFilter) return true;
+  if (ctx.bookingIdFilter && wsBook && wsBook === ctx.bookingIdFilter) return true;
+  if (ctx.bookingUniqueIdFilter && wsUnique && wsUnique === ctx.bookingUniqueIdFilter) return true;
+  if (wsRev && wsRev === ctx.revisionId) return true;
+  if (wsBook && wsBook === ctx.bookingId) return true;
+  if (wsUnique && wsUnique === ctx.uniqueId) return true;
+  return false;
+}
+
+/** Enriquece atributos da revisão com campos do webhook resumido (send_data=false), ex.: customer_name completo. */
+function mergeChannexWebhookSummaryIntoAttrs(attrs: AnyObj, ws: AnyObj): AnyObj {
+  const out = { ...attrs };
+  const cn = ensureString(ws.customer_name);
+  if (cn) out.customer_name = cn;
+  const arr = ensureString(ws.arrival_date);
+  if (arr) out.arrival_date = arr;
+  const dep = ensureString(ws.departure_date);
+  if (dep) out.departure_date = dep;
+  if (ws.amount != null && String(ws.amount).trim() !== "") {
+    const n = Number(ws.amount);
+    if (!Number.isNaN(n)) out.amount = n;
+  }
+  const cur = ensureString(ws.currency);
+  if (cur) out.currency = cur;
+  return out;
+}
+
+async function updateOtaReservationsRow(
+  supabase: ReturnType<typeof createClient>,
+  params: {
+    channelId: string;
+    uniqueId: string;
+    bookingId: string;
+    existingOta: { id: string } | null;
+    patch: Record<string, unknown>;
+  },
+): Promise<void> {
+  const { channelId, uniqueId, bookingId, existingOta, patch } = params;
+  const q = supabase.from("ota_reservations").update(patch).eq("ota_channel_id", channelId);
+  if (existingOta?.id) {
+    const { error } = await q.eq("id", existingOta.id);
+    if (error) console.warn("updateOtaReservationsRow by id", error.message);
+    return;
+  }
+  const codes = otaReservationLookupCodes(uniqueId, bookingId);
+  if (codes.length === 0) {
+    console.warn("updateOtaReservationsRow: sem códigos OTA", { uniqueId, bookingId });
+    return;
+  }
+  const { error } =
+    codes.length > 1
+      ? await q.in("ota_reservation_code", codes)
+      : await q.eq("ota_reservation_code", codes[0]!);
+  if (error) console.warn("updateOtaReservationsRow", error.message, codes);
+}
+
 async function postChannex(baseUrl: string, apiKey: string, path: string) {
   const resp = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
     method: "POST",
@@ -423,25 +703,253 @@ serve(async (req) => {
   if (req.method !== "POST") return json({ success: false, error: "Method not allowed" }, 405);
 
   try {
-    const body = (await req.json()) as {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return json({ success: false, error: "Não autorizado" }, 401);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const internalServiceAuth = serviceRoleKey.length > 0 && bearerToken === serviceRoleKey;
+
+    let supabaseUser: ReturnType<typeof createClient>;
+    let authUserId: string | null = null;
+
+    if (internalServiceAuth) {
+      supabaseUser = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    } else {
+      supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabaseUser.auth.getUser();
+      if (userErr || !user) {
+        return json({ success: false, error: "Sessão inválida ou expirada" }, 401);
+      }
+      authUserId = user.id;
+    }
+
+    let body: {
       channel_id?: string;
       establishment_id?: string;
       revision_id?: string;
+      booking_id?: string;
+      booking_unique_id?: string;
+      force_reprocess?: boolean;
+      auto_apply_lifecycle?: boolean;
+      recent_window_seconds?: number;
+      source_event?: string;
+      /** Campos do webhook resumido (ex. customer_name) para alinhar ao pull do feed. */
+      webhook_summary?: AnyObj;
+      /** Após cancelar no PMS pelo fluxo normal (UI): marca revisão/OTA/ACK sem reaplicar política no servidor. */
+      finalize_channex_cancellation_revision?: boolean;
     };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ success: false, error: "JSON inválido" }, 400);
+    }
+
     const channelId = ensureString(body.channel_id);
     const establishmentId = ensureString(body.establishment_id);
     const revisionFilter = ensureString(body.revision_id);
+    const bookingIdFilter = ensureString(body.booking_id);
+    const bookingUniqueIdFilter = ensureString(body.booking_unique_id);
+    const forceReprocess = body.force_reprocess === true;
+    const autoApplyLifecycle = body.auto_apply_lifecycle === true;
+    const sourceEvent = ensureString(body.source_event).toLowerCase();
+    const recentWindowSeconds =
+      typeof body.recent_window_seconds === "number" && Number.isFinite(body.recent_window_seconds)
+        ? Math.max(0, Math.floor(body.recent_window_seconds))
+        : 0;
+    const webhookSummary =
+      body.webhook_summary && typeof body.webhook_summary === "object" ? (body.webhook_summary as AnyObj) : null;
     if (!channelId || !establishmentId) {
       return json({ success: false, error: "channel_id e establishment_id são obrigatórios" }, 400);
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-    );
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const { data: channel } = await supabase.from("ota_channels").select("*").eq("id", channelId).maybeSingle();
     if (!channel) return json({ success: false, error: "Canal não encontrado" }, 404);
+
+    if (String((channel as AnyObj).establishment_id ?? "").trim() !== establishmentId) {
+      return json({ success: false, error: "Canal não pertence ao estabelecimento informado" }, 403);
+    }
+
+    if (!internalServiceAuth && authUserId) {
+      const { data: canAccess, error: accessRpcError } = await supabaseUser.rpc("user_can_access_establishment", {
+        p_user_id: authUserId,
+        p_establishment_id: establishmentId,
+      });
+      if (accessRpcError) {
+        return json(
+          {
+            success: false,
+            error: `Não foi possível validar permissão: ${accessRpcError.message}`,
+          },
+          500,
+        );
+      }
+      if (canAccess !== true) {
+        return json({ success: false, error: "Sem permissão para este estabelecimento" }, 403);
+      }
+    }
+
+    if (ensureString((channel as AnyObj).channel_manager_type) !== "channex") {
+      return json({ success: false, error: "Canal informado não é do tipo Channex" }, 400);
+    }
+
+    if (body.finalize_channex_cancellation_revision === true) {
+      const finalizeRevisionId = ensureString(body.revision_id);
+      if (!finalizeRevisionId) {
+        return json({ success: false, error: "revision_id é obrigatório para finalizar a revisão" }, 400);
+      }
+
+      const { data: revRow, error: revErr } = await supabase
+        .from("channex_booking_revisions")
+        .select("id, status, reservation_id, booking_id, unique_id, payload")
+        .eq("ota_channel_id", channelId)
+        .eq("revision_id", finalizeRevisionId)
+        .maybeSingle();
+
+      if (revErr) {
+        return json({ success: false, error: `Erro ao ler revisão: ${revErr.message}` }, 500);
+      }
+      if (!revRow?.id) {
+        return json({ success: false, error: "Revisão Channex não encontrada" }, 404);
+      }
+
+      const rev = revRow as AnyObj;
+      if (normalizeRevisionStatus(rev.status) !== "cancelled") {
+        return json({ success: false, error: "Esta pendência não é de cancelamento" }, 400);
+      }
+
+      const resId = ensureString(rev.reservation_id);
+      if (!resId) {
+        return json(
+          {
+            success: false,
+            error: "Revisão sem reserva vinculada. Sincronize as reservas Channex antes de finalizar.",
+          },
+          409,
+        );
+      }
+
+      const { data: resCheck } = await supabase.from("reservations").select("id, status").eq("id", resId).maybeSingle();
+      const st = ensureString((resCheck as AnyObj | null)?.status).toLowerCase();
+      if (st !== "cancelled") {
+        return json(
+          {
+            success: false,
+            error:
+              "A reserva ainda não está cancelada no PMS. Use o cancelamento com política e estorno (como no mapa de reservas) antes de finalizar.",
+            hint: "pending_reservation_not_cancelled",
+          },
+          409,
+        );
+      }
+
+      const bookingIdF = ensureString(rev.booking_id);
+      const uniqueIdF = ensureString(rev.unique_id);
+      const existingOta = await findOtaReservationForChannel(supabase, channelId, uniqueIdF, bookingIdF);
+
+      await updateOtaReservationsRow(supabase, {
+        channelId,
+        uniqueId: uniqueIdF,
+        bookingId: bookingIdF,
+        existingOta,
+        patch: {
+          sync_status: "cancelled",
+          synced_at: new Date().toISOString(),
+        },
+      });
+
+      await supabase
+        .from("channex_booking_revisions")
+        .update({
+          process_status: "processed",
+          processed_at: new Date().toISOString(),
+          error_message: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", rev.id as string);
+
+      if (bookingIdF) {
+        await supabase
+          .from("channex_booking_revisions")
+          .update({
+            process_status: "processed",
+            error_message: `Superseded by cancellation revision ${finalizeRevisionId}`,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("ota_channel_id", channelId)
+          .eq("booking_id", bookingIdF)
+          .eq("status", "modified")
+          .in("process_status", ["pending", "failed"])
+          .neq("revision_id", finalizeRevisionId);
+      }
+      if (uniqueIdF) {
+        await supabase
+          .from("channex_booking_revisions")
+          .update({
+            process_status: "processed",
+            error_message: `Superseded by cancellation revision ${finalizeRevisionId}`,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("ota_channel_id", channelId)
+          .eq("unique_id", uniqueIdF)
+          .eq("status", "modified")
+          .in("process_status", ["pending", "failed"])
+          .neq("revision_id", finalizeRevisionId);
+      }
+
+      await supabase.from("channex_ack_queue").upsert(
+        {
+          ota_channel_id: channelId,
+          establishment_id: establishmentId,
+          revision_id: finalizeRevisionId,
+          status: "pending",
+          next_attempt_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "ota_channel_id,revision_id" },
+      );
+
+      try {
+        await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/channex-ack-worker`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+          },
+          body: JSON.stringify({ channel_id: channelId, establishment_id: establishmentId }),
+        });
+      } catch {
+        // fila permanece pendente
+      }
+
+      await supabase.from("channex_sync_logs").insert({
+        ota_channel_id: channelId,
+        establishment_id: establishmentId,
+        direction: "pull_booking",
+        status: "success",
+        endpoint: "finalize_channex_cancellation_revision",
+        message: `Revisão ${finalizeRevisionId} finalizada após cancelamento no PMS`,
+        request_payload: { revision_id: finalizeRevisionId },
+      });
+
+      return json({ success: true, finalized: true });
+    }
 
     const apiKey = ensureString((channel as AnyObj).channex_api_key);
     const propertyId = ensureString((channel as AnyObj).channex_property_id);
@@ -453,58 +961,251 @@ serve(async (req) => {
     const feedPath = revisionFilter
       ? `/api/v1/booking_revisions/${revisionFilter}`
       : `/api/v1/booking_revisions/feed?filter[property_id]=${encodeURIComponent(propertyId)}&order[inserted_at]=asc`;
-    const { resp: feedResp, data: feedData } = await fetchChannex(baseUrl, apiKey, feedPath);
-    if (!feedResp.ok) {
+    let feedResp: Response | null = null;
+    let feedData: unknown = {};
+    let list: AnyObj[] = [];
+
+    const shouldRetryFeed =
+      !revisionFilter && !bookingIdFilter && !bookingUniqueIdFilter && recentWindowSeconds > 0;
+    const retryDelaysMs = shouldRetryFeed ? [0, 800, 1600, 3200] : [0];
+    for (const delayMs of retryDelaysMs) {
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const attempt = await fetchChannex(baseUrl, apiKey, feedPath);
+      feedResp = attempt.resp;
+      feedData = attempt.data;
+      if (!attempt.resp.ok) break;
+      list = parseFeedList(attempt.data);
+      if (list.length > 0) break;
+    }
+
+    if (!feedResp || !feedResp.ok) {
       await supabase.from("channex_sync_logs").insert({
         ota_channel_id: channelId,
         establishment_id: establishmentId,
         direction: "pull_booking",
         status: "error",
         endpoint: feedPath,
-        http_status: feedResp.status,
+        http_status: feedResp?.status ?? null,
         response_payload: feedData,
         message: "Erro ao buscar booking revisions",
       });
-      return json({ success: false, error: "Falha ao buscar revisões no Channex", hint: String(feedResp.status) }, 502);
+      return json({ success: false, error: "Falha ao buscar revisões no Channex", hint: String(feedResp?.status ?? 0) }, 502);
     }
 
-    const list: AnyObj[] = Array.isArray((feedData as AnyObj).data)
-      ? ((feedData as AnyObj).data as AnyObj[])
-      : (feedData as AnyObj).data
-        ? [((feedData as AnyObj).data as AnyObj)]
-        : [];
+    // Fallback: alguns ambientes retornam vazio em /feed logo após webhook resumido.
+    // Tentamos endpoint alternativo de revisões não-acknowledged.
+    if (
+      list.length === 0 &&
+      !revisionFilter &&
+      !bookingIdFilter &&
+      !bookingUniqueIdFilter &&
+      recentWindowSeconds > 0
+    ) {
+      const altPath = `/api/v1/booking_revisions?filter[property_id]=${encodeURIComponent(propertyId)}&order[inserted_at]=desc`;
+      const alt = await fetchChannex(baseUrl, apiKey, altPath);
+      if (alt.resp.ok) {
+        list = parseFeedList(alt.data);
+      }
+    }
+
+    if (list.length === 0 && (revisionFilter || bookingIdFilter || bookingUniqueIdFilter)) {
+      const fallbackPath = `/api/v1/booking_revisions/feed?filter[property_id]=${encodeURIComponent(propertyId)}&order[inserted_at]=desc`;
+      const fallback = await fetchChannex(baseUrl, apiKey, fallbackPath);
+      if (fallback.resp.ok) {
+        const fallbackList: AnyObj[] = Array.isArray((fallback.data as AnyObj).data)
+          ? ((fallback.data as AnyObj).data as AnyObj[])
+          : [];
+        list = fallbackList.filter((entry) => {
+          const attrs = (entry.attributes ?? {}) as AnyObj;
+          const rid = ensureString(attrs.id || entry.id);
+          const bid = ensureString(attrs.booking_id);
+          const uid = ensureString(attrs.unique_id || attrs.ota_reservation_code);
+          if (revisionFilter && rid === revisionFilter) return true;
+          if (bookingIdFilter && bid === bookingIdFilter) return true;
+          if (bookingUniqueIdFilter && uid === bookingUniqueIdFilter) return true;
+          return false;
+        });
+      }
+    }
+
+    // Fallback final: usa payload local já salvo para permitir "aceitar/reprocessar" via UI
+    // mesmo quando a revisão não vem mais no feed remoto.
+    if (list.length === 0 && revisionFilter) {
+      const { data: localRevision } = await supabase
+        .from("channex_booking_revisions")
+        .select("revision_id, booking_id, unique_id, payload, status, reservation_id")
+        .eq("ota_channel_id", channelId)
+        .eq("revision_id", revisionFilter)
+        .maybeSingle();
+      if (localRevision?.revision_id) {
+        const payload = (localRevision.payload ?? {}) as AnyObj;
+        const rowStatus = ensureString((localRevision as AnyObj).status);
+        const rowBid = ensureString((localRevision as AnyObj).booking_id);
+        const rowUid = ensureString((localRevision as AnyObj).unique_id);
+        const rowResId = ensureString((localRevision as AnyObj).reservation_id);
+        list = [
+          {
+            id: localRevision.revision_id,
+            _local_reservation_id: rowResId || undefined,
+            attributes: {
+              ...payload,
+              id: localRevision.revision_id,
+              booking_id: rowBid || ensureString(payload.booking_id),
+              unique_id:
+                rowUid ||
+                ensureString(payload.unique_id) ||
+                ensureString(payload.booking_unique_id) ||
+                ensureString(payload.ota_reservation_code),
+              status: ensureString(payload.status) || rowStatus || undefined,
+            },
+          },
+        ];
+      }
+    }
+
+    if (!revisionFilter && !bookingIdFilter && !bookingUniqueIdFilter && recentWindowSeconds > 0) {
+      const minMs = Date.now() - recentWindowSeconds * 1000;
+      list = list.filter((entry) => {
+        const attrs = (entry.attributes ?? {}) as AnyObj;
+        const insertedAtMs =
+          parseIsoMs(attrs.inserted_at) ??
+          parseIsoMs((entry as AnyObj).inserted_at) ??
+          parseIsoMs(attrs.created_at) ??
+          parseIsoMs((entry as AnyObj).created_at);
+        // Para webhook resumido, só aceitar revisões com timestamp válido na janela.
+        if (insertedAtMs == null) return false;
+        return insertedAtMs >= minMs;
+      });
+    }
 
     let processed = 0;
     let created = 0;
     let modified = 0;
     let cancelled = 0;
     let failed = 0;
+    let skippedMissingIds = 0;
+    let skippedBySourceEvent = 0;
+
+    // Limpeza defensiva: se a reserva local já está cancelada, não manter pendências antigas de modificação.
+    const { data: staleModified } = await supabase
+      .from("channex_booking_revisions")
+      .select("id, reservation_id")
+      .eq("ota_channel_id", channelId)
+      .eq("status", "modified")
+      .in("process_status", ["pending", "failed"])
+      .not("reservation_id", "is", null)
+      .limit(200);
+    for (const row of staleModified ?? []) {
+      const reservationId = ensureString((row as AnyObj).reservation_id);
+      if (!reservationId) continue;
+      const { data: reservation } = await supabase
+        .from("reservations")
+        .select("status")
+        .eq("id", reservationId)
+        .maybeSingle();
+      const status = ensureString((reservation as AnyObj | null)?.status).toLowerCase();
+      if (status === "cancelled") {
+        await supabase
+          .from("channex_booking_revisions")
+          .update({
+            process_status: "processed",
+            error_message: "Superseded: local reservation already cancelled",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", (row as AnyObj).id);
+      }
+    }
 
     for (const item of list) {
-      const attrs = (item.attributes ?? {}) as AnyObj;
-      const revisionId = ensureString(attrs.id || item.id);
-      const bookingId = ensureString(attrs.booking_id);
-      const uniqueId = ensureString(attrs.unique_id || attrs.ota_reservation_code);
+      let attrs = (item.attributes ?? {}) as AnyObj;
+      const processingMeta: AnyObj = {
+        used_category_mapping_fallback: false,
+        fallback_reservation_id: null,
+        modification_details: [],
+      };
+      const itemObj = item as AnyObj;
+      const localReservationHint = ensureString((itemObj as AnyObj)._local_reservation_id);
+      const revisionId = ensureString(
+        attrs.id ||
+          attrs.revision_id ||
+          itemObj.id ||
+          itemObj.revision_id ||
+          nestedValue(itemObj, "revision.id")
+      );
+      const bookingId = ensureString(
+        attrs.booking_id ||
+          attrs.bookingId ||
+          itemObj.booking_id ||
+          itemObj.bookingId ||
+          nestedValue(itemObj, "relationships.booking.data.id") ||
+          nestedValue(itemObj, "booking.id")
+      );
+      const uniqueId = ensureString(
+        attrs.unique_id ||
+          attrs.ota_reservation_code ||
+          attrs.booking_unique_id ||
+          itemObj.unique_id ||
+          itemObj.booking_unique_id ||
+          itemObj.bookingUniqueId
+      );
+      if (webhookSummary) {
+        const summaryCustomer = ensureString(webhookSummary.customer_name);
+        const matchIds = channexWebhookSummaryMatchesItem(webhookSummary, {
+          revisionId,
+          bookingId,
+          uniqueId,
+          revisionFilter,
+          bookingIdFilter,
+          bookingUniqueIdFilter,
+        });
+        // Webhook resumido: com uma única revisão na janela, enriquecer nome/datas do payload do CM.
+        const singleRevisionInBatch = list.length === 1 && Boolean(summaryCustomer);
+        if (matchIds || singleRevisionInBatch) {
+          attrs = mergeChannexWebhookSummaryIntoAttrs(attrs, webhookSummary);
+        }
+      }
       const otaName = ensureString(attrs.ota_name) || "Channex";
-      const existingReservationLookup = await supabase
-        .from("ota_reservations")
-        .select("id, reservation_id")
-        .eq("ota_channel_id", channelId)
-        .eq("ota_reservation_code", uniqueId || bookingId)
-        .maybeSingle();
-      const existingOta = existingReservationLookup.data;
+      const existingOta = await findOtaReservationForChannel(supabase, channelId, uniqueId, bookingId);
       const reservationAlreadyExists = !!ensureString(existingOta?.reservation_id);
 
-      const revisionStatus = deriveRevisionStatus(attrs, reservationAlreadyExists);
-      if (!revisionId || !bookingId) continue;
+      if (!revisionId || (!bookingId && !uniqueId)) {
+        skippedMissingIds += 1;
+        continue;
+      }
 
       const { data: exists } = await supabase
         .from("channex_booking_revisions")
-        .select("id, process_status")
+        .select("id, process_status, reservation_id, status")
         .eq("ota_channel_id", channelId)
         .eq("revision_id", revisionId)
         .maybeSingle();
-      if (exists?.id && exists.process_status === "acked") continue;
+
+      let revisionStatus = deriveRevisionStatus(attrs, reservationAlreadyExists);
+      const storedLifecycle = normalizeRevisionStatus((exists as AnyObj | null)?.status);
+      if (storedLifecycle === "cancelled") {
+        revisionStatus = "cancelled";
+      }
+      // Webhook/pull resumido: sem rooms/status no JSON o derive cai em "modified" mesmo sendo cancelamento.
+      if (sourceEvent === "booking_cancellation") {
+        revisionStatus = "cancelled";
+      }
+
+      if (sourceEvent === "booking_cancellation" && revisionStatus !== "cancelled") {
+        skippedBySourceEvent += 1;
+        continue;
+      }
+      if (sourceEvent === "booking_modification" && revisionStatus === "cancelled") {
+        skippedBySourceEvent += 1;
+        continue;
+      }
+
+      if (
+        !forceReprocess &&
+        exists?.id &&
+        (exists.process_status === "acked" || exists.process_status === "processed")
+      ) {
+        continue;
+      }
 
       processed += 1;
 
@@ -512,18 +1213,29 @@ serve(async (req) => {
         const customer = (attrs.customer ?? {}) as AnyObj;
         const firstName = ensureString(customer.name);
         const lastName = ensureString(customer.surname);
-        const guestName = `${firstName} ${lastName}`.trim() || "Hóspede Channex";
+        const fromSummary = ensureString(attrs.customer_name);
+        const guestName =
+          fromSummary ||
+          `${firstName} ${lastName}`.trim() ||
+          "Hóspede Channex";
         const email = ensureString(customer.mail) || null;
         const phone = ensureString(customer.phone) || null;
 
         let clientId: string | null = null;
+        // OTAs frequentemente repetem e-mail genérico/vazio: não reutilizar cliente só pelo e-mail (evita hóspede errado).
         if (email) {
           const { data: foundClient } = await supabase
             .from("clients")
-            .select("id")
+            .select("id, full_name")
             .eq("email", email)
             .maybeSingle();
-          if (foundClient?.id) clientId = foundClient.id;
+          if (foundClient?.id) {
+            const existingNm = ensureString((foundClient as AnyObj).full_name).toLowerCase().replace(/\s+/g, " ");
+            const wanted = guestName.toLowerCase().replace(/\s+/g, " ");
+            if (existingNm && wanted && existingNm === wanted) {
+              clientId = foundClient.id;
+            }
+          }
         }
         if (!clientId) {
           const { data: clientRow, error: clientErr } = await supabase
@@ -554,21 +1266,237 @@ serve(async (req) => {
           ? await shouldApplyChannelAutoPayment(supabase, establishmentId, otaName)
           : false;
 
-        const { data: mapping } = await supabase
-          .from("channel_pricing")
-          .select("category_id, pricing_plan_id")
-          .eq("ota_channel_id", channelId)
-          .eq("channel_room_code", roomTypeId)
-          .eq("channel_rate_plan_code", ratePlanId)
-          .maybeSingle();
-        const categoryId = ensureString(mapping?.category_id);
-        if (!categoryId) {
-          throw new Error(`Mapeamento não encontrado para room_type_id=${roomTypeId} rate_plan_id=${ratePlanId}`);
+        let reservationId = ensureString(existingOta?.reservation_id);
+        if (!reservationId && localReservationHint) reservationId = localReservationHint;
+        if (!reservationId) {
+          const fromStoredRevision = ensureString((exists as AnyObj | null)?.reservation_id);
+          if (fromStoredRevision) reservationId = fromStoredRevision;
+        }
+        let processStatusForRevision: "processed" | "pending" = "processed";
+
+        const shouldQueueLifecyclePending =
+          (revisionStatus === "modified" || revisionStatus === "cancelled") &&
+          !forceReprocess &&
+          !autoApplyLifecycle;
+
+        if (shouldQueueLifecyclePending) {
+          if (reservationId && (revisionStatus === "modified" || revisionStatus === "cancelled")) {
+            const { data: currentReservation } = await supabase
+              .from("reservations")
+              .select("status")
+              .eq("id", reservationId)
+              .maybeSingle();
+            const localStatus = ensureString((currentReservation as AnyObj | null)?.status).toLowerCase();
+            // Se a reserva já está cancelada localmente, não abrir pendência de modificação antiga.
+            if (localStatus === "cancelled") {
+              processStatusForRevision = "processed";
+            } else {
+              processStatusForRevision = "pending";
+            }
+          } else {
+          processStatusForRevision = "pending";
+          }
+          if (revisionStatus === "modified") modified += 1;
+          if (revisionStatus === "cancelled") cancelled += 1;
         }
 
-        let reservationId = ensureString(existingOta?.reservation_id);
+        let categoryId = "";
+        let channexMappedPricingPlanId: string | null = null;
+        const needsCategoryMapping =
+          !shouldQueueLifecyclePending &&
+          ((revisionStatus === "new" || revisionStatus === "modified") && !reservationId) ||
+          (revisionStatus === "modified" && forceReprocess);
 
-        if ((revisionStatus === "new" || revisionStatus === "modified") && !reservationId) {
+        // Reaproveitar último vínculo local por booking/unique quando ota_reservations ainda não estiver ligado.
+        if (!reservationId && (revisionStatus === "modified" || revisionStatus === "cancelled")) {
+          let latestReservationId = "";
+          if (bookingId) {
+            const { data: byBook } = await supabase
+              .from("channex_booking_revisions")
+              .select("reservation_id")
+              .eq("ota_channel_id", channelId)
+              .eq("booking_id", bookingId)
+              .not("reservation_id", "is", null)
+              .order("updated_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            latestReservationId = ensureString((byBook as AnyObj | null)?.reservation_id);
+          }
+          if (!latestReservationId && uniqueId) {
+            const { data: byUnique } = await supabase
+              .from("channex_booking_revisions")
+              .select("reservation_id")
+              .eq("ota_channel_id", channelId)
+              .eq("unique_id", uniqueId)
+              .not("reservation_id", "is", null)
+              .order("updated_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            latestReservationId = ensureString((byUnique as AnyObj | null)?.reservation_id);
+          }
+          if (latestReservationId) {
+            reservationId = latestReservationId;
+            const { data: latestReservation } = await supabase
+              .from("reservations")
+              .select("status")
+              .eq("id", latestReservationId)
+              .maybeSingle();
+            const latestStatus = ensureString((latestReservation as AnyObj | null)?.status).toLowerCase();
+            if (latestStatus === "cancelled") {
+              processStatusForRevision = "processed";
+            }
+          }
+        }
+
+        // Cancelamento: sem vínculo OTA, localizar reserva criada pelo PMS (notas "Channex … booking …").
+        if (!reservationId && revisionStatus === "cancelled") {
+          const needles = [uniqueId, bookingId].map((n) => ensureString(n).replace(/[^a-zA-Z0-9\-]/g, "").trim()).filter(
+            (t) => t.length >= 8,
+          );
+          for (const token of needles) {
+            const { data: noteHits } = await supabase
+              .from("reservations")
+              .select("id")
+              .eq("establishment_id", establishmentId)
+              .ilike("notes", `%${token}%`)
+              .in("status", ["pending", "confirmed", "checkedin", "preregistration"])
+              .limit(2);
+            if (noteHits?.length === 1) {
+              reservationId = ensureString((noteHits[0] as AnyObj).id);
+              break;
+            }
+          }
+        }
+
+        // Para pendência de modificação, registrar detalhes before/after para exibir no PMS.
+        if (shouldQueueLifecyclePending && revisionStatus === "modified" && reservationId) {
+          const { data: previousReservation } = await supabase
+            .from("reservations")
+            .select("guest_name, checkin_date, checkout_date, total_amount, category_id, room_id")
+            .eq("id", reservationId)
+            .maybeSingle();
+          const prev = previousReservation as AnyObj | null;
+
+          let incomingCategoryId: string | null = null;
+          if (roomTypeId && ratePlanId) {
+            const { data: detailMapping } = await supabase
+              .from("channel_pricing")
+              .select("category_id")
+              .eq("ota_channel_id", channelId)
+              .eq("channel_room_code", roomTypeId)
+              .eq("channel_rate_plan_code", ratePlanId)
+              .maybeSingle();
+            incomingCategoryId = ensureString((detailMapping as AnyObj | null)?.category_id) || null;
+          }
+
+          const changes: AnyObj[] = [];
+          const prevGuest = ensureString(prev?.guest_name);
+          if (prevGuest && prevGuest !== guestName) {
+            changes.push({ field: "guest_name", before: prevGuest, after: guestName });
+          }
+          const prevCheckin = ensureString(prev?.checkin_date).slice(0, 10);
+          const prevCheckout = ensureString(prev?.checkout_date).slice(0, 10);
+          if (prevCheckin && arrivalDate && prevCheckin !== arrivalDate) {
+            changes.push({ field: "checkin_date", before: prevCheckin, after: arrivalDate });
+          }
+          if (prevCheckout && departureDate && prevCheckout !== departureDate) {
+            changes.push({ field: "checkout_date", before: prevCheckout, after: departureDate });
+          }
+          const prevAmount = Number(prev?.total_amount ?? 0);
+          if (Number.isFinite(prevAmount) && Number.isFinite(amount) && Math.abs(prevAmount - amount) > 0.009) {
+            changes.push({ field: "total_amount", before: prevAmount, after: amount });
+          }
+          const prevCategoryId = ensureString(prev?.category_id);
+          if (prevCategoryId && incomingCategoryId && prevCategoryId !== incomingCategoryId) {
+            const categoryIds = [prevCategoryId, incomingCategoryId];
+            const { data: categories } = await supabase
+              .from("room_categories")
+              .select("id, name")
+              .in("id", categoryIds);
+            const categoryNameById = new Map<string, string>();
+            for (const category of categories ?? []) {
+              const cc = category as AnyObj;
+              const cid = ensureString(cc.id);
+              if (!cid) continue;
+              categoryNameById.set(cid, ensureString(cc.name) || cid);
+            }
+
+            const prevCategoryName = categoryNameById.get(prevCategoryId) ?? prevCategoryId;
+            const incomingCategoryName = categoryNameById.get(incomingCategoryId) ?? incomingCategoryId;
+
+            changes.push({
+              field: "category",
+              before: prevCategoryName,
+              after: incomingCategoryName,
+              before_id: prevCategoryId,
+              after_id: incomingCategoryId,
+            });
+          }
+
+          processingMeta.modification_details = changes;
+        }
+        if (needsCategoryMapping) {
+          const { data: mapping } = await supabase
+            .from("channel_pricing")
+            .select("category_id, pricing_plan_id")
+            .eq("ota_channel_id", channelId)
+            .eq("channel_room_code", roomTypeId)
+            .eq("channel_rate_plan_code", ratePlanId)
+            .maybeSingle();
+          const mapRow = mapping as AnyObj | null;
+          categoryId = ensureString(mapRow?.category_id);
+          const mappedPlan = ensureString(mapRow?.pricing_plan_id);
+          if (mappedPlan) channexMappedPricingPlanId = mappedPlan;
+          if (!categoryId) {
+            // Fallback: usar categoria da última reserva já vinculada ao mesmo booking/unique.
+            // Isso evita falha de "modified" quando o mapeamento foi removido/alterado após a criação inicial.
+            let fallbackReservationId = "";
+            if (bookingId) {
+              const { data: lastByBook } = await supabase
+                .from("channex_booking_revisions")
+                .select("reservation_id")
+                .eq("ota_channel_id", channelId)
+                .eq("booking_id", bookingId)
+                .not("reservation_id", "is", null)
+                .order("updated_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              fallbackReservationId = ensureString((lastByBook as AnyObj | null)?.reservation_id);
+            }
+            if (!fallbackReservationId && uniqueId) {
+              const { data: lastByUnique } = await supabase
+                .from("channex_booking_revisions")
+                .select("reservation_id")
+                .eq("ota_channel_id", channelId)
+                .eq("unique_id", uniqueId)
+                .not("reservation_id", "is", null)
+                .order("updated_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              fallbackReservationId = ensureString((lastByUnique as AnyObj | null)?.reservation_id);
+            }
+            if (fallbackReservationId) {
+              const { data: fallbackReservation } = await supabase
+                .from("reservations")
+                .select("category_id, pricing_plan_id")
+                .eq("id", fallbackReservationId)
+                .maybeSingle();
+              const fb = fallbackReservation as AnyObj | null;
+              categoryId = ensureString(fb?.category_id);
+              const fbPlan = ensureString(fb?.pricing_plan_id);
+              if (fbPlan) channexMappedPricingPlanId = fbPlan;
+              if (categoryId) {
+                processingMeta.used_category_mapping_fallback = true;
+                processingMeta.fallback_reservation_id = fallbackReservationId;
+              }
+            }
+          }
+          if (!categoryId) {
+            throw new Error(`Mapeamento não encontrado para room_type_id=${roomTypeId} rate_plan_id=${ratePlanId}`);
+          }
+        }
+
+        if (!shouldQueueLifecyclePending && (revisionStatus === "new" || revisionStatus === "modified") && !reservationId) {
           const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_reservation_with_lock", {
             p_reservation_data: {
               guest_name: guestName,
@@ -581,6 +1509,7 @@ serve(async (req) => {
               channel: "ota",
               notes: `Channex ${otaName} · booking ${uniqueId || bookingId}`,
               client_id: clientId,
+              ...(channexMappedPricingPlanId ? { pricing_plan_id: channexMappedPricingPlanId } : {}),
             },
             p_checkin_date: arrivalDate,
             p_checkout_date: departureDate,
@@ -666,7 +1595,84 @@ serve(async (req) => {
             }
           }
           created += 1;
-        } else if (revisionStatus === "modified" && reservationId) {
+        } else if (!shouldQueueLifecyclePending && revisionStatus === "modified" && reservationId) {
+          const { data: previousReservation } = await supabase
+            .from("reservations")
+            .select("id, checkin_date, checkout_date, guest_name, total_amount, room_id, category_id")
+            .eq("id", reservationId)
+            .maybeSingle();
+
+          if (forceReprocess && previousReservation?.id) {
+            await supabase
+              .from("reservations")
+              .update({
+                status: "cancelled",
+                cancelled_at: new Date().toISOString(),
+                notes: `Cancelada automaticamente para reprocessar modificação Channex · booking ${uniqueId || bookingId}`,
+              })
+              .eq("id", reservationId);
+
+            const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_reservation_with_lock", {
+              p_reservation_data: {
+                guest_name: guestName,
+                adults: Number((attrs.occupancy as AnyObj)?.adults ?? 2),
+                children: Number((attrs.occupancy as AnyObj)?.children ?? 0),
+                total_amount: amount > 0 ? amount : 0,
+                paid_amount: paidByOta && shouldApplyAutoPayment && amount > 0 ? amount : 0,
+                payment_status: paidByOta && shouldApplyAutoPayment && amount > 0 ? "paid" : "pending",
+                status: "pending",
+                channel: "ota",
+                notes: `Channex ${otaName} · booking ${uniqueId || bookingId} · modified (reprocess)`,
+                client_id: clientId,
+                ...(channexMappedPricingPlanId ? { pricing_plan_id: channexMappedPricingPlanId } : {}),
+              },
+              p_checkin_date: arrivalDate,
+              p_checkout_date: departureDate,
+              p_establishment_id: establishmentId,
+              p_room_id: null,
+              p_category_id: categoryId,
+            });
+            if (rpcErr) throw rpcErr;
+            const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
+            if (!result?.success || !result?.reservation_id) throw new Error(result?.error || "Falha ao reprocessar modificação");
+            reservationId = String(result.reservation_id);
+
+            await updateOtaReservationsRow(supabase, {
+              channelId,
+              uniqueId,
+              bookingId,
+              existingOta,
+              patch: {
+                reservation_id: reservationId,
+                ota_guest_name: guestName,
+                ota_guest_email: email,
+                ota_guest_phone: phone,
+                ota_source_channel_name: otaName,
+                sync_status: "synced",
+                synced_at: new Date().toISOString(),
+              },
+            });
+
+            await supabase.rpc("create_notification_for_establishment", {
+              p_establishment_id: establishmentId,
+              p_type: "reservation_modified",
+              p_title: "Reserva de Canal Reprocessada",
+              p_message: `Reserva ${uniqueId || bookingId} reprocessada. Alterações: hóspede, período, valores e possível quarto/categoria.`,
+              p_priority: "high",
+              p_metadata: {
+                source: "channex_channel",
+                action: "modified_reprocess",
+                previous_reservation: previousReservation,
+                current: {
+                  reservation_id: reservationId,
+                  checkin_date: arrivalDate || null,
+                  checkout_date: departureDate || null,
+                  guest_name: guestName,
+                  total_amount: amount > 0 ? amount : 0,
+                },
+              },
+            });
+          } else {
           const shouldApplyAutoPayment = paidByOta
             ? await shouldApplyChannelAutoPayment(supabase, establishmentId, otaName)
             : false;
@@ -681,18 +1687,20 @@ serve(async (req) => {
           };
           await supabase.from("reservations").update(patch).eq("id", reservationId);
 
-          await supabase
-            .from("ota_reservations")
-            .update({
+          await updateOtaReservationsRow(supabase, {
+            channelId,
+            uniqueId,
+            bookingId,
+            existingOta,
+            patch: {
               ota_guest_name: guestName,
               ota_guest_email: email,
               ota_guest_phone: phone,
               ota_source_channel_name: otaName,
               sync_status: "synced",
               synced_at: new Date().toISOString(),
-            })
-            .eq("ota_channel_id", channelId)
-            .eq("ota_reservation_code", uniqueId || bookingId);
+            },
+          });
 
           try {
             const { data: reservationRow } = await supabase
@@ -754,21 +1762,24 @@ serve(async (req) => {
               console.warn("channex-reservations-sync modified prepaid payment warning", payErr.error);
             }
           }
+          }
           modified += 1;
-        } else if (revisionStatus === "cancelled" && reservationId) {
-          await supabase
-            .from("reservations")
-            .update({ status: "cancelled", notes: `Cancelada via Channex · booking ${uniqueId || bookingId}` })
-            .eq("id", reservationId);
+        } else if (!shouldQueueLifecyclePending && revisionStatus === "cancelled" && reservationId) {
+          await applyChannelCancellationWithPolicy(supabase, {
+            reservationId,
+            reason: `Cancelada via Channex · booking ${uniqueId || bookingId}`,
+          });
 
-          await supabase
-            .from("ota_reservations")
-            .update({
+          await updateOtaReservationsRow(supabase, {
+            channelId,
+            uniqueId,
+            bookingId,
+            existingOta,
+            patch: {
               sync_status: "cancelled",
               synced_at: new Date().toISOString(),
-            })
-            .eq("ota_channel_id", channelId)
-            .eq("ota_reservation_code", uniqueId || bookingId);
+            },
+          });
 
           try {
             const { data: reservationRow } = await supabase
@@ -788,9 +1799,68 @@ serve(async (req) => {
           } catch (e) {
             console.warn("channex-reservations-sync cancelled notification warning", e);
           }
+
+          // Cancelamento mais recente invalida pendências anteriores de modificação do mesmo booking.
+          if (bookingId) {
+            await supabase
+              .from("channex_booking_revisions")
+              .update({
+                process_status: "processed",
+                error_message: `Superseded by cancellation revision ${revisionId}`,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("ota_channel_id", channelId)
+              .eq("booking_id", bookingId)
+              .eq("status", "modified")
+              .in("process_status", ["pending", "failed"])
+              .neq("revision_id", revisionId);
+          }
+          if (uniqueId) {
+            await supabase
+              .from("channex_booking_revisions")
+              .update({
+                process_status: "processed",
+                error_message: `Superseded by cancellation revision ${revisionId}`,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("ota_channel_id", channelId)
+              .eq("unique_id", uniqueId)
+              .eq("status", "modified")
+              .in("process_status", ["pending", "failed"])
+              .neq("revision_id", revisionId);
+          }
           cancelled += 1;
-        } else if (revisionStatus === "cancelled" && !reservationId) {
+        } else if (!shouldQueueLifecyclePending && revisionStatus === "cancelled" && !reservationId) {
           // Reserva cancelada sem vínculo local: mantemos revisão processada para permitir ACK e evitar loop no feed.
+
+          if (bookingId) {
+            await supabase
+              .from("channex_booking_revisions")
+              .update({
+                process_status: "processed",
+                error_message: `Superseded by cancellation revision ${revisionId}`,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("ota_channel_id", channelId)
+              .eq("booking_id", bookingId)
+              .eq("status", "modified")
+              .in("process_status", ["pending", "failed"])
+              .neq("revision_id", revisionId);
+          }
+          if (uniqueId) {
+            await supabase
+              .from("channex_booking_revisions")
+              .update({
+                process_status: "processed",
+                error_message: `Superseded by cancellation revision ${revisionId}`,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("ota_channel_id", channelId)
+              .eq("unique_id", uniqueId)
+              .eq("status", "modified")
+              .in("process_status", ["pending", "failed"])
+              .neq("revision_id", revisionId);
+          }
           cancelled += 1;
         }
 
@@ -803,9 +1873,12 @@ serve(async (req) => {
             unique_id: uniqueId || null,
             system_id: ensureString(attrs.system_id) || null,
             status: revisionStatus || "new",
-            payload: attrs,
+            payload: {
+              ...attrs,
+              _processing_meta: processingMeta,
+            },
             reservation_id: reservationId || null,
-            process_status: "processed",
+            process_status: processStatusForRevision,
             processed_at: new Date().toISOString(),
             error_message: null,
             updated_at: new Date().toISOString(),
@@ -813,17 +1886,48 @@ serve(async (req) => {
           { onConflict: "ota_channel_id,revision_id" }
         );
 
-        await supabase.from("channex_ack_queue").upsert(
-          {
-            ota_channel_id: channelId,
-            establishment_id: establishmentId,
-            revision_id: revisionId,
-            status: "pending",
-            next_attempt_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "ota_channel_id,revision_id" }
-        );
+        // Sempre que uma revisão for registrada, limpar pendências/falhas anteriores do mesmo booking
+        // para evitar reaparecimento de revisões antigas já ultrapassadas.
+        if (bookingId) {
+          await supabase
+            .from("channex_booking_revisions")
+            .update({
+              process_status: "processed",
+              error_message: `Superseded by newer revision ${revisionId}`,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("ota_channel_id", channelId)
+            .eq("booking_id", bookingId)
+            .in("process_status", ["pending", "failed"])
+            .neq("revision_id", revisionId);
+        }
+        if (uniqueId) {
+          await supabase
+            .from("channex_booking_revisions")
+            .update({
+              process_status: "processed",
+              error_message: `Superseded by newer revision ${revisionId}`,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("ota_channel_id", channelId)
+            .eq("unique_id", uniqueId)
+            .in("process_status", ["pending", "failed"])
+            .neq("revision_id", revisionId);
+        }
+
+        if (processStatusForRevision === "processed") {
+          await supabase.from("channex_ack_queue").upsert(
+            {
+              ota_channel_id: channelId,
+              establishment_id: establishmentId,
+              revision_id: revisionId,
+              status: "pending",
+              next_attempt_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "ota_channel_id,revision_id" }
+          );
+        }
       } catch (e) {
         failed += 1;
         await supabase.from("channex_booking_revisions").upsert(
@@ -835,7 +1939,10 @@ serve(async (req) => {
             unique_id: uniqueId || null,
             system_id: ensureString(attrs.system_id) || null,
             status: revisionStatus || "new",
-            payload: attrs,
+            payload: {
+              ...attrs,
+              _processing_meta: processingMeta,
+            },
             process_status: "failed",
             processed_at: new Date().toISOString(),
             error_message: e instanceof Error ? e.message : "Falha no processamento",
@@ -867,11 +1974,34 @@ serve(async (req) => {
       status: failed > 0 ? "warning" : "success",
       endpoint: feedPath,
       message: `Processadas ${processed} revisão(ões)`,
-      request_payload: { revisionFilter: revisionFilter || null },
-      response_payload: { processed, created, modified, cancelled, failed },
+      request_payload: {
+        revisionFilter: revisionFilter || null,
+        bookingIdFilter: bookingIdFilter || null,
+        bookingUniqueIdFilter: bookingUniqueIdFilter || null,
+        recentWindowSeconds,
+      },
+      response_payload: {
+        processed,
+        created,
+        modified,
+        cancelled,
+        failed,
+        fetched_items: list.length,
+        skipped_missing_ids: skippedMissingIds,
+        skipped_by_source_event: skippedBySourceEvent,
+      },
     });
 
-    return json({ success: true, processed, created, modified, cancelled, failed });
+    return json({
+      success: true,
+      processed,
+      created,
+      modified,
+      cancelled,
+      failed,
+      skipped_missing_ids: skippedMissingIds,
+      skipped_by_source_event: skippedBySourceEvent,
+    });
   } catch (error) {
     console.error("channex-reservations-sync error", error);
     return json({ success: false, error: error instanceof Error ? error.message : "Erro interno" }, 500);

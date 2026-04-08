@@ -11,6 +11,7 @@ import { Loader2, Ban } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { logActivity, createBlockDescription } from "@/lib/activityLogger";
+import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 
 interface BlockRoomDialogProps {
   open: boolean;
@@ -206,6 +207,9 @@ export const BlockRoomDialog = ({
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
       queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+
+      const estId = String((reservation as { establishment_id?: string }).establishment_id ?? "").trim();
+      scheduleChannelSyncAfterInventoryChange(estId || null);
 
       toast.success("Quarto bloqueado com sucesso!");
       onSuccess();

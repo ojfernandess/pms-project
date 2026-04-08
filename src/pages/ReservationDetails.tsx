@@ -69,6 +69,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 import {
   formatReservationChannelOrigin,
+  otaContactHintFromOtaBooking,
   resolveReservationBookingSourceLogo,
   reservationGuestContactFields,
   formatOtaGuestAddressLines,
@@ -512,6 +513,37 @@ const ReservationDetails = () => {
         .maybeSingle();
       if (!otaBookingErr && otaBookingData) {
         ota_booking = otaBookingData as Record<string, unknown>;
+      }
+
+      if (!pricingPlan && reservationData.category_id && otaBookingData) {
+        const otaChannelId = (otaBookingData as { ota_channel_id?: string | null }).ota_channel_id;
+        if (otaChannelId) {
+          const { data: cpRows } = await supabase
+            .from("channel_pricing")
+            .select("pricing_plan_id")
+            .eq("ota_channel_id", otaChannelId)
+            .eq("category_id", reservationData.category_id)
+            .eq("is_active", true)
+            .not("pricing_plan_id", "is", null)
+            .limit(25);
+          const planIds = [
+            ...new Set(
+              (cpRows ?? [])
+                .map((r) => r.pricing_plan_id)
+                .filter((id): id is string => Boolean(id))
+            ),
+          ];
+          if (planIds.length === 1) {
+            const { data: planData, error: cpPlanErr } = await supabase
+              .from("pricing_plans")
+              .select("*")
+              .eq("id", planIds[0])
+              .maybeSingle();
+            if (!cpPlanErr && planData) {
+              pricingPlan = planData;
+            }
+          }
+        }
       }
 
       return {
@@ -1817,7 +1849,9 @@ const ReservationDetails = () => {
                 </h3>
                 {reservation.ota_booking && (
                   <p className="text-xs text-muted-foreground mb-3">
-                    Contacto enviado pelo canal (Aiosell / OTA) quando aplicável.
+                    {otaContactHintFromOtaBooking(
+                      reservation.ota_booking as Parameters<typeof otaContactHintFromOtaBooking>[0]
+                    )}
                   </p>
                 )}
                 <div className="space-y-2">

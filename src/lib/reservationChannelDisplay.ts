@@ -26,6 +26,44 @@ function normalizePartnerName(raw: string | null | undefined): string {
   return value;
 }
 
+/** Nome no payload Channex (revisão): prioriza customer_name do webhook resumido; senão name + surname. */
+export function channexRevisionPayloadGuestName(payload: Record<string, unknown> | null | undefined): string {
+  if (!payload || typeof payload !== "object") return "N/A";
+  const cn = String(payload.customer_name ?? "").trim();
+  if (cn) return cn;
+  const c = payload.customer as Record<string, unknown> | undefined;
+  if (c && typeof c === "object") {
+    const n = String(c.name ?? "").trim();
+    const s = String(c.surname ?? "").trim();
+    const full = `${n} ${s}`.trim();
+    if (full) return full;
+    if (n) return n;
+  }
+  return "N/A";
+}
+
+/** Texto de rodapé em «Dados do Hóspede» quando a reserva veio de OTA/CM. */
+export function otaContactHintFromOtaBooking(ota: OtaBookingShape | null | undefined): string {
+  if (!ota) return "";
+  const cmType = String(ota.ota_channels?.channel_manager_type ?? "")
+    .toLowerCase()
+    .trim();
+  const cmName = normalizeManagerName(ota.ota_channels?.name);
+  if (cmType === "channex" || cmName === "Channex") {
+    return "Contacto enviado pelo canal (Channex / OTA) quando aplicável.";
+  }
+  if (cmType === "aiosell" || cmName === "Aiosell") {
+    return "Contacto enviado pelo canal (Aiosell / OTA) quando aplicável.";
+  }
+  if (cmType === "bukly" || cmName === "Bukly") {
+    return "Contacto enviado pelo canal (Bukly / OTA) quando aplicável.";
+  }
+  if (cmName && cmName !== "Channel Manager") {
+    return `Contacto enviado pelo canal (${cmName} / OTA) quando aplicável.`;
+  }
+  return "Contacto enviado pelo canal (OTA) quando aplicável.";
+}
+
 /** Texto único para «Origem / Canal» na ficha da reserva ou listas. */
 export function formatReservationChannelOrigin(r: {
   channel?: string | null;

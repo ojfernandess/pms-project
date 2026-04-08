@@ -436,6 +436,14 @@ export const formatCPF = (value: string): string => {
  * Formata data para exibição
  */
 export const formatDate = (date: string): string => {
-  return new Date(date).toLocaleDateString("pt-BR");
+  const raw = String(date ?? "").trim();
+  if (!raw) return "";
+  // Evita deslocamento de fuso para datas no formato YYYY-MM-DD.
+  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (dateOnlyMatch) {
+    const [, y, m, d] = dateOnlyMatch;
+    return `${d}/${m}/${y}`;
+  }
+  return new Date(raw).toLocaleDateString("pt-BR");
 };
 

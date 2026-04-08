@@ -53,40 +53,56 @@ export const CancelReservationDialog = ({
   const [penaltyCalculation, setPenaltyCalculation] = useState<CancellationCalculationResult | null>(null);
   const [policyName, setPolicyName] = useState<string | null>(null);
 
-  // Calcular multa ao abrir o dialog
+  // Calcular multa ao abrir o dialog (dados vêm da BD; reservationData do pai é apenas fallback)
   useEffect(() => {
-    if (open && reservationId && reservationData) {
-      calculatePenalty();
-    } else {
+    if (!open || !reservationId) {
       setPenaltyCalculation(null);
       setPolicyName(null);
+      return;
     }
-  }, [open, reservationId, reservationData]);
 
-  const calculatePenalty = async () => {
-    if (!reservationData) return;
-    
-    setCalculating(true);
-    try {
-      const policy = await getReservationCancellationPolicy(reservationId);
-      
-      if (policy) {
+    let cancelled = false;
+
+    const run = async () => {
+      setCalculating(true);
+      try {
+        const policy = await getReservationCancellationPolicy(reservationId);
+        if (cancelled) return;
+
+        if (!policy) {
+          setPolicyName(null);
+          setPenaltyCalculation(null);
+          return;
+        }
+
         setPolicyName(policy.name);
-        
-        // Buscar dados completos da reserva para o cálculo (created_at, establishment_id, etc.)
+
         const { data: reservation } = await supabase
           .from("reservations")
           .select("id, checkin_date, checkout_date, total_amount, paid_amount, pricing_plan_id, status, establishment_id, created_at, channel")
           .eq("id", reservationId)
-          .single();
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        const checkin =
+          reservation?.checkin_date || reservationData?.checkin_date || "";
+        const checkout =
+          reservation?.checkout_date || reservationData?.checkout_date || "";
+        if (!checkin || !checkout) {
+          setPenaltyCalculation(null);
+          return;
+        }
 
         const reservationDataForCalc: ReservationData = {
           id: reservation?.id || reservationId,
-          checkin_date: reservation?.checkin_date || reservationData.checkin_date,
-          checkout_date: reservation?.checkout_date || reservationData.checkout_date,
-          total_amount: reservation?.total_amount ?? reservationData.total_amount ?? 0,
+          checkin_date: checkin,
+          checkout_date: checkout,
+          total_amount:
+            reservation?.total_amount ?? reservationData?.total_amount ?? 0,
           paid_amount: reservation?.paid_amount ?? paidAmount ?? 0,
-          pricing_plan_id: reservation?.pricing_plan_id ?? reservationData.pricing_plan_id ?? null,
+          pricing_plan_id:
+            reservation?.pricing_plan_id ?? reservationData?.pricing_plan_id ?? null,
           status: reservation?.status || "confirmed",
           establishment_id: reservation?.establishment_id || "",
           created_at: reservation?.created_at || "",
@@ -98,18 +114,28 @@ export const CancelReservationDialog = ({
           reservationDataForCalc,
           new Date()
         );
-        setPenaltyCalculation(result);
-      } else {
-        setPolicyName(null);
-        setPenaltyCalculation(null);
+        if (!cancelled) setPenaltyCalculation(result);
+      } catch (error) {
+        console.error("Erro ao calcular multa:", error);
+        if (!cancelled) setPenaltyCalculation(null);
+      } finally {
+        if (!cancelled) setCalculating(false);
       }
-    } catch (error) {
-      console.error("Erro ao calcular multa:", error);
-      setPenaltyCalculation(null);
-    } finally {
-      setCalculating(false);
-    }
-  };
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    open,
+    reservationId,
+    paidAmount,
+    reservationData?.checkin_date,
+    reservationData?.checkout_date,
+    reservationData?.total_amount,
+    reservationData?.pricing_plan_id,
+  ]);
 
   const handleConfirm = async () => {
     if (!reason.trim()) {

@@ -135,6 +135,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
     channex_api_key: "",
     channex_property_id: "",
     channex_use_webhook: true,
+    channex_webhook_verify_user_api_key: false,
   });
 
   useEffect(() => {
@@ -174,6 +175,8 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
           channex_api_key: (channel as { channex_api_key?: string | null }).channex_api_key || "",
           channex_property_id: (channel as { channex_property_id?: string | null }).channex_property_id || "",
           channex_use_webhook: (channel as { channex_use_webhook?: boolean | null }).channex_use_webhook ?? true,
+          channex_webhook_verify_user_api_key: !!(channel as { channex_webhook_verify_user_api_key?: boolean | null })
+            .channex_webhook_verify_user_api_key,
         });
       }
     } else if (!channelId && open) {
@@ -202,6 +205,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
         channex_api_key: "",
         channex_property_id: "",
         channex_use_webhook: true,
+        channex_webhook_verify_user_api_key: false,
       });
     }
   }, [channelId, open, channels]);
@@ -610,6 +614,27 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
                           checked={formData.channex_use_webhook}
                           onCheckedChange={(checked) =>
                             setFormData({ ...formData, channex_use_webhook: checked })
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="sm:col-span-2 rounded-lg border border-border/80 bg-muted/20 px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="channex_webhook_verify_user_api_key" className={labelClass}>
+                            Validar user-api-key no webhook (segurança)
+                          </Label>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            Exige que o Channex envie o cabeçalho <code className="text-[10px]">user-api-key</code>{" "}
+                            idêntico à API key acima. Configure no webhook do Channex (headers customizados ou webhook
+                            protected, conforme a documentação).
+                          </p>
+                        </div>
+                        <Switch
+                          id="channex_webhook_verify_user_api_key"
+                          checked={formData.channex_webhook_verify_user_api_key}
+                          onCheckedChange={(checked) =>
+                            setFormData({ ...formData, channex_webhook_verify_user_api_key: checked === true })
                           }
                         />
                       </div>

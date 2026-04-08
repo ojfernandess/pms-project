@@ -20,6 +20,13 @@ serve(async (req) => {
   if (req.method !== "POST") return json({ success: false, error: "Method not allowed" }, 405);
 
   try {
+    const authHeader = req.headers.get("Authorization");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const bearerToken = (authHeader ?? "").replace(/^Bearer\s+/i, "").trim();
+    if (!serviceRoleKey || bearerToken !== serviceRoleKey) {
+      return json({ success: false, error: "Não autorizado" }, 401);
+    }
+
     const body = (await req.json().catch(() => ({}))) as { channel_id?: string; establishment_id?: string };
     const channelId = String(body.channel_id ?? "").trim();
     const establishmentId = String(body.establishment_id ?? "").trim();

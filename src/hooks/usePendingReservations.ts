@@ -8,12 +8,14 @@ import { ptBR } from "date-fns/locale";
 import { logActivity } from "@/lib/activityLogger";
 import { triggerEmail } from "@/lib/emailService";
 import { reservationGuestContactFields } from "@/lib/reservationChannelDisplay";
+import { invokeChannexReservationsSync } from "@/lib/channexReservationsSyncInvoke";
 
 export interface Overbooking {
   reservation: any;
   conflictingReservations: any[];
   conflictDates: string[];
   availableRooms: any[];
+  alternativeRooms: any[];
   categoryRooms: any[];
 }
 
@@ -313,11 +315,33 @@ export const usePendingReservations = () => {
               return !hasConflict;
             });
 
+            // Fallback: procurar quartos em outras categorias para permitir troca de quarto/categoria.
+            const { data: allRooms } = await supabase
+              .from("rooms")
+              .select("*")
+              .eq("establishment_id", establishmentId)
+              .in("status", ["available", "cleaning"]);
+
+            const alternativeRooms = (allRooms || []).filter((room: any) => {
+              if (room.id === roomId) return false;
+              if (room.is_blocked === true) return false;
+              const hasConflict = reservations.some((r: any) => {
+                if (r.room_id !== room.id) return false;
+                if (r.id === reservation.id) return false;
+                if (r.status === "cancelled") return false;
+                const rCheckin = parseISO(r.checkin_date);
+                const rCheckout = parseISO(r.checkout_date);
+                return isBefore(rCheckin, checkout) && isAfter(rCheckout, checkin);
+              });
+              return !hasConflict;
+            });
+
             overbookings.push({
               reservation,
               conflictingReservations,
               conflictDates,
               availableRooms,
+              alternativeRooms,
               categoryRooms: categoryRooms || [],
             });
           }
@@ -454,6 +478,73 @@ export const usePendingReservations = () => {
     },
   });
 
+  const channexRevisionsQuery = useQuery({
+    queryKey: ["pending", "channex-revisions", selectedEstablishment?.id],
+    queryFn: async () => {
+      const establishmentId = getEstablishmentId();
+      if (!establishmentId) return { modified: [], cancelled: [] };
+
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const { data, error } = await supabase
+        .from("channex_booking_revisions" as any)
+        .select(
+          "id, ota_channel_id, revision_id, booking_id, unique_id, status, payload, process_status, error_message, created_at, reservation_id, reservation:reservations(id, reservation_code, checkin_date, checkout_date, guest_name, total_amount, paid_amount, pricing_plan_id, status, establishment_id)"
+        )
+        .eq("establishment_id", establishmentId)
+        .in("status", ["modified", "cancelled"])
+        .order("created_at", { ascending: false })
+        .gte("created_at", sevenDaysAgo.toISOString());
+
+      if (error) {
+        console.error("Erro ao buscar revisões Channex:", error);
+        return { modified: [], cancelled: [] };
+      }
+
+      const rows = (data || []) as any[];
+      const isPendingOrFailed = (r: any) =>
+        String(r.process_status || "pending") === "pending" ||
+        String(r.process_status || "pending") === "failed";
+      const cancelledByBooking = new Set(
+        rows
+          .filter((r) => r.status === "cancelled")
+          .map((r) => String(r.booking_id || "").trim())
+          .filter(Boolean)
+      );
+      const cancelledByUnique = new Set(
+        rows
+          .filter((r) => r.status === "cancelled")
+          .map((r) => String(r.unique_id || "").trim())
+          .filter(Boolean)
+      );
+      const isStaleFailedModified = (r: any) => {
+        if (String(r.status) !== "modified") return false;
+        const processStatus = String(r.process_status || "");
+        if (processStatus !== "failed") return false;
+
+        const bookingId = String(r.booking_id || "").trim();
+        const uniqueId = String(r.unique_id || "").trim();
+        if ((bookingId && cancelledByBooking.has(bookingId)) || (uniqueId && cancelledByUnique.has(uniqueId))) {
+          return true;
+        }
+
+        const reservationStatus = String(r?.reservation?.status || "").toLowerCase();
+        if (reservationStatus === "cancelled") return true;
+
+        const message = String(r.error_message || "").toLowerCase();
+        if (message.includes("superseded") || message.includes("already cancelled")) return true;
+        return false;
+      };
+      return {
+        modified: rows.filter((r) => r.status === "modified" && isPendingOrFailed(r) && !isStaleFailedModified(r)),
+        cancelled: rows.filter((r) => r.status === "cancelled" && isPendingOrFailed(r)),
+        modifiedCompleted: rows.filter((r) => r.status === "modified" && (!isPendingOrFailed(r) || isStaleFailedModified(r))),
+        cancelledCompleted: rows.filter((r) => r.status === "cancelled" && !isPendingOrFailed(r)),
+      };
+    },
+  });
+
   // Função para marcar pendência como resolvida
   const markPendingAsResolved = useMutation({
     mutationFn: async (reservationId: string) => {
@@ -500,23 +591,63 @@ export const usePendingReservations = () => {
     },
   });
 
+  const acceptChannexRevision = useMutation({
+    mutationFn: async (args: { revisionId: string; channelId: string; bookingId?: string; bookingUniqueId?: string; status: "modified" | "cancelled" }) => {
+      const establishmentId = getEstablishmentId();
+      if (!establishmentId) throw new Error("Estabelecimento não encontrado");
+
+      const payload = await invokeChannexReservationsSync(args.channelId, establishmentId, {
+        revisionId: args.revisionId,
+        bookingId: args.bookingId,
+        bookingUniqueId: args.bookingUniqueId,
+        // Força reprocessamento para aceitar ação manual mesmo com revisão já acked.
+        forceReprocess: true,
+        autoApplyLifecycle: true,
+        sourceEvent: args.status === "cancelled" ? "booking_cancellation" : "booking_modification",
+      });
+
+      return payload;
+    },
+    onSuccess: (_data, vars) => {
+      toast.success(
+        vars.status === "modified"
+          ? "Reserva modificada reprocessada com sucesso"
+          : "Cancelamento de reserva processado com sucesso"
+      );
+      queryClient.invalidateQueries({ queryKey: ["pending"] });
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["ota_reservations"] });
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Erro ao processar revisão Channex");
+    },
+  });
+
   return {
     newOTAReservations: newOTAReservationsQuery.data || [],
     newCounterReservations: newCounterReservationsQuery.data || [],
     noCheckIn: noCheckInQuery.data || [],
     overbookings: overbookingsQuery.data || [],
+    channexModified: channexRevisionsQuery.data?.modified || [],
+    channexCancelled: channexRevisionsQuery.data?.cancelled || [],
+    channexModifiedCompleted: channexRevisionsQuery.data?.modifiedCompleted || [],
+    channexCancelledCompleted: channexRevisionsQuery.data?.cancelledCompleted || [],
     isLoading:
       newOTAReservationsQuery.isLoading ||
       newCounterReservationsQuery.isLoading ||
       noCheckInQuery.isLoading ||
-      overbookingsQuery.isLoading,
+      overbookingsQuery.isLoading ||
+      channexRevisionsQuery.isLoading,
     markPendingAsResolved: markPendingAsResolved.mutate,
     isMarkingResolved: markPendingAsResolved.isPending,
+    acceptChannexRevision: acceptChannexRevision.mutate,
+    isAcceptingChannexRevision: acceptChannexRevision.isPending,
     refetch: () => {
       newOTAReservationsQuery.refetch();
       newCounterReservationsQuery.refetch();
       noCheckInQuery.refetch();
       overbookingsQuery.refetch();
+      channexRevisionsQuery.refetch();
     },
   };
 };

@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { logActivity, createMoveDescription, createSwapDescription } from "@/lib/activityLogger";
+import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 import { usePermissions } from "@/hooks/usePermissions";
 import { QuickReservationDialog } from "./QuickReservationDialog";
 import { ReservationQuickViewModal } from "./ReservationQuickViewModal";
@@ -3434,6 +3435,9 @@ export const ReservationCalendarMap = ({
               queryClient.invalidateQueries({ queryKey: ["reservations"] });
               queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
               queryClient.invalidateQueries({ queryKey: ["rooms"] });
+
+              const estUnblock = String(blockReservation?.establishment_id ?? "").trim();
+              scheduleChannelSyncAfterInventoryChange(estUnblock || null);
               
               toast.success("Quarto desbloqueado com sucesso!");
               setBlockViewOpen(false);

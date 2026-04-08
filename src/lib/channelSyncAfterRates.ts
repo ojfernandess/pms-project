@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { invokeAiosellSync } from "@/lib/aiosellSyncInvoke";
 import { invokeBuklySync } from "@/lib/buklySyncInvoke";
+import { invokeChannexSync } from "@/lib/channexSyncInvoke";
 import { dispatchInvalidateChannelQueries } from "@/lib/channelQueriesInvalidation";
 import { toast } from "sonner";
 
@@ -11,7 +12,7 @@ const DEBOUNCE_MS = 1200;
 const BULK_CALENDAR_DEBOUNCE_MS = 650;
 
 /**
- * Agenda sincronização com Channel Managers (Aiosell/Bukly) após alteração ao tarifário ou ARI.
+ * Agenda sincronização com Channel Managers (Aiosell/Bukly/Channex) após alteração ao tarifário ou ARI.
  * Inclui: `rate_calendar`, planos, regras dinâmicas, restrições, ARI (`rate_sales_status` / inventário),
  * definições do sistema tarifário, preço base de categorias, etc.
  * Agrupa várias edições seguidas num único envio após {DEBOUNCE_MS} ms.
@@ -74,7 +75,9 @@ async function runAutoChannelSync(establishmentId: string): Promise<void> {
       c.is_active !== false &&
       c.sync_enabled === true &&
       c.channel_type === "channel_manager" &&
-      (c.channel_manager_type === "bukly" || c.channel_manager_type === "aiosell")
+      (c.channel_manager_type === "bukly" ||
+        c.channel_manager_type === "aiosell" ||
+        c.channel_manager_type === "channex")
   );
 
   if (list.length === 0) return;
@@ -129,6 +132,8 @@ async function runAutoChannelSync(establishmentId: string): Promise<void> {
         }
       } else if (ch.channel_manager_type === "bukly") {
         await invokeBuklySync(ch.id, establishmentId, { silent: true });
+      } else if (ch.channel_manager_type === "channex") {
+        await invokeChannexSync(ch.id, establishmentId);
       }
     } catch (e) {
       console.warn("[channelSyncAfterRates] Sincronização automática falhou:", ch.id, e);

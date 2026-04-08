@@ -39,6 +39,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { useNavigate, useParams } from "react-router-dom";
 import { logActivity } from "@/lib/activityLogger";
+import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 import { useTranslation } from "react-i18next";
 import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 
@@ -801,6 +802,9 @@ const Reservations = () => {
                 queryClient.invalidateQueries({ queryKey: ["reservations"] });
                 queryClient.invalidateQueries({ queryKey: ["rooms"] });
                 queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+
+                const estBlock = String(blockReservation?.establishment_id ?? "").trim();
+                scheduleChannelSyncAfterInventoryChange(estBlock || null);
                 
                 toast.success("Bloqueio removido com sucesso!");
                 refetch();

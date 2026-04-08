@@ -32,17 +32,55 @@ serve(async (req) => {
   if (req.method !== "POST") return json({ success: false, error: "Method not allowed" }, 405);
 
   try {
-    const body = (await req.json()) as { channel_id?: string; establishment_id?: string };
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return json({ success: false, error: "Não autorizado" }, 401);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const internalServiceAuth = serviceRoleKey.length > 0 && bearerToken === serviceRoleKey;
+
+    let supabaseUser: ReturnType<typeof createClient>;
+    let authUserId: string | null = null;
+
+    if (internalServiceAuth) {
+      supabaseUser = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    } else {
+      supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabaseUser.auth.getUser();
+      if (userErr || !user) {
+        return json({ success: false, error: "Sessão inválida ou expirada" }, 401);
+      }
+      authUserId = user.id;
+    }
+
+    let body: { channel_id?: string; establishment_id?: string };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ success: false, error: "JSON inválido" }, 400);
+    }
+
     const channelId = String(body?.channel_id ?? "").trim();
     const establishmentId = String(body?.establishment_id ?? "").trim();
     if (!channelId || !establishmentId) {
       return json({ success: false, error: "channel_id e establishment_id são obrigatórios" }, 400);
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-    );
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const { data: channel } = await supabase
       .from("ota_channels")
@@ -55,6 +93,22 @@ serve(async (req) => {
     }
     if (String(channel.establishment_id) !== establishmentId) {
       return json({ success: false, error: "Canal não pertence ao estabelecimento selecionado" }, 403);
+    }
+
+    if (!internalServiceAuth && authUserId) {
+      const { data: canAccess, error: accessRpcError } = await supabaseUser.rpc("user_can_access_establishment", {
+        p_user_id: authUserId,
+        p_establishment_id: establishmentId,
+      });
+      if (accessRpcError) {
+        return json(
+          { success: false, error: `Não foi possível validar permissão: ${accessRpcError.message}` },
+          500,
+        );
+      }
+      if (canAccess !== true) {
+        return json({ success: false, error: "Sem permissão para este estabelecimento" }, 403);
+      }
     }
 
     const apiKey = String(channel.channex_api_key ?? "").trim();
