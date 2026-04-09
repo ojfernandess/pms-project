@@ -7,6 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { toast } from "sonner";
@@ -14,8 +16,18 @@ import { slugFromName } from "@/lib/slugUtils";
 import { useSlugValidation } from "@/hooks/useSlugValidation";
 import { useQueryClient } from "@tanstack/react-query";
 import { scheduleChannelSyncAfterRateEdit } from "@/lib/channelSyncAfterRates";
-import { Save, Trash2 } from "lucide-react";
+import { Save, Trash2, Link2 } from "lucide-react";
 import { RoomsTable } from "./RoomsTable";
+
+interface ChannelMappingEntry {
+  channelId: string;
+  channelName: string;
+  channelType: string;
+  roomCode: string;
+  ratePlanCode: string;
+  existingId?: string;
+  enabled: boolean;
+}
 
 interface CategoryDialogProps {
   open: boolean;
@@ -32,6 +44,8 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
   const [showRoomsTable, setShowRoomsTable] = useState(false);
   const [createdRooms, setCreatedRooms] = useState<any[]>([]);
   const [savedCategoryId, setSavedCategoryId] = useState<string | null>(null);
+  const [channelMappings, setChannelMappings] = useState<ChannelMappingEntry[]>([]);
+  const [channelMappingsLoaded, setChannelMappingsLoaded] = useState(false);
   const establishmentId = getSelectedEstablishmentId();
   const [formData, setFormData] = useState({
     name: "",
@@ -67,6 +81,7 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
       loadCategoryData();
       setShowRoomsTable(false);
       setSavedCategoryId(categoryId);
+      loadChannelMappings(categoryId);
     } else if (open && !categoryId) {
       // Resetar formulário para nova categoria
       setFormData({
@@ -92,6 +107,7 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
       });
       setShowRoomsTable(false);
       setSavedCategoryId(null);
+      loadChannelMappings(null);
     }
   }, [open, categoryId]);
 
@@ -117,6 +133,65 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
     } catch (error: any) {
       console.error("Erro ao carregar quartos:", error);
       toast.error("Erro ao carregar quartos");
+    }
+  };
+
+  /** Carrega canais Aiosell/Channex e mapeamentos existentes para esta categoria. */
+  const loadChannelMappings = async (catId: string | null) => {
+    if (!establishmentId) return;
+    setChannelMappingsLoaded(false);
+    try {
+      // 1. Canais ativos Aiosell / Channex do estabelecimento
+      const { data: channels } = await supabase
+        .from("ota_channels")
+        .select("id, name, channel_manager_type")
+        .eq("establishment_id", establishmentId)
+        .in("channel_manager_type", ["aiosell", "channex"])
+        .eq("is_active", true)
+        .order("name");
+
+      if (!channels || channels.length === 0) {
+        setChannelMappings([]);
+        setChannelMappingsLoaded(true);
+        return;
+      }
+
+      // 2. Mapeamentos já existentes para esta categoria (se estiver editando)
+      let existingMap: Record<string, { id: string; room_code: string; rate_code: string }> = {};
+      if (catId) {
+        const { data: existing } = await supabase
+          .from("channel_pricing")
+          .select("id, ota_channel_id, channel_room_code, channel_rate_plan_code")
+          .eq("category_id", catId)
+          .in("ota_channel_id", channels.map((c: any) => c.id));
+
+        for (const row of existing ?? []) {
+          existingMap[row.ota_channel_id] = {
+            id: row.id,
+            room_code: row.channel_room_code ?? "",
+            rate_code: row.channel_rate_plan_code ?? "",
+          };
+        }
+      }
+
+      const entries: ChannelMappingEntry[] = channels.map((ch: any) => {
+        const ex = existingMap[ch.id];
+        return {
+          channelId: ch.id,
+          channelName: ch.name,
+          channelType: ch.channel_manager_type,
+          roomCode: ex?.room_code ?? "",
+          ratePlanCode: ex?.rate_code ?? "",
+          existingId: ex?.id,
+          enabled: !!ex?.room_code,
+        };
+      });
+
+      setChannelMappings(entries);
+    } catch (err) {
+      console.error("Erro ao carregar mapeamentos de canal:", err);
+    } finally {
+      setChannelMappingsLoaded(true);
     }
   };
 
@@ -423,6 +498,35 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
         }
       }
 
+      // Salvar mapeamentos de channel manager
+      const finalCatId = savedCategoryId || categoryId;
+      if (finalCatId && channelMappings.length > 0) {
+        for (const mapping of channelMappings) {
+          if (mapping.enabled && mapping.roomCode.trim()) {
+            const payload = {
+              ota_channel_id: mapping.channelId,
+              category_id: finalCatId,
+              channel_room_code: mapping.roomCode.trim(),
+              channel_rate_plan_code: mapping.ratePlanCode.trim() || null,
+              price_multiplier: 1,
+              is_active: true,
+            };
+            if (mapping.existingId) {
+              await supabase
+                .from("channel_pricing")
+                .update({ channel_room_code: payload.channel_room_code, channel_rate_plan_code: payload.channel_rate_plan_code })
+                .eq("id", mapping.existingId);
+            } else {
+              await supabase.from("channel_pricing").insert(payload);
+            }
+          } else if (!mapping.enabled && mapping.existingId) {
+            // Usuário desativou — remove o mapeamento
+            await supabase.from("channel_pricing").delete().eq("id", mapping.existingId);
+          }
+        }
+        queryClient.invalidateQueries({ queryKey: ["channel_pricing"] });
+      }
+
       // Invalidar todas as queries de categorias e quartos
       queryClient.invalidateQueries({ 
         predicate: (query) => {
@@ -513,10 +617,26 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className={createdRooms.length > 0 ? "grid w-full grid-cols-4" : "grid w-full grid-cols-3"}>
+          <TabsList className={[
+            "grid w-full",
+            (() => {
+              let cols = 4; // Informações + Instalações + Imagens + Channel Manager
+              if (createdRooms.length > 0) cols++;
+              return `grid-cols-${cols}`;
+            })(),
+          ].join(" ")}>
             <TabsTrigger value="informations">Informações</TabsTrigger>
             <TabsTrigger value="facilities">Instalações</TabsTrigger>
             <TabsTrigger value="images">Imagens</TabsTrigger>
+            <TabsTrigger value="channel-manager" className="flex items-center gap-1.5">
+              <Link2 className="h-3.5 w-3.5" />
+              Channel Manager
+              {channelMappings.some((m) => m.enabled && m.roomCode) && (
+                <Badge variant="default" className="ml-1 h-4 px-1 text-[10px]">
+                  {channelMappings.filter((m) => m.enabled && m.roomCode).length}
+                </Badge>
+              )}
+            </TabsTrigger>
             {createdRooms.length > 0 && (
               <TabsTrigger value="rooms">Quartos ({createdRooms.length})</TabsTrigger>
             )}
@@ -963,6 +1083,122 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
                 <p className="text-sm text-muted-foreground">
                   As imagens podem ser gerenciadas na seção "Configuração da Página Pública de Reservas".
                 </p>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="channel-manager" className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Configure os códigos de quarto e plano de tarifa para cada channel manager. Estes códigos
+                  são usados na sincronização de ARI (tarifas, restrições e inventário).
+                </p>
+                {!channelMappingsLoaded ? (
+                  <div className="flex items-center justify-center py-8 text-muted-foreground text-sm gap-2">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    Carregando canais...
+                  </div>
+                ) : channelMappings.length === 0 ? (
+                  <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    Nenhum channel manager (Aiosell ou Channex) configurado e ativo neste estabelecimento.
+                    <br />
+                    Configure um canal em <strong>Channel Manager → Canais</strong> primeiro.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {channelMappings.map((mapping, idx) => {
+                      const isAiosell = mapping.channelType === "aiosell";
+                      const isChannex = mapping.channelType === "channex";
+                      return (
+                        <div
+                          key={mapping.channelId}
+                          className={[
+                            "rounded-lg border p-4 space-y-3 transition-colors",
+                            mapping.enabled ? "border-primary/30 bg-primary/5" : "border-border bg-muted/30",
+                          ].join(" ")}
+                        >
+                          {/* Cabeçalho do canal */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              {isAiosell && (
+                                <img src="/channel/Aiosell.jpeg" alt="Aiosell" className="h-5 w-auto rounded object-contain" />
+                              )}
+                              {isChannex && (
+                                <img src="/channel/logo_small.svg" alt="Channex" className="h-5 w-auto object-contain" />
+                              )}
+                              <span className="font-medium text-sm">{mapping.channelName}</span>
+                              <Badge variant="outline" className="text-[10px] capitalize">
+                                {mapping.channelType}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Label htmlFor={`cm-enable-${idx}`} className="text-xs text-muted-foreground cursor-pointer">
+                                {mapping.enabled ? "Mapeado" : "Não mapeado"}
+                              </Label>
+                              <Switch
+                                id={`cm-enable-${idx}`}
+                                checked={mapping.enabled}
+                                onCheckedChange={(checked) => {
+                                  setChannelMappings((prev) =>
+                                    prev.map((m, i) => (i === idx ? { ...m, enabled: checked } : m))
+                                  );
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Campos de código — visíveis só quando habilitado */}
+                          {mapping.enabled && (
+                            <div className="grid grid-cols-2 gap-3 pt-1">
+                              <div>
+                                <Label className="text-xs font-medium mb-1 block">
+                                  {isChannex ? "Room Type ID" : "Room Code"}
+                                  <span className="text-destructive ml-0.5">*</span>
+                                </Label>
+                                <Input
+                                  value={mapping.roomCode}
+                                  onChange={(e) =>
+                                    setChannelMappings((prev) =>
+                                      prev.map((m, i) =>
+                                        i === idx ? { ...m, roomCode: e.target.value } : m
+                                      )
+                                    )
+                                  }
+                                  placeholder={isChannex ? "uuid-room-type" : "SUITE"}
+                                  className="h-8 text-sm"
+                                  disabled={loading}
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs font-medium mb-1 block">
+                                  {isChannex ? "Rate Plan ID" : "Rate Plan Code(s)"}
+                                  <span className="text-muted-foreground ml-1">(opcional)</span>
+                                </Label>
+                                <Input
+                                  value={mapping.ratePlanCode}
+                                  onChange={(e) =>
+                                    setChannelMappings((prev) =>
+                                      prev.map((m, i) =>
+                                        i === idx ? { ...m, ratePlanCode: e.target.value } : m
+                                      )
+                                    )
+                                  }
+                                  placeholder={isChannex ? "uuid-rate-plan" : "SUITE-D-101"}
+                                  className="h-8 text-sm"
+                                  disabled={loading}
+                                />
+                                {isAiosell && (
+                                  <p className="text-[10px] text-muted-foreground mt-1">
+                                    Separe múltiplos códigos com vírgula: SUITE-D-101, SUITE-BB
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </TabsContent>
 
