@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -147,9 +148,26 @@ export const useMaintenance = () => {
   // Atualizar ticket
   const updateTicket = useMutation({
     mutationFn: async ({ id, ...updates }: { id: string } & MaintenanceTicketUpdate) => {
+      const { data: before, error: beforeErr } = await supabase
+        .from("maintenance_tickets")
+        .select("status, room_id")
+        .eq("id", id)
+        .single();
+
+      if (beforeErr) throw beforeErr;
+
+      const reopeningFromCompleted =
+        before?.status === "completed" &&
+        (updates.status === "open" || updates.status === "in_progress");
+
+      const payload: MaintenanceTicketUpdate = { ...updates };
+      if (reopeningFromCompleted) {
+        payload.completed_at = null;
+      }
+
       const { data, error } = await supabase
         .from("maintenance_tickets")
-        .update(updates)
+        .update(payload)
         .eq("id", id)
         .select(`
           *,
@@ -158,6 +176,11 @@ export const useMaintenance = () => {
         .single();
 
       if (error) throw error;
+
+      // Reabrir chamado concluído: quarto volta para manutenção
+      if (reopeningFromCompleted && before?.room_id) {
+        await supabase.from("rooms").update({ status: "maintenance" }).eq("id", before.room_id);
+      }
 
       // Se o ticket foi completado, atualizar status do quarto
       if (updates.status === "completed") {
@@ -472,6 +495,31 @@ export const useMaintenance = () => {
       toast.error(error.message || "Erro ao adicionar comentário");
     },
   });
+
+  useEffect(() => {
+    const establishmentId = selectedEstablishment?.id;
+    if (!establishmentId) return;
+
+    const channel = supabase
+      .channel(`realtime-maintenance-tickets-${establishmentId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "maintenance_tickets",
+          filter: `establishment_id=eq.${establishmentId}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["maintenance_tickets", establishmentId] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [selectedEstablishment?.id, queryClient]);
 
   return {
     tickets: ticketsQuery.data || [],

@@ -386,6 +386,24 @@ export async function getRefunds(
   }
 }
 
+/** Mapeia o rótulo da operação para action_type (CHECK em financial_audit_logs). */
+function mapAuditActionType(
+  detail: string
+): "create" | "update" | "delete" | "approve" | "reject" | "reverse" | "refund" {
+  switch (detail) {
+    case "refund_created":
+      return "create";
+    case "refund_recorded_processed":
+      return "refund";
+    case "refund_approved":
+      return "approve";
+    case "refund_processed":
+      return "update";
+    default:
+      return "update";
+  }
+}
+
 /**
  * Registrar log de auditoria financeira
  */
@@ -399,21 +417,22 @@ async function logFinancialAudit(params: {
   user_id?: string;
 }): Promise<void> {
   try {
-    await supabase
-      .from("financial_audit_logs")
-      .insert({
-        establishment_id: params.establishment_id,
-        action: params.action,
-        entity_type: params.entity_type,
-        entity_id: params.entity_id,
-        old_value: params.old_value,
-        new_value: params.new_value,
-        user_id: params.user_id,
-        ip_address: null, // Pode ser obtido do request
-        user_agent: null, // Pode ser obtido do request
-      });
+    const { error } = await supabase.from("financial_audit_logs").insert({
+      establishment_id: params.establishment_id,
+      action_type: mapAuditActionType(params.action),
+      reason: params.action,
+      entity_type: params.entity_type,
+      entity_id: params.entity_id,
+      old_values: params.old_value,
+      new_values: params.new_value,
+      user_id: params.user_id,
+      ip_address: null,
+      user_agent: null,
+    });
+    if (error) {
+      console.warn("Erro ao registrar log de auditoria:", error);
+    }
   } catch (error) {
-    // Não falhar se não conseguir registrar log
     console.warn("Erro ao registrar log de auditoria:", error);
   }
 }

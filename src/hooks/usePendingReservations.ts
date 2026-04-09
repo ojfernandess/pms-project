@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -732,6 +733,54 @@ export const usePendingReservations = () => {
       toast.error(error.message || "Erro ao processar revisão Channex");
     },
   });
+
+  // Atualiza pendências em tempo quase real quando reservas, revisões Channex ou quartos mudam.
+  useEffect(() => {
+    const establishmentId = selectedEstablishment?.id;
+    if (!establishmentId) return;
+
+    const invalidatePending = () => {
+      queryClient.invalidateQueries({ queryKey: ["pending"] });
+    };
+
+    const channel = supabase
+      .channel(`realtime-pending-${establishmentId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "reservations",
+          filter: `establishment_id=eq.${establishmentId}`,
+        },
+        invalidatePending
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "channex_booking_revisions",
+          filter: `establishment_id=eq.${establishmentId}`,
+        },
+        invalidatePending
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "rooms",
+          filter: `establishment_id=eq.${establishmentId}`,
+        },
+        invalidatePending
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [selectedEstablishment?.id, queryClient]);
 
   return {
     newOTAReservations: newOTAReservationsQuery.data || [],

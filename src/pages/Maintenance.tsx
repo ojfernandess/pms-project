@@ -20,7 +20,8 @@ import {
   Image as ImageIcon,
   Eye,
   Edit,
-  BarChart3
+  BarChart3,
+  LayoutGrid,
 } from "lucide-react";
 import {
   Popover,
@@ -37,6 +38,10 @@ import {
 import { useMaintenance } from "@/hooks/useMaintenance";
 import { MaintenanceTicketDialog } from "@/components/maintenance/MaintenanceTicketDialog";
 import { MaintenanceTicketComments } from "@/components/maintenance/MaintenanceTicketComments";
+import {
+  MaintenanceKanbanBoard,
+  type MaintenanceKanbanStatus,
+} from "@/components/maintenance/MaintenanceKanbanBoard";
 import { formatDate } from "@/lib/reservationUtils";
 import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
@@ -45,6 +50,7 @@ import { ptBR } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { toast } from "sonner";
 
 // Função para converter URL antiga de "documents" para "maintenance"
 // Também garante que URLs do bucket maintenance estejam corretas
@@ -198,11 +204,11 @@ const Maintenance = () => {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [selectedKPI, setSelectedKPI] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("tickets");
+  const [activeTab, setActiveTab] = useState<string>("board");
   const [selectedImage, setSelectedImage] = useState<{ url: string; fileName: string; ticketId?: string } | null>(null);
   const [establishmentLogo, setEstablishmentLogo] = useState<string | null>(null);
 
-  const { tickets, isLoading, refetch, startTicket, completeTicket, cancelTicket } = useMaintenance();
+  const { tickets, isLoading, refetch, startTicket, completeTicket, cancelTicket, updateTicket } = useMaintenance();
   const { canCreate, canUpdate } = usePermissions();
   const { selectedEstablishment } = useEstablishment();
 
@@ -305,35 +311,24 @@ const Maintenance = () => {
     });
   }, [tickets, searchTerm, statusFilter, priorityFilter]);
 
-  // Estatísticas de quartos com mais chamados
+  // Quadro Kanban: ignora filtro de status para sempre mostrar o fluxo completo; respeita busca e prioridade.
+  const boardTickets = useMemo(() => {
+    return tickets.filter((ticket: any) => {
+      const ticketNumber = ticket.id?.substring(0, 8).toUpperCase() || "";
+      const searchTermUpper = searchTerm.toUpperCase();
+      const matchesTicketNumber = ticketNumber.includes(searchTermUpper);
+      const matchesSearch =
+        matchesTicketNumber ||
+        ticket.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        ticket.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        ticket.rooms?.room_number?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesPriority = priorityFilter === "all" || ticket.priority === priorityFilter;
+      return matchesSearch && matchesPriority;
+    });
+  }, [tickets, searchTerm, priorityFilter]);
+
+  // Estatísticas de quartos com mais chamados (todos os chamados do quarto, inclusive cancelados)
   const roomStatistics = useMemo(() => {
-    // Filtrar tickets abertos primeiro (open ou in_progress)
-    let ticketsToAnalyze = tickets.filter((t: any) => {
-      const status = (t.status || "").toLowerCase();
-      return status === "open" || status === "in_progress";
-    });
-
-    // Se não houver tickets abertos, usar todos os tickets (exceto cancelled)
-    // para mostrar estatísticas gerais dos quartos
-    if (ticketsToAnalyze.length === 0) {
-      ticketsToAnalyze = tickets.filter((t: any) => {
-        const status = (t.status || "").toLowerCase();
-        return status !== "cancelled";
-      });
-    }
-
-    console.log("📊 Estatísticas - Tickets para análise:", {
-      totalTickets: tickets.length,
-      ticketsToAnalyze: ticketsToAnalyze.length,
-      ticketsDetails: ticketsToAnalyze.map((t: any) => ({
-        id: t.id?.substring(0, 8),
-        status: t.status,
-        room_id: t.room_id,
-        room_number: Array.isArray(t.rooms) ? t.rooms[0]?.room_number : t.rooms?.room_number,
-        ticket_type: t.ticket_type
-      }))
-    });
-
     // Função para extrair palavras-chave de um texto
     const extractKeywords = (text: string): string[] => {
       if (!text) return [];
@@ -399,24 +394,21 @@ const Maintenance = () => {
       room_number: string;
       room_id: string;
       totalTickets: number;
+      activeTickets: number;
       problems: Map<string, number>;
       keywords: Map<string, number>; // Palavras-chave com contagem
     }>();
 
-    ticketsToAnalyze.forEach((ticket: any) => {
-      const roomId = ticket.room_id;
-      // rooms pode ser um objeto ou um array
+    tickets.forEach((ticket: any) => {
       const roomsData = Array.isArray(ticket.rooms) ? ticket.rooms[0] : ticket.rooms;
+      const roomId = ticket.room_id || roomsData?.id || null;
       const roomNumber = roomsData?.room_number || "N/A";
       const ticketType = ticket.ticket_type || "general";
+      const st = (ticket.status || "").toLowerCase();
+      const isActive = st === "open" || st === "in_progress";
 
       if (!roomId) {
-        console.warn("⚠️ Ticket sem room_id:", {
-          ticketId: ticket.id?.substring(0, 8),
-          status: ticket.status,
-          hasRooms: !!ticket.rooms
-        });
-        return; // Pular tickets sem quarto
+        return;
       }
 
       if (!roomMap.has(roomId)) {
@@ -424,6 +416,7 @@ const Maintenance = () => {
           room_number: roomNumber,
           room_id: roomId,
           totalTickets: 0,
+          activeTickets: 0,
           problems: new Map(),
           keywords: new Map(),
         });
@@ -431,6 +424,7 @@ const Maintenance = () => {
 
       const room = roomMap.get(roomId)!;
       room.totalTickets += 1;
+      if (isActive) room.activeTickets += 1;
       
       // Contar tipo de problema
       const currentCount = room.problems.get(ticketType) || 0;
@@ -465,15 +459,6 @@ const Maintenance = () => {
           })),
       }))
       .sort((a, b) => b.totalTickets - a.totalTickets);
-
-    console.log("📊 Estatísticas - Resultado final:", {
-      roomsCount: result.length,
-      rooms: result.map(r => ({
-        room_number: r.room_number,
-        totalTickets: r.totalTickets,
-        problems: r.problems
-      }))
-    });
 
     return result;
   }, [tickets]);
@@ -567,6 +552,68 @@ const Maintenance = () => {
       } catch (error) {
         // Error já tratado no hook
       }
+    }
+  };
+
+  const kanbanStatusLabel: Record<MaintenanceKanbanStatus, string> = {
+    open: "Aberto",
+    in_progress: "Em progresso",
+    completed: "Concluído",
+    cancelled: "Cancelado",
+  };
+
+  const handleKanbanStatusChange = async (
+    ticketId: string,
+    fromStatus: string,
+    toStatus: MaintenanceKanbanStatus
+  ) => {
+    if (fromStatus === toStatus) return;
+
+    if (fromStatus === "cancelled") {
+      toast.error("Chamados cancelados não podem ser movidos pelo quadro.");
+      return;
+    }
+
+    const leavingCompleted = fromStatus === "completed" && toStatus !== "completed";
+    if (leavingCompleted) {
+      const targetName = kanbanStatusLabel[toStatus];
+      const detail =
+        toStatus === "cancelled"
+          ? `O status do chamado passará para "${targetName}".`
+          : `O status passará para "${targetName}" e o quarto voltará para manutenção.`;
+      const ok = window.confirm(
+        `Este chamado está concluído.\n\n${detail}\n\nDeseja alterar o status?`
+      );
+      if (!ok) return;
+    }
+
+    if (toStatus === "cancelled") {
+      if (!leavingCompleted && !window.confirm("Cancelar este chamado?")) return;
+      await cancelTicket(ticketId);
+      return;
+    }
+
+    if (toStatus === "completed") {
+      await completeTicket(ticketId);
+      return;
+    }
+
+    if (toStatus === "in_progress") {
+      if (fromStatus === "open") {
+        await startTicket(ticketId);
+      } else {
+        await updateTicket({ id: ticketId, status: "in_progress" });
+      }
+      return;
+    }
+
+    if (toStatus === "open") {
+      if (fromStatus === "in_progress" || fromStatus === "completed") {
+        await updateTicket({ id: ticketId, status: "open" });
+        return;
+      }
+      toast.error("Somente chamados em progresso ou concluídos podem voltar para Aberto.");
+      return;
     }
   };
 
@@ -743,10 +790,14 @@ const Maintenance = () => {
 
         {/* Abas */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="board" className="gap-2">
+              <LayoutGrid className="h-4 w-4" />
+              Quadro
+            </TabsTrigger>
             <TabsTrigger value="tickets" className="gap-2">
               <Wrench className="h-4 w-4" />
-              Chamados
+              Lista
             </TabsTrigger>
             <TabsTrigger value="statistics" className="gap-2">
               <BarChart3 className="h-4 w-4" />
@@ -754,7 +805,26 @@ const Maintenance = () => {
             </TabsTrigger>
           </TabsList>
 
-          {/* Aba: Chamados */}
+          {/* Aba: Quadro Kanban */}
+          <TabsContent value="board" className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Arraste os cartões entre colunas para atualizar o status. A busca e a prioridade aplicam-se ao quadro; o filtro de status vale só na lista.
+            </p>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+              </div>
+            ) : (
+              <MaintenanceKanbanBoard
+                tickets={boardTickets}
+                canDrag={canUpdate("maintenance") || canCreate("maintenance")}
+                onViewDetails={handleViewDetails}
+                onStatusChange={handleKanbanStatusChange}
+              />
+            )}
+          </TabsContent>
+
+          {/* Aba: Lista */}
           <TabsContent value="tickets" className="space-y-4">
         {/* Lista de Chamados */}
         {isLoading ? (
@@ -967,7 +1037,16 @@ const Maintenance = () => {
                             )}
                           </div>
                           <p className="text-sm text-slate-600">
-                            {room.totalTickets} chamado{room.totalTickets > 1 ? "s" : ""} aberto{room.totalTickets > 1 ? "s" : ""}
+                            {room.totalTickets} chamado{room.totalTickets > 1 ? "s" : ""} registrado
+                            {room.totalTickets > 1 ? "s" : ""}
+                            {room.activeTickets > 0 ? (
+                              <span className="text-slate-500">
+                                {" "}
+                                ({room.activeTickets} aberto{room.activeTickets > 1 ? "s" : ""} ou em andamento)
+                              </span>
+                            ) : (
+                              <span className="text-slate-500"> (nenhum em aberto)</span>
+                            )}
                           </p>
                         </div>
                       </div>
