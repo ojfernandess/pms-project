@@ -2187,6 +2187,54 @@ async function maybeSendCheckinChargeAutomationsForAiosellReservation(
   }
 }
 
+/**
+ * Mensagens & Cobranças: dispara evento específico (modificação / cancelamento / overbooking)
+ * para reservas que chegam do canal Aiosell.
+ *
+ * Diferente de `maybeSendCheckinChargeAutomationsForAiosellReservation` (que trata criação),
+ * esta função envia notificações de ciclo de vida: reserva modificada, cancelada ou overbooking.
+ * Fire-and-forget — erros são apenas logados para não interromper o fluxo principal.
+ */
+async function maybeSendCheckinChargeEventForAiosell(
+  supabase: SupabaseClient,
+  reservationIds: string[],
+  establishmentId: string,
+  logPrefix: string,
+  intent: "reservation_cancelled" | "reservation_modified" | "reservation_overbooking"
+): Promise<void> {
+  if (reservationIds.length === 0) return;
+  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/$/, "");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!supabaseUrl || !serviceKey) return;
+
+  const { data: config } = await supabase
+    .from("checkin_charge_config")
+    .select("enabled")
+    .eq("establishment_id", establishmentId)
+    .maybeSingle();
+
+  if (!config?.enabled) return;
+
+  for (const reservationId of reservationIds) {
+    const res = await fetch(`${supabaseUrl}/functions/v1/send-checkin-charge`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ reservation_id: reservationId, intent }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      results?: Array<{ success?: boolean; error?: string }>;
+      error?: string;
+    };
+    const first = data.results?.[0];
+    if (!res.ok || !first?.success) {
+      console.warn(
+        `${logPrefix}: send-checkin-charge ${intent} ${reservationId}`,
+        first?.error ?? data.error ?? res.statusText
+      );
+    }
+  }
+}
+
 async function createChannelReservationNotification(
   supabase: SupabaseClient,
   args: {
@@ -2291,6 +2339,10 @@ async function applyAiosellReservationPayload(
     if (updErr) {
       return { status: 500, json: { success: false, error: updErr.message } };
     }
+    // Mensagens & Cobranças: avisa hóspede(s) que a reserva foi cancelada pelo canal.
+    void maybeSendCheckinChargeEventForAiosell(
+      supabase, ids, establishmentId, logPrefix, "reservation_cancelled"
+    ).catch((e) => console.warn(`${logPrefix}: checkin-charge reservation_cancelled`, e));
     return {
       status: 200,
       json: {
@@ -2382,6 +2434,14 @@ async function applyAiosellReservationPayload(
         }
       }
     }
+    // Mensagens & Cobranças: avisa hóspede(s) que a reserva foi modificada pelo canal.
+    void maybeSendCheckinChargeEventForAiosell(
+      supabase,
+      otaRows.map((r) => r.reservation_id),
+      establishmentId,
+      logPrefix,
+      "reservation_modified"
+    ).catch((e) => console.warn(`${logPrefix}: checkin-charge reservation_modified`, e));
     return {
       status: 200,
       json: {
