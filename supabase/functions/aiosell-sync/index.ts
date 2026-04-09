@@ -563,8 +563,23 @@ function isPlanTariffClosedInCalendar(row: Record<string, unknown>): boolean {
 
 /**
  * Formato de restrições inventário/tarifa (PMS → CM / OTA).
- * Doc. Aiosell «Rates Restrictions POST from Aiosell to 3rd Party»: mesmo conjunto de chaves que o exemplo
- * (campos não usados pelo PMS permanecem explicitamente `null`).
+ *
+ * Alinhado ao sample payload da doc. Aiosell «Inventory Restrictions POST from Aiosell to 3rd Party»:
+ * {
+ *   "stopSell": false,
+ *   "exactStayArrival": null,
+ *   "maximumStayArrival": null,
+ *   "minimumAdvanceReservation": null,
+ *   "minimumStay": 1,
+ *   "closeOnArrival": false,
+ *   "minimumStayArrival": null,
+ *   "maximumStay": null,
+ *   "maximumAdvanceReservation": null,
+ *   "closeOnDeparture": false
+ * }
+ *
+ * Campos não suportados pelo PMS (`exactStayArrival`, `maximumStayArrival`, `minimumStayArrival`)
+ * permanecem explicitamente `null` para conformidade total com o schema.
  * LOS mínimo é enviado quando o PMS tem ≥ 1 noite; 0/null = sem regra explícita (`minimumStay: null`).
  */
 function aiosellRestrictionShape(
@@ -591,6 +606,7 @@ function aiosellRestrictionShape(
   const maxStayVal =
     maxStay != null && Number.isFinite(Number(maxStay)) ? Number(maxStay) : null;
 
+  // Ordem de chaves idêntica ao sample da documentação Aiosell (facilita comparação visual em logs).
   return {
     stopSell,
     exactStayArrival: null,
@@ -622,7 +638,9 @@ function aggregateRowsToAiosellInvRestrictions(
     const xs = row.max_stay ?? row.max_los;
     const cta = row.closed_to_arrival ?? row.cta;
     const ctd = row.closed_to_departure ?? row.ctd;
-    const ss = row.stop_sell_ota ?? row.stop_sell_booking_engine;
+    // Usa apenas stop_sell_ota para canais OTA; stop_sell_booking_engine aplica-se
+    // só ao motor de reservas próprio e não deve fechar o inventário OTA.
+    const ss = row.stop_sell_ota;
     const mad = row.min_advance_days ?? row.min_advance_reservation;
     const xad = row.max_advance_days ?? row.max_advance_reservation;
     if (ms != null && Number(ms) >= 1) {
@@ -675,7 +693,8 @@ function rowToAiosellRateRestrictions(row: Record<string, unknown>): Record<stri
   const xs = row.max_stay ?? row.max_los;
   const cta = row.closed_to_arrival ?? row.cta;
   const ctd = row.closed_to_departure ?? row.ctd;
-  const ss = row.stop_sell_ota ?? row.stop_sell_booking_engine;
+  // Usa apenas stop_sell_ota; stop_sell_booking_engine não deve propagar-se ao canal OTA/CM.
+  const ss = row.stop_sell_ota;
   const mad = row.min_advance_days ?? row.min_advance_reservation;
   const xad = row.max_advance_days ?? row.max_advance_reservation;
   const planTariffClosed = isPlanTariffClosedInCalendar(row);
@@ -2095,6 +2114,22 @@ serve(async (req) => {
           );
         }
         if (r.aiosellMessage) invMsgs.push(r.aiosellMessage);
+        // Resposta de sucesso confirmada pelo payload: "Inventory Updated Successfully" (doc. Aiosell).
+        const invAckMsg = (r.aiosellMessage ?? "").trim();
+        if (invAckMsg) {
+          console.info(
+            "[aiosell-sync] aiosell_inventory_post_ok",
+            JSON.stringify({
+              hotelCode,
+              inventory_path: inventoryPath,
+              http_ok: true,
+              api_message: invAckMsg,
+              inventory_updated: /inventory updated successfully/i.test(invAckMsg),
+              chunk_index: totalChunks > 1 ? Math.floor(off / INV_AVAIL_CHUNK_SIZE) + 1 : null,
+              chunk_of: totalChunks > 1 ? totalChunks : null,
+            })
+          );
+        }
       }
       if (invMsgs.length > 0) aiosellApiMessages.push(`Inventário: ${invMsgs.join(" · ")}`);
     }
