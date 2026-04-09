@@ -1819,7 +1819,28 @@ const ReservationDetails = () => {
                     {reservation.cancellation_reason && (
                       <div className="mt-2 pt-2 border-t border-red-200">
                         <span className="font-medium">Motivo: </span>
-                        <span>{reservation.cancellation_reason}</span>
+                        <span className="whitespace-pre-wrap">{reservation.cancellation_reason}</span>
+                        {(() => {
+                          const reasonText = String(reservation.cancellation_reason || "");
+                          const match = reasonText.match(/Nova reserva:\s*([A-Za-z0-9-]+)/i);
+                          const newReservationCode = match?.[1] || null;
+                          if (!newReservationCode) return null;
+                          return (
+                            <div className="mt-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const currentEst = reservation.establishment_id || establishmentId;
+                                  if (!currentEst) return;
+                                  navigate(`/${currentEst}/reservas/${newReservationCode}`);
+                                }}
+                              >
+                                Abrir nova reserva: {newReservationCode}
+                              </Button>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>

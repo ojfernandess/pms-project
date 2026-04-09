@@ -374,14 +374,29 @@ async function insertChannelPrepaidPayment(
     if (!(matchesKnown || matchesOthers)) return { error: null };
   }
 
+  const configuredCarrierId =
+    ((hotelSettings as { auto_payment_channel_carrier_id?: string | null } | null)?.auto_payment_channel_carrier_id) ||
+    ((hotelSettings as { auto_payment_carrier_id?: string | null } | null)?.auto_payment_carrier_id) ||
+    null;
+
   const marker = `Pré-pago via canal OTA (${args.managerName})`;
   const { data: existing } = await supabase
     .from("payments")
-    .select("id")
+    .select("id, carrier_id")
     .eq("reservation_id", args.reservationId)
     .ilike("notes", `%${marker}%`)
     .maybeSingle();
-  if (existing?.id) return { error: null };
+  if (existing?.id) {
+    const existingCarrier = String((existing as AnyObj).carrier_id ?? "").trim();
+    if (!existingCarrier && configuredCarrierId) {
+      const { error: patchErr } = await supabase
+        .from("payments")
+        .update({ carrier_id: configuredCarrierId })
+        .eq("id", (existing as AnyObj).id);
+      if (patchErr) return { error: patchErr.message };
+    }
+    return { error: null };
+  }
 
   const notes = [
     marker,
@@ -397,14 +412,33 @@ async function insertChannelPrepaidPayment(
     amount: args.amount,
     payment_method: "deposit",
     payment_date: new Date().toISOString(),
-    carrier_id:
-      ((hotelSettings as { auto_payment_channel_carrier_id?: string | null } | null)?.auto_payment_channel_carrier_id) ||
-      ((hotelSettings as { auto_payment_carrier_id?: string | null } | null)?.auto_payment_carrier_id) ||
-      null,
+    carrier_id: configuredCarrierId,
     notes,
   });
 
   return { error: error?.message ?? null };
+}
+
+async function refundReservationPaymentsForModificationReprocess(
+  supabase: ReturnType<typeof createClient>,
+  reservationId: string,
+): Promise<void> {
+  const { data: payments, error: paymentsError } = await supabase
+    .from("payments")
+    .select("id")
+    .eq("reservation_id", reservationId);
+  if (paymentsError) {
+    throw new Error(`Falha ao buscar pagamentos para estorno: ${paymentsError.message}`);
+  }
+  if ((payments?.length ?? 0) === 0) return;
+
+  const { error: deleteError } = await supabase
+    .from("payments")
+    .delete()
+    .eq("reservation_id", reservationId);
+  if (deleteError) {
+    throw new Error(`Falha ao estornar pagamentos da reserva antiga: ${deleteError.message}`);
+  }
 }
 
 async function createChannelReservationNotification(
@@ -554,6 +588,194 @@ async function maybeSendCheckinChargeAutomationsForChannelReservation(
   }
   if (config.send_timing === "after_confirmation" && checkinEligibleStatus) await postIntent("checkin_reminder");
   if (config.send_timing === "after_ota" && isOta && checkinEligibleStatus) await postIntent("checkin_reminder");
+}
+
+async function maybeSendLifecycleTemplateForChannelReservation(
+  reservationId: string,
+  intent: "reservation_modified" | "reservation_cancelled" | "reservation_overbooking",
+): Promise<void> {
+  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/$/, "");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!supabaseUrl || !serviceKey || !reservationId) return;
+
+  await fetch(`${supabaseUrl}/functions/v1/send-checkin-charge`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ reservation_id: reservationId, intent }),
+  }).catch((e) => {
+    console.warn(`channex-reservations-sync lifecycle template warning (${intent})`, e);
+  });
+}
+
+function isAvailabilityErrorMessage(raw: unknown): boolean {
+  const msg = ensureString(raw).toLowerCase();
+  if (!msg) return false;
+  return (
+    msg.includes("nenhum quarto disponível") ||
+    msg.includes("quarto não está disponível") ||
+    msg.includes("nao está disponível") ||
+    msg.includes("não está disponível") ||
+    msg.includes("available_rooms")
+  );
+}
+
+function isTruthyLike(v: unknown): boolean {
+  if (v === true || v === 1) return true;
+  const s = ensureString(v).toLowerCase();
+  return s === "true" || s === "1" || s === "yes" || s === "y";
+}
+
+function hasNegativeModifierSignal(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some((item) => hasNegativeModifierSignal(item));
+  const obj = value as Record<string, unknown>;
+  const modifier = Number(obj.modifier);
+  if (Number.isFinite(modifier) && modifier < 0) return true;
+  for (const nested of Object.values(obj)) {
+    if (hasNegativeModifierSignal(nested)) return true;
+  }
+  return false;
+}
+
+function detectChannexOverbooking(attrs: AnyObj, sourceEvent: string): boolean {
+  if (sourceEvent === "booking_unmapped_room" || sourceEvent === "booking_unmapped_rate") return true;
+  const rooms = Array.isArray(attrs.rooms) ? (attrs.rooms as AnyObj[]) : [];
+  if (isTruthyLike(attrs.overbooking) || isTruthyLike(attrs.is_overbooking) || isTruthyLike(attrs.overbooked)) return true;
+  if (isTruthyLike(attrs.overbook)) return true;
+  if (rooms.some((r) => isTruthyLike(r.overbooking) || isTruthyLike(r.is_overbooking) || isTruthyLike(r.overbooked))) return true;
+  const statusHint = ensureString(
+    attrs.availability_status || attrs.booking_status || attrs.type || attrs.inventory_status || attrs.availability,
+  ).toLowerCase();
+  if (
+    statusHint.includes("overbook") ||
+    statusHint.includes("unavailable") ||
+    statusHint.includes("no_availability") ||
+    statusHint.includes("soldout") ||
+    statusHint.includes("sold_out")
+  ) {
+    return true;
+  }
+  if (hasNegativeModifierSignal(attrs.values) || hasNegativeModifierSignal(attrs.availability_changes)) return true;
+  return false;
+}
+
+function isPmsOverbookingRelocationRevision(attrs: AnyObj): boolean {
+  const bookingMeta = ((attrs.meta as AnyObj | undefined) ?? {}) as AnyObj;
+  if (bookingMeta.pms_overbooking_reallocation === true) return true;
+  const rooms = Array.isArray(attrs.rooms) ? (attrs.rooms as AnyObj[]) : [];
+  for (const room of rooms) {
+    const roomMeta = (((room as AnyObj).meta as AnyObj | undefined) ?? {}) as AnyObj;
+    if (roomMeta.pms_overbooking_reallocation === true) return true;
+  }
+  return false;
+}
+
+function extractOccupancyInfo(attrs: AnyObj, firstRoom: AnyObj): { adults: number; children: number; ages: number[] } {
+  const occ = ((attrs.occupancy as AnyObj | undefined) ?? (firstRoom.occupancy as AnyObj | undefined) ?? {}) as AnyObj;
+  const adultsRaw = Number(occ.adults ?? 2);
+  const childrenRaw = Number(occ.children ?? 0);
+  const adults = Number.isFinite(adultsRaw) && adultsRaw >= 0 ? Math.floor(adultsRaw) : 2;
+  const children = Number.isFinite(childrenRaw) && childrenRaw >= 0 ? Math.floor(childrenRaw) : 0;
+  const ages = Array.isArray(occ.ages)
+    ? occ.ages
+        .map((v) => Number(v))
+        .filter((n) => Number.isFinite(n) && n >= 0)
+        .map((n) => Math.floor(n))
+    : [];
+  return { adults, children, ages };
+}
+
+function extractChannexNotes(attrs: AnyObj, firstRoom: AnyObj): string[] {
+  const notesCandidates = [
+    attrs.notes,
+    attrs.note,
+    attrs.comments,
+    attrs.comment,
+    attrs.remarks,
+    attrs.message,
+    (firstRoom as AnyObj).notes,
+    (firstRoom as AnyObj).comment,
+    (firstRoom as AnyObj).remarks,
+  ];
+  return notesCandidates
+    .map((v) => ensureString(v))
+    .filter(Boolean)
+    .filter((v, idx, arr) => arr.indexOf(v) === idx);
+}
+
+function mergeReservationNotes(existing: unknown, managedLines: string[]): string {
+  const rawExisting = ensureString(existing);
+  const startMarker = "[CHANNEX_SYNC]";
+  const endMarker = "[/CHANNEX_SYNC]";
+  const normalizedManagedLines = managedLines.filter(Boolean);
+  const managedBlock = normalizedManagedLines.join("\n");
+  if (!rawExisting) return managedBlock;
+
+  const start = rawExisting.indexOf(startMarker);
+  const end = rawExisting.indexOf(endMarker);
+  if (start >= 0 && end > start) {
+    const before = rawExisting.slice(0, start).trim();
+    const after = rawExisting.slice(end + endMarker.length).trim();
+    return [before, managedBlock, after].filter(Boolean).join("\n\n");
+  }
+
+  const existingLines = rawExisting
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .filter((l) => !normalizedManagedLines.includes(l));
+  return [...existingLines, ...normalizedManagedLines].filter(Boolean).join("\n");
+}
+
+async function createOverbookingReservationFallback(
+  supabase: ReturnType<typeof createClient>,
+  args: {
+    establishmentId: string;
+    categoryId: string;
+    clientId: string;
+    guestName: string;
+    arrivalDate: string;
+    departureDate: string;
+    amount: number;
+    adults: number;
+    children: number;
+    notesSuffix?: string | null;
+    paidByOta: boolean;
+    shouldApplyAutoPayment: boolean;
+    mappedPricingPlanId?: string | null;
+    otaName: string;
+    bookingRef: string;
+  },
+): Promise<string> {
+  const { data: created, error } = await supabase
+    .from("reservations")
+    .insert({
+      establishment_id: args.establishmentId,
+      category_id: args.categoryId,
+      room_id: null,
+      client_id: args.clientId,
+      guest_name: args.guestName,
+      checkin_date: args.arrivalDate,
+      checkout_date: args.departureDate,
+      adults: Math.max(0, Math.floor(Number(args.adults || 0))),
+      children: Math.max(0, Math.floor(Number(args.children || 0))),
+      total_amount: args.amount > 0 ? args.amount : 0,
+      paid_amount: args.paidByOta && args.shouldApplyAutoPayment && args.amount > 0 ? args.amount : 0,
+      payment_status: args.paidByOta && args.shouldApplyAutoPayment && args.amount > 0 ? "paid" : "pending",
+      status: "pending",
+      channel: "ota",
+      notes:
+        `Channex ${args.otaName} · booking ${args.bookingRef} · OVERBOOKING (sem disponibilidade no lock)` +
+        ` · criado para tratativa manual no PMS` +
+        (args.notesSuffix ? `\n${args.notesSuffix}` : ""),
+      ...(args.mappedPricingPlanId ? { pricing_plan_id: args.mappedPricingPlanId } : {}),
+    })
+    .select("id")
+    .single();
+  if (error || !created?.id) {
+    throw new Error(error?.message || "Falha ao criar fallback de overbooking no PMS");
+  }
+  return created.id as string;
 }
 
 async function fetchChannex(baseUrl: string, apiKey: string, path: string) {
@@ -1167,6 +1389,8 @@ serve(async (req) => {
       const otaName = ensureString(attrs.ota_name) || "Channex";
       const existingOta = await findOtaReservationForChannel(supabase, channelId, uniqueId, bookingId);
       const reservationAlreadyExists = !!ensureString(existingOta?.reservation_id);
+      const detectedOverbooking = detectChannexOverbooking(attrs, sourceEvent);
+      const isSelfOverbookingRelocation = isPmsOverbookingRelocationRevision(attrs);
 
       if (!revisionId || (!bookingId && !uniqueId)) {
         skippedMissingIds += 1;
@@ -1211,15 +1435,35 @@ serve(async (req) => {
 
       try {
         const customer = (attrs.customer ?? {}) as AnyObj;
-        const firstName = ensureString(customer.name);
-        const lastName = ensureString(customer.surname);
+        const rooms = Array.isArray(attrs.rooms) ? (attrs.rooms as AnyObj[]) : [];
+        const firstRoom = rooms[0] ?? {};
+        const firstGuest = (Array.isArray((firstRoom as AnyObj).guests) ? ((firstRoom as AnyObj).guests as AnyObj[])[0] : null) as
+          | AnyObj
+          | null;
+        const firstName = ensureString(customer.name || customer.first_name || firstGuest?.name);
+        const lastName = ensureString(customer.surname || customer.last_name || firstGuest?.surname);
         const fromSummary = ensureString(attrs.customer_name);
         const guestName =
           fromSummary ||
           `${firstName} ${lastName}`.trim() ||
           "Hóspede Channex";
-        const email = ensureString(customer.mail) || null;
-        const phone = ensureString(customer.phone) || null;
+        const email = ensureString(customer.mail || customer.email) || null;
+        const phone = ensureString(customer.phone || customer.mobile || customer.phone_number) || null;
+        const roomTypeId = ensureString((firstRoom as AnyObj).room_type_id || (firstRoom as AnyObj).room_type_code || ((firstRoom as AnyObj).meta as AnyObj | undefined)?.room_type_code);
+        const ratePlanId = ensureString((firstRoom as AnyObj).rate_plan_id || (firstRoom as AnyObj).rate_plan_code || ((firstRoom as AnyObj).meta as AnyObj | undefined)?.rate_plan_code);
+        const arrivalDate = ensureString(attrs.arrival_date || (firstRoom as AnyObj).checkin_date);
+        const departureDate = ensureString(attrs.departure_date || (firstRoom as AnyObj).checkout_date);
+        const amount = Number(attrs.amount ?? (firstRoom as AnyObj).amount ?? 0);
+        const paidByOta = ensureString(attrs.payment_collect).toLowerCase() === "ota";
+        const occInfo = extractOccupancyInfo(attrs, firstRoom as AnyObj);
+        const channexNotes = extractChannexNotes(attrs, firstRoom as AnyObj);
+        const childAgeLine =
+          occInfo.children > 0
+            ? `Children: ${occInfo.children}` + (occInfo.ages.length > 0 ? ` | Child Age: ${occInfo.ages.join(", ")}` : "")
+            : "";
+        const notesSuffix = [childAgeLine, ...channexNotes.map((n) => `Notes (Channex): ${n}`)]
+          .filter(Boolean)
+          .join("\n");
 
         let clientId: string | null = null;
         // OTAs frequentemente repetem e-mail genérico/vazio: não reutilizar cliente só pelo e-mail (evita hóspede errado).
@@ -1235,6 +1479,18 @@ serve(async (req) => {
             if (existingNm && wanted && existingNm === wanted) {
               clientId = foundClient.id;
             }
+          }
+        }
+        if (!clientId && phone) {
+          const { data: foundByPhone } = await supabase
+            .from("clients")
+            .select("id, full_name")
+            .eq("phone", phone)
+            .maybeSingle();
+          if (foundByPhone?.id) {
+            const existingNm = ensureString((foundByPhone as AnyObj).full_name).toLowerCase().replace(/\s+/g, " ");
+            const wanted = guestName.toLowerCase().replace(/\s+/g, " ");
+            if (!wanted || !existingNm || existingNm === wanted) clientId = foundByPhone.id;
           }
         }
         if (!clientId) {
@@ -1254,14 +1510,6 @@ serve(async (req) => {
           clientId = clientRow.id;
         }
 
-        const rooms = Array.isArray(attrs.rooms) ? (attrs.rooms as AnyObj[]) : [];
-        const firstRoom = rooms[0] ?? {};
-        const roomTypeId = ensureString((firstRoom as AnyObj).room_type_id || (firstRoom as AnyObj).room_type_code || ((firstRoom as AnyObj).meta as AnyObj | undefined)?.room_type_code);
-        const ratePlanId = ensureString((firstRoom as AnyObj).rate_plan_id || (firstRoom as AnyObj).rate_plan_code || ((firstRoom as AnyObj).meta as AnyObj | undefined)?.rate_plan_code);
-        const arrivalDate = ensureString(attrs.arrival_date || (firstRoom as AnyObj).checkin_date);
-        const departureDate = ensureString(attrs.departure_date || (firstRoom as AnyObj).checkout_date);
-        const amount = Number(attrs.amount ?? (firstRoom as AnyObj).amount ?? 0);
-        const paidByOta = ensureString(attrs.payment_collect).toLowerCase() === "ota";
         const shouldApplyAutoPayment = paidByOta
           ? await shouldApplyChannelAutoPayment(supabase, establishmentId, otaName)
           : false;
@@ -1277,7 +1525,8 @@ serve(async (req) => {
         const shouldQueueLifecyclePending =
           (revisionStatus === "modified" || revisionStatus === "cancelled") &&
           !forceReprocess &&
-          !autoApplyLifecycle;
+          !autoApplyLifecycle &&
+          !isSelfOverbookingRelocation;
 
         if (shouldQueueLifecyclePending) {
           if (reservationId && (revisionStatus === "modified" || revisionStatus === "cancelled")) {
@@ -1348,9 +1597,31 @@ serve(async (req) => {
           }
         }
 
+        // Reprocessamento de modificação deve sempre partir de uma reserva já existente.
+        // Se não houver vínculo em ota_reservations/revisões, tenta localizar por notas.
+        if (!reservationId && revisionStatus === "modified" && forceReprocess) {
+          const needles = [uniqueId, bookingId]
+            .map((n) => ensureString(n).replace(/[^a-zA-Z0-9-]/g, "").trim())
+            .filter((t) => t.length >= 8);
+          for (const token of needles) {
+            const { data: noteHits } = await supabase
+              .from("reservations")
+              .select("id")
+              .eq("establishment_id", establishmentId)
+              .ilike("notes", `%${token}%`)
+              .in("status", ["pending", "confirmed", "checkedin", "preregistration"])
+              .order("created_at", { ascending: false })
+              .limit(2);
+            if (noteHits?.length === 1) {
+              reservationId = ensureString((noteHits[0] as AnyObj).id);
+              break;
+            }
+          }
+        }
+
         // Cancelamento: sem vínculo OTA, localizar reserva criada pelo PMS (notas "Channex … booking …").
         if (!reservationId && revisionStatus === "cancelled") {
-          const needles = [uniqueId, bookingId].map((n) => ensureString(n).replace(/[^a-zA-Z0-9\-]/g, "").trim()).filter(
+          const needles = [uniqueId, bookingId].map((n) => ensureString(n).replace(/[^a-zA-Z0-9-]/g, "").trim()).filter(
             (t) => t.length >= 8,
           );
           for (const token of needles) {
@@ -1388,27 +1659,39 @@ serve(async (req) => {
               .maybeSingle();
             incomingCategoryId = ensureString((detailMapping as AnyObj | null)?.category_id) || null;
           }
+          // Fallback para quando o rate plan não vier no feed resumido
+          // ou o mapeamento existir apenas por room code.
+          if (!incomingCategoryId && roomTypeId) {
+            const { data: roomOnlyMapping } = await supabase
+              .from("channel_pricing")
+              .select("category_id")
+              .eq("ota_channel_id", channelId)
+              .eq("channel_room_code", roomTypeId)
+              .limit(1)
+              .maybeSingle();
+            incomingCategoryId = ensureString((roomOnlyMapping as AnyObj | null)?.category_id) || null;
+          }
 
           const changes: AnyObj[] = [];
           const prevGuest = ensureString(prev?.guest_name);
-          if (prevGuest && prevGuest !== guestName) {
-            changes.push({ field: "guest_name", before: prevGuest, after: guestName });
+          if (guestName && prevGuest !== guestName) {
+            changes.push({ field: "guest_name", before: prevGuest || "-", after: guestName });
           }
           const prevCheckin = ensureString(prev?.checkin_date).slice(0, 10);
           const prevCheckout = ensureString(prev?.checkout_date).slice(0, 10);
-          if (prevCheckin && arrivalDate && prevCheckin !== arrivalDate) {
-            changes.push({ field: "checkin_date", before: prevCheckin, after: arrivalDate });
+          if (arrivalDate && prevCheckin !== arrivalDate) {
+            changes.push({ field: "checkin_date", before: prevCheckin || "-", after: arrivalDate });
           }
-          if (prevCheckout && departureDate && prevCheckout !== departureDate) {
-            changes.push({ field: "checkout_date", before: prevCheckout, after: departureDate });
+          if (departureDate && prevCheckout !== departureDate) {
+            changes.push({ field: "checkout_date", before: prevCheckout || "-", after: departureDate });
           }
           const prevAmount = Number(prev?.total_amount ?? 0);
           if (Number.isFinite(prevAmount) && Number.isFinite(amount) && Math.abs(prevAmount - amount) > 0.009) {
             changes.push({ field: "total_amount", before: prevAmount, after: amount });
           }
           const prevCategoryId = ensureString(prev?.category_id);
-          if (prevCategoryId && incomingCategoryId && prevCategoryId !== incomingCategoryId) {
-            const categoryIds = [prevCategoryId, incomingCategoryId];
+          if (incomingCategoryId && prevCategoryId !== incomingCategoryId) {
+            const categoryIds = [prevCategoryId, incomingCategoryId].filter(Boolean);
             const { data: categories } = await supabase
               .from("room_categories")
               .select("id, name")
@@ -1421,7 +1704,9 @@ serve(async (req) => {
               categoryNameById.set(cid, ensureString(cc.name) || cid);
             }
 
-            const prevCategoryName = categoryNameById.get(prevCategoryId) ?? prevCategoryId;
+            const prevCategoryName = prevCategoryId
+              ? categoryNameById.get(prevCategoryId) ?? prevCategoryId
+              : "-";
             const incomingCategoryName = categoryNameById.get(incomingCategoryId) ?? incomingCategoryId;
 
             changes.push({
@@ -1496,32 +1781,119 @@ serve(async (req) => {
           }
         }
 
-        if (!shouldQueueLifecyclePending && (revisionStatus === "new" || revisionStatus === "modified") && !reservationId) {
-          const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_reservation_with_lock", {
-            p_reservation_data: {
-              guest_name: guestName,
-              adults: Number((attrs.occupancy as AnyObj)?.adults ?? 2),
-              children: Number((attrs.occupancy as AnyObj)?.children ?? 0),
-              total_amount: amount > 0 ? amount : 0,
-              paid_amount: paidByOta && shouldApplyAutoPayment && amount > 0 ? amount : 0,
-              payment_status: paidByOta && shouldApplyAutoPayment && amount > 0 ? "paid" : "pending",
-              status: "pending",
-              channel: "ota",
-              notes: `Channex ${otaName} · booking ${uniqueId || bookingId}`,
-              client_id: clientId,
-              ...(channexMappedPricingPlanId ? { pricing_plan_id: channexMappedPricingPlanId } : {}),
-            },
-            p_checkin_date: arrivalDate,
-            p_checkout_date: departureDate,
-            p_establishment_id: establishmentId,
-            p_room_id: null,
-            p_category_id: categoryId,
-          });
-          if (rpcErr) throw rpcErr;
+        // Proteção anti-duplicidade: no reprocessamento de "modified", sem reserva de origem não é seguro criar nova.
+        if (revisionStatus === "modified" && forceReprocess && !reservationId) {
+          throw new Error(
+            `Não foi possível localizar a reserva original para reprocessar booking ${uniqueId || bookingId}. Operação bloqueada para evitar duplicidade.`,
+          );
+        }
 
-          const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
-          if (!result?.success || !result?.reservation_id) throw new Error(result?.error || "Falha ao criar reserva");
-          reservationId = String(result.reservation_id);
+        if (!shouldQueueLifecyclePending && (revisionStatus === "new" || revisionStatus === "modified") && !reservationId) {
+          let reservationIsOverbooking = detectedOverbooking;
+          if (detectedOverbooking && categoryId) {
+            reservationId = await createOverbookingReservationFallback(supabase, {
+              establishmentId,
+              categoryId,
+              clientId: clientId!,
+              guestName,
+              arrivalDate,
+              departureDate,
+              amount,
+              adults: occInfo.adults,
+              children: occInfo.children,
+              notesSuffix,
+              paidByOta,
+              shouldApplyAutoPayment,
+              mappedPricingPlanId: channexMappedPricingPlanId,
+              otaName,
+              bookingRef: uniqueId || bookingId,
+            });
+            await supabase.from("channex_sync_logs").insert({
+              ota_channel_id: channelId,
+              establishment_id: establishmentId,
+              direction: "pull_booking",
+              status: "warning",
+              endpoint: "channex-reservations-sync (detected_overbooking_fallback)",
+              message: `Reserva criada em modo overbooking por sinal do feed/webhook (${revisionId})`,
+              request_payload: {
+                booking_id: bookingId || null,
+                unique_id: uniqueId || null,
+                reservation_id: reservationId,
+                category_id: categoryId,
+              },
+            });
+          } else {
+            const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_reservation_with_lock", {
+              p_reservation_data: {
+                guest_name: guestName,
+                adults: occInfo.adults,
+                children: occInfo.children,
+                total_amount: amount > 0 ? amount : 0,
+                paid_amount: paidByOta && shouldApplyAutoPayment && amount > 0 ? amount : 0,
+                payment_status: paidByOta && shouldApplyAutoPayment && amount > 0 ? "paid" : "pending",
+                status: "pending",
+                channel: "ota",
+                notes: mergeReservationNotes(null, [
+                  `Channex ${otaName} · booking ${uniqueId || bookingId}`,
+                  ...(detectedOverbooking ? ["OVERBOOKING (detectado no feed/webhook)"] : []),
+                  ...(childAgeLine ? [childAgeLine] : []),
+                  ...channexNotes.map((n) => `Notes (Channex): ${n}`),
+                ]),
+                client_id: clientId,
+                ...(channexMappedPricingPlanId ? { pricing_plan_id: channexMappedPricingPlanId } : {}),
+              },
+              p_checkin_date: arrivalDate,
+              p_checkout_date: departureDate,
+              p_establishment_id: establishmentId,
+              p_room_id: null,
+              p_category_id: categoryId,
+            });
+            if (rpcErr) throw rpcErr;
+
+            const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
+            if (!result?.success || !result?.reservation_id) {
+              const rpcMessage = ensureString(result?.error);
+              if (isAvailabilityErrorMessage(rpcMessage) && categoryId) {
+                reservationIsOverbooking = true;
+                reservationId = await createOverbookingReservationFallback(supabase, {
+                  establishmentId,
+                  categoryId,
+                  clientId: clientId!,
+                  guestName,
+                  arrivalDate,
+                  departureDate,
+                  amount,
+                  adults: occInfo.adults,
+                  children: occInfo.children,
+                  notesSuffix,
+                  paidByOta,
+                  shouldApplyAutoPayment,
+                  mappedPricingPlanId: channexMappedPricingPlanId,
+                  otaName,
+                  bookingRef: uniqueId || bookingId,
+                });
+                await supabase.from("channex_sync_logs").insert({
+                  ota_channel_id: channelId,
+                  establishment_id: establishmentId,
+                  direction: "pull_booking",
+                  status: "warning",
+                  endpoint: "channex-reservations-sync (overbooking_fallback)",
+                  message: `Reserva criada sem quarto por indisponibilidade (${revisionId})`,
+                  request_payload: {
+                    booking_id: bookingId || null,
+                    unique_id: uniqueId || null,
+                    reservation_id: reservationId,
+                    category_id: categoryId,
+                    rpc_error: rpcMessage,
+                  },
+                });
+              } else {
+                throw new Error(result?.error || "Falha ao criar reserva");
+              }
+            } else {
+              reservationId = String(result.reservation_id);
+            }
+          }
 
           await supabase.from("ota_reservations").insert({
             reservation_id: reservationId,
@@ -1538,9 +1910,11 @@ serve(async (req) => {
           try {
             const { data: reservationRow } = await supabase
               .from("reservations")
-              .select("reservation_code, checkin_date, checkout_date, total_amount, paid_amount")
+              .select("reservation_code, checkin_date, checkout_date, total_amount, paid_amount, notes")
               .eq("id", reservationId)
               .maybeSingle();
+            const rowNotes = ensureString((reservationRow as AnyObj | null)?.notes).toLowerCase();
+            if (rowNotes.includes("overbooking")) reservationIsOverbooking = true;
             await createChannelReservationNotification(supabase, {
               establishmentId,
               reservationId,
@@ -1576,7 +1950,11 @@ serve(async (req) => {
           }
 
           try {
-            await maybeSendCheckinChargeAutomationsForChannelReservation(reservationId, establishmentId);
+            if (reservationIsOverbooking) {
+              await maybeSendLifecycleTemplateForChannelReservation(reservationId, "reservation_overbooking");
+            } else {
+              await maybeSendCheckinChargeAutomationsForChannelReservation(reservationId, establishmentId);
+            }
           } catch (e) {
             console.warn("channex-reservations-sync checkin-charge warning", e);
           }
@@ -1596,46 +1974,178 @@ serve(async (req) => {
           }
           created += 1;
         } else if (!shouldQueueLifecyclePending && revisionStatus === "modified" && reservationId) {
+          if (isSelfOverbookingRelocation && !forceReprocess) {
+            await updateOtaReservationsRow(supabase, {
+              channelId,
+              uniqueId,
+              bookingId,
+              existingOta,
+              patch: {
+                sync_status: "synced",
+                synced_at: new Date().toISOString(),
+              },
+            });
+            await supabase.from("channex_sync_logs").insert({
+              ota_channel_id: channelId,
+              establishment_id: establishmentId,
+              direction: "pull_booking",
+              status: "info",
+              endpoint: "channex-reservations-sync (self_overbooking_relocation)",
+              message: `Modificação técnica (realocação overbooking PMS) ignorada para pendência/reprocessamento (${revisionId})`,
+              request_payload: {
+                booking_id: bookingId || null,
+                unique_id: uniqueId || null,
+                reservation_id: reservationId,
+              },
+            });
+            modified += 1;
+          } else {
           const { data: previousReservation } = await supabase
             .from("reservations")
-            .select("id, checkin_date, checkout_date, guest_name, total_amount, room_id, category_id")
+            .select("id, checkin_date, checkout_date, guest_name, total_amount, room_id, category_id, pricing_plan_id, notes")
             .eq("id", reservationId)
             .maybeSingle();
 
           if (forceReprocess && previousReservation?.id) {
+            let reservationIsOverbooking = detectedOverbooking;
+            const oldReservationId = reservationId;
+            await refundReservationPaymentsForModificationReprocess(supabase, reservationId);
+
             await supabase
               .from("reservations")
               .update({
                 status: "cancelled",
                 cancelled_at: new Date().toISOString(),
-                notes: `Cancelada automaticamente para reprocessar modificação Channex · booking ${uniqueId || bookingId}`,
+                paid_amount: 0,
+                payment_status: "pending",
+                notes: `Reserva cancelada para reprocessamento de modificação do canal · booking ${uniqueId || bookingId}`,
               })
               .eq("id", reservationId);
 
-            const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_reservation_with_lock", {
-              p_reservation_data: {
-                guest_name: guestName,
-                adults: Number((attrs.occupancy as AnyObj)?.adults ?? 2),
-                children: Number((attrs.occupancy as AnyObj)?.children ?? 0),
-                total_amount: amount > 0 ? amount : 0,
-                paid_amount: paidByOta && shouldApplyAutoPayment && amount > 0 ? amount : 0,
-                payment_status: paidByOta && shouldApplyAutoPayment && amount > 0 ? "paid" : "pending",
-                status: "pending",
-                channel: "ota",
-                notes: `Channex ${otaName} · booking ${uniqueId || bookingId} · modified (reprocess)`,
-                client_id: clientId,
-                ...(channexMappedPricingPlanId ? { pricing_plan_id: channexMappedPricingPlanId } : {}),
-              },
-              p_checkin_date: arrivalDate,
-              p_checkout_date: departureDate,
-              p_establishment_id: establishmentId,
-              p_room_id: null,
-              p_category_id: categoryId,
-            });
-            if (rpcErr) throw rpcErr;
-            const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
-            if (!result?.success || !result?.reservation_id) throw new Error(result?.error || "Falha ao reprocessar modificação");
-            reservationId = String(result.reservation_id);
+            if (detectedOverbooking && categoryId) {
+              reservationId = await createOverbookingReservationFallback(supabase, {
+                establishmentId,
+                categoryId,
+                clientId: clientId!,
+                guestName,
+                arrivalDate,
+                departureDate,
+                amount,
+                adults: occInfo.adults,
+                children: occInfo.children,
+                notesSuffix,
+                paidByOta,
+                shouldApplyAutoPayment,
+                mappedPricingPlanId: channexMappedPricingPlanId,
+                otaName,
+                bookingRef: uniqueId || bookingId,
+              });
+              await supabase.from("channex_sync_logs").insert({
+                ota_channel_id: channelId,
+                establishment_id: establishmentId,
+                direction: "pull_booking",
+                status: "warning",
+                endpoint: "channex-reservations-sync (modified_detected_overbooking_fallback)",
+                message: `Reprocessamento criou reserva em modo overbooking por sinal do feed/webhook (${revisionId})`,
+                request_payload: {
+                  booking_id: bookingId || null,
+                  unique_id: uniqueId || null,
+                  reservation_id: reservationId,
+                  category_id: categoryId,
+                },
+              });
+            } else {
+              const { data: rpcResult, error: rpcErr } = await supabase.rpc("create_reservation_with_lock", {
+                p_reservation_data: {
+                  guest_name: guestName,
+                  adults: occInfo.adults,
+                  children: occInfo.children,
+                  total_amount: amount > 0 ? amount : 0,
+                  paid_amount: paidByOta && shouldApplyAutoPayment && amount > 0 ? amount : 0,
+                  payment_status: paidByOta && shouldApplyAutoPayment && amount > 0 ? "paid" : "pending",
+                  status: "pending",
+                  channel: "ota",
+                  notes: mergeReservationNotes(null, [
+                    `Channex ${otaName} · booking ${uniqueId || bookingId} · modified (reprocess)`,
+                    ...(detectedOverbooking ? ["OVERBOOKING (detectado no feed/webhook)"] : []),
+                    ...(childAgeLine ? [childAgeLine] : []),
+                    ...channexNotes.map((n) => `Notes (Channex): ${n}`),
+                  ]),
+                  client_id: clientId,
+                  ...(channexMappedPricingPlanId ? { pricing_plan_id: channexMappedPricingPlanId } : {}),
+                },
+                p_checkin_date: arrivalDate,
+                p_checkout_date: departureDate,
+                p_establishment_id: establishmentId,
+                p_room_id: null,
+                p_category_id: categoryId,
+              });
+              if (rpcErr) throw rpcErr;
+              const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
+              if (!result?.success || !result?.reservation_id) {
+                const rpcMessage = ensureString(result?.error);
+                if (isAvailabilityErrorMessage(rpcMessage) && categoryId) {
+                  reservationIsOverbooking = true;
+                  reservationId = await createOverbookingReservationFallback(supabase, {
+                    establishmentId,
+                    categoryId,
+                    clientId: clientId!,
+                    guestName,
+                    arrivalDate,
+                    departureDate,
+                    amount,
+                    adults: occInfo.adults,
+                    children: occInfo.children,
+                    notesSuffix,
+                    paidByOta,
+                    shouldApplyAutoPayment,
+                    mappedPricingPlanId: channexMappedPricingPlanId,
+                    otaName,
+                    bookingRef: uniqueId || bookingId,
+                  });
+                  await supabase.from("channex_sync_logs").insert({
+                    ota_channel_id: channelId,
+                    establishment_id: establishmentId,
+                    direction: "pull_booking",
+                    status: "warning",
+                    endpoint: "channex-reservations-sync (modified_overbooking_fallback)",
+                    message: `Reprocessamento criou reserva sem quarto por indisponibilidade (${revisionId})`,
+                    request_payload: {
+                      booking_id: bookingId || null,
+                      unique_id: uniqueId || null,
+                      reservation_id: reservationId,
+                      category_id: categoryId,
+                      rpc_error: rpcMessage,
+                    },
+                  });
+                } else {
+                  throw new Error(result?.error || "Falha ao reprocessar modificação");
+                }
+              } else {
+                reservationId = String(result.reservation_id);
+              }
+            }
+            const { data: newReservationRow } = await supabase
+              .from("reservations")
+              .select("reservation_code, notes")
+              .eq("id", reservationId)
+              .maybeSingle();
+            const newReservationCode = ensureString((newReservationRow as AnyObj | null)?.reservation_code);
+            const newReservationNotes = ensureString((newReservationRow as AnyObj | null)?.notes).toLowerCase();
+            if (newReservationNotes.includes("overbooking")) reservationIsOverbooking = true;
+
+            await supabase
+              .from("reservations")
+              .update({
+                cancellation_reason:
+                  "Reserva cancelada para reprocessar a versão atual.\n" +
+                  `Nova reserva: ${newReservationCode || reservationId}`,
+                notes:
+                  `Reserva cancelada para reprocessar a versão atual.\n` +
+                  `Nova reserva: ${newReservationCode || reservationId}\n` +
+                  `Cancelada em: ${new Date().toISOString()}`,
+              })
+              .eq("id", oldReservationId);
 
             await updateOtaReservationsRow(supabase, {
               channelId,
@@ -1650,6 +2160,46 @@ serve(async (req) => {
                 ota_source_channel_name: otaName,
                 sync_status: "synced",
                 synced_at: new Date().toISOString(),
+              },
+            });
+
+            if (paidByOta && amount > 0) {
+              const payErr = await insertChannelPrepaidPayment(supabase, {
+                reservationId,
+                establishmentId,
+                amount,
+                bookingId: uniqueId || bookingId,
+                managerName: "Channex",
+                partnerName: otaName,
+              });
+              if (payErr.error) {
+                console.warn("channex-reservations-sync modified(reprocess) prepaid payment warning", payErr.error);
+              }
+            }
+
+            try {
+              await maybeSendLifecycleTemplateForChannelReservation(
+                reservationId,
+                reservationIsOverbooking ? "reservation_overbooking" : "reservation_modified",
+              );
+            } catch (e) {
+              console.warn("channex-reservations-sync modified(reprocess) lifecycle template warning", e);
+            }
+
+            await supabase.from("channex_sync_logs").insert({
+              ota_channel_id: channelId,
+              establishment_id: establishmentId,
+              direction: "pull_booking",
+              status: "success",
+              endpoint: "channex-reservations-sync (modified_reprocess)",
+              message: `Modificação aceita e reprocessada (${revisionId})`,
+              request_payload: {
+                revision_id: revisionId,
+                booking_id: bookingId || null,
+                unique_id: uniqueId || null,
+                old_reservation_id: oldReservationId,
+                new_reservation_id: reservationId,
+                new_reservation_code: newReservationCode || null,
               },
             });
 
@@ -1673,18 +2223,51 @@ serve(async (req) => {
               },
             });
           } else {
+          let reservationIsOverbooking = detectedOverbooking;
           const shouldApplyAutoPayment = paidByOta
             ? await shouldApplyChannelAutoPayment(supabase, establishmentId, otaName)
             : false;
+          let mappedCategoryId = "";
+          let mappedPricingPlanId = "";
+          if (roomTypeId && ratePlanId) {
+            const { data: mapping } = await supabase
+              .from("channel_pricing")
+              .select("category_id, pricing_plan_id")
+              .eq("ota_channel_id", channelId)
+              .eq("channel_room_code", roomTypeId)
+              .eq("channel_rate_plan_code", ratePlanId)
+              .maybeSingle();
+            mappedCategoryId = ensureString((mapping as AnyObj | null)?.category_id);
+            mappedPricingPlanId = ensureString((mapping as AnyObj | null)?.pricing_plan_id);
+          }
           const patch: AnyObj = {
             checkin_date: arrivalDate || null,
             checkout_date: departureDate || null,
             guest_name: guestName,
+            adults: occInfo.adults,
+            children: occInfo.children,
             total_amount: amount > 0 ? amount : 0,
             paid_amount: paidByOta && shouldApplyAutoPayment && amount > 0 ? amount : 0,
             payment_status: paidByOta && shouldApplyAutoPayment && amount > 0 ? "paid" : "pending",
-            notes: `Channex ${otaName} · booking ${uniqueId || bookingId} · modify`,
+            notes: mergeReservationNotes((previousReservation as AnyObj | null)?.notes, [
+              detectedOverbooking
+                ? `Channex ${otaName} · booking ${uniqueId || bookingId} · modify · OVERBOOKING (detectado no feed/webhook)`
+                : `Channex ${otaName} · booking ${uniqueId || bookingId} · modify`,
+              ...(childAgeLine ? [childAgeLine] : []),
+              ...channexNotes.map((n) => `Notes (Channex): ${n}`),
+            ]),
           };
+          if (mappedCategoryId) {
+            patch.category_id = mappedCategoryId;
+            const prevCategory = ensureString((previousReservation as AnyObj | null)?.category_id);
+            if (!prevCategory || prevCategory !== mappedCategoryId) {
+              // Troca de categoria invalida o quarto anterior para evitar inconsistência de inventário.
+              patch.room_id = null;
+            }
+          }
+          if (mappedPricingPlanId) {
+            patch.pricing_plan_id = mappedPricingPlanId;
+          }
           await supabase.from("reservations").update(patch).eq("id", reservationId);
 
           await updateOtaReservationsRow(supabase, {
@@ -1705,9 +2288,11 @@ serve(async (req) => {
           try {
             const { data: reservationRow } = await supabase
               .from("reservations")
-              .select("reservation_code, checkin_date, checkout_date, total_amount, paid_amount")
+              .select("reservation_code, checkin_date, checkout_date, total_amount, paid_amount, notes")
               .eq("id", reservationId)
               .maybeSingle();
+            const rowNotes = ensureString((reservationRow as AnyObj | null)?.notes).toLowerCase();
+            if (rowNotes.includes("overbooking")) reservationIsOverbooking = true;
             await createChannelReservationLifecycleNotification(supabase, {
               establishmentId,
               reservationId,
@@ -1744,7 +2329,9 @@ serve(async (req) => {
           }
 
           try {
-            await maybeSendCheckinChargeAutomationsForChannelReservation(reservationId, establishmentId);
+            if (!reservationIsOverbooking) {
+              await maybeSendCheckinChargeAutomationsForChannelReservation(reservationId, establishmentId);
+            }
           } catch (e) {
             console.warn("channex-reservations-sync modified checkin-charge warning", e);
           }
@@ -1762,8 +2349,17 @@ serve(async (req) => {
               console.warn("channex-reservations-sync modified prepaid payment warning", payErr.error);
             }
           }
+          try {
+            await maybeSendLifecycleTemplateForChannelReservation(
+              reservationId,
+              reservationIsOverbooking ? "reservation_overbooking" : "reservation_modified",
+            );
+          } catch (e) {
+            console.warn("channex-reservations-sync modified lifecycle template warning", e);
+          }
           }
           modified += 1;
+          }
         } else if (!shouldQueueLifecyclePending && revisionStatus === "cancelled" && reservationId) {
           await applyChannelCancellationWithPolicy(supabase, {
             reservationId,
@@ -1829,6 +2425,25 @@ serve(async (req) => {
               .in("process_status", ["pending", "failed"])
               .neq("revision_id", revisionId);
           }
+          try {
+            await maybeSendLifecycleTemplateForChannelReservation(reservationId, "reservation_cancelled");
+          } catch (e) {
+            console.warn("channex-reservations-sync cancelled lifecycle template warning", e);
+          }
+          await supabase.from("channex_sync_logs").insert({
+            ota_channel_id: channelId,
+            establishment_id: establishmentId,
+            direction: "pull_booking",
+            status: "success",
+            endpoint: "channex-reservations-sync (cancelled)",
+            message: `Cancelamento processado (${revisionId})`,
+            request_payload: {
+              revision_id: revisionId,
+              booking_id: bookingId || null,
+              unique_id: uniqueId || null,
+              reservation_id: reservationId,
+            },
+          });
           cancelled += 1;
         } else if (!shouldQueueLifecyclePending && revisionStatus === "cancelled" && !reservationId) {
           // Reserva cancelada sem vínculo local: mantemos revisão processada para permitir ACK e evitar loop no feed.
@@ -1875,7 +2490,10 @@ serve(async (req) => {
             status: revisionStatus || "new",
             payload: {
               ...attrs,
-              _processing_meta: processingMeta,
+              _processing_meta: {
+                ...processingMeta,
+                detected_overbooking: detectedOverbooking,
+              },
             },
             reservation_id: reservationId || null,
             process_status: processStatusForRevision,
@@ -1941,7 +2559,10 @@ serve(async (req) => {
             status: revisionStatus || "new",
             payload: {
               ...attrs,
-              _processing_meta: processingMeta,
+              _processing_meta: {
+                ...processingMeta,
+                detected_overbooking: detectedOverbooking,
+              },
             },
             process_status: "failed",
             processed_at: new Date().toISOString(),

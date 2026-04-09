@@ -31,6 +31,11 @@ export const BlockRoomDialog = ({
   onSuccess,
   initialData,
 }: BlockRoomDialogProps) => {
+  const parseLocalDate = (dateStr: string): Date => {
+    const [year, month, day] = String(dateStr).split("-").map(Number);
+    return new Date(year, (month || 1) - 1, day || 1);
+  };
+
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [blockReason, setBlockReason] = useState("");
@@ -93,7 +98,7 @@ export const BlockRoomDialog = ({
         return;
       }
 
-      if (new Date(initialData.checkout_date) <= new Date(initialData.checkin_date)) {
+      if (parseLocalDate(initialData.checkout_date) <= parseLocalDate(initialData.checkin_date)) {
         toast.error("Data final deve ser posterior à data inicial");
         setLoading(false);
         return;
@@ -225,7 +230,7 @@ export const BlockRoomDialog = ({
   const formatDate = (dateString: string) => {
     if (!dateString) return "";
     try {
-      const date = new Date(dateString);
+      const date = parseLocalDate(dateString);
       return format(date, "dd/MM/yyyy", { locale: ptBR });
     } catch {
       return dateString;

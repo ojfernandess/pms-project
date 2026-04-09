@@ -110,7 +110,12 @@ function resolveMetaTemplateForIntent(
   const defaultVars = ["guest_name", "reservation_code", "checkin_date", "amount", "payment_link", "web_checkin_link", "establishment_name", "establishment_address"];
   const byIntent = (channelConfig.meta_templates_by_intent as Record<string, { name?: string; language?: string; variables?: string | string[] }> | undefined) ?? {};
   const intentKey =
-    intent === "checkin_reminder" || intent === "payment_pending" || intent === "checkout_reminder"
+    intent === "checkin_reminder" ||
+    intent === "payment_pending" ||
+    intent === "checkout_reminder" ||
+    intent === "reservation_modified" ||
+    intent === "reservation_cancelled" ||
+    intent === "reservation_overbooking"
       ? intent
       : "fallback";
   const selected = byIntent[intentKey] ?? byIntent.fallback;
@@ -428,7 +433,14 @@ serve(async (req) => {
     );
 
     let reservationIds: string[] = [];
-    let intent: "checkin_reminder" | "payment_pending" | "checkout_reminder" | undefined;
+    let intent:
+      | "checkin_reminder"
+      | "payment_pending"
+      | "checkout_reminder"
+      | "reservation_modified"
+      | "reservation_cancelled"
+      | "reservation_overbooking"
+      | undefined;
     let phoneOverrides: Record<string, string> | undefined;
     let templateIdOverride: string | undefined;
     if (req.method === "POST") {
@@ -436,7 +448,17 @@ serve(async (req) => {
         const body = await req.json().catch(() => ({}));
         if (body.reservation_id) reservationIds = [body.reservation_id];
         else if (Array.isArray(body.reservation_ids)) reservationIds = body.reservation_ids;
-        if (body.intent && ["checkin_reminder", "payment_pending", "checkout_reminder"].includes(body.intent)) {
+        if (
+          body.intent &&
+          [
+            "checkin_reminder",
+            "payment_pending",
+            "checkout_reminder",
+            "reservation_modified",
+            "reservation_cancelled",
+            "reservation_overbooking",
+          ].includes(body.intent)
+        ) {
           intent = body.intent;
         }
         if (body.phone_overrides && typeof body.phone_overrides === "object" && !Array.isArray(body.phone_overrides)) {
@@ -594,7 +616,7 @@ serve(async (req) => {
         }
 
         let webCheckinLocator: string | null = null;
-        let { data: webCheckin } = await supabase
+        const { data: webCheckin } = await supabase
           .from("web_checkin")
           .select("locator")
           .eq("reservation_id", reservationId)
@@ -640,7 +662,9 @@ serve(async (req) => {
             .from("clients")
             .select("id, full_name, phone")
             .in("id", idSet);
-          const byId = new Map((clientRows ?? []).map((c: { id: string; full_name: string | null; phone: string | null }) => [c.id, c]));
+          const byId = new Map<string, { id: string; full_name: string | null; phone: string | null }>(
+            (clientRows ?? []).map((c: { id: string; full_name: string | null; phone: string | null }) => [c.id, c])
+          );
           if (reservation.guest_id) guestRow = byId.get(reservation.guest_id as string) ?? null;
           if (reservation.client_id) finRow = byId.get(reservation.client_id as string) ?? null;
         }
@@ -687,7 +711,10 @@ serve(async (req) => {
           const intentId =
             intent === "checkin_reminder" ? config.template_id_reminder
             : intent === "payment_pending" ? config.template_id_payment
-            : config.template_id_checkout;
+            : intent === "checkout_reminder" ? config.template_id_checkout
+            : intent === "reservation_modified" ? config.template_id_modified
+            : intent === "reservation_cancelled" ? config.template_id_cancelled
+            : config.template_id_overbooking;
           if (intentId) templateId = intentId;
         }
         if (templateSource === "internal" && templateIdOverride) {

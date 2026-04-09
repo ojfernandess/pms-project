@@ -635,6 +635,7 @@ export const useReservations = () => {
         .select(`
           checkin_date,
           checkout_date,
+          notes,
           room_id,
           category_id,
           rooms (room_number, name),
@@ -864,6 +865,53 @@ export const useReservations = () => {
           } catch (emailError) {
             console.error("❌ Erro ao enviar email de modificação:", emailError);
             // Não bloquear a atualização se o email falhar
+          }
+        }
+
+        // Channex CRS: ao trocar quarto/categoria no PMS, atualizar também o room_type da reserva no canal.
+        if ((roomChanged || categoryChanged || categoryChangedByRoom) && data?.category_id) {
+          const overbookingContext = String(oldReservation?.notes ?? "").toLowerCase().includes("overbooking");
+          try {
+            const { data: channexSyncResult, error: channexSyncError } = await supabase.functions.invoke("channex-booking-crs-update", {
+              body: {
+                reservation_id: data.id,
+                category_id: data.category_id,
+                overbooking_context: overbookingContext,
+              },
+            });
+            if (channexSyncError) throw channexSyncError;
+
+            const channexPayload = (channexSyncResult ?? {}) as { success?: boolean; skipped?: boolean; reason?: string };
+            if (channexPayload.success) {
+              await logActivity({
+                actionType: "updated",
+                entityType: "reservation",
+                entityId: data.id,
+                entityCode: data.reservation_code,
+                description: `Categoria/quarto da reserva ${data.reservation_code} sincronizado com Channex`,
+                metadata: {
+                  source: "channex_crs",
+                  synced: true,
+                  category_id: data.category_id,
+                },
+              });
+            } else if (channexPayload.skipped) {
+              await logActivity({
+                actionType: "updated",
+                entityType: "reservation",
+                entityId: data.id,
+                entityCode: data.reservation_code,
+                description: `Sincronização com Channex não aplicada para a reserva ${data.reservation_code}`,
+                metadata: {
+                  source: "channex_crs",
+                  synced: false,
+                  skipped: true,
+                  reason: channexPayload.reason ?? "sem detalhes",
+                },
+              });
+            }
+          } catch (channexErr) {
+            console.warn("⚠️ Falha ao sincronizar troca de categoria/quarto com Channex CRS:", channexErr);
           }
         }
       }
@@ -1380,6 +1428,15 @@ export const useReservations = () => {
   // Substituir quarto de uma reserva
   const replaceReservationRoom = useMutation({
     mutationFn: async ({ id, newRoomId }: { id: string; newRoomId: string }) => {
+      const { data: currentReservation } = await supabase
+        .from("reservations")
+        .select("notes")
+        .eq("id", id)
+        .maybeSingle();
+      const overbookingContext = String((currentReservation as { notes?: string | null } | null)?.notes ?? "")
+        .toLowerCase()
+        .includes("overbooking");
+
       // Buscar category_id do novo quarto
       let newCategoryId = null;
       const { data: roomData } = await supabase
@@ -1411,6 +1468,51 @@ export const useReservations = () => {
         .single();
 
       if (error) throw error;
+
+      if (data?.category_id) {
+        try {
+          const { data: channexSyncResult, error: channexSyncError } = await supabase.functions.invoke("channex-booking-crs-update", {
+            body: {
+              reservation_id: data.id,
+              category_id: data.category_id,
+              overbooking_context: overbookingContext,
+            },
+          });
+          if (channexSyncError) throw channexSyncError;
+
+          const channexPayload = (channexSyncResult ?? {}) as { success?: boolean; skipped?: boolean; reason?: string };
+          if (channexPayload.success) {
+            await logActivity({
+              actionType: "updated",
+              entityType: "reservation",
+              entityId: data.id,
+              entityCode: data.reservation_code,
+              description: `Categoria/quarto da reserva ${data.reservation_code} sincronizado com Channex`,
+              metadata: {
+                source: "channex_crs",
+                synced: true,
+                category_id: data.category_id,
+              },
+            });
+          } else if (channexPayload.skipped) {
+            await logActivity({
+              actionType: "updated",
+              entityType: "reservation",
+              entityId: data.id,
+              entityCode: data.reservation_code,
+              description: `Sincronização com Channex não aplicada para a reserva ${data.reservation_code}`,
+              metadata: {
+                source: "channex_crs",
+                synced: false,
+                skipped: true,
+                reason: channexPayload.reason ?? "sem detalhes",
+              },
+            });
+          }
+        } catch (channexErr) {
+          console.warn("⚠️ Falha ao sincronizar substituição de quarto com Channex CRS:", channexErr);
+        }
+      }
       return data;
     },
         onSuccess: () => {

@@ -145,13 +145,56 @@ Localizador: {{reservation_code}}
 
 Qualquer dúvida, responda esta mensagem. Até breve!`;
 
+/** Template: reserva modificada. */
+const DEFAULT_TEMPLATE_MODIFICADA = `Olá {{guest_name}} 👋
+
+Sua reserva {{reservation_code}} foi atualizada com sucesso.
+
+Novo período: {{checkin_date}} até {{checkout_date}}
+Valor atualizado: R$ {{amount}}
+
+Confira os detalhes e finalize, se necessário:
+🔗 {{web_checkin_link}}
+`;
+
+/** Template: reserva cancelada. */
+const DEFAULT_TEMPLATE_CANCELADA = `Olá {{guest_name}} 👋
+
+Informamos que a reserva {{reservation_code}} foi cancelada.
+
+Se precisar de uma nova hospedagem, nossa equipe está à disposição.
+`;
+
+/** Template: overbooking. */
+const DEFAULT_TEMPLATE_OVERBOOKING = `Olá {{guest_name}} 👋
+
+Identificamos uma indisponibilidade operacional para a reserva {{reservation_code}}.
+
+Nossa equipe já está tratando a situação para garantir a melhor solução para sua estadia.
+Em breve entraremos em contato com a atualização.
+`;
+
 type SendTiming = "after_confirmation" | "days_before_checkin" | "after_ota" | "manual";
 type AmountType = "total" | "percent" | "fixed";
 type ChannelType = "whatsapp_cloud" | "chatwoot" | "evolution_api" | "webhook";
 type TemplateSource = "internal" | "meta" | "chatwoot";
-type MetaIntentKey = "checkin_reminder" | "payment_pending" | "checkout_reminder" | "fallback";
+type MetaIntentKey =
+  | "checkin_reminder"
+  | "payment_pending"
+  | "checkout_reminder"
+  | "reservation_modified"
+  | "reservation_cancelled"
+  | "reservation_overbooking"
+  | "fallback";
 
-type TemplateType = "checkin_reminder" | "payment_pending" | "checkout_reminder" | "custom";
+type TemplateType =
+  | "checkin_reminder"
+  | "payment_pending"
+  | "checkout_reminder"
+  | "reservation_modified"
+  | "reservation_cancelled"
+  | "reservation_overbooking"
+  | "custom";
 
 interface CheckinChargeConfigRow {
   id: string;
@@ -168,6 +211,9 @@ interface CheckinChargeConfigRow {
   template_id_reminder?: string | null;
   template_id_payment?: string | null;
   template_id_checkout?: string | null;
+  template_id_modified?: string | null;
+  template_id_cancelled?: string | null;
+  template_id_overbooking?: string | null;
   payment_link_expires_days: number;
   template_source?: TemplateSource;
   meta_template_name?: string | null;
@@ -198,6 +244,9 @@ const DEFAULT_META_TEMPLATES_BY_INTENT: MetaTemplatesByIntent = {
   checkin_reminder: { name: "", language: "pt_BR", variables: "guest_name, reservation_code, checkin_date, web_checkin_link" },
   payment_pending: { name: "", language: "pt_BR", variables: "guest_name, reservation_code, amount, payment_link" },
   checkout_reminder: { name: "", language: "pt_BR", variables: "guest_name, reservation_code, checkout_date" },
+  reservation_modified: { name: "", language: "pt_BR", variables: "guest_name, reservation_code, checkin_date, checkout_date, amount" },
+  reservation_cancelled: { name: "", language: "pt_BR", variables: "guest_name, reservation_code" },
+  reservation_overbooking: { name: "", language: "pt_BR", variables: "guest_name, reservation_code, checkin_date, checkout_date" },
   fallback: { name: "", language: "pt_BR", variables: "guest_name, reservation_code, checkin_date, amount, payment_link, web_checkin_link" },
 };
 
@@ -481,6 +530,9 @@ export default function CheckinChargeSettings() {
   const [templateIdReminder, setTemplateIdReminder] = useState<string | null>(null);
   const [templateIdPayment, setTemplateIdPayment] = useState<string | null>(null);
   const [templateIdCheckout, setTemplateIdCheckout] = useState<string | null>(null);
+  const [templateIdModified, setTemplateIdModified] = useState<string | null>(null);
+  const [templateIdCancelled, setTemplateIdCancelled] = useState<string | null>(null);
+  const [templateIdOverbooking, setTemplateIdOverbooking] = useState<string | null>(null);
 
   // --- Templates
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
@@ -1000,6 +1052,18 @@ export default function CheckinChargeSettings() {
         ...DEFAULT_META_TEMPLATES_BY_INTENT.checkout_reminder,
         ...(byIntent.checkout_reminder ?? {}),
       },
+      reservation_modified: {
+        ...DEFAULT_META_TEMPLATES_BY_INTENT.reservation_modified,
+        ...(byIntent.reservation_modified ?? {}),
+      },
+      reservation_cancelled: {
+        ...DEFAULT_META_TEMPLATES_BY_INTENT.reservation_cancelled,
+        ...(byIntent.reservation_cancelled ?? {}),
+      },
+      reservation_overbooking: {
+        ...DEFAULT_META_TEMPLATES_BY_INTENT.reservation_overbooking,
+        ...(byIntent.reservation_overbooking ?? {}),
+      },
       fallback: {
         ...DEFAULT_META_TEMPLATES_BY_INTENT.fallback,
         name: config.meta_template_name ?? byIntent.fallback?.name ?? "",
@@ -1011,6 +1075,9 @@ export default function CheckinChargeSettings() {
     setTemplateIdReminder(config.template_id_reminder ?? null);
     setTemplateIdPayment(config.template_id_payment ?? null);
     setTemplateIdCheckout(config.template_id_checkout ?? null);
+    setTemplateIdModified(config.template_id_modified ?? null);
+    setTemplateIdCancelled(config.template_id_cancelled ?? null);
+    setTemplateIdOverbooking(config.template_id_overbooking ?? null);
   }, [config]);
 
   const { data: channelTemplates, isLoading: channelTemplatesLoading, isFetching: channelTemplatesFetching, refetch: refetchChannelTemplates } = useQuery({
@@ -1062,6 +1129,21 @@ export default function CheckinChargeSettings() {
           language: (metaTemplatesByIntent.checkout_reminder.language || "pt_BR").trim(),
           variables: metaTemplatesByIntent.checkout_reminder.variables.trim(),
         },
+        reservation_modified: {
+          name: metaTemplatesByIntent.reservation_modified.name.trim(),
+          language: (metaTemplatesByIntent.reservation_modified.language || "pt_BR").trim(),
+          variables: metaTemplatesByIntent.reservation_modified.variables.trim(),
+        },
+        reservation_cancelled: {
+          name: metaTemplatesByIntent.reservation_cancelled.name.trim(),
+          language: (metaTemplatesByIntent.reservation_cancelled.language || "pt_BR").trim(),
+          variables: metaTemplatesByIntent.reservation_cancelled.variables.trim(),
+        },
+        reservation_overbooking: {
+          name: metaTemplatesByIntent.reservation_overbooking.name.trim(),
+          language: (metaTemplatesByIntent.reservation_overbooking.language || "pt_BR").trim(),
+          variables: metaTemplatesByIntent.reservation_overbooking.variables.trim(),
+        },
         fallback: {
           name: metaTemplatesByIntent.fallback.name.trim(),
           language: (metaTemplatesByIntent.fallback.language || "pt_BR").trim(),
@@ -1101,6 +1183,9 @@ export default function CheckinChargeSettings() {
         template_id_reminder: templateSource === "internal" ? (templateIdReminder || null) : null,
         template_id_payment: templateSource === "internal" ? (templateIdPayment || null) : null,
         template_id_checkout: templateSource === "internal" ? (templateIdCheckout || null) : null,
+        template_id_modified: templateSource === "internal" ? (templateIdModified || null) : null,
+        template_id_cancelled: templateSource === "internal" ? (templateIdCancelled || null) : null,
+        template_id_overbooking: templateSource === "internal" ? (templateIdOverbooking || null) : null,
         updated_at: new Date().toISOString(),
       };
       const { error } = await supabase
@@ -1240,7 +1325,7 @@ export default function CheckinChargeSettings() {
 
   const sendChargeForReservations = async (
     reservationIds: string[],
-    intent?: "checkin_reminder" | "payment_pending" | "checkout_reminder",
+    intent?: "checkin_reminder" | "payment_pending" | "checkout_reminder" | "reservation_modified" | "reservation_cancelled" | "reservation_overbooking",
     options?: { template_id_override?: string | null; phone_overrides?: Record<string, string> }
   ) => {
     if (!reservationIds.length) {
@@ -1267,6 +1352,12 @@ export default function CheckinChargeSettings() {
             ? `Cobrança enviada para ${ok} reserva(s). O template configurado foi usado com o link de pagamento.`
             : intent === "checkout_reminder"
               ? `Lembrete de checkout enviado para ${ok} reserva(s).`
+              : intent === "reservation_modified"
+                ? `Aviso de reserva modificada enviado para ${ok} reserva(s).`
+                : intent === "reservation_cancelled"
+                  ? `Aviso de reserva cancelada enviado para ${ok} reserva(s).`
+                : intent === "reservation_overbooking"
+                  ? `Aviso de overbooking enviado para ${ok} reserva(s).`
               : `Mensagem enviada para ${ok} reserva(s). O template selecionado foi usado.`;
       if (fail.length > 0) {
         toast.warning(`${ok} enviada(s). Falha(s): ${fail.map((f) => f.error).join("; ")}`);
@@ -1821,6 +1912,54 @@ export default function CheckinChargeSettings() {
                             </SelectContent>
                           </Select>
                         </div>
+                        <div className="space-y-2">
+                          <Label>Reserva modificada</Label>
+                          <Select value={templateIdModified ?? "none"} onValueChange={(v) => setTemplateIdModified(v === "none" ? null : v)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Padrão do sistema" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Padrão do sistema</SelectItem>
+                              {templates.filter((t) => !t.template_type || t.template_type === "reservation_modified" || t.template_type === "custom").map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.name} {t.is_default ? "(padrão)" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Reserva cancelada</Label>
+                          <Select value={templateIdCancelled ?? "none"} onValueChange={(v) => setTemplateIdCancelled(v === "none" ? null : v)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Padrão do sistema" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Padrão do sistema</SelectItem>
+                              {templates.filter((t) => !t.template_type || t.template_type === "reservation_cancelled" || t.template_type === "custom").map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.name} {t.is_default ? "(padrão)" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Overbooking</Label>
+                          <Select value={templateIdOverbooking ?? "none"} onValueChange={(v) => setTemplateIdOverbooking(v === "none" ? null : v)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Padrão do sistema" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Padrão do sistema</SelectItem>
+                              {templates.filter((t) => !t.template_type || t.template_type === "reservation_overbooking" || t.template_type === "custom").map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.name} {t.is_default ? "(padrão)" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
                       <div className="space-y-2">
                         <Label>Template geral (fallback)</Label>
@@ -1868,6 +2007,9 @@ export default function CheckinChargeSettings() {
                         ["checkin_reminder", "Lembrete de check-in"],
                         ["payment_pending", "Pagamento pendente"],
                         ["checkout_reminder", "Lembrete de checkout"],
+                        ["reservation_modified", "Reserva modificada"],
+                        ["reservation_cancelled", "Reserva cancelada"],
+                        ["reservation_overbooking", "Overbooking"],
                         ["fallback", "Template geral (fallback)"],
                       ] as Array<[MetaIntentKey, string]>).map(([intentKey, intentLabel]) => (
                         <div key={intentKey} className="space-y-3 rounded-lg border p-4 bg-muted/20">
@@ -2523,7 +2665,19 @@ export default function CheckinChargeSettings() {
                       <TableCell className="font-medium">{t.name}</TableCell>
                       <TableCell>
                         <span className="text-muted-foreground text-sm">
-                          {t.template_type === "checkin_reminder" ? "Lembrete check-in" : t.template_type === "payment_pending" ? "Pagamento pendente" : t.template_type === "checkout_reminder" ? "Lembrete checkout" : "Personalizado"}
+                          {t.template_type === "checkin_reminder"
+                            ? "Lembrete check-in"
+                            : t.template_type === "payment_pending"
+                              ? "Pagamento pendente"
+                              : t.template_type === "checkout_reminder"
+                                ? "Lembrete checkout"
+                                : t.template_type === "reservation_modified"
+                                  ? "Reserva modificada"
+                                  : t.template_type === "reservation_cancelled"
+                                    ? "Reserva cancelada"
+                                    : t.template_type === "reservation_overbooking"
+                                      ? "Overbooking"
+                                    : "Personalizado"}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -2622,6 +2776,9 @@ export default function CheckinChargeSettings() {
                         <SelectItem value="checkin_reminder">Lembrete de check-in</SelectItem>
                         <SelectItem value="payment_pending">Pagamento pendente</SelectItem>
                         <SelectItem value="checkout_reminder">Lembrete de checkout</SelectItem>
+                        <SelectItem value="reservation_modified">Reserva modificada</SelectItem>
+                        <SelectItem value="reservation_cancelled">Reserva cancelada</SelectItem>
+                        <SelectItem value="reservation_overbooking">Overbooking</SelectItem>
                         <SelectItem value="custom">Personalizado</SelectItem>
                       </SelectContent>
                     </Select>
@@ -2635,6 +2792,9 @@ export default function CheckinChargeSettings() {
                       if (v === "checkin") { setTemplateBody(DEFAULT_TEMPLATE_CHECKIN); setTemplateType("checkin_reminder"); }
                       else if (v === "pagamento") { setTemplateBody(DEFAULT_TEMPLATE_PAGAMENTO); setTemplateType("payment_pending"); }
                       else if (v === "checkout") { setTemplateBody(DEFAULT_TEMPLATE_CHECKOUT); setTemplateType("checkout_reminder"); }
+                      else if (v === "modificada") { setTemplateBody(DEFAULT_TEMPLATE_MODIFICADA); setTemplateType("reservation_modified"); }
+                      else if (v === "cancelada") { setTemplateBody(DEFAULT_TEMPLATE_CANCELADA); setTemplateType("reservation_cancelled"); }
+                      else if (v === "overbooking") { setTemplateBody(DEFAULT_TEMPLATE_OVERBOOKING); setTemplateType("reservation_overbooking"); }
                     }}
                   >
                     <SelectTrigger>
@@ -2645,6 +2805,9 @@ export default function CheckinChargeSettings() {
                       <SelectItem value="checkin">Lembrete de check-in</SelectItem>
                       <SelectItem value="pagamento">Pagamento pendente</SelectItem>
                       <SelectItem value="checkout">Lembrete de checkout</SelectItem>
+                      <SelectItem value="modificada">Reserva modificada</SelectItem>
+                      <SelectItem value="cancelada">Reserva cancelada</SelectItem>
+                      <SelectItem value="overbooking">Overbooking</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

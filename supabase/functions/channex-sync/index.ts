@@ -245,11 +245,17 @@ serve(async (req) => {
         .gte("date", today)
         .lte("date", futureDate),
       supabase.from("channel_pricing").select("*").eq("ota_channel_id", channelId).eq("is_active", true),
-      supabase.from("rooms").select("id, category_id, status"),
-      supabase.from("room_categories").select("id, base_price"),
+      supabase
+        .from("rooms")
+        .select("id, category_id, status, is_blocked")
+        .eq("establishment_id", establishmentId),
+      supabase
+        .from("room_categories")
+        .select("id, base_price")
+        .eq("establishment_id", establishmentId),
       supabase
         .from("reservations")
-        .select("id, category_id, checkin_date, checkout_date, status")
+        .select("id, category_id, room_id, checkin_date, checkout_date, status, notes, channel")
         .eq("establishment_id", establishmentId)
         .gte("checkout_date", today)
         .lte("checkin_date", futureDate),
@@ -272,7 +278,8 @@ serve(async (req) => {
       const categoryId = String(rr.category_id ?? "");
       if (!categoryId) continue;
       const status = String(rr.status ?? "").toLowerCase();
-      const isUnavailable = status === "maintenance" || status === "blocked";
+      const isBlocked = rr.is_blocked === true;
+      const isUnavailable = isBlocked || status === "maintenance" || status === "blocked";
       const current = roomAvailabilityByCategory.get(categoryId) ?? 0;
       roomAvailabilityByCategory.set(categoryId, current + (isUnavailable ? 0 : 1));
     }
@@ -281,14 +288,35 @@ serve(async (req) => {
     // (ex.: cancelada). Cancelamentos só na OTA/Channex em pendência mantêm a reserva ativa no PMS
     // até o staff cancelar — o inventário no push continua coerente com quartos ocupados localmente.
     const bookedByCategoryDate = new Map<string, number>();
+    const roomCategoryByRoomId = new Map<string, string>();
+    for (const room of rooms ?? []) {
+      const rr = room as AnyObj;
+      const roomId = String(rr.id ?? "").trim();
+      const categoryId = String(rr.category_id ?? "").trim();
+      if (!roomId || !categoryId) continue;
+      roomCategoryByRoomId.set(roomId, categoryId);
+    }
     const inactiveReservationStatuses = new Set(["cancelled", "canceled", "checkedout", "checked_out"]);
     for (const reservation of reservations ?? []) {
       const rr = reservation as AnyObj;
-      const categoryId = String(rr.category_id ?? "").trim();
-      if (!categoryId) continue;
+      const roomId = String(rr.room_id ?? "").trim();
+      const fallbackCategoryId = String(rr.category_id ?? "").trim();
+      const effectiveCategoryId = roomId
+        ? String(roomCategoryByRoomId.get(roomId) ?? fallbackCategoryId).trim()
+        : fallbackCategoryId;
+      if (!effectiveCategoryId) continue;
 
       const status = String(rr.status ?? "").toLowerCase();
-      if (inactiveReservationStatuses.has(status)) continue;
+      const notes = String(rr.notes ?? "").toLowerCase();
+      const channel = String(rr.channel ?? "").toLowerCase();
+      const keepInventoryForChannexCancelled =
+        (status === "cancelled" || status === "canceled") && notes.includes("cancelada via channex");
+      if (inactiveReservationStatuses.has(status) && !keepInventoryForChannexCancelled) continue;
+      const isChannelReservation = channel === "ota" || channel === "channel_manager" || channel === "channel manager";
+      const hasCrossCategoryRelocation =
+        Boolean(fallbackCategoryId) &&
+        Boolean(effectiveCategoryId) &&
+        fallbackCategoryId !== effectiveCategoryId;
 
       const checkin = String(rr.checkin_date ?? "").slice(0, 10);
       const checkout = String(rr.checkout_date ?? "").slice(0, 10);
@@ -303,8 +331,15 @@ serve(async (req) => {
       const loopEnd = end < maxExclusive ? end : maxExclusive;
       while (cursor < loopEnd) {
         const d = toIsoDate(cursor);
-        const key = `${categoryId}::${d}`;
+        const key = `${effectiveCategoryId}::${d}`;
         bookedByCategoryDate.set(key, (bookedByCategoryDate.get(key) ?? 0) + 1);
+        // Em realocacao entre categorias para reserva de canal, manter bloqueio
+        // tambem na categoria original para evitar disponibilidade falsa/negativa no Channex
+        // enquanto o booking original ainda referencia a categoria anterior no canal.
+        if (isChannelReservation && hasCrossCategoryRelocation) {
+          const originalKey = `${fallbackCategoryId}::${d}`;
+          bookedByCategoryDate.set(originalKey, (bookedByCategoryDate.get(originalKey) ?? 0) + 1);
+        }
         cursor = addDays(cursor, 1);
       }
     }

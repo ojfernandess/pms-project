@@ -49,6 +49,11 @@ export const usePendingReservations = () => {
     return !isChannelReservation(reservation);
   };
 
+  const isOverbookingReservation = (reservation: any): boolean => {
+    const notes = String(reservation?.notes || "").toLowerCase();
+    return notes.includes("overbooking");
+  };
+
   // Buscar novas reservas de OTA/Channel Manager (últimas 7 dias)
   const newOTAReservationsQuery = useQuery({
     queryKey: ["pending", "new-ota-reservations", selectedEstablishment?.id],
@@ -88,7 +93,11 @@ export const usePendingReservations = () => {
 
       // Filtrar reservas vindas de channel manager/OTA e não resolvidas
       const otaReservations = (allReservations || []).filter((reservation: any) => {
-        return isChannelReservation(reservation) && reservation.pending_resolved_at === null;
+        return (
+          isChannelReservation(reservation) &&
+          !isOverbookingReservation(reservation) &&
+          reservation.pending_resolved_at === null
+        );
       });
 
       return otaReservations;
@@ -134,7 +143,11 @@ export const usePendingReservations = () => {
 
       // Filtrar reservas criadas no PMS/balcão e não resolvidas
       const counterReservations = (allReservations || []).filter((reservation: any) => {
-        return isCounterReservation(reservation) && reservation.pending_resolved_at === null;
+        return (
+          isCounterReservation(reservation) &&
+          !isOverbookingReservation(reservation) &&
+          reservation.pending_resolved_at === null
+        );
       });
 
       return counterReservations;
@@ -178,7 +191,7 @@ export const usePendingReservations = () => {
         return [];
       }
 
-      return data || [];
+      return (data || []).filter((reservation: any) => !isOverbookingReservation(reservation));
     },
   });
 
@@ -346,6 +359,81 @@ export const usePendingReservations = () => {
             });
           }
         }
+      }
+
+      // Overbooking operacional (ex.: vindo de integração sem quarto atribuído)
+      // Se a reserva foi marcada com OVERBOOKING nas notas, ela também deve aparecer em Pendências.
+      const existingOverbookingIds = new Set(overbookings.map((o) => o.reservation?.id).filter(Boolean));
+      for (const reservation of reservations as any[]) {
+        const reservationId = String(reservation?.id || "").trim();
+        if (!reservationId || existingOverbookingIds.has(reservationId)) continue;
+        if (reservation?.pending_resolved_at !== null) continue;
+
+        const notes = String(reservation?.notes || "").toLowerCase();
+        if (!notes.includes("overbooking")) continue;
+
+        const categoryId = reservation.category_id || reservation.room_categories?.id;
+        if (!categoryId) continue;
+
+        const checkin = parseISO(reservation.checkin_date);
+        const checkout = parseISO(reservation.checkout_date);
+
+        const { data: categoryRooms } = await supabase
+          .from("rooms")
+          .select("*")
+          .eq("category_id", categoryId)
+          .eq("establishment_id", establishmentId)
+          .in("status", ["available", "cleaning"]);
+
+        const availableRooms = (categoryRooms || []).filter((room: any) => {
+          if (room.is_blocked === true) return false;
+          const hasConflict = reservations.some((r: any) => {
+            if (r.room_id !== room.id) return false;
+            if (r.id === reservation.id) return false;
+            if (r.status === "cancelled") return false;
+            const rCheckin = parseISO(r.checkin_date);
+            const rCheckout = parseISO(r.checkout_date);
+            return isBefore(rCheckin, checkout) && isAfter(rCheckout, checkin);
+          });
+          return !hasConflict;
+        });
+
+        const { data: allRooms } = await supabase
+          .from("rooms")
+          .select("*")
+          .eq("establishment_id", establishmentId)
+          .in("status", ["available", "cleaning"]);
+
+        const alternativeRooms = (allRooms || []).filter((room: any) => {
+          if (room.id === reservation.room_id) return false;
+          if (room.is_blocked === true) return false;
+          const hasConflict = reservations.some((r: any) => {
+            if (r.room_id !== room.id) return false;
+            if (r.id === reservation.id) return false;
+            if (r.status === "cancelled") return false;
+            const rCheckin = parseISO(r.checkin_date);
+            const rCheckout = parseISO(r.checkout_date);
+            return isBefore(rCheckin, checkout) && isAfter(rCheckout, checkin);
+          });
+          return !hasConflict;
+        });
+
+        const conflictDates = eachDayOfInterval({
+          start: startOfDay(checkin),
+          end: startOfDay(checkout),
+        }).map((d) => format(d, "yyyy-MM-dd"));
+
+        overbookings.push({
+          reservation: {
+            ...reservation,
+            overbooking_source: "integration_unavailability",
+          },
+          conflictingReservations: [],
+          conflictDates,
+          availableRooms,
+          alternativeRooms,
+          categoryRooms: categoryRooms || [],
+        });
       }
 
       // Remover duplicatas e filtrar reservas não resolvidas
@@ -608,7 +696,29 @@ export const usePendingReservations = () => {
 
       return payload;
     },
-    onSuccess: (_data, vars) => {
+    onSuccess: async (_data, vars) => {
+      try {
+        await logActivity({
+          actionType: vars.status === "cancelled" ? "cancelled" : "updated",
+          entityType: "pending",
+          entityId: vars.revisionId,
+          entityCode: vars.bookingUniqueId || vars.bookingId || vars.revisionId,
+          description:
+            vars.status === "cancelled"
+              ? `Pendência Channex de cancelamento aceita pelo usuário (${vars.bookingUniqueId || vars.bookingId || vars.revisionId})`
+              : `Pendência Channex de modificação aceita pelo usuário (${vars.bookingUniqueId || vars.bookingId || vars.revisionId})`,
+          metadata: {
+            source: "channex",
+            revision_id: vars.revisionId,
+            booking_id: vars.bookingId || null,
+            booking_unique_id: vars.bookingUniqueId || null,
+            accepted_by_user: true,
+            accepted_action: vars.status,
+          },
+        });
+      } catch (logError) {
+        console.error("Erro ao registrar log de aceite Channex:", logError);
+      }
       toast.success(
         vars.status === "modified"
           ? "Reserva modificada reprocessada com sucesso"

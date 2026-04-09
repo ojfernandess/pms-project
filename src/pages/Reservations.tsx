@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useReservations } from "@/hooks/useReservations";
 import { usePendingReservations } from "@/hooks/usePendingReservations";
 import { useExpiredPreregistrations } from "@/hooks/useExpiredPreregistrations";
@@ -86,6 +87,9 @@ const Reservations = () => {
   const [dateFromFilter, setDateFromFilter] = useState<string>("");
   const [dateToFilter, setDateToFilter] = useState<string>("");
   const [activeTab, setActiveTab] = useState<string>("map");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [sortBy, setSortBy] = useState<"recent" | "checkin_asc" | "checkin_desc">("recent");
 
   const { reservations, isLoading, refetch, checkIn, checkOut, cancelReservation, updateReservation, replaceReservationRoom, confirmPreregistration } = useReservations();
   const { canCreate, canUpdate, canDelete } = usePermissions();
@@ -231,6 +235,35 @@ const Reservations = () => {
       return matchesSearch && matchesStatus && matchesDate;
     });
   }, [reservations, searchTerm, statusFilter, dateFromFilter, dateToFilter]);
+
+  const sortedReservations = useMemo(() => {
+    const list = [...filteredReservations];
+    list.sort((a: any, b: any) => {
+      if (sortBy === "recent") {
+        const aTs = new Date(a.created_at || a.updated_at || a.checkin_date || 0).getTime();
+        const bTs = new Date(b.created_at || b.updated_at || b.checkin_date || 0).getTime();
+        return bTs - aTs;
+      }
+      const aCheckin = new Date(a.checkin_date || 0).getTime();
+      const bCheckin = new Date(b.checkin_date || 0).getTime();
+      return sortBy === "checkin_asc" ? aCheckin - bCheckin : bCheckin - aCheckin;
+    });
+    return list;
+  }, [filteredReservations, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedReservations.length / pageSize));
+  const paginatedReservations = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return sortedReservations.slice(start, start + pageSize);
+  }, [sortedReservations, page, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, statusFilter, dateFromFilter, dateToFilter, sortBy, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const getStatusBadge = (status: string) => {
     const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
@@ -479,6 +512,39 @@ const Reservations = () => {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">Ordenar</span>
+                  <Select
+                    value={sortBy}
+                    onValueChange={(value: "recent" | "checkin_asc" | "checkin_desc") => setSortBy(value)}
+                  >
+                    <SelectTrigger className="w-[220px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="recent">Mais recentes</SelectItem>
+                      <SelectItem value="checkin_asc">Check-in (mais próximo)</SelectItem>
+                      <SelectItem value="checkin_desc">Check-in (mais distante)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">Por página</span>
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(value) => setPageSize(Number(value))}
+                  >
+                    <SelectTrigger className="w-[100px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="20">20</SelectItem>
+                      <SelectItem value="30">30</SelectItem>
+                      <SelectItem value="40">40</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 
@@ -486,11 +552,19 @@ const Reservations = () => {
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
-        ) : filteredReservations.length === 0 ? (
+        ) : sortedReservations.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             Nenhuma reserva encontrada
           </div>
         ) : (
+          <>
+          <div className="mb-3 flex items-center justify-between text-sm text-muted-foreground">
+            <span>
+              Mostrando {Math.min((page - 1) * pageSize + 1, sortedReservations.length)}-
+              {Math.min(page * pageSize, sortedReservations.length)} de {sortedReservations.length}
+            </span>
+            <span>Página {page} de {totalPages}</span>
+          </div>
           <Table>
             <TableHeader>
               <TableRow>
@@ -506,7 +580,7 @@ const Reservations = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredReservations.map((reservation: any) => (
+              {paginatedReservations.map((reservation: any) => (
                 <TableRow key={reservation.id}>
                   <TableCell className="font-mono text-xs text-muted-foreground">
                     #{reservation.identification_number || "-"}
@@ -627,6 +701,25 @@ const Reservations = () => {
               ))}
             </TableBody>
           </Table>
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Próxima
+            </Button>
+          </div>
+          </>
             )}
           </Card>
         </TabsContent>

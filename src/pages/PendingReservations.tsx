@@ -74,6 +74,7 @@ const PendingReservations = () => {
   const [showCompletedChannex, setShowCompletedChannex] = useState(false);
   const [channexCancelTarget, setChannexCancelTarget] = useState<ChannexCancelDialogTarget | null>(null);
   const [finalizingChannexRevisionId, setFinalizingChannexRevisionId] = useState<string | null>(null);
+  const [resolvingOverbookingId, setResolvingOverbookingId] = useState<string | null>(null);
 
   // URL :establishmentId é o numeric_id (ex. "5"), não o UUID. APIs Supabase/edge usam establishment.id (UUID).
   const establishmentIdResolved = selectedEstablishment?.id || establishmentId || "";
@@ -175,6 +176,15 @@ const PendingReservations = () => {
       availableRooms: candidateRooms,
     });
     setChangeRoomDialogOpen(true);
+  };
+
+  const handleResolveOverbooking = (reservationId: string) => {
+    setResolvingOverbookingId(reservationId);
+    markPendingAsResolved(reservationId, {
+      onSettled: () => {
+        setResolvingOverbookingId(null);
+      },
+    });
   };
 
   return (
@@ -678,23 +688,40 @@ const PendingReservations = () => {
                                 </p>
                               ) : null}
                               <p className="text-sm text-muted-foreground">Ao aceitar: a reserva anterior é cancelada e uma nova versão é reprocessada no mapa.</p>
-                              <Button
-                                size="sm"
-                                className="mt-2"
-                                disabled={isAcceptingChannexRevision}
-                                onClick={() =>
-                                  acceptChannexRevision({
-                                    revisionId: item.revision_id,
-                                    channelId: item.ota_channel_id,
-                                    bookingId: item.booking_id || undefined,
-                                    bookingUniqueId: item.unique_id || undefined,
-                                    status: "modified",
-                                  })
-                                }
-                              >
-                                <RotateCcw className="h-4 w-4 mr-2" />
-                                Reprocessar Modificação
-                              </Button>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <Button
+                                  size="sm"
+                                  disabled={isAcceptingChannexRevision}
+                                  onClick={() =>
+                                    acceptChannexRevision({
+                                      revisionId: item.revision_id,
+                                      channelId: item.ota_channel_id,
+                                      bookingId: item.booking_id || undefined,
+                                      bookingUniqueId: item.unique_id || undefined,
+                                      status: "modified",
+                                    })
+                                  }
+                                >
+                                  <RotateCcw className="h-4 w-4 mr-2" />
+                                  Reprocessar Modificação
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-green-700 hover:text-green-800 hover:bg-green-50"
+                                  disabled={isMarkingResolved || !reservationRow?.id}
+                                  onClick={() => {
+                                    if (!reservationRow?.id) {
+                                      toast.error("Sem reserva vinculada para resolver a pendência.");
+                                      return;
+                                    }
+                                    markPendingAsResolved(reservationRow.id);
+                                  }}
+                                >
+                                  <Check className="h-4 w-4 mr-2" />
+                                  Resolver
+                                </Button>
+                              </div>
                             </div>
                           );
                         })}
@@ -838,7 +865,9 @@ const PendingReservations = () => {
                               <h3 className="font-semibold">
                                 {overbooking.reservation.reservation_code}
                               </h3>
-                              <Badge variant="destructive">Conflito</Badge>
+                              <Badge variant="destructive">
+                                {overbooking.conflictingReservations.length > 0 ? "Conflito" : "Overbooking"}
+                              </Badge>
                             </div>
                             <p className="text-sm text-muted-foreground">
                               Hóspede:{" "}
@@ -864,31 +893,44 @@ const PendingReservations = () => {
                           <AlertCircle className="h-4 w-4" />
                           <AlertDescription>
                             <div className="space-y-1">
-                              <p>
-                                <strong>Conflita com {overbooking.conflictingReservations.length} reserva(s):</strong>
-                              </p>
-                              <ul className="list-disc list-inside space-y-1">
-                                {overbooking.conflictingReservations.map(
-                                  (conflict: any) => (
-                                    <li key={conflict.id}>
-                                      {conflict.reservation_code} -{" "}
-                                      {reservationGuestDisplayName(conflict, "N/A")}
-                                      {" "}({formatDate(conflict.checkin_date)} -{" "}
-                                      {formatDate(conflict.checkout_date)})
-                                    </li>
-                                  )
-                                )}
-                              </ul>
-                              <p className="mt-2">
-                                <strong>Datas em conflito:</strong>{" "}
-                                {overbooking.conflictDates
-                                  .map((date: string) =>
-                                    format(parseISO(date), "dd/MM/yyyy", {
-                                      locale: ptBR,
-                                    })
-                                  )
-                                  .join(", ")}
-                              </p>
+                              {overbooking.conflictingReservations.length > 0 ? (
+                                <>
+                                  <p>
+                                    <strong>Conflita com {overbooking.conflictingReservations.length} reserva(s):</strong>
+                                  </p>
+                                  <ul className="list-disc list-inside space-y-1">
+                                    {overbooking.conflictingReservations.map(
+                                      (conflict: any) => (
+                                        <li key={conflict.id}>
+                                          {conflict.reservation_code} -{" "}
+                                          {reservationGuestDisplayName(conflict, "N/A")}
+                                          {" "}({formatDate(conflict.checkin_date)} -{" "}
+                                          {formatDate(conflict.checkout_date)})
+                                        </li>
+                                      )
+                                    )}
+                                  </ul>
+                                  <p className="mt-2">
+                                    <strong>Datas em conflito:</strong>{" "}
+                                    {overbooking.conflictDates
+                                      .map((date: string) =>
+                                        format(parseISO(date), "dd/MM/yyyy", {
+                                          locale: ptBR,
+                                        })
+                                      )
+                                      .join(", ")}
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <p>
+                                    <strong>Reserva recebida com indisponibilidade (overbooking de integração).</strong>
+                                  </p>
+                                  <p>
+                                    Sem quarto disponível no momento; faça a tratativa manual (troca de quarto/categoria, split ou resolução).
+                                  </p>
+                                </>
+                              )}
                             </div>
                           </AlertDescription>
                         </Alert>
@@ -962,14 +1004,29 @@ const PendingReservations = () => {
                           </Button>
                           <Button
                             variant="outline"
-                            onClick={() => markPendingAsResolved(overbooking.reservation.id)}
+                            onClick={() => handleResolveOverbooking(overbooking.reservation.id)}
                             disabled={isMarkingResolved}
                             className="text-green-600 hover:text-green-700 hover:bg-green-50"
                           >
-                            <Check className="h-4 w-4 mr-1" />
-                            Resolver
+                            {resolvingOverbookingId === overbooking.reservation.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                Processando...
+                              </>
+                            ) : (
+                              <>
+                                <Check className="h-4 w-4 mr-1" />
+                                Resolver
+                              </>
+                            )}
                           </Button>
                         </div>
+                        {resolvingOverbookingId === overbooking.reservation.id && (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            O processamento pode levar alguns segundos para atualizar as pendências.
+                          </div>
+                        )}
                       </div>
                         );
                       })()}

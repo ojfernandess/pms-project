@@ -756,10 +756,11 @@ export const QuickReservationDialog = ({
                       value={formData.checkin_date}
                       onChange={(e) => {
                         const newCheckin = e.target.value;
+                        const nextCheckout = newCheckin ? calculateCheckoutDate(newCheckin) : formData.checkout_date;
                         setFormData({
                           ...formData,
                           checkin_date: newCheckin,
-                          checkout_date: newCheckin ? format(addDays(new Date(newCheckin), 1), "yyyy-MM-dd") : formData.checkout_date,
+                          checkout_date: nextCheckout,
                         });
                       }}
                       className="pl-9 h-9"
@@ -848,10 +849,11 @@ export const QuickReservationDialog = ({
                       value={formData.checkin_date}
                       onChange={(e) => {
                         const newCheckin = e.target.value;
+                        const nextCheckout = newCheckin ? calculateCheckoutDate(newCheckin) : formData.checkout_date;
                         setFormData({
                           ...formData,
                           checkin_date: newCheckin,
-                          checkout_date: newCheckin ? format(addDays(new Date(newCheckin), 1), "yyyy-MM-dd") : formData.checkout_date,
+                          checkout_date: nextCheckout,
                         });
                       }}
                       className="pl-9 h-9"
