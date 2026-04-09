@@ -2049,19 +2049,61 @@ function splitMoneyAcrossParts(total: number, n: number): number[] {
   return Array.from({ length: n }, (_, i) => (base + (i < rem ? 1 : 0)) / 100);
 }
 
+/**
+ * Soma `rooms[].prices[].sellRate` (formato doc. Aiosell: tarifa diária por quarto).
+ * Usado como peso proporcional para multi-quarto quando os quartos não têm um campo `amount` direto.
+ * Retorna null se o quarto não tiver o array `prices` ou se nenhuma tarifa for válida.
+ */
+function sumRoomSellRates(room: Record<string, unknown>): number | null {
+  const prices = room.prices;
+  if (!Array.isArray(prices) || prices.length === 0) return null;
+  let sum = 0;
+  let hasAny = false;
+  for (const p of prices as Record<string, unknown>[]) {
+    const sr = p.sellRate ?? p.sell_rate ?? p.rate ?? p.price;
+    if (sr != null) {
+      const n = Number(sr);
+      if (!Number.isNaN(n) && n > 0) {
+        sum += n;
+        hasAny = true;
+      }
+    }
+  }
+  return hasAny ? sum : null;
+}
+
 function computePerRoomAmounts(
   rooms: Record<string, unknown>[],
   room0: Record<string, unknown>,
   body: Record<string, unknown>,
   layers: Record<string, unknown>[]
-): { amounts: number[]; strategy: "per_room_lines" | "split_booking_total" } {
+): { amounts: number[]; strategy: "per_room_lines" | "split_booking_total" | "prices_proportional" } {
   if (rooms.length === 0) return { amounts: [], strategy: "split_booking_total" };
+
+  // 1ª prioridade: campo de valor direto por quarto (e.g. room.amount, room.totalAmount)
   const per = rooms.map((r) => pickTotalAmountFromRoomObjectOnly(r));
   const allSet = per.length > 0 && per.every((a) => a != null && !Number.isNaN(a));
   if (allSet) {
     return { amounts: per.map((a) => a as number), strategy: "per_room_lines" };
   }
+
   const bookingTotal = pickTotalAmount(room0, body, layers);
+
+  // 2ª prioridade: distribuição proporcional via rooms[].prices[].sellRate (doc. Aiosell)
+  // Ex.: Room A com sellRate diário 500, Room B com 1000 → split 1/3 : 2/3 do total com impostos
+  if (rooms.length > 1) {
+    const pricesRates = rooms.map((r) => sumRoomSellRates(r));
+    const allHavePrices = pricesRates.every((s) => s != null && (s as number) > 0);
+    if (allHavePrices && bookingTotal > 0) {
+      const totalRates = (pricesRates as number[]).reduce((a, b) => a + b, 0);
+      const amounts = (pricesRates as number[]).map(
+        (s) => Math.round((s / totalRates) * bookingTotal * 100) / 100
+      );
+      return { amounts, strategy: "prices_proportional" };
+    }
+  }
+
+  // 3ª prioridade: divisão igualitária do total da reserva
   return { amounts: splitMoneyAcrossParts(bookingTotal, rooms.length), strategy: "split_booking_total" };
 }
 
@@ -2347,6 +2389,7 @@ async function applyAiosellReservationPayload(
       status: 200,
       json: {
         success: true,
+        message: "Reservation Cancelled Successfully",
         action: "cancel",
         reservation_id: ids[0],
         reservation_ids: ids,
@@ -2446,6 +2489,7 @@ async function applyAiosellReservationPayload(
       status: 200,
       json: {
         success: true,
+        message: "Reservation Modified Successfully",
         action: "modify",
         reservation_id: otaRows[0].reservation_id,
         reservation_ids: otaRows.map((r) => r.reservation_id),
@@ -2685,6 +2729,7 @@ async function applyAiosellReservationPayload(
       status: 200,
       json: {
         success: true,
+        message: "Reservation Updated Successfully",
         action: "book",
         multi_room: true,
         reservation_ids: createdIds,
@@ -2873,6 +2918,7 @@ async function applyAiosellReservationPayload(
     status: 200,
     json: {
       success: true,
+      message: "Reservation Updated Successfully",
       action: "book",
       reservation_id: rid,
       prepaid_recorded: prepaid && total > 0,
