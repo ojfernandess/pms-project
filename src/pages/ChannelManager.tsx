@@ -131,10 +131,16 @@ const ChannelManager = () => {
           <TabsTrigger value="channels">Canais</TabsTrigger>
           <TabsTrigger value="pricing">Tarifas por Canal</TabsTrigger>
           {channels.some((c: { channel_manager_type?: string }) => c.channel_manager_type === "aiosell") && (
-            <TabsTrigger value="aiosell-mapping">Mapeamento Aiosell</TabsTrigger>
+            <TabsTrigger value="aiosell-mapping" className="flex items-center gap-1.5">
+              <img src="/channel/Aiosell.jpeg" alt="Aiosell" className="h-4 w-auto rounded object-contain" />
+              Mapeamento Aiosell
+            </TabsTrigger>
           )}
           {channels.some((c: { channel_manager_type?: string }) => c.channel_manager_type === "channex") && (
-            <TabsTrigger value="channex-mapping">Mapeamento Channex</TabsTrigger>
+            <TabsTrigger value="channex-mapping" className="flex items-center gap-1.5">
+              <img src="/channel/logo_small.svg" alt="Channex" className="h-4 w-auto object-contain" />
+              Mapeamento Channex
+            </TabsTrigger>
           )}
           <TabsTrigger value="reservations">Reservas OTA</TabsTrigger>
         </TabsList>
@@ -206,47 +212,61 @@ const ChannelManager = () => {
 
               {channels.some((c: any) => c.channel_manager_type === "aiosell") && (
                 <Card className="p-4 bg-slate-50 border-slate-200">
-                  <div className="flex-1">
-                    <h4 className="font-semibold text-slate-900 mb-2">Aiosell Channel Manager</h4>
-                    <p className="text-sm text-slate-800 mb-2">
-                      Configure o código do hotel (sandbox ou produção), usuário e senha HTTP Basic. Use o
-                      separador <strong>Mapeamento Aiosell</strong> para associar cada categoria e plano do PMS
-                      aos Room Codes e Rate Plan Codes do painel Aiosell (ex. deluxe / deluxe-s-ep).
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      Documentação:{" "}
-                      <a
-                        href="https://support.aiosell.com/portal/en/kb/articles/aiosell-rest-api-documentation-property-management-system-to-channel-manager"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline"
-                      >
-                        Aiosell REST API (PMS → Channel Manager)
-                      </a>
-                    </p>
+                  <div className="flex items-start gap-4">
+                    <img
+                      src="/channel/Aiosell.jpeg"
+                      alt="Aiosell Channel Manager"
+                      className="h-12 w-auto rounded-lg object-contain shrink-0 border border-slate-200 bg-white p-1"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-slate-900 mb-1">Aiosell Channel Manager</h4>
+                      <p className="text-sm text-slate-800 mb-2">
+                        Configure o código do hotel (sandbox ou produção), usuário e senha HTTP Basic. Use o
+                        separador <strong>Mapeamento Aiosell</strong> para associar cada categoria e plano do PMS
+                        aos Room Codes e Rate Plan Codes do painel Aiosell (ex. deluxe / deluxe-s-ep).
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        Documentação:{" "}
+                        <a
+                          href="https://support.aiosell.com/portal/en/kb/articles/aiosell-rest-api-documentation-property-management-system-to-channel-manager"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline"
+                        >
+                          Aiosell REST API (PMS → Channel Manager)
+                        </a>
+                      </p>
+                    </div>
                   </div>
                 </Card>
               )}
 
               {channels.some((c: any) => c.channel_manager_type === "channex") && (
                 <Card className="p-4 bg-violet-50 border-violet-200">
-                  <div className="flex-1">
-                    <h4 className="font-semibold text-violet-900 mb-2">Channex Channel Manager</h4>
-                    <p className="text-sm text-violet-800 mb-2">
-                      Configure API Key e Property ID para enviar ARI (availability/restrictions) e receber
-                      reservas via feed/webhook com ACK automático.
-                    </p>
-                    <p className="text-xs text-violet-700">
-                      Documentação:{" "}
-                      <a
-                        href="https://docs.channex.io/guides/pms-integration-guide"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline"
-                      >
-                        Channex PMS Integration Guide
-                      </a>
-                    </p>
+                  <div className="flex items-start gap-4">
+                    <img
+                      src="/channel/logo_small.svg"
+                      alt="Channex Channel Manager"
+                      className="h-12 w-auto rounded-lg object-contain shrink-0 border border-violet-200 bg-white p-1"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-violet-900 mb-1">Channex Channel Manager</h4>
+                      <p className="text-sm text-violet-800 mb-2">
+                        Configure API Key e Property ID para enviar ARI (availability/restrictions) e receber
+                        reservas via feed/webhook com ACK automático.
+                      </p>
+                      <p className="text-xs text-violet-700">
+                        Documentação:{" "}
+                        <a
+                          href="https://docs.channex.io/guides/pms-integration-guide"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline"
+                        >
+                          Channex PMS Integration Guide
+                        </a>
+                      </p>
+                    </div>
                   </div>
                 </Card>
               )}

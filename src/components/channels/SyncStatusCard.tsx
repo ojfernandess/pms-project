@@ -81,14 +81,28 @@ export const SyncStatusCard = ({
 
       {channel.channel_manager_type === "aiosell" && (
         <div className="mb-3 p-2 bg-slate-50 rounded text-xs text-slate-800">
-          <p className="font-semibold">Aiosell Channel Manager</p>
+          <div className="flex items-center gap-2 mb-1">
+            <img
+              src="/channel/Aiosell.jpeg"
+              alt="Aiosell"
+              className="h-6 w-auto rounded object-contain"
+            />
+            <p className="font-semibold">Aiosell Channel Manager</p>
+          </div>
           <p>Push de tarifas, inventário e restrições via HTTP Basic. Webhook de reservas na Edge Function.</p>
         </div>
       )}
 
       {channel.channel_manager_type === "channex" && (
         <div className="mb-3 p-2 bg-violet-50 rounded text-xs text-violet-800">
-          <p className="font-semibold">Channex Channel Manager</p>
+          <div className="flex items-center gap-2 mb-1">
+            <img
+              src="/channel/logo_small.svg"
+              alt="Channex"
+              className="h-6 w-auto object-contain"
+            />
+            <p className="font-semibold">Channex Channel Manager</p>
+          </div>
           <p>ARI em chamadas separadas e reservas via booking revisions feed com ACK.</p>
           <p className="mt-1">
             Estado Channex: <strong>{channel.channex_sync_status || "idle"}</strong>
