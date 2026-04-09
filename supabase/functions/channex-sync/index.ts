@@ -71,9 +71,9 @@ function toNonNegativeIntOrNull(value: unknown): number | null {
 }
 
 function rowToChannexRestrictionFields(row: AnyObj): {
-  closed_to_arrival?: boolean;
-  closed_to_departure?: boolean;
-  stop_sell?: boolean;
+  closed_to_arrival: boolean;
+  closed_to_departure: boolean;
+  stop_sell: boolean;
   min_stay_arrival?: number;
   min_stay_through?: number;
   max_stay?: number;
@@ -82,7 +82,9 @@ function rowToChannexRestrictionFields(row: AnyObj): {
   const maxStayRaw = row.max_stay ?? row.max_los;
   const ctaRaw = row.closed_to_arrival ?? row.cta;
   const ctdRaw = row.closed_to_departure ?? row.ctd;
-  const stopSellRaw = row.stop_sell_ota ?? row.stop_sell_booking_engine ?? row.stop_sell;
+  // Usa apenas stop_sell_ota; stop_sell_booking_engine aplica-se só ao motor de reservas
+  // próprio e não deve fechar inventário no canal OTA/Channex.
+  const stopSellRaw = row.stop_sell_ota ?? row.stop_sell;
 
   const minStay = toPositiveIntOrNull(minStayRaw);
   const maxStay = toNonNegativeIntOrNull(maxStayRaw);
@@ -90,30 +92,28 @@ function rowToChannexRestrictionFields(row: AnyObj): {
   const ctd = Boolean(ctdRaw);
   const stopSell = Boolean(stopSellRaw);
 
+  // Channex usa "Last Win logic": enviar sempre os booleanos (mesmo false) garante que o
+  // Channex redefina corretamente quando uma restrição for desativada.
+  // Doc: "Should be a non null value or not existed field" → false é válido, null gera warning.
   const payload: {
-    closed_to_arrival?: boolean;
-    closed_to_departure?: boolean;
-    stop_sell?: boolean;
+    closed_to_arrival: boolean;
+    closed_to_departure: boolean;
+    stop_sell: boolean;
     min_stay_arrival?: number;
     min_stay_through?: number;
     max_stay?: number;
-  } = {};
+  } = {
+    closed_to_arrival: cta,
+    closed_to_departure: ctd,
+    stop_sell: stopSell,
+  };
 
-  // RATE -> rate
-  // CTA -> closed_to_arrival
-  // CTD -> closed_to_departure
-  // SS -> stop_sell
-  // MSA -> min_stay_arrival
-  // MST -> min_stay_through
-  // MXS -> max_stay
+  // MSA/MST: só envia quando há valor positivo — omitir é correto quando não há restrição de estadia.
   if (minStay != null) {
     payload.min_stay_arrival = minStay;
     payload.min_stay_through = minStay;
   }
   if (maxStay != null) payload.max_stay = maxStay;
-  if (cta) payload.closed_to_arrival = true;
-  if (ctd) payload.closed_to_departure = true;
-  if (stopSell) payload.stop_sell = true;
 
   return payload;
 }
@@ -255,7 +255,7 @@ serve(async (req) => {
         .eq("establishment_id", establishmentId),
       supabase
         .from("reservations")
-        .select("id, category_id, room_id, checkin_date, checkout_date, status, notes, channel")
+        .select("id, category_id, room_id, checkin_date, checkout_date, status, channel")
         .eq("establishment_id", establishmentId)
         .gte("checkout_date", today)
         .lte("checkin_date", futureDate),
@@ -285,8 +285,8 @@ serve(async (req) => {
     }
 
     // Ocupação enviada ao Channex segue o PMS: só deixa de contar quando a reserva está inativa aqui
-    // (ex.: cancelada). Cancelamentos só na OTA/Channex em pendência mantêm a reserva ativa no PMS
-    // até o staff cancelar — o inventário no push continua coerente com quartos ocupados localmente.
+    // (ex.: cancelada). Cancelamentos no Channex atualizam o status no PMS imediatamente via webhook/sync,
+    // portanto reservas canceladas NUNCA devem reduzir a disponibilidade enviada ao Channex.
     const bookedByCategoryDate = new Map<string, number>();
     const roomCategoryByRoomId = new Map<string, string>();
     for (const room of rooms ?? []) {
@@ -307,11 +307,12 @@ serve(async (req) => {
       if (!effectiveCategoryId) continue;
 
       const status = String(rr.status ?? "").toLowerCase();
-      const notes = String(rr.notes ?? "").toLowerCase();
       const channel = String(rr.channel ?? "").toLowerCase();
-      const keepInventoryForChannexCancelled =
-        (status === "cancelled" || status === "canceled") && notes.includes("cancelada via channex");
-      if (inactiveReservationStatuses.has(status) && !keepInventoryForChannexCancelled) continue;
+      // Reservas inativas (canceladas, checkout concluído) não consomem inventário.
+      // A exceção anterior para "cancelada via channex" foi removida: causava disponibilidade
+      // reduzida no Channex mesmo após o cancelamento ser processado, gerando o bug
+      // "PMS mostra 2 disponíveis, Channex mostra 1".
+      if (inactiveReservationStatuses.has(status)) continue;
       const isChannelReservation = channel === "ota" || channel === "channel_manager" || channel === "channel manager";
       const hasCrossCategoryRelocation =
         Boolean(fallbackCategoryId) &&
@@ -343,6 +344,29 @@ serve(async (req) => {
         cursor = addDays(cursor, 1);
       }
     }
+
+    // Diagnóstico: mostra disponibilidade base e ocupação por categoria para auditoria.
+    const diagCategories: Record<string, { base: number; topBooked: number }> = {};
+    for (const [catId, base] of roomAvailabilityByCategory.entries()) {
+      diagCategories[catId] = { base, topBooked: 0 };
+    }
+    for (const [key, cnt] of bookedByCategoryDate.entries()) {
+      const catId = key.split("::")[0];
+      if (diagCategories[catId]) {
+        diagCategories[catId].topBooked = Math.max(diagCategories[catId].topBooked, cnt);
+      }
+    }
+    console.info(
+      "[channex-sync] availability_debug",
+      JSON.stringify({
+        categories: Object.entries(diagCategories).map(([id, v]) => ({
+          category_id: id,
+          base_inventory: v.base,
+          peak_booked: v.topBooked,
+          min_net_availability: Math.max(0, v.base - v.topBooked),
+        })),
+      })
+    );
 
     const useRateCalendar = Array.isArray(rateCalendar) && rateCalendar.length > 0;
     const categoryBasePriceMap = new Map<string, number>();

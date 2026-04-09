@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 
 type MaintenanceTicketInsert = TablesInsert<"maintenance_tickets">;
@@ -138,6 +139,7 @@ export const useMaintenance = () => {
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
       queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      scheduleChannelSyncAfterInventoryChange(getEstablishmentId());
       toast.success("Ticket de manutenção criado com sucesso!");
     },
     onError: (error: any) => {
@@ -219,6 +221,7 @@ export const useMaintenance = () => {
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
       queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      scheduleChannelSyncAfterInventoryChange(getEstablishmentId());
       toast.success("Ticket atualizado com sucesso!");
     },
     onError: (error: any) => {
@@ -281,6 +284,7 @@ export const useMaintenance = () => {
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
       queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      scheduleChannelSyncAfterInventoryChange(getEstablishmentId());
       toast.success("Ticket cancelado com sucesso!");
     },
     onError: (error: any) => {
@@ -358,6 +362,7 @@ export const useMaintenance = () => {
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
       queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      scheduleChannelSyncAfterInventoryChange(getEstablishmentId());
       toast.success("Manutenção concluída com sucesso!");
     },
     onError: (error: any) => {

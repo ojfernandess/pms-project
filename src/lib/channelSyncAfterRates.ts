@@ -133,7 +133,22 @@ async function runAutoChannelSync(establishmentId: string): Promise<void> {
       } else if (ch.channel_manager_type === "bukly") {
         await invokeBuklySync(ch.id, establishmentId, { silent: true });
       } else if (ch.channel_manager_type === "channex") {
-        await invokeChannexSync(ch.id, establishmentId);
+        const channexPayload = await invokeChannexSync(ch.id, establishmentId);
+        const availCount = channexPayload.availabilityTasks?.length ?? 0;
+        const restrictCount = channexPayload.restrictionTasks?.length ?? 0;
+        if (availCount === 0 && restrictCount === 0) {
+          toast.info("Channex: sincronização concluída (sem alterações a enviar).", {
+            duration: 5_000,
+          });
+        } else {
+          const parts: string[] = [];
+          if (availCount > 0) parts.push(`${availCount} tarefa(s) de disponibilidade`);
+          if (restrictCount > 0) parts.push(`${restrictCount} tarefa(s) de restrições`);
+          toast.success("Channex: ARI sincronizado com sucesso.", {
+            description: parts.join(" · "),
+            duration: 7_000,
+          });
+        }
       }
     } catch (e) {
       console.warn("[channelSyncAfterRates] Sincronização automática falhou:", ch.id, e);
