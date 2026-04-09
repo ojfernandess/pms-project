@@ -33,9 +33,12 @@ export const RecentReservations = () => {
           checkout_date,
           status,
           reservation_code,
+          guest_name,
+          channel,
           guest:clients!guest_id(full_name),
           financial_responsible:clients!client_id(full_name),
-          rooms(room_number, name)
+          rooms(room_number, name),
+          ota_reservations(ota_guest_name, ota_source_channel_name)
         `)
         .eq("establishment_id", selectedEstablishment.id)
         .gte("checkin_date", today)
@@ -48,15 +51,6 @@ export const RecentReservations = () => {
       if (error) {
         console.error("Erro ao buscar próximas chegadas:", error);
         throw error;
-      }
-      
-      // Log para debug
-      if (data && data.length > 0) {
-        console.log("Reservas encontradas:", data.map((r: any) => ({
-          id: r.id,
-          reservation_code: r.reservation_code,
-          guest: r.guest?.full_name || r.financial_responsible?.full_name
-        })));
       }
       
       return data || [];
@@ -73,10 +67,36 @@ export const RecentReservations = () => {
     return <Badge variant="secondary">Pendente</Badge>;
   };
 
-  const getGuestName = (reservation: any) => {
-    return reservation.guest?.full_name || 
-           reservation.financial_responsible?.full_name || 
-           "N/A";
+  const getGuestName = (reservation: any): string => {
+    // 1. Cliente vinculado (reservas diretas)
+    const clientName =
+      reservation.guest?.full_name ||
+      reservation.financial_responsible?.full_name;
+    if (clientName) return clientName;
+
+    // 2. Nome salvo diretamente na reserva (Aiosell, Channex e outros canais OTA)
+    if (reservation.guest_name) return reservation.guest_name;
+
+    // 3. Nome do hóspede OTA salvo em ota_reservations
+    const otaRows = reservation.ota_reservations;
+    const otaName = Array.isArray(otaRows)
+      ? otaRows[0]?.ota_guest_name
+      : otaRows?.ota_guest_name;
+    if (otaName) return otaName;
+
+    return "N/A";
+  };
+
+  const getChannelLabel = (reservation: any): string | null => {
+    const channel = reservation.channel;
+    if (!channel || channel === "direct") return null;
+    const otaRows = reservation.ota_reservations;
+    const sourceName = Array.isArray(otaRows)
+      ? otaRows[0]?.ota_source_channel_name
+      : otaRows?.ota_source_channel_name;
+    if (sourceName) return sourceName;
+    if (channel === "ota") return "OTA";
+    return channel;
   };
 
   const getRoomInfo = (reservation: any) => {
@@ -170,9 +190,16 @@ export const RecentReservations = () => {
                 }}
               >
                 <div className="space-y-1 flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">
-                    {getGuestName(reservation)}
-                  </p>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <p className="font-medium text-sm truncate">
+                      {getGuestName(reservation)}
+                    </p>
+                    {getChannelLabel(reservation) && (
+                      <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                        {getChannelLabel(reservation)}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {roomNumber} • {formatCheckinDate(reservation.checkin_date)}
                   </p>
