@@ -186,6 +186,8 @@ export const ReservationCalendarMap = ({
     category_id?: string;
     room_id?: string;
   } | null>(null);
+  // Evita reabrir o modal com o mesmo clique usado para fechar (outside click).
+  const suppressQuickDialogUntilRef = useRef(0);
 
   // Estados para modal de visualização rápida
   const [quickViewOpen, setQuickViewOpen] = useState(false);
@@ -982,6 +984,12 @@ export const ReservationCalendarMap = ({
 
   const handleMouseUp = (categoryId?: string, roomId?: string, date?: Date) => {
     if (draggedReservation) return;
+    if (Date.now() < suppressQuickDialogUntilRef.current) {
+      setIsDragging(false);
+      setDragStart(null);
+      setDragEnd(null);
+      return;
+    }
     
     if (!isDragging || !dragStart || !dragEnd) {
       // Clique direto sem drag
@@ -3175,6 +3183,10 @@ export const ReservationCalendarMap = ({
         <QuickReservationDialog
           open={quickDialogOpen}
           onOpenChange={(open) => {
+            if (!open) {
+              // Pequena janela para ignorar o clique que fechou o dialog.
+              suppressQuickDialogUntilRef.current = Date.now() + 250;
+            }
             setQuickDialogOpen(open);
             if (!open) setQuickDialogData(null);
           }}
