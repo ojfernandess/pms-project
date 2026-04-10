@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { parseDateOnlyLocal } from "@/lib/calendarDate";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface RestrictionsViewProps {
@@ -25,7 +26,8 @@ interface RestrictionsViewProps {
   categories: any[];
   ratePlans: any[];
   onCreate: (restriction: Partial<RateRestriction>) => void;
-  onUpdate: (id: string, restriction: Partial<RateRestriction>) => void;
+  /** Um único objeto — mutateAsync só recebe o 1.º argumento como variáveis da mutação. */
+  onUpdate: (payload: { id: string } & Partial<RateRestriction>) => void;
   onDelete: (id: string) => void;
 }
 
@@ -68,7 +70,7 @@ export const RestrictionsView = ({
 
   const handleSave = (restriction: Partial<RateRestriction>) => {
     if (selectedRestriction) {
-      onUpdate(selectedRestriction.id, restriction);
+      onUpdate({ id: selectedRestriction.id, ...restriction });
     } else {
       onCreate(restriction);
     }
@@ -143,8 +145,12 @@ export const RestrictionsView = ({
               <div className="flex items-center gap-2">
                 <Calendar className="w-4 h-4" />
                 <span>
-                  {format(new Date(restriction.start_date), "dd/MM/yyyy", { locale: ptBR })} -{" "}
-                  {format(new Date(restriction.end_date), "dd/MM/yyyy", { locale: ptBR })}
+                  {(() => {
+                    const sd = parseDateOnlyLocal(restriction.start_date);
+                    const ed = parseDateOnlyLocal(restriction.end_date);
+                    if (!sd || !ed) return "—";
+                    return `${format(sd, "dd/MM/yyyy", { locale: ptBR })} – ${format(ed, "dd/MM/yyyy", { locale: ptBR })}`;
+                  })()}
                 </span>
               </div>
               {category && (

@@ -12,6 +12,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDateOnlyLocal, parseDateOnlyLocal } from "@/lib/calendarDate";
 import { RateRestriction } from "@/hooks/useRateSystem";
 
 interface RestrictionDialogProps {
@@ -47,8 +48,8 @@ export const RestrictionDialog = ({
       if (restriction) {
         setFormData({
           restriction_type: restriction.restriction_type || "stop_sell",
-          start_date: restriction.start_date ? new Date(restriction.start_date) : undefined,
-          end_date: restriction.end_date ? new Date(restriction.end_date) : undefined,
+          start_date: parseDateOnlyLocal(restriction.start_date),
+          end_date: parseDateOnlyLocal(restriction.end_date),
           category_id: restriction.category_id || "",
           pricing_plan_id: restriction.pricing_plan_id || "",
           value: restriction.value || 0,
@@ -76,9 +77,14 @@ export const RestrictionDialog = ({
     }
 
     onSave({
-      ...formData,
-      start_date: format(formData.start_date, "yyyy-MM-dd"),
-      end_date: format(formData.end_date, "yyyy-MM-dd"),
+      restriction_type: formData.restriction_type,
+      start_date: formatDateOnlyLocal(formData.start_date),
+      end_date: formatDateOnlyLocal(formData.end_date),
+      category_id: formData.category_id.trim() || null,
+      pricing_plan_id: formData.pricing_plan_id.trim() || null,
+      value: formData.value,
+      notes: formData.notes.trim() || null,
+      is_active: formData.is_active,
     });
     onOpenChange(false);
   };

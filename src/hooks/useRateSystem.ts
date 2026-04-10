@@ -93,13 +93,25 @@ export interface RateRestriction {
   id: string;
   establishment_id: string;
   restriction_type: 'stop_sell' | 'min_los' | 'max_los' | 'cta' | 'ctd' | 'closed_to_arrival' | 'closed_to_departure';
-  pricing_plan_id?: string;
-  category_id?: string;
+  pricing_plan_id?: string | null;
+  category_id?: string | null;
   start_date: string;
   end_date: string;
   value?: number;
-  notes?: string;
+  notes?: string | null;
   is_active: boolean;
+}
+
+/** Postgres rejects "" for UUID columns; optional selects use "" in the UI. */
+function sanitizeRateRestrictionPayload<T extends Partial<RateRestriction>>(r: T): T {
+  const next = { ...r };
+  if ("category_id" in next && typeof next.category_id === "string" && next.category_id.trim() === "") {
+    (next as { category_id?: string | null }).category_id = null;
+  }
+  if ("pricing_plan_id" in next && typeof next.pricing_plan_id === "string" && next.pricing_plan_id.trim() === "") {
+    (next as { pricing_plan_id?: string | null }).pricing_plan_id = null;
+  }
+  return next;
 }
 
 export interface UseRateSystemOptions {
@@ -1043,9 +1055,14 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       const establishmentId = getEstablishmentId();
       if (!establishmentId) throw new Error("Establishment ID não encontrado");
 
+      const row = sanitizeRateRestrictionPayload({
+        ...restriction,
+        establishment_id: establishmentId,
+      });
+
       const { data, error } = await supabase
         .from("rate_restrictions")
-        .insert([{ ...restriction, establishment_id: establishmentId }])
+        .insert([row])
         .select()
         .single();
 
@@ -1092,7 +1109,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
 
       const { data, error } = await supabase
         .from("rate_restrictions")
-        .update(updates)
+        .update(sanitizeRateRestrictionPayload(updates))
         .eq("id", id)
         .select()
         .single();
