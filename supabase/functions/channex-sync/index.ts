@@ -223,7 +223,9 @@ serve(async (req) => {
       .update({ channex_sync_status: "syncing", channex_last_sync_at: new Date().toISOString() })
       .eq("id", channelId);
 
-    const today = new Date().toISOString().slice(0, 10);
+    // Recua 1 dia para cobrir timezones UTC- (ex.: Brasil UTC-3): evita excluir "hoje local"
+    // quando o UTC já virou para o dia seguinte (ex.: 22h BRT = 01h UTC do dia seguinte).
+    const today = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
     const future = new Date();
     future.setDate(future.getDate() + 365);
     const futureDate = future.toISOString().slice(0, 10);

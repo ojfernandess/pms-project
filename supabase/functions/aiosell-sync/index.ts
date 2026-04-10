@@ -1017,7 +1017,10 @@ serve(async (req) => {
     });
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  // Recua 1 dia para cobrir timezones como UTC-3 (Brasil): evita excluir "hoje local"
+  // quando o UTC já virou para o dia seguinte (ex.: 22h BRT = 01h UTC do dia seguinte).
+  const todayUtcMinus1 = new Date(Date.now() - 86_400_000);
+  const today = todayUtcMinus1.toISOString().split("T")[0];
   const futureDate = new Date();
   futureDate.setDate(futureDate.getDate() + SYNC_DAYS_AHEAD);
   const futureDateStr = futureDate.toISOString().split("T")[0];
@@ -1490,10 +1493,11 @@ serve(async (req) => {
     const catRes = reservationsByCategory.get(categoryId) || [];
 
     dates.forEach((date) => {
-      const currentDate = new Date(date + "T12:00:00");
+      // Usar UTC explícito para evitar ambiguidade de timezone nas comparações de data.
+      const currentDate = new Date(date + "T12:00:00Z");
       const occupiedRooms = catRes.filter((r) => {
-        const checkin = new Date(r.checkin_date);
-        const checkout = new Date(r.checkout_date);
+        const checkin = new Date(String(r.checkin_date).slice(0, 10) + "T00:00:00Z");
+        const checkout = new Date(String(r.checkout_date).slice(0, 10) + "T00:00:00Z");
         return currentDate >= checkin && currentDate < checkout;
       }).length;
 
@@ -2040,11 +2044,10 @@ serve(async (req) => {
           })
         );
         const ackMsg = (r.aiosellMessage ?? "").trim();
-        if (
-          !ackMsg ||
-          /^request received successfully\.?$/i.test(ackMsg) ||
-          /^received successfully\.?$/i.test(ackMsg)
-        ) {
+        // "Request Received Successfully" é a resposta normal da Aiosell em produção —
+        // não aciona o aviso ACK-only (seria ruído em cada sync).
+        // Só aciona quando não há mensagem nenhuma (resposta inesperada).
+        if (!ackMsg) {
           aiosellRatePostAckOnly = true;
         }
       }
@@ -2115,9 +2118,14 @@ serve(async (req) => {
           );
         }
         if (r.aiosellMessage) invMsgs.push(r.aiosellMessage);
-        // Resposta de sucesso confirmada pelo payload: "Inventory Updated Successfully" (doc. Aiosell).
+        // Aiosell responde "Request Received Successfully" em produção (doc indica "Inventory Updated
+        // Successfully", mas ambas confirmam receção/aceitação do payload).
         const invAckMsg = (r.aiosellMessage ?? "").trim();
         if (invAckMsg) {
+          const inventory_accepted =
+            /inventory updated successfully/i.test(invAckMsg) ||
+            /request received successfully/i.test(invAckMsg) ||
+            /received successfully/i.test(invAckMsg);
           console.info(
             "[aiosell-sync] aiosell_inventory_post_ok",
             JSON.stringify({
@@ -2125,7 +2133,7 @@ serve(async (req) => {
               inventory_path: inventoryPath,
               http_ok: true,
               api_message: invAckMsg,
-              inventory_updated: /inventory updated successfully/i.test(invAckMsg),
+              inventory_accepted,
               chunk_index: totalChunks > 1 ? Math.floor(off / INV_AVAIL_CHUNK_SIZE) + 1 : null,
               chunk_of: totalChunks > 1 ? totalChunks : null,
             })
