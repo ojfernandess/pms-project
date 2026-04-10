@@ -151,7 +151,18 @@ async function runAutoChannelSync(establishmentId: string): Promise<void> {
         }
       }
     } catch (e) {
+      const label =
+        ch.channel_manager_type === "aiosell"
+          ? "Aiosell"
+          : ch.channel_manager_type === "channex"
+            ? "Channex"
+            : String(ch.channel_manager_type ?? "Canal");
+      const msg = e instanceof Error ? e.message : String(e);
       console.warn("[channelSyncAfterRates] Sincronização automática falhou:", ch.id, e);
+      toast.warning(`Sincronização automática ${label} falhou`, {
+        description: msg.slice(0, 200),
+        duration: 10_000,
+      });
     }
   }
 

@@ -1169,7 +1169,8 @@ serve(async (req) => {
     .from("reservations")
     .select("category_id, checkin_date, checkout_date, room_id")
     .eq("establishment_id", establishmentId)
-    .in("status", ["pending", "confirmed", "checkedin"]);
+    // "blocked", "noshow" e "preregistration" também consomem inventário
+    .in("status", ["pending", "confirmed", "checkedin", "blocked", "noshow", "preregistration"]);
 
   if (reservationsError) {
     return new Response(JSON.stringify({ success: false, error: reservationsError.message }), {
