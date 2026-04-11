@@ -42,12 +42,14 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CancelReservationDialog } from "@/components/reservations/CancelReservationDialog";
 import { invokeChannexFinalizeCancellationRevision } from "@/lib/channexReservationsSyncInvoke";
+import { invokeAiosellFinalizeCancellationRevision } from "@/lib/aiosellRevisionApplyInvoke";
 import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 
 type ChannexCancelDialogTarget = {
   revisionId: string;
   channelId: string;
   establishmentId: string;
+  channelManagerType?: string | null;
   reservation: {
     id: string;
     reservation_code?: string | null;
@@ -86,18 +88,19 @@ const PendingReservations = () => {
       return;
     }
     if (!res?.id) {
-      toast.error("Sem reserva vinculada nesta pendência. Execute a sincronização de reservas Channex e tente de novo.");
+      toast.error("Sem reserva vinculada nesta pendência. Execute a sincronização de reservas do canal e tente de novo.");
       return;
     }
     const st = String(res.status ?? "").toLowerCase();
     if (st === "cancelled") {
-      toast.info("A reserva já está cancelada no PMS. Use «Finalizar no Channex».");
+      toast.info("A reserva já está cancelada no PMS. Use «Finalizar pendência do canal».");
       return;
     }
     setChannexCancelTarget({
       revisionId: String(item.revision_id),
       channelId: String(item.ota_channel_id),
       establishmentId: establishmentIdResolved,
+      channelManagerType: item.ota_channels?.channel_manager_type ?? null,
       reservation: {
         id: String(res.id),
         reservation_code: res.reservation_code ?? null,
@@ -119,14 +122,23 @@ const PendingReservations = () => {
       reason,
       refundPayments,
     });
+    const isAiosell = String(target.channelManagerType ?? "").toLowerCase() === "aiosell";
     try {
-      await invokeChannexFinalizeCancellationRevision(target.channelId, target.establishmentId, target.revisionId);
-      toast.success("Pendência Channex concluída: reserva cancelada no PMS e revisão finalizada.");
+      if (isAiosell) {
+        await invokeAiosellFinalizeCancellationRevision(target.establishmentId, target.revisionId);
+      } else {
+        await invokeChannexFinalizeCancellationRevision(target.channelId, target.establishmentId, target.revisionId);
+      }
+      toast.success(
+        isAiosell
+          ? "Pendência Aiosell concluída: reserva cancelada no PMS e revisão finalizada."
+          : "Pendência Channex concluída: reserva cancelada no PMS e revisão finalizada.",
+      );
     } catch (e: unknown) {
       toast.error(
         e instanceof Error
           ? e.message
-          : "Reserva cancelada no PMS. Use «Finalizar no Channex (já cancelada no PMS)» nesta pendência para concluir.",
+          : "Reserva cancelada no PMS. Use «Finalizar pendência (já cancelada no PMS)» neste cartão para concluir.",
       );
     }
     refetch();
@@ -138,13 +150,22 @@ const PendingReservations = () => {
       return;
     }
     setFinalizingChannexRevisionId(String(item.revision_id));
+    const isAiosell = String(item.ota_channels?.channel_manager_type ?? "").toLowerCase() === "aiosell";
     try {
-      await invokeChannexFinalizeCancellationRevision(
-        String(item.ota_channel_id),
-        establishmentIdResolved,
-        String(item.revision_id),
+      if (isAiosell) {
+        await invokeAiosellFinalizeCancellationRevision(establishmentIdResolved, String(item.revision_id));
+      } else {
+        await invokeChannexFinalizeCancellationRevision(
+          String(item.ota_channel_id),
+          establishmentIdResolved,
+          String(item.revision_id),
+        );
+      }
+      toast.success(
+        isAiosell
+          ? "Pendência Aiosell finalizada (reserva já estava cancelada no PMS)."
+          : "Revisão Channex finalizada (reserva já estava cancelada no PMS).",
       );
-      toast.success("Revisão Channex finalizada (reserva já estava cancelada no PMS).");
       scheduleChannelSyncAfterInventoryChange(establishmentIdResolved);
       refetch();
     } catch (e: unknown) {
@@ -611,27 +632,55 @@ const PendingReservations = () => {
                 <div className="space-y-4">
                   {channexModified.length > 0 && (
                     <Card className="p-4 border-amber-300">
-                      <h3 className="font-semibold mb-3">Reservas Modificadas (Channex)</h3>
+                      <h3 className="font-semibold mb-3">Reservas modificadas (Channel Manager)</h3>
                       <div className="space-y-3">
                         {channexModified.map((item: any) => {
                           const payload = item.payload || {};
                           const room = Array.isArray(payload.rooms) ? payload.rooms[0] || {} : {};
                           const reservationRow = item.reservation || null;
+                          const isAiosell =
+                            String(item?.ota_channels?.channel_manager_type ?? "").toLowerCase() === "aiosell";
+                          const aiosellRaw =
+                            payload?.source === "aiosell_lifecycle" &&
+                            payload?.rawBody &&
+                            typeof payload.rawBody === "object" &&
+                            !Array.isArray(payload.rawBody)
+                              ? (payload.rawBody as Record<string, unknown>)
+                              : null;
+                          const aiosellAmountRaw = aiosellRaw?.amount;
+                          const aiosellAmountDisplay =
+                            aiosellAmountRaw != null && typeof aiosellAmountRaw === "object" && !Array.isArray(aiosellAmountRaw)
+                              ? (aiosellAmountRaw as { amountAfterTax?: unknown }).amountAfterTax ??
+                                (aiosellAmountRaw as { total?: unknown }).total
+                              : aiosellAmountRaw;
                           const displayCheckin =
                             reservationRow?.checkin_date ||
+                            (aiosellRaw?.checkin as string) ||
+                            (aiosellRaw?.checkIn as string) ||
                             payload.arrival_date ||
                             room.checkin_date ||
                             "-";
                           const displayCheckout =
                             reservationRow?.checkout_date ||
+                            (aiosellRaw?.checkout as string) ||
+                            (aiosellRaw?.checkOut as string) ||
                             payload.departure_date ||
                             room.checkout_date ||
                             "-";
+                          const proposedCheckin =
+                            (aiosellRaw?.checkin as string) || (aiosellRaw?.checkIn as string) || "";
+                          const proposedCheckout =
+                            (aiosellRaw?.checkout as string) || (aiosellRaw?.checkOut as string) || "";
                           const displayAmount =
                             reservationRow?.total_amount ??
+                            aiosellAmountDisplay ??
                             payload.amount ??
                             room.amount ??
                             "-";
+                          const proposedAmountLabel =
+                            aiosellAmountDisplay != null && aiosellAmountDisplay !== ""
+                              ? String(aiosellAmountDisplay)
+                              : null;
                           const processStatus = String(item.process_status || "pending");
                           const processingMeta = payload?._processing_meta || {};
                           const modificationDetails = Array.isArray(processingMeta?.modification_details)
@@ -667,8 +716,38 @@ const PendingReservations = () => {
                               </div>
                               <p className="text-sm"><strong>Reserva:</strong> {item.unique_id || item.booking_id}</p>
                               <p className="text-sm"><strong>Hóspede:</strong> {displayChannexGuest}</p>
-                              <p className="text-sm"><strong>Período:</strong> {displayCheckin} até {displayCheckout}</p>
-                              <p className="text-sm"><strong>Valor:</strong> {displayAmount}</p>
+                              {isAiosell ? (
+                                <>
+                                  <p className="text-sm">
+                                    <strong>Período no PMS:</strong>{" "}
+                                    {reservationRow?.checkin_date || displayCheckin || "—"} até{" "}
+                                    {reservationRow?.checkout_date || displayCheckout || "—"}
+                                  </p>
+                                  {aiosellRaw && (proposedCheckin || proposedCheckout) ? (
+                                    <p className="text-sm text-amber-900/90">
+                                      <strong>Proposta do canal:</strong> {proposedCheckin || "—"} até{" "}
+                                      {proposedCheckout || "—"}
+                                    </p>
+                                  ) : null}
+                                  <p className="text-sm">
+                                    <strong>Valor no PMS:</strong> {reservationRow?.total_amount ?? "—"}
+                                  </p>
+                                  {proposedAmountLabel != null ? (
+                                    <p className="text-sm text-amber-900/90">
+                                      <strong>Valor proposto (canal):</strong> {proposedAmountLabel}
+                                    </p>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-sm">
+                                    <strong>Período:</strong> {displayCheckin} até {displayCheckout}
+                                  </p>
+                                  <p className="text-sm">
+                                    <strong>Valor:</strong> {displayAmount}
+                                  </p>
+                                </>
+                              )}
                               {modificationDetails.length > 0 ? (
                                 <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/40 p-2">
                                   <p className="text-xs font-semibold text-amber-900">Detalhes da modificação:</p>
@@ -687,7 +766,11 @@ const PendingReservations = () => {
                                   Último erro: {item.error_message}
                                 </p>
                               ) : null}
-                              <p className="text-sm text-muted-foreground">Ao aceitar: a reserva anterior é cancelada e uma nova versão é reprocessada no mapa.</p>
+                              <p className="text-sm text-muted-foreground">
+                                {isAiosell
+                                  ? "A alteração chegou pelo Aiosell. Ao aceitar, a reserva no PMS é atualizada com os dados enviados pelo canal."
+                                  : "Ao aceitar: a reserva anterior é cancelada e uma nova versão é reprocessada no mapa."}
+                              </p>
                               <div className="mt-2 flex flex-wrap gap-2">
                                 <Button
                                   size="sm"
@@ -699,11 +782,12 @@ const PendingReservations = () => {
                                       bookingId: item.booking_id || undefined,
                                       bookingUniqueId: item.unique_id || undefined,
                                       status: "modified",
+                                      channelManagerType: item.ota_channels?.channel_manager_type,
                                     })
                                   }
                                 >
                                   <RotateCcw className="h-4 w-4 mr-2" />
-                                  Reprocessar Modificação
+                                  {isAiosell ? "Aplicar modificação no PMS" : "Reprocessar Modificação"}
                                 </Button>
                                 <Button
                                   size="sm"
@@ -731,11 +815,13 @@ const PendingReservations = () => {
 
                   {channexCancelled.length > 0 && (
                     <Card className="p-4 border-red-300">
-                      <h3 className="font-semibold mb-3">Reservas Canceladas (Channex)</h3>
+                      <h3 className="font-semibold mb-3">Reservas canceladas (Channel Manager)</h3>
                       <div className="space-y-3">
                         {channexCancelled.map((item: any) => {
                           const payload = item.payload || {};
                           const reservationRow = item.reservation || null;
+                          const isAiosell =
+                            String(item?.ota_channels?.channel_manager_type ?? "").toLowerCase() === "aiosell";
                           const payloadGuestCx = channexRevisionPayloadGuestName(payload);
                           const displayChannexGuestCx =
                             payloadGuestCx !== "N/A"
@@ -782,14 +868,15 @@ const PendingReservations = () => {
                                 </p>
                               ) : null}
                               <p className="text-sm text-muted-foreground">
-                                O canal já cancelou e liberou disponibilidade. No PMS use o <strong>mesmo fluxo do mapa de reservas</strong>: política de
-                                cancelamento, multa e opção de estornar pagamentos. Só depois a pendência Channex é finalizada e o inventário local é
-                                reenviado ao Channex.
+                                O channel manager já registrou o cancelamento no canal. No PMS use o{" "}
+                                <strong>mesmo fluxo do mapa de reservas</strong>: política de cancelamento, multa e opção de estornar pagamentos. Em
+                                seguida finalize a pendência do canal para sincronizar o vínculo OTA e o inventário local
+                                {isAiosell ? " (Aiosell)" : " (Channex)"}.
                               </p>
                               {!item.reservation_id || !reservationRow?.id ? (
                                 <p className="text-xs text-amber-800 mt-2 rounded-md border border-amber-200 bg-amber-50/60 p-2">
-                                  Pendência sem reserva vinculada. Em Canais → Channex, execute a sincronização de reservas para criar o vínculo antes de
-                                  cancelar aqui.
+                                  Pendência sem reserva vinculada. Em Canais, execute a sincronização de reservas do channel manager para criar o vínculo
+                                  antes de tratar aqui.
                                 </p>
                               ) : null}
                               {reservationRow?.id &&
@@ -821,7 +908,9 @@ const PendingReservations = () => {
                                   ) : (
                                     <CheckCircle2 className="h-4 w-4 mr-2" />
                                   )}
-                                  Finalizar no Channex (já cancelada no PMS)
+                                  {isAiosell
+                                    ? "Finalizar pendência Aiosell (já cancelada no PMS)"
+                                    : "Finalizar no Channex (já cancelada no PMS)"}
                                 </Button>
                               ) : null}
                             </div>
@@ -833,7 +922,7 @@ const PendingReservations = () => {
 
                   {showCompletedChannex && (channexModifiedCompleted.length > 0 || channexCancelledCompleted.length > 0) ? (
                     <Card className="p-4 border-emerald-300">
-                      <h3 className="font-semibold mb-3">Histórico concluído (Channex)</h3>
+                      <h3 className="font-semibold mb-3">Histórico concluído (Channel Manager)</h3>
                       <div className="space-y-2 text-sm text-muted-foreground">
                         {channexModifiedCompleted.map((item: any) => (
                           <div key={item.id} className="rounded-md border p-2">

@@ -1576,6 +1576,10 @@ async function insertAiosellChannelPrepaidPayment(
     amount: number;
     bookingId: string;
     partnerChannelName?: string | null;
+    /**
+     * OTA marcou pré-pago no payload. Grava `payments` mesmo com `auto_payment_ota` desligado.
+     */
+    otaPrepaid?: boolean;
   }
 ): Promise<{ error: string | null }> {
   if (args.amount <= 0) return { error: null };
@@ -1586,15 +1590,16 @@ async function insertAiosellChannelPrepaidPayment(
     .eq("establishment_id", args.establishmentId)
     .maybeSingle();
 
+  const otaPrepaid = args.otaPrepaid === true;
   const autoEnabled = (hotelSettings as { auto_payment_ota?: boolean } | null)?.auto_payment_ota === true;
-  if (!autoEnabled) return { error: null };
+  if (!autoEnabled && !otaPrepaid) return { error: null };
 
   const allowedPartnersRaw = (hotelSettings as { auto_payment_ota_channels?: unknown } | null)?.auto_payment_ota_channels;
   const allowedPartners = Array.isArray(allowedPartnersRaw)
     ? allowedPartnersRaw.map((v) => normalizePartnerKey(String(v))).filter(Boolean)
     : [];
   const partnerKey = normalizePartnerKey(args.partnerChannelName);
-  if (allowedPartners.length > 0) {
+  if (autoEnabled && !otaPrepaid && allowedPartners.length > 0) {
     const allowsOthers = allowedPartners.includes("outros") || allowedPartners.includes("others");
     const matchesKnown = !!partnerKey && allowedPartners.includes(partnerKey);
     const matchesOthers = allowsOthers && !!partnerKey && !isKnownOtaPartner(partnerKey);
@@ -1633,38 +1638,6 @@ async function insertAiosellChannelPrepaidPayment(
   });
 
   return { error: error?.message ?? null };
-}
-
-async function shouldApplyAiosellAutoPayment(
-  supabase: SupabaseClient,
-  args: {
-    establishmentId: string;
-    partnerChannelName?: string | null;
-  }
-): Promise<boolean> {
-  const { data: hotelSettings } = await supabase
-    .from("hotel_settings")
-    .select("auto_payment_ota, auto_payment_ota_channels")
-    .eq("establishment_id", args.establishmentId)
-    .maybeSingle();
-
-  const autoEnabled = (hotelSettings as { auto_payment_ota?: boolean } | null)?.auto_payment_ota === true;
-  if (!autoEnabled) return false;
-
-  const allowedPartnersRaw = (hotelSettings as { auto_payment_ota_channels?: unknown } | null)?.auto_payment_ota_channels;
-  const allowedPartners = Array.isArray(allowedPartnersRaw)
-    ? allowedPartnersRaw.map((v) => normalizePartnerKey(String(v))).filter(Boolean)
-    : [];
-  const partnerKey = normalizePartnerKey(args.partnerChannelName);
-
-  if (allowedPartners.length > 0) {
-    const allowsOthers = allowedPartners.includes("outros") || allowedPartners.includes("others");
-    const matchesKnown = !!partnerKey && allowedPartners.includes(partnerKey);
-    const matchesOthers = allowsOthers && !!partnerKey && !isKnownOtaPartner(partnerKey);
-    if (!(matchesKnown || matchesOthers)) return false;
-  }
-
-  return true;
 }
 
 /** Camadas do payload (raiz, data, reservation, booking, etc.) para aceitar webhooks aninhados. */
@@ -1712,13 +1685,59 @@ function firstNonEmptyString(layers: Record<string, unknown>[], keys: string[]):
   return undefined;
 }
 
+function aiosellLayerString(v: unknown): string | null {
+  if (v == null || v === "") return null;
+  if (typeof v === "string" && v.trim()) return v.trim().toLowerCase();
+  if (typeof v === "number" && !Number.isNaN(v)) return String(v);
+  return null;
+}
+
+/** Doc. Aiosell CM: `action: "modify"`. Alguns envios usam sinónimos no mesmo campo. */
+function normalizeAiosellPrimaryAction(t: string): string {
+  if (
+    t === "change" ||
+    t === "changed" ||
+    t === "amend" ||
+    t === "amended" ||
+    t === "alter" ||
+    t === "altered" ||
+    t === "edit" ||
+    t === "edited" ||
+    t === "adjust" ||
+    t === "adjustment" ||
+    t === "revision"
+  ) {
+    return "modify";
+  }
+  return t;
+}
+
 function normalizeActionFromLayers(layers: Record<string, unknown>[]): string {
-  const keys = ["action", "event", "type", "bookingType", "operation"];
+  const primaryKeys = ["action", "bookingAction", "booking_action", "operationType", "operation_type"];
   for (const layer of layers) {
-    for (const k of keys) {
-      const v = layer[k];
-      if (v != null && String(v).length) return String(v).toLowerCase();
+    for (const k of primaryKeys) {
+      const t = aiosellLayerString(layer[k]);
+      if (t) return normalizeAiosellPrimaryAction(t);
     }
+  }
+  const secondaryKeys = ["event", "bookingType", "operation"];
+  for (const layer of layers) {
+    for (const k of secondaryKeys) {
+      const t = aiosellLayerString(layer[k]);
+      if (!t) continue;
+      if (t === "modification" || t === "modification_request" || t === "booking_modification") return "modify";
+      if (t === "cancellation" || t === "cancel_request" || t === "booking_cancellation") return "cancel";
+      return normalizeAiosellPrimaryAction(t);
+    }
+  }
+  for (const layer of layers) {
+    const t = aiosellLayerString(layer.type);
+    if (!t) continue;
+    if (t.includes("modif") || t.includes("change") || t.endsWith("_update") || t === "booking_updated") {
+      return "modify";
+    }
+    if (t.includes("cancel")) return "cancel";
+    if (t === "book" || t === "new" || t === "booking") return "book";
   }
   for (const layer of layers) {
     const s = layer.status;
@@ -1908,6 +1927,9 @@ function pickCheckIn(room0: Record<string, unknown>, layers: Record<string, unkn
     "check_in",
     "dateFrom",
     "start_date",
+    "stayFrom",
+    "stay_from",
+    "from",
   ];
   const fromRoom = firstNonEmptyString([room0], keys);
   if (fromRoom) return fromRoom;
@@ -1927,10 +1949,122 @@ function pickCheckOut(room0: Record<string, unknown>, layers: Record<string, unk
     "check_out",
     "dateTo",
     "end_date",
+    "stayTo",
+    "stay_to",
+    "to",
   ];
   const fromRoom = firstNonEmptyString([room0], keys);
   if (fromRoom) return fromRoom;
   return firstNonEmptyString(layers, keys);
+}
+
+function normalizeAiosellDateField(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const s = String(raw).trim();
+  if (!s) return undefined;
+  const isoDay = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoDay) return isoDay[1];
+  return s;
+}
+
+function isValidPmsStayRange(checkin: string | undefined, checkout: string | undefined): boolean {
+  const a = normalizeAiosellDateField(checkin) ?? String(checkin ?? "").trim();
+  const b = normalizeAiosellDateField(checkout) ?? String(checkout ?? "").trim();
+  if (!a || !b) return false;
+  return a < b;
+}
+
+async function roomHasReservationOverlapForModify(
+  supabase: SupabaseClient,
+  args: {
+    roomId: string;
+    establishmentId: string;
+    checkin: string;
+    checkout: string;
+    excludeReservationId: string;
+  },
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("reservations")
+    .select("id")
+    .eq("room_id", args.roomId)
+    .eq("establishment_id", args.establishmentId)
+    .neq("id", args.excludeReservationId)
+    .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"])
+    .lt("checkin_date", args.checkout)
+    .gt("checkout_date", args.checkin)
+    .limit(1);
+  if (error) {
+    console.warn("aiosell room overlap check", error.message);
+    return true;
+  }
+  return (data?.length ?? 0) > 0;
+}
+
+async function findAvailableRoomForAiosellCategoryChange(
+  supabase: SupabaseClient,
+  args: {
+    establishmentId: string;
+    categoryId: string;
+    checkin: string;
+    checkout: string;
+    excludeReservationId: string;
+    currentRoomId: string | null | undefined;
+  },
+): Promise<string | null> {
+  const cur = args.currentRoomId?.trim();
+  if (cur) {
+    const { data: pref } = await supabase
+      .from("rooms")
+      .select("id, category_id, is_blocked, status")
+      .eq("id", cur)
+      .eq("establishment_id", args.establishmentId)
+      .maybeSingle();
+    const pr = pref as { category_id?: string; is_blocked?: boolean | null; status?: string } | null;
+    if (
+      pr &&
+      String(pr.category_id) === args.categoryId &&
+      pr.is_blocked !== true &&
+      pr.status !== "maintenance" &&
+      pr.status !== "blocked"
+    ) {
+      const ov = await roomHasReservationOverlapForModify(supabase, {
+        roomId: cur,
+        establishmentId: args.establishmentId,
+        checkin: args.checkin,
+        checkout: args.checkout,
+        excludeReservationId: args.excludeReservationId,
+      });
+      if (!ov) return cur;
+    }
+  }
+
+  const { data: cands, error } = await supabase
+    .from("rooms")
+    .select("id")
+    .eq("establishment_id", args.establishmentId)
+    .eq("category_id", args.categoryId)
+    .or("is_blocked.is.null,is_blocked.eq.false")
+    .in("status", ["available", "occupied", "cleaning"])
+    .order("room_number", { ascending: true });
+
+  if (error || !cands?.length) {
+    if (error) console.warn("aiosell list rooms for category change", error.message);
+    return null;
+  }
+
+  for (const row of cands) {
+    const rid = String((row as { id: string }).id);
+    const ov = await roomHasReservationOverlapForModify(supabase, {
+      roomId: rid,
+      establishmentId: args.establishmentId,
+      checkin: args.checkin,
+      checkout: args.checkout,
+      excludeReservationId: args.excludeReservationId,
+    });
+    if (!ov) return rid;
+  }
+  return null;
 }
 
 function pickRoomCode(room0: Record<string, unknown>, layers: Record<string, unknown>[]): string | undefined {
@@ -2128,10 +2262,43 @@ async function listOtaRowsForAiosellBooking(
   );
 }
 
+const OTA_BOOKING_ID_LOOKUP_KEYS = [
+  "bookingId",
+  "booking_id",
+  "otaBookingId",
+  "cmBookingId",
+  "cm_booking_id",
+  "confirmationNumber",
+  "confirmationNo",
+  "reference",
+  "externalBookingId",
+] as const;
+
+async function listOtaRowsForAiosellPayloadLookup(
+  supabase: SupabaseClient,
+  channelId: string,
+  layers: Record<string, unknown>[],
+): Promise<{ id: string; reservation_id: string; ota_reservation_code: string }[]> {
+  const tried = new Set<string>();
+  for (const k of OTA_BOOKING_ID_LOOKUP_KEYS) {
+    const v = firstNonEmptyString(layers, [k]);
+    if (!v || tried.has(v)) continue;
+    tried.add(v);
+    const rows = await listOtaRowsForAiosellBooking(supabase, channelId, v);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
 function findChannelPricingMapping(
   roomCode: string | undefined,
   rateplanCode: string | undefined,
-  pricingRows: { channel_room_code?: unknown; channel_rate_plan_code?: unknown; category_id?: unknown }[] | null
+  pricingRows: {
+    channel_room_code?: unknown;
+    channel_rate_plan_code?: unknown;
+    category_id?: unknown;
+    pricing_plan_id?: unknown;
+  }[] | null
 ): { category_id: string; pricing_plan_id?: string | null } | null {
   if (!roomCode) return null;
   let mapping = (pricingRows || []).find(
@@ -2309,11 +2476,227 @@ async function createChannelReservationNotification(
   });
 }
 
+async function notifyEstablishmentAiosellReservationModified(
+  supabase: SupabaseClient,
+  args: {
+    establishmentId: string;
+    reservationId: string;
+    guestName: string;
+    partnerName?: string | null;
+    bookingRef: string;
+    checkIn: string;
+    checkOut: string;
+  },
+): Promise<void> {
+  const partner = String(args.partnerName ?? "canal").trim() || "canal";
+  const { data: row } = await supabase
+    .from("reservations")
+    .select("reservation_code")
+    .eq("id", args.reservationId)
+    .maybeSingle();
+  const code = String((row as { reservation_code?: string | null } | null)?.reservation_code ?? "").trim();
+  const head = code ? `Reserva ${code}` : "Reserva de canal";
+  const { error } = await supabase.rpc("create_notification_for_establishment", {
+    p_establishment_id: args.establishmentId,
+    p_type: "reservation_modified",
+    p_title: "Reserva alterada (Aiosell)",
+    p_message: `${head} — ${args.guestName} (${args.checkIn} a ${args.checkOut}) atualizada via ${partner}. Ref. ${args.bookingRef}.`,
+    p_priority: "medium",
+    p_metadata: {
+      reservation_id: args.reservationId,
+      reservation_code: code || null,
+      source: "aiosell_channel",
+      lifecycle: "modify",
+      booking_ref: args.bookingRef,
+    },
+  });
+  if (error) {
+    console.warn("notifyEstablishmentAiosellReservationModified: create_notification_for_establishment", error);
+    throw new Error(error.message);
+  }
+}
+
+/** Cancel e modify Aiosell → Tratativas; `AIOSELL_AUTO_APPLY_CANCEL_MODIFY=true` aplica na hora. */
+function aiosellLifecycleQueueEnabled(): boolean {
+  return !envFlagTrue("AIOSELL_AUTO_APPLY_CANCEL_MODIFY");
+}
+
+function fmtAiosellMoneyDisplay(n: number): string {
+  if (n == null || Number.isNaN(n)) return "—";
+  return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function buildAiosellModifyQueueProcessingMeta(
+  supabase: SupabaseClient,
+  args: {
+    reservationId: string;
+    otaChannelId: string;
+    incomingGuestName: string;
+    incomingCheckIn?: string;
+    incomingCheckOut?: string;
+    incomingRoomCode?: string;
+    incomingRateplanCode?: string;
+    incomingTotal: number;
+    incomingPrepaid: boolean;
+    partnerChannelName?: string | null;
+    multiRoomCount: number;
+  },
+): Promise<Record<string, unknown>> {
+  const details: { field: string; before: string; after: string }[] = [];
+
+  const { data: cur } = await supabase
+    .from("reservations")
+    .select("checkin_date, checkout_date, guest_name, total_amount, paid_amount, payment_status, room_categories(name)")
+    .eq("id", args.reservationId)
+    .maybeSingle();
+
+  const row = cur as {
+    checkin_date?: string;
+    checkout_date?: string;
+    guest_name?: string | null;
+    total_amount?: number | null;
+    paid_amount?: number | null;
+    payment_status?: string | null;
+    room_categories?: { name?: string | null } | null;
+  } | null;
+
+  const prevGuest = String(row?.guest_name ?? "").trim() || "—";
+  const prevIn = String(row?.checkin_date ?? "").trim() || "—";
+  const prevOut = String(row?.checkout_date ?? "").trim() || "—";
+  const prevTotal = Number(row?.total_amount ?? 0);
+  const prevPaid = Number(row?.paid_amount ?? 0);
+  const prevPayStatus = String(row?.payment_status ?? "").trim() || "—";
+  const prevCat = String(row?.room_categories?.name ?? "").trim() || "—";
+
+  const incGuest = String(args.incomingGuestName ?? "").trim() || "—";
+  const pushIfDiff = (field: string, before: string, after: string) => {
+    if (before !== after) details.push({ field, before, after });
+  };
+
+  pushIfDiff("Hóspede", prevGuest, incGuest);
+
+  const incInRaw = String(args.incomingCheckIn ?? "").trim();
+  const incOutRaw = String(args.incomingCheckOut ?? "").trim();
+  if (incInRaw) pushIfDiff("Check-in", prevIn, incInRaw);
+  if (incOutRaw) pushIfDiff("Check-out", prevOut, incOutRaw);
+
+  pushIfDiff("Valor total (PMS → proposto pelo canal)", fmtAiosellMoneyDisplay(prevTotal), fmtAiosellMoneyDisplay(args.incomingTotal));
+
+  const { data: pricingRows } = await supabase
+    .from("channel_pricing")
+    .select("category_id, channel_room_code, channel_rate_plan_code, pricing_plan_id")
+    .eq("ota_channel_id", args.otaChannelId)
+    .eq("is_active", true);
+
+  const mapping = findChannelPricingMapping(args.incomingRoomCode, args.incomingRateplanCode, pricingRows || []);
+  let newCatName = "";
+  if (mapping?.category_id) {
+    const { data: cat } = await supabase
+      .from("room_categories")
+      .select("name")
+      .eq("id", mapping.category_id)
+      .maybeSingle();
+    newCatName = String(cat?.name ?? "").trim();
+  }
+  const codesLabel = `${args.incomingRoomCode || "—"} / ${args.incomingRateplanCode || "—"}`;
+  const afterCat =
+    newCatName ||
+    (args.incomingRoomCode ? `Sem mapeamento em Tarifas por canal (${codesLabel})` : "—");
+  pushIfDiff("Categoria no PMS (atual → após mapear códigos do canal)", prevCat, afterCat);
+
+  details.push({
+    field: "Códigos quarto / tarifa (canal)",
+    before: "—",
+    after: codesLabel,
+  });
+
+  const prepBefore = `${prevPayStatus || "—"} · já pago ${fmtAiosellMoneyDisplay(prevPaid)}`;
+  const prepAfter = args.incomingPrepaid ? "Canal indica pré-pago" : "Canal não indica pré-pago";
+  pushIfDiff("Pagamento (estado PMS vs canal)", prepBefore, prepAfter);
+
+  if (args.partnerChannelName) {
+    details.push({
+      field: "Parceiro OTA",
+      before: "—",
+      after: formatPartnerChannelName(args.partnerChannelName),
+    });
+  }
+
+  if (args.multiRoomCount > 1) {
+    details.push({
+      field: "Quartos no payload",
+      before: "—",
+      after: String(args.multiRoomCount),
+    });
+  }
+
+  return { modification_details: details };
+}
+
+async function queueAiosellLifecycleRevision(
+  supabase: SupabaseClient,
+  args: {
+    channel: Record<string, unknown>;
+    establishmentId: string;
+    bookingId: string;
+    revisionStatus: "cancelled" | "modified";
+    body: Record<string, unknown>;
+    lifecycle: "cancel" | "modify";
+    reservationId: string;
+    processingMeta?: Record<string, unknown>;
+  },
+): Promise<{ status: number; json: Record<string, unknown> }> {
+  const revId = crypto.randomUUID();
+  const payload: Record<string, unknown> = {
+    source: "aiosell_lifecycle",
+    lifecycle: args.lifecycle,
+    rawBody: args.body,
+  };
+  if (args.processingMeta && Object.keys(args.processingMeta).length > 0) {
+    payload._processing_meta = args.processingMeta;
+  }
+  const { error: insErr } = await supabase.from("channex_booking_revisions").insert({
+    ota_channel_id: args.channel.id,
+    establishment_id: args.establishmentId,
+    revision_id: revId,
+    booking_id: null,
+    unique_id: String(args.bookingId),
+    system_id: "aiosell",
+    status: args.revisionStatus,
+    payload,
+    reservation_id: args.reservationId,
+    process_status: "pending",
+  });
+  if (insErr) {
+    console.warn("aiosell-reservations-sync queue lifecycle revision", insErr);
+    return { status: 500, json: { success: false, error: insErr.message } };
+  }
+  const msg =
+    args.lifecycle === "cancel"
+      ? "Cancelamento enfileirado — confirme em Tratativas."
+      : "Alteração enfileirada — confirme em Tratativas.";
+  return {
+    status: 200,
+    json: {
+      success: true,
+      queued: true,
+      revision_id: revId,
+      message: msg,
+      action: args.lifecycle,
+    },
+  };
+}
+
 async function applyAiosellReservationPayload(
   supabase: SupabaseClient,
   channel: Record<string, unknown>,
   body: Record<string, unknown>,
-  opts?: { logPrefix?: string; requestPathname?: string; incomingRequest?: Request | null }
+  opts?: {
+    logPrefix?: string;
+    requestPathname?: string;
+    incomingRequest?: Request | null;
+    skipLifecycleQueue?: boolean;
+  }
 ): Promise<{ status: number; json: Record<string, unknown> }> {
   const logPrefix = opts?.logPrefix ?? "aiosell-reservations-sync";
 
@@ -2339,8 +2722,10 @@ async function applyAiosellReservationPayload(
   const guestPhone = pickGuestPhone(guestMerged);
   const guestAddr = guestAddressJson(guestMerged.address);
 
-  const checkIn = pickCheckIn(room0, layers);
-  const checkOut = pickCheckOut(room0, layers);
+  const checkInRaw = pickCheckIn(room0, layers);
+  const checkOutRaw = pickCheckOut(room0, layers);
+  const checkIn = normalizeAiosellDateField(checkInRaw) ?? checkInRaw;
+  const checkOut = normalizeAiosellDateField(checkOutRaw) ?? checkOutRaw;
 
   const roomCode = pickRoomCode(room0, layers);
   const rateplanCode = pickRateplanCode(room0, layers);
@@ -2369,22 +2754,36 @@ async function applyAiosellReservationPayload(
     .maybeSingle();
 
   if (action.includes("cancel")) {
-    if (!bookingId) {
-      return { status: 400, json: { success: false, error: "bookingId obrigatÃ³rio para cancel" } };
-    }
-    const otaRows = await listOtaRowsForAiosellBooking(supabase, channel.id as string, String(bookingId));
+    const otaRows = await listOtaRowsForAiosellPayloadLookup(supabase, channel.id as string, layers);
     if (otaRows.length === 0) {
-      return { status: 404, json: { success: false, error: "Reserva OTA não encontrada" } };
+      return {
+        status: 404,
+        json: { success: false, error: "Reserva OTA não encontrada (confirme bookingId / cmBookingId no payload)" },
+      };
+    }
+    const bookingRef =
+      (bookingId && String(bookingId).trim()) ||
+      String(otaRows[0].ota_reservation_code).replace(/#.*$/, "") ||
+      "";
+    if (!opts?.skipLifecycleQueue && aiosellLifecycleQueueEnabled()) {
+      return queueAiosellLifecycleRevision(supabase, {
+        channel,
+        establishmentId,
+        bookingId: bookingRef,
+        revisionStatus: "cancelled",
+        body,
+        lifecycle: "cancel",
+        reservationId: otaRows[0].reservation_id,
+      });
     }
     const ids = otaRows.map((r) => r.reservation_id);
+    void maybeSendCheckinChargeEventForAiosell(
+      supabase, ids, establishmentId, logPrefix, "reservation_cancelled"
+    ).catch((e) => console.warn(`${logPrefix}: checkin-charge reservation_cancelled`, e));
     const { error: updErr } = await supabase.from("reservations").update({ status: "cancelled" }).in("id", ids);
     if (updErr) {
       return { status: 500, json: { success: false, error: updErr.message } };
     }
-    // Mensagens & Cobranças: avisa hóspede(s) que a reserva foi cancelada pelo canal.
-    void maybeSendCheckinChargeEventForAiosell(
-      supabase, ids, establishmentId, logPrefix, "reservation_cancelled"
-    ).catch((e) => console.warn(`${logPrefix}: checkin-charge reservation_cancelled`, e));
     return {
       status: 200,
       json: {
@@ -2399,43 +2798,169 @@ async function applyAiosellReservationPayload(
   }
 
   if (action.includes("modify") || action.includes("update")) {
-    if (!bookingId) {
-      return { status: 400, json: { success: false, error: "bookingId obrigatÃ³rio para alteraÃ§Ã£o" } };
+    const otaRows = await listOtaRowsForAiosellPayloadLookup(supabase, channel.id as string, layers);
+    if (otaRows.length === 0) {
+      return {
+        status: 404,
+        json: { success: false, error: "Reserva OTA não encontrada (confirme bookingId / cmBookingId no payload)" },
+      };
     }
-    if (!checkIn || !checkOut) {
+    const bookingRef =
+      (bookingId && String(bookingId).trim()) ||
+      String(otaRows[0].ota_reservation_code).replace(/#.*$/, "") ||
+      "";
+    if (!opts?.skipLifecycleQueue && aiosellLifecycleQueueEnabled()) {
+      const incomingTotal = pickTotalAmount(room0, body, layers);
+      const incomingPrepaid = isAiosellPrepaidBooking(layers, body);
+      const processingMeta = await buildAiosellModifyQueueProcessingMeta(supabase, {
+        reservationId: otaRows[0].reservation_id,
+        otaChannelId: channel.id as string,
+        incomingGuestName: guestName,
+        incomingCheckIn: checkIn,
+        incomingCheckOut: checkOut,
+        incomingRoomCode: roomCode,
+        incomingRateplanCode: rateplanCode,
+        incomingTotal,
+        incomingPrepaid,
+        partnerChannelName: meta.sourceChannel,
+        multiRoomCount: rooms.length,
+      });
+      return queueAiosellLifecycleRevision(supabase, {
+        channel,
+        establishmentId,
+        bookingId: bookingRef,
+        revisionStatus: "modified",
+        body,
+        lifecycle: "modify",
+        reservationId: otaRows[0].reservation_id,
+        processingMeta,
+      });
+    }
+    let checkInM = checkIn;
+    let checkOutM = checkOut;
+    if (!checkInM || !checkOutM) {
+      const { data: curRes } = await supabase
+        .from("reservations")
+        .select("checkin_date, checkout_date")
+        .eq("id", otaRows[0].reservation_id)
+        .maybeSingle();
+      checkInM = checkInM || (curRes?.checkin_date as string | undefined) || undefined;
+      checkOutM = checkOutM || (curRes?.checkout_date as string | undefined) || undefined;
+    }
+    if (!checkInM || !checkOutM) {
       return { status: 400, json: { success: false, error: "Datas obrigatÃ³rias para alteraÃ§Ã£o" } };
     }
-    const otaRows = await listOtaRowsForAiosellBooking(supabase, channel.id as string, String(bookingId));
-    if (otaRows.length === 0) {
-      return { status: 404, json: { success: false, error: "Reserva OTA não encontrada" } };
+    let checkInFinal = normalizeAiosellDateField(checkInM) ?? checkInM;
+    let checkOutFinal = normalizeAiosellDateField(checkOutM) ?? checkOutM;
+    if (!isValidPmsStayRange(checkInFinal, checkOutFinal)) {
+      const { data: curDates } = await supabase
+        .from("reservations")
+        .select("checkin_date, checkout_date")
+        .eq("id", otaRows[0].reservation_id)
+        .maybeSingle();
+      const fbCi =
+        normalizeAiosellDateField(curDates?.checkin_date as string | undefined) ??
+        String(curDates?.checkin_date ?? "").trim();
+      const fbCo =
+        normalizeAiosellDateField(curDates?.checkout_date as string | undefined) ??
+        String(curDates?.checkout_date ?? "").trim();
+      if (isValidPmsStayRange(fbCi, fbCo)) {
+        checkInFinal = fbCi;
+        checkOutFinal = fbCo;
+      } else {
+        return {
+          status: 400,
+          json: {
+            success: false,
+            error:
+              "Período inválido: check-out deve ser posterior ao check-in. Corrija o envio do canal ou as datas na reserva.",
+          },
+        };
+      }
     }
     const amt = room0.amount ?? room0.totalAmount ?? body.totalAmount ?? body.amount;
     const numAmt = extractNumberFromAmountLike(amt) ?? (amt != null && amt !== "" ? Number(amt) : NaN);
     const modifyPrepaid = isAiosellPrepaidBooking(layers, body);
-    const shouldApplyAutoPaymentOnModify = modifyPrepaid
-      ? await shouldApplyAiosellAutoPayment(supabase, {
-          establishmentId,
-          partnerChannelName: meta.sourceChannel,
-        })
-      : false;
     const n = otaRows.length;
     const amountParts =
       numAmt != null && !Number.isNaN(numAmt) && n > 1 ? splitMoneyAcrossParts(numAmt, n) : null;
 
+    const { data: pricingRowsModify } = await supabase
+      .from("channel_pricing")
+      .select("category_id, pricing_plan_id, channel_room_code, channel_rate_plan_code")
+      .eq("ota_channel_id", channel.id)
+      .eq("is_active", true);
+
     for (let i = 0; i < otaRows.length; i++) {
+      const roomLine = rooms[i] || room0;
+      const rc = pickRoomCode(roomLine, layers);
+      const rpc = pickRateplanCode(roomLine, layers);
+      let mapping: { category_id: string; pricing_plan_id?: string | null } | null = null;
+      if (rc) {
+        const m = findChannelPricingMapping(rc, rpc, pricingRowsModify || []);
+        if (!m?.category_id) {
+          return {
+            status: 400,
+            json: {
+              success: false,
+              error: `Mapeamento não encontrado para alteração (${rc} / ${rpc ?? "—"}). Configure Tarifas por canal.`,
+            },
+          };
+        }
+        mapping = m;
+      }
+
+      const { data: curRow } = await supabase
+        .from("reservations")
+        .select("category_id, room_id, establishment_id")
+        .eq("id", otaRows[i].reservation_id)
+        .maybeSingle();
+
       const patch: Record<string, unknown> = {
-        checkin_date: checkIn,
-        checkout_date: checkOut,
+        checkin_date: checkInFinal,
+        checkout_date: checkOutFinal,
         guest_name: guestName,
       };
       if (numAmt != null && !Number.isNaN(numAmt)) {
         const part = amountParts ? amountParts[i] : numAmt;
         patch.total_amount = part;
-        if (modifyPrepaid && shouldApplyAutoPaymentOnModify && part > 0) {
+        if (modifyPrepaid && part > 0) {
           patch.paid_amount = part;
           patch.payment_status = "paid";
         }
       }
+
+      if (mapping) {
+        const newCat = mapping.category_id;
+        const oldCat = String(curRow?.category_id ?? "");
+        patch.category_id = newCat;
+        if (mapping.pricing_plan_id) {
+          patch.pricing_plan_id = mapping.pricing_plan_id;
+        }
+        if (newCat !== oldCat) {
+          const estId = String(curRow?.establishment_id ?? establishmentId);
+          const newRoomId = await findAvailableRoomForAiosellCategoryChange(supabase, {
+            establishmentId: estId,
+            categoryId: newCat,
+            checkin: checkInFinal,
+            checkout: checkOutFinal,
+            excludeReservationId: otaRows[i].reservation_id,
+            currentRoomId: curRow?.room_id as string | null | undefined,
+          });
+          if (!newRoomId) {
+            return {
+              status: 400,
+              json: {
+                success: false,
+                error:
+                  "Sem quarto disponível na nova categoria neste período. Libere um quarto no mapa ou atribua manualmente antes de aplicar.",
+              },
+            };
+          }
+          patch.room_id = newRoomId;
+        }
+      }
+
       const { error: updErr } = await supabase
         .from("reservations")
         .update(patch)
@@ -2468,14 +2993,28 @@ async function applyAiosellReservationPayload(
             reservationId: otaRows[i].reservation_id,
             establishmentId,
             amount: part,
-            bookingId: `${String(bookingId)}#${i}`,
+            bookingId: `${bookingRef}#${i}`,
             partnerChannelName: meta.sourceChannel,
+            otaPrepaid: true,
           });
           if (payErr.error) {
             console.warn(`${logPrefix} prepaid payment (modify)`, payErr.error);
           }
         }
       }
+    }
+    try {
+      await notifyEstablishmentAiosellReservationModified(supabase, {
+        establishmentId,
+        reservationId: otaRows[0].reservation_id,
+        guestName,
+        partnerName: meta.sourceChannel,
+        bookingRef,
+        checkIn: checkInFinal,
+        checkOut: checkOutFinal,
+      });
+    } catch (e) {
+      console.warn(`${logPrefix} notification reserva modificada`, e);
     }
     // Mensagens & Cobranças: avisa hóspede(s) que a reserva foi modificada pelo canal.
     void maybeSendCheckinChargeEventForAiosell(
@@ -2512,12 +3051,6 @@ async function applyAiosellReservationPayload(
   }
 
   const prepaid = isAiosellPrepaidBooking(layers, body);
-  const shouldApplyAutoPayment = prepaid
-    ? await shouldApplyAiosellAutoPayment(supabase, {
-        establishmentId,
-        partnerChannelName: meta.sourceChannel,
-      })
-    : false;
   const bookingTotal = pickTotalAmount(room0, body, layers);
 
   const { data: pricingRows } = await supabase
@@ -2585,8 +3118,10 @@ async function applyAiosellReservationPayload(
       const rc = pickRoomCode(room, layers);
       const rpc = pickRateplanCode(room, layers);
       const mapping = findChannelPricingMapping(rc, rpc, pricingRows || [])!;
-      const ci = pickCheckIn(room, layers) || checkIn;
-      const co = pickCheckOut(room, layers) || checkOut;
+      const ciRaw = pickCheckIn(room, layers) || checkIn;
+      const coRaw = pickCheckOut(room, layers) || checkOut;
+      const ci = normalizeAiosellDateField(ciRaw) ?? ciRaw;
+      const co = normalizeAiosellDateField(coRaw) ?? coRaw;
 
       const rg =
         room.guest && typeof room.guest === "object" && !Array.isArray(room.guest)
@@ -2608,8 +3143,8 @@ async function applyAiosellReservationPayload(
         adults: Number(room.adults ?? occ.adults ?? body.adults ?? 2),
         children: Number(room.children ?? occ.children ?? body.children ?? 0),
         total_amount: total_i,
-        paid_amount: prepaid && shouldApplyAutoPayment && total_i > 0 ? total_i : 0,
-        payment_status: prepaid && shouldApplyAutoPayment && total_i > 0 ? "paid" : "pending",
+        paid_amount: prepaid && total_i > 0 ? total_i : 0,
+        payment_status: prepaid && total_i > 0 ? "paid" : "pending",
         status: "pending",
         channel: "ota",
         notes: prepaid
@@ -2703,6 +3238,7 @@ async function applyAiosellReservationPayload(
           amount: total_i,
           bookingId: otaCode,
           partnerChannelName: meta.sourceChannel,
+          otaPrepaid: true,
         });
         if (payErr.error) {
           console.warn(`${logPrefix} prepaid payment insert`, payErr.error);
@@ -2802,8 +3338,8 @@ async function applyAiosellReservationPayload(
     adults: Number(room0.adults ?? occ.adults ?? body.adults ?? 2),
     children: Number(room0.children ?? occ.children ?? body.children ?? 0),
     total_amount: total,
-    paid_amount: prepaid && shouldApplyAutoPayment && total > 0 ? total : 0,
-    payment_status: prepaid && shouldApplyAutoPayment && total > 0 ? "paid" : "pending",
+    paid_amount: prepaid && total > 0 ? total : 0,
+    payment_status: prepaid && total > 0 ? "paid" : "pending",
     status: "pending",
     channel: "ota",
     notes: prepaid ? `${baseNotes} · Pagamento: pré-pago (OTA)` : baseNotes,
@@ -2893,6 +3429,7 @@ async function applyAiosellReservationPayload(
       amount: total,
       bookingId: String(bookingId),
       partnerChannelName: meta.sourceChannel,
+      otaPrepaid: true,
     });
     if (payErr.error) {
       console.warn(`${logPrefix} prepaid payment insert`, payErr.error);
@@ -3214,7 +3751,9 @@ serve(async (req) => {
       if (j.already_exists) skipped++;
       else if (j.action === "book") created++;
       const action = String(j.action ?? "");
-      if (action === "cancel" || action === "modify") {
+      if (j.queued === true) {
+        // Inventário só após aplicar na Tratativas (webhook apply_revision).
+      } else if (action === "cancel" || action === "modify") {
         shouldPushAvailability = true;
       } else if (action === "book" && !j.already_exists) {
         shouldPushAvailability = true;

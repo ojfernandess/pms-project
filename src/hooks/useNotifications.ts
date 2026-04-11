@@ -9,6 +9,7 @@ export type NotificationType =
   | 'pending_service_fee'
   | 'maintenance_ticket'
   | 'reservation_cancelled'
+  | 'reservation_modified'
   | 'checkin_today'
   | 'checkout_today'
   | 'cleaning_required'

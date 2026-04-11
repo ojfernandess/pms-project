@@ -512,7 +512,10 @@ serve(async (req) => {
         }
 
         const allowedStatuses = ["pending", "unpaid", "confirmed", "checkedin"];
-        if (!allowedStatuses.includes(reservation.status)) {
+        const statusOk =
+          allowedStatuses.includes(reservation.status) ||
+          (intent === "reservation_cancelled" && reservation.status === "cancelled");
+        if (!statusOk) {
           results.push({ reservation_id: reservationId, success: false, error: "Reserva não está em status permitido para envio (pendente, não paga, confirmada ou com check-in)" });
           continue;
         }

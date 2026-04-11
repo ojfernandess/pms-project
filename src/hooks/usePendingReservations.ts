@@ -10,6 +10,7 @@ import { logActivity } from "@/lib/activityLogger";
 import { triggerEmail } from "@/lib/emailService";
 import { reservationGuestContactFields } from "@/lib/reservationChannelDisplay";
 import { invokeChannexReservationsSync } from "@/lib/channexReservationsSyncInvoke";
+import { invokeAiosellApplyBookingRevision } from "@/lib/aiosellRevisionApplyInvoke";
 
 export interface Overbooking {
   reservation: any;
@@ -579,7 +580,7 @@ export const usePendingReservations = () => {
       const { data, error } = await supabase
         .from("channex_booking_revisions" as any)
         .select(
-          "id, ota_channel_id, revision_id, booking_id, unique_id, status, payload, process_status, error_message, created_at, reservation_id, reservation:reservations(id, reservation_code, checkin_date, checkout_date, guest_name, total_amount, paid_amount, pricing_plan_id, status, establishment_id)"
+          "id, ota_channel_id, revision_id, booking_id, unique_id, status, payload, process_status, error_message, created_at, reservation_id, ota_channels(channel_manager_type), reservation:reservations(id, reservation_code, checkin_date, checkout_date, guest_name, total_amount, paid_amount, pricing_plan_id, status, establishment_id)"
         )
         .eq("establishment_id", establishmentId)
         .in("status", ["modified", "cancelled"])
@@ -681,9 +682,21 @@ export const usePendingReservations = () => {
   });
 
   const acceptChannexRevision = useMutation({
-    mutationFn: async (args: { revisionId: string; channelId: string; bookingId?: string; bookingUniqueId?: string; status: "modified" | "cancelled" }) => {
+    mutationFn: async (args: {
+      revisionId: string;
+      channelId: string;
+      bookingId?: string;
+      bookingUniqueId?: string;
+      status: "modified" | "cancelled";
+      channelManagerType?: string | null;
+    }) => {
       const establishmentId = getEstablishmentId();
       if (!establishmentId) throw new Error("Estabelecimento não encontrado");
+
+      const isAiosell = String(args.channelManagerType ?? "").toLowerCase() === "aiosell";
+      if (isAiosell) {
+        return invokeAiosellApplyBookingRevision(establishmentId, args.revisionId);
+      }
 
       const payload = await invokeChannexReservationsSync(args.channelId, establishmentId, {
         revisionId: args.revisionId,
@@ -698,6 +711,8 @@ export const usePendingReservations = () => {
       return payload;
     },
     onSuccess: async (_data, vars) => {
+      const isAiosell = String(vars.channelManagerType ?? "").toLowerCase() === "aiosell";
+      const sourceLabel = isAiosell ? "Aiosell" : "Channex";
       try {
         await logActivity({
           actionType: vars.status === "cancelled" ? "cancelled" : "updated",
@@ -706,10 +721,10 @@ export const usePendingReservations = () => {
           entityCode: vars.bookingUniqueId || vars.bookingId || vars.revisionId,
           description:
             vars.status === "cancelled"
-              ? `Pendência Channex de cancelamento aceita pelo usuário (${vars.bookingUniqueId || vars.bookingId || vars.revisionId})`
-              : `Pendência Channex de modificação aceita pelo usuário (${vars.bookingUniqueId || vars.bookingId || vars.revisionId})`,
+              ? `Pendência ${sourceLabel} de cancelamento aceita pelo usuário (${vars.bookingUniqueId || vars.bookingId || vars.revisionId})`
+              : `Pendência ${sourceLabel} de modificação aceita pelo usuário (${vars.bookingUniqueId || vars.bookingId || vars.revisionId})`,
           metadata: {
-            source: "channex",
+            source: isAiosell ? "aiosell" : "channex",
             revision_id: vars.revisionId,
             booking_id: vars.bookingId || null,
             booking_unique_id: vars.bookingUniqueId || null,
@@ -730,7 +745,7 @@ export const usePendingReservations = () => {
       queryClient.invalidateQueries({ queryKey: ["ota_reservations"] });
     },
     onError: (error: any) => {
-      toast.error(error.message || "Erro ao processar revisão Channex");
+      toast.error(error.message || "Erro ao processar revisão do channel manager");
     },
   });
 

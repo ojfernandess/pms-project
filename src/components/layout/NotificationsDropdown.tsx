@@ -19,6 +19,8 @@ const getNotificationIcon = (type: Notification["type"]) => {
   switch (type) {
     case "new_reservation":
       return <Calendar className="h-4 w-4 text-blue-600" />;
+    case "reservation_modified":
+      return <Calendar className="h-4 w-4 text-violet-600" />;
     case "pending_payment":
     case "pending_service_fee":
       return <CreditCard className="h-4 w-4 text-orange-600" />;

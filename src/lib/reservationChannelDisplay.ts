@@ -29,6 +29,25 @@ function normalizePartnerName(raw: string | null | undefined): string {
 /** Nome no payload Channex (revisão): prioriza customer_name do webhook resumido; senão name + surname. */
 export function channexRevisionPayloadGuestName(payload: Record<string, unknown> | null | undefined): string {
   if (!payload || typeof payload !== "object") return "N/A";
+  if (payload.source === "aiosell_lifecycle") {
+    const rb = payload.rawBody as Record<string, unknown> | undefined;
+    if (rb && typeof rb === "object" && !Array.isArray(rb)) {
+      const g = rb.guest as Record<string, unknown> | undefined;
+      if (g && typeof g === "object") {
+        const fn = String(g.firstName ?? "").trim();
+        const ln = String(g.lastName ?? "").trim();
+        const full = `${fn} ${ln}`.trim();
+        if (full) return full;
+      }
+      const rooms = rb.rooms as unknown[] | undefined;
+      const r0 =
+        Array.isArray(rooms) && rooms[0] && typeof rooms[0] === "object" && !Array.isArray(rooms[0])
+          ? (rooms[0] as Record<string, unknown>)
+          : null;
+      const gn = r0 && String(r0.guestName ?? "").trim();
+      if (gn) return gn;
+    }
+  }
   const cn = String(payload.customer_name ?? "").trim();
   if (cn) return cn;
   const c = payload.customer as Record<string, unknown> | undefined;
