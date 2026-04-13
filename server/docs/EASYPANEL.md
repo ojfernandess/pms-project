@@ -17,7 +17,7 @@ Este serviço é o backend **Node.js + Fastify** em `server/`, com rotas diretas
 | `SUPABASE_ANON_KEY` | Recomendado | Para validar `Authorization: Bearer <jwt>` nas rotas protegidas da API. |
 | `PORT` | Não | EasyPanel costuma definir `PORT`; o servidor usa `process.env.PORT` (padrão `8787`). |
 | `NODE_ENV` | Sim | `production`. |
-| `CORS_ORIGINS` | Sim | Lista separada por vírgulas: `https://app.seudominio.com,https://www.seudominio.com`. |
+| `CORS_ORIGIN` | Sim | Origem do frontend (ex.: `https://app.seudominio.com` ou `http://localhost:8080`). |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | Não | Limite por IP (padrão 120 req / 60s). |
 | `FUNCTIONS_INVOKE_BASE_URL` | Opcional | Base para proxy de funções legadas ainda não reescritas. |
 
@@ -83,6 +83,25 @@ O frontend deve chamar diretamente os endpoints da API Node (`/api/...`) via uti
 - `GET https://api.seudominio.com/health`
 - `POST https://api.seudominio.com/api/pagamentos/stripe/intent`
 - `POST https://api.seudominio.com/api/webhooks/stripe`
+
+## Frontend + Backend juntos (EasyPanel)
+
+Se quiser subir os dois no mesmo projeto:
+
+1. Use o arquivo `docker-compose.easypanel.yml` na raiz.
+2. Configure as variáveis:
+   - Backend: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `CORS_ORIGIN`
+   - Frontend (build args): `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_PMS_API_URL`, `VITE_SUPABASE_PROJECT_ID`
+3. Exponha os serviços:
+   - `pms-web` na porta `80` do container (externa ex.: `https://app.seudominio.com`)
+   - `pms-api` na porta `8787` (externa ex.: `https://api.seudominio.com`)
+4. Configure `VITE_PMS_API_URL=https://api.seudominio.com` para o build do frontend.
+
+Arquivos usados:
+- `Dockerfile.frontend` (frontend Vite -> Nginx)
+- `docker/nginx/frontend.conf` (SPA fallback)
+- `server/Dockerfile` (API Fastify)
+- `docker-compose.easypanel.yml` (orquestração local/compose)
 
 ## CI
 
