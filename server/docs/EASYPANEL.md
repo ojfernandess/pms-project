@@ -88,7 +88,7 @@ O frontend deve chamar diretamente os endpoints da API Node (`/api/...`) via uti
 
 Se quiser subir os dois no mesmo projeto:
 
-1. Use o arquivo `docker-compose.easypanel.yml` na raiz.
+1. Use o arquivo `server/docker-compose.easypanel.yml`.
 2. Configure as variáveis:
    - Backend: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `CORS_ORIGIN`
    - Frontend (build args): `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_PMS_API_URL`, `VITE_SUPABASE_PROJECT_ID`
@@ -101,7 +101,17 @@ Arquivos usados:
 - `Dockerfile.frontend` (frontend Vite -> Nginx)
 - `docker/nginx/frontend.conf` (SPA fallback)
 - `server/Dockerfile` (API Fastify)
-- `docker-compose.easypanel.yml` (orquestração local/compose)
+- `server/docker-compose.easypanel.yml` (compose para EasyPanel com build path em `server`)
+
+### Se a UI mostrar "Caminho de Build: Invalid"
+
+No formulário do EasyPanel (modo docker-compose + Git), use:
+
+- **Branch:** `Sandbox` (respeita maiúscula)
+- **Caminho de Build:** `server` (sem `/` no fim e sem `.`)
+- **Arquivo Docker Compose:** `docker-compose.easypanel.yml`
+
+Esse combo evita o erro de validação do campo de caminho.
 
 ## CI
 
