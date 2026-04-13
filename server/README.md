@@ -186,13 +186,13 @@ Configura no Stripe Dashboard o endpoint `https://<teu-api>/api/webhooks/stripe`
 
 Configura no painel da Aiosell o endpoint `https://<teu-api>/api/webhooks/aiosell-reservation`.
 
-Para autenticação do webhook, mantém a mesma estratégia já usada no legado (`x-aiosell-secret`, `x-webhook-secret`, `x-api-secret`, `Authorization Basic/Bearer`, ou `?secret=`). O backend Node apenas encaminha request/query para a função legada `aiosell-reservation-webhook`, então o comportamento de validação continua igual.
+Para autenticação do webhook, mantém a mesma estratégia já usada no legado (`x-aiosell-secret`, `x-webhook-secret`, `x-api-secret`, `Authorization Basic/Bearer`, ou `?secret=`). O backend Node encaminha corpo e query para a Edge `aiosell-reservation-webhook` (com `apikey`/anon no gateway quando necessário, como no Channex).
 
 ### 9. Webhook Channex (reservas)
 
 Configura no Channex o endpoint `https://<teu-api>/api/webhooks/channex-reservation`.
 
-O backend Node encaminha request/query para a função legada `channex-reservation-webhook`, preservando a validação existente (incluindo `user-api-key` quando habilitado no canal).
+O backend Node encaminha o corpo e a query para a Edge `channex-reservation-webhook`, preservando a validação existente (incluindo `user-api-key` quando habilitado no canal). O proxy acrescenta sempre `apikey` + `Authorization` com a **anon key** do projeto quando o cliente não envia `Authorization`, para o gateway Supabase aceitar o pedido; o corpo é repassado como JSON (objeto, string JSON ou Buffer UTF-8) sem dupla serialização indevida.
 
 #### Teste rápido (curl)
 

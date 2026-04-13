@@ -206,17 +206,66 @@ function pickEmailTemplateForEstablishment(
   establishmentId: string,
 ): AnyObj | null {
   if (!allTemplates?.length) return null;
+  const matchesEstablishment = (raw: unknown): boolean => {
+    if (raw === null || raw === undefined) return false;
+    if (Array.isArray(raw)) return raw.map(String).includes(establishmentId);
+    if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) && parsed.map(String).includes(establishmentId);
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  };
+  for (const template of allTemplates) {
+    if (matchesEstablishment(template.establishment_ids)) return template;
+  }
   for (const template of allTemplates) {
     const establishmentIds = template.establishment_ids;
     if (establishmentIds === null || establishmentIds === undefined) return template;
-    if (Array.isArray(establishmentIds) && establishmentIds.length === 0) continue;
-    if (Array.isArray(establishmentIds) && establishmentIds.includes(establishmentId)) return template;
-    try {
-      const parsed = typeof establishmentIds === "string" ? JSON.parse(establishmentIds) : establishmentIds;
-      if (Array.isArray(parsed) && parsed.includes(establishmentId)) return template;
-    } catch {
-      return template;
-    }
+    if (Array.isArray(establishmentIds) && establishmentIds.length === 0) return template;
+  }
+  return null;
+}
+
+/** E-mail em CC/BCC: colunas são TEXT; normaliza arrays JSON vindos do PostgREST. */
+function ccBccToText(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") {
+    const t = v.trim();
+    return t || null;
+  }
+  if (Array.isArray(v)) {
+    const t = v.map((x) => String(x).trim()).filter(Boolean).join(", ");
+    return t || null;
+  }
+  const t = String(v).trim();
+  return t || null;
+}
+
+/** Channex / OTAs variam os campos do hóspede; cobrir mail, guests e aninhamentos comuns. */
+function channexGuestEmailFromPayload(customer: AnyObj, firstGuest: AnyObj | null, attrs: AnyObj): string | null {
+  const candidates: unknown[] = [
+    customer.mail,
+    customer.email,
+    customer.e_mail,
+    (customer as AnyObj).E_mail,
+    nestedValue(customer, "contact.mail"),
+    nestedValue(customer, "contact.email"),
+    firstGuest?.mail,
+    firstGuest?.email,
+    firstGuest ? nestedValue(firstGuest as AnyObj, "contact.email") : undefined,
+    firstGuest ? nestedValue(firstGuest as AnyObj, "contact.mail") : undefined,
+    attrs.customer_email,
+    attrs.guest_email,
+    nestedValue(attrs, "customer.mail"),
+    nestedValue(attrs, "customer.email"),
+  ];
+  for (const c of candidates) {
+    const s = ensureString(c);
+    if (s.includes("@")) return s;
   }
   return null;
 }
@@ -246,13 +295,28 @@ async function queueChannelReservationEmail(
     reservationCode?: string | null;
   },
 ): Promise<void> {
-  const recipientEmail = args.guestEmail || args.otaGuestEmail;
+  let recipientEmail = ensureString(args.guestEmail) || ensureString(args.otaGuestEmail);
+  if (!recipientEmail && args.reservationId) {
+    const { data: resRow } = await supabase
+      .from("reservations")
+      .select("guest_id, client_id")
+      .eq("id", args.reservationId)
+      .maybeSingle();
+    const cid = ensureString((resRow as AnyObj | null)?.guest_id) || ensureString((resRow as AnyObj | null)?.client_id);
+    if (cid) {
+      const { data: cl } = await supabase.from("clients").select("email").eq("id", cid).maybeSingle();
+      recipientEmail = ensureString((cl as AnyObj | null)?.email);
+    }
+  }
   if (!recipientEmail) return;
+
+  const eventType =
+    args.paidAmount >= args.totalAmount && args.totalAmount > 0 ? "payment.confirmed" : "reservation.created";
 
   const { data: templates } = await supabase
     .from("email_templates")
     .select("*")
-    .eq("event_type", args.paidAmount >= args.totalAmount && args.totalAmount > 0 ? "payment.confirmed" : "reservation.created")
+    .eq("event_type", eventType)
     .eq("is_active", true);
 
   const template = pickEmailTemplateForEstablishment((templates || []) as AnyObj[], args.establishmentId);
@@ -270,10 +334,12 @@ async function queueChannelReservationEmail(
 
   const subject = replaceVars(String(template.subject || ""), vars);
   const bodyHtml = replaceVars(String(template.body_html || ""), vars);
+  const ccText = ccBccToText(template.cc_emails);
+  const bccText = ccBccToText(template.bcc_emails);
 
-  await supabase.rpc("insert_email_queue", {
+  const { data: queueId, error: queueError } = await supabase.rpc("insert_email_queue", {
     p_template_id: template.id,
-    p_event_type: args.paidAmount >= args.totalAmount && args.totalAmount > 0 ? "payment.confirmed" : "reservation.created",
+    p_event_type: eventType,
     p_recipient_email: recipientEmail,
     p_recipient_name: args.guestName || "Hóspede",
     p_subject: subject,
@@ -281,9 +347,28 @@ async function queueChannelReservationEmail(
     p_reservation_id: args.reservationId,
     p_variables: vars,
     p_priority: 1,
-    p_cc_emails: template.cc_emails ?? null,
-    p_bcc_emails: template.bcc_emails ?? null,
+    p_cc_emails: ccText,
+    p_bcc_emails: bccText,
   });
+
+  if (queueError || !queueId) {
+    console.warn("channex-reservations-sync insert_email_queue", queueError);
+    const { error: insErr } = await supabase.from("email_queue").insert({
+      template_id: template.id,
+      event_type: eventType,
+      recipient_email: recipientEmail,
+      recipient_name: args.guestName || "Hóspede",
+      subject,
+      body_html: bodyHtml,
+      reservation_id: args.reservationId,
+      variables: vars,
+      priority: 1,
+      status: "pending",
+      cc_emails: ccText,
+      bcc_emails: bccText,
+    });
+    if (insErr) console.warn("channex-reservations-sync email_queue direct insert", insErr);
+  }
 }
 
 function normalizePartnerKey(raw: string | null | undefined): string {
@@ -1447,7 +1532,7 @@ serve(async (req) => {
           fromSummary ||
           `${firstName} ${lastName}`.trim() ||
           "Hóspede Channex";
-        const email = ensureString(customer.mail || customer.email) || null;
+        const email = channexGuestEmailFromPayload(customer, firstGuest, attrs);
         const phone = ensureString(customer.phone || customer.mobile || customer.phone_number) || null;
         const roomTypeId = ensureString((firstRoom as AnyObj).room_type_id || (firstRoom as AnyObj).room_type_code || ((firstRoom as AnyObj).meta as AnyObj | undefined)?.room_type_code);
         const ratePlanId = ensureString((firstRoom as AnyObj).rate_plan_id || (firstRoom as AnyObj).rate_plan_code || ((firstRoom as AnyObj).meta as AnyObj | undefined)?.rate_plan_code);

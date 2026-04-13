@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Env } from "../config/env.js";
 import { requireAuth } from "../middleware/auth.js";
 import { invokeLegacyFunction, invokeLegacyFunctionWithOptions } from "../services/legacyFunctionsProxy.js";
@@ -34,6 +34,31 @@ function pickQueryParams(rawQuery: Record<string, unknown> | undefined): URLSear
     }
   }
   return query;
+}
+
+/** Normaliza corpo de webhook (JSON em string/Buffer ou objeto já parseado pelo Fastify). */
+function integrationWebhookJsonBody(request: FastifyRequest): unknown {
+  const raw = request.body;
+  if (raw === undefined || raw === null) return {};
+  if (Buffer.isBuffer(raw)) {
+    const t = raw.toString("utf8").trim();
+    if (!t) return {};
+    try {
+      return JSON.parse(t) as unknown;
+    } catch {
+      throw new HttpError(400, "Corpo JSON inválido", "INVALID_JSON");
+    }
+  }
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    if (!t) return {};
+    try {
+      return JSON.parse(t) as unknown;
+    } catch {
+      throw new HttpError(400, "Corpo JSON inválido", "INVALID_JSON");
+    }
+  }
+  return raw;
 }
 
 export async function registerIntegrationOpsRoutes(app: FastifyInstance, env: Env): Promise<void> {
@@ -73,7 +98,7 @@ export async function registerIntegrationOpsRoutes(app: FastifyInstance, env: En
       const data = await invokeLegacyFunctionWithOptions(
         env,
         "aiosell-reservation-webhook",
-        request.body ?? {},
+        integrationWebhookJsonBody(request),
         {
           query,
           extraHeaders: forwardedHeaders,
@@ -115,7 +140,7 @@ export async function registerIntegrationOpsRoutes(app: FastifyInstance, env: En
       const data = await invokeLegacyFunctionWithOptions(
         env,
         "channex-reservation-webhook",
-        request.body ?? {},
+        integrationWebhookJsonBody(request),
         {
           query,
           extraHeaders: forwardedHeaders,

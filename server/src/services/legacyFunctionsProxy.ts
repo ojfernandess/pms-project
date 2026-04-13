@@ -6,6 +6,20 @@ type InvokeLegacyOptions = {
   useServiceRoleAuth?: boolean;
 };
 
+/** Corpo para Edge: objeto → JSON; string já JSON → repasse sem duplo stringify; Buffer → UTF-8. */
+export function serializeLegacyFunctionBody(body: unknown): string {
+  if (body === undefined || body === null) return "{}";
+  if (typeof body === "string") {
+    const t = body.trim();
+    return t || "{}";
+  }
+  if (Buffer.isBuffer(body)) {
+    const t = body.toString("utf8").trim();
+    return t || "{}";
+  }
+  return JSON.stringify(body);
+}
+
 export async function invokeLegacyFunction<T>(env: Env, functionName: string, body: unknown): Promise<T> {
   return invokeLegacyFunctionWithOptions<T>(env, functionName, body, { useServiceRoleAuth: true });
 }
@@ -32,12 +46,18 @@ export async function invokeLegacyFunctionWithOptions<T>(
   if (options.useServiceRoleAuth !== false) {
     headers.Authorization = `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`;
     headers.apikey = env.SUPABASE_SERVICE_ROLE_KEY;
+  } else {
+    // Gateway das Edge Functions exige `apikey` do projeto; webhooks externos não o enviam.
+    headers.apikey = env.SUPABASE_ANON_KEY;
+    if (!String(headers.Authorization ?? "").trim()) {
+      headers.Authorization = `Bearer ${env.SUPABASE_ANON_KEY}`;
+    }
   }
 
   const response = await fetch(url.toString(), {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: serializeLegacyFunctionBody(body),
   });
 
   const data = (await response.json().catch(() => ({}))) as { error?: string } & T;
@@ -78,7 +98,7 @@ export async function invokeLegacyFunctionForwardAuth<T>(
   const init: RequestInit = { method: options.method, headers };
   if (options.method === "POST") {
     headers["Content-Type"] = "application/json";
-    init.body = JSON.stringify(options.body ?? {});
+    init.body = serializeLegacyFunctionBody(options.body ?? {});
   }
 
   const response = await fetch(url.toString(), init);
