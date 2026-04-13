@@ -1,5 +1,999 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// --- Inlined: Supabase deploy bundle só inclui este ficheiro (importações relativas falham). ---
+
+/**
+ * Handlebars-like e-mail templates: `{{var}}`, `{{#if}}`, `{{#each}}`, `{{{raw}}}`.
+ * Inlined in this file because some Supabase deploy paths only upload `index.ts`. Aligned with `src/lib/emailTemplateEngine.ts`.
+ */
+
+interface TemplateVariables {
+  [key: string]: string | number | null | undefined | any; // Permite objetos e arrays
+}
+
+/**
+ * ObtÃƒÂ©m valor de uma variÃƒÂ¡vel aninhada (ex: "main_guest.name" ou "documents.0.guest_name")
+ */
+function getNestedValue(variables: TemplateVariables, path: string): any {
+  const parts = path.split('.');
+  let value: any = variables;
+  
+  for (const part of parts) {
+    if (value === null || value === undefined) return null;
+    
+    // Se for um nÃƒÂºmero, tratar como ÃƒÂ­ndice de array
+    const numPart = parseInt(part, 10);
+    if (!isNaN(numPart) && Array.isArray(value)) {
+      value = value[numPart];
+    } else if (typeof value === 'object' && part in value) {
+      value = value[part];
+    } else {
+      return null;
+    }
+  }
+  
+  return value;
+}
+
+/**
+ * Processa loops {{#each array}}...{{/each}}
+ */
+function processEachLoops(template: string, variables: TemplateVariables): string {
+  let processed = template;
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = 100;
+
+  while (changed && iterations < maxIterations) {
+    iterations++;
+    changed = false;
+
+    // Regex para encontrar {{#each variable}}
+    const eachRegex = /\{\{#each\s+(\w+(?:\.\w+)*)\}\}/g;
+    let match;
+
+    while ((match = eachRegex.exec(processed)) !== null) {
+      const startIndex = match.index;
+      const variablePath = match[1];
+      const startTag = match[0];
+
+      // Encontrar o {{/each}} correspondente
+      let depth = 1;
+      let searchIndex = startIndex + startTag.length;
+      let endIndex = -1;
+
+      while (depth > 0 && searchIndex < processed.length) {
+        const nextEach = processed.indexOf('{{#each', searchIndex);
+        const nextEndEach = processed.indexOf('{{/each}}', searchIndex);
+
+        if (nextEndEach === -1) break;
+
+        if (nextEach !== -1 && nextEach < nextEndEach) {
+          depth++;
+          searchIndex = nextEach + 7;
+        } else {
+          depth--;
+          if (depth === 0) {
+            endIndex = nextEndEach + 10; // {{/each}} tem 10 caracteres
+            break;
+          } else {
+            searchIndex = nextEndEach + 10;
+          }
+        }
+      }
+
+      if (endIndex === -1) break;
+
+      const fullMatch = processed.substring(startIndex, endIndex);
+      const content = processed.substring(startIndex + startTag.length, endIndex - 10);
+
+      // Obter o array da variÃƒÂ¡vel
+      const arrayValue = getNestedValue(variables, variablePath);
+      
+      if (Array.isArray(arrayValue) && arrayValue.length > 0) {
+        // Processar cada item do array
+        const items = arrayValue.map((item: any, index: number) => {
+          // Criar contexto com "this" e ÃƒÂ­ndice
+          const itemContext: TemplateVariables = {
+            ...variables,
+            this: item,
+            '@index': index,
+            '@first': index === 0,
+            '@last': index === arrayValue.length - 1,
+          };
+
+          // Adicionar propriedades do item ao contexto como variÃƒÂ¡veis achatadas
+          // Ex: this.guest_name -> guest_name, this.document_type -> document_type
+          if (typeof item === 'object' && item !== null) {
+            Object.keys(item).forEach(key => {
+              // Adicionar como this.key para acesso direto
+              itemContext[`this.${key}`] = item[key];
+              // TambÃƒÂ©m adicionar como key para acesso sem this (mais simples)
+              itemContext[key] = item[key];
+            });
+          }
+
+          // Processar o conteÃƒÂºdo do loop com o contexto do item
+          // Usar uma versÃƒÂ£o recursiva que processa apenas o conteÃƒÂºdo do loop
+          let itemContent = content;
+          
+          // Substituir {{this.property}} e {{property}} dentro do loop
+          if (typeof item === 'object' && item !== null) {
+            Object.keys(item).forEach(key => {
+              const value = item[key];
+              const stringValue = value !== null && value !== undefined ? String(value) : '';
+              
+              // Substituir {{this.key}}
+              const thisRegex = new RegExp(`\\{\\{this\\.${key}\\}\\}`, 'g');
+              itemContent = itemContent.replace(thisRegex, stringValue);
+              
+              // Substituir {{key}} (sem this)
+              const keyRegex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+              itemContent = itemContent.replace(keyRegex, stringValue);
+            });
+          }
+          
+          // Processar condicionais e outras variÃƒÂ¡veis no contexto do item
+          return processTemplate(itemContent, itemContext);
+        });
+
+        processed = processed.replace(fullMatch, items.join(''));
+      } else {
+        // Array vazio ou nÃƒÂ£o ÃƒÂ© array: remover o bloco
+        processed = processed.replace(fullMatch, '');
+      }
+
+      changed = true;
+      break;
+    }
+  }
+
+  return processed;
+}
+
+/**
+ * Processa um template HTML substituindo variÃƒÂ¡veis no formato {{variable_name}}
+ * e processando condicionais no formato {{#if variable_name}}...{{/if}}
+ * e loops no formato {{#each array}}...{{/each}}
+ */
+function processTemplate(template: string, variables: TemplateVariables): string {
+  let processed = template;
+
+  // Log inicial para debug
+  if (template?.includes('{{review_link}}') || template?.includes('{{{review_link}}}')) {
+    console.log('Ã°Å¸â€Â processTemplate: Template contÃƒÂ©m review_link placeholder', {
+      hasReviewLinkVar: 'review_link' in variables,
+      reviewLinkValue: variables.review_link,
+      allKeys: Object.keys(variables),
+    });
+  }
+
+  // Primeiro, processar loops {{#each array}}...{{/each}}
+  processed = processEachLoops(processed, variables);
+
+  // Depois, processar condicionais {{#if variable}}...{{/if}}
+  // Fazer mÃƒÂºltiplas passadas atÃƒÂ© que nÃƒÂ£o haja mais mudanÃƒÂ§as
+  let conditionalChanged = true;
+  let conditionalIterations = 0;
+  while (conditionalChanged && conditionalIterations < 50) {
+    conditionalIterations++;
+    const beforeConditionals = processed;
+  processed = processConditionals(processed, variables);
+    conditionalChanged = beforeConditionals !== processed;
+  }
+  
+  // Limpeza final: remover qualquer {{/if}} solto que possa ter sobrado
+  // Isso pode acontecer se houver um erro no processamento de condicionais aninhadas
+  // Contar quantos {{#if}} e {{/if}} existem para garantir que nÃƒÂ£o removemos demais
+  const ifCount = (processed.match(/\{\{#if\s+\w+(?:\.\w+)*\}\}/g) || []).length;
+  const endifCount = (processed.match(/\{\{\/if\}\}/g) || []).length;
+  
+  // Se hÃƒÂ¡ mais {{/if}} do que {{#if}}, remover os extras
+  if (endifCount > ifCount) {
+    // Remover apenas os {{/if}} extras (a diferenÃƒÂ§a)
+    let removed = 0;
+    const toRemove = endifCount - ifCount;
+    processed = processed.replace(/\{\{\/if\}\}/g, (match) => {
+      if (removed < toRemove) {
+        removed++;
+        return '';
+      }
+      return match;
+    });
+  }
+
+  // Por ÃƒÂºltimo, substituir variÃƒÂ¡veis no formato {{variable_name}} ou {{variable.path}}
+  // Processar variÃƒÂ¡veis aninhadas primeiro (ex: {{main_guest.name}})
+  const nestedVarRegex = /\{\{(\w+(?:\.\w+)+)\}\}/g;
+  let nestedMatch;
+  let nestedChanged = true;
+  let nestedIterations = 0;
+  while (nestedChanged && nestedIterations < 10) {
+    nestedIterations++;
+    nestedChanged = false;
+    nestedVarRegex.lastIndex = 0; // Reset regex
+  while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
+    const fullMatch = nestedMatch[0];
+    const path = nestedMatch[1];
+    const value = getNestedValue(variables, path);
+    const stringValue = value !== null && value !== undefined ? String(value) : '';
+      if (processed.includes(fullMatch)) {
+    processed = processed.replace(fullMatch, stringValue);
+        nestedChanged = true;
+      }
+    }
+  }
+
+  // Depois, substituir variÃƒÂ¡veis simples no formato {{variable_name}}
+  // Fazer mÃƒÂºltiplas passadas para garantir que todas as variÃƒÂ¡veis sejam substituÃƒÂ­das
+  let varChanged = true;
+  let varIterations = 0;
+  while (varChanged && varIterations < 20) {
+    varIterations++;
+    varChanged = false;
+    
+    // Substituir variÃƒÂ¡veis aninhadas primeiro (formato {{variable.path}})
+    const nestedVarRegex = /\{\{(\w+(?:\.\w+)+)\}\}/g;
+    let nestedMatch;
+    nestedVarRegex.lastIndex = 0;
+    while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
+      const fullMatch = nestedMatch[0];
+      const path = nestedMatch[1];
+      const value = getNestedValue(variables, path);
+      const stringValue = value !== null && value !== undefined ? String(value) : '';
+      processed = processed.replace(fullMatch, stringValue);
+      varChanged = true;
+    }
+    
+    // Substituir variÃƒÂ¡veis com trÃƒÂªs chaves {{{variable}}} (HTML nÃƒÂ£o escapado)
+  Object.keys(variables).forEach((key) => {
+    const value = variables[key];
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        const stringValue = value !== null && value !== undefined ? String(value) : '';
+        const tripleBraceRegex = new RegExp(`\\{\\{\\{${key}\\}\\}\\}`, 'g');
+        const beforeReplace = processed;
+        processed = processed.replace(tripleBraceRegex, stringValue);
+        if (beforeReplace !== processed) {
+          varChanged = true;
+        }
+      }
+    });
+    
+    // Depois substituir variÃƒÂ¡veis simples primeiro (formato {{variable}})
+    // Processar variÃƒÂ¡veis simples (strings, nÃƒÂºmeros, etc) antes de objetos
+    Object.keys(variables).forEach((key) => {
+      const value = variables[key];
+      
+      // Processar apenas valores simples (nÃƒÂ£o objetos ou arrays)
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        const stringValue = value !== null && value !== undefined ? String(value) : '';
+        // Escapar caracteres especiais na chave
+        const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g');
+        const beforeReplace = processed;
+        const matches = processed.match(regex);
+        if (matches && matches.length > 0) {
+          processed = processed.replace(regex, stringValue);
+          if (beforeReplace !== processed) {
+            varChanged = true;
+            if (key === 'review_link') {
+              console.log('Ã¢Å“â€¦ review_link substituÃƒÂ­do no loop simples:', {
+                matches: matches.length,
+                value: stringValue,
+              });
+            }
+          }
+        }
+      }
+    });
+    
+    // Depois processar objetos e arrays (variÃƒÂ¡veis aninhadas)
+    Object.keys(variables).forEach((key) => {
+      const value = variables[key];
+    
+      // Processar objetos e arrays (variÃƒÂ¡veis aninhadas)
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // Processar propriedades do objeto como variÃƒÂ¡veis aninhadas
+      Object.keys(value).forEach((prop) => {
+        const nestedPath = `${key}.${prop}`;
+        const nestedValue = value[prop];
+        const stringValue = nestedValue !== null && nestedValue !== undefined ? String(nestedValue) : '';
+        const regex = new RegExp(`\\{\\{${nestedPath.replace(/\./g, '\\.')}\\}\\}`, 'g');
+          if (regex.test(processed)) {
+        processed = processed.replace(regex, stringValue);
+            varChanged = true;
+          }
+      });
+    } else {
+      // Esta parte jÃƒÂ¡ foi processada acima, mas manter para compatibilidade
+      // Converter para string, tratando null/undefined como string vazia
+      const stringValue = value !== null && value !== undefined ? String(value) : '';
+        // Usar replace global para substituir todas as ocorrÃƒÂªncias
+      // Escapar caracteres especiais na chave (como underscore, que ÃƒÂ© vÃƒÂ¡lido em regex)
+      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g');
+        const beforeReplace = processed;
+      const matches = processed.match(regex);
+      if (matches && matches.length > 0) {
+        console.log(`Ã°Å¸â€Â Substituindo variÃƒÂ¡vel ${key}:`, {
+          matches: matches.length,
+          value: stringValue,
+          key,
+          escapedKey,
+        });
+      }
+      processed = processed.replace(regex, stringValue);
+        if (beforeReplace !== processed) {
+          varChanged = true;
+          if (key === 'review_link') {
+            console.log('Ã¢Å“â€¦ review_link substituÃƒÂ­do:', {
+              before: beforeReplace.includes('{{review_link}}'),
+              after: processed.includes('{{review_link}}'),
+              value: stringValue,
+            });
+          }
+        } else if (key === 'review_link' && processed.includes('{{review_link}}')) {
+          console.warn('Ã¢Å¡Â Ã¯Â¸Â review_link NÃƒÆ’O foi substituÃƒÂ­do:', {
+            key,
+            escapedKey,
+            regex: regex.toString(),
+            value: stringValue,
+            templateHasPlaceholder: processed.includes('{{review_link}}'),
+          });
+        }
+    }
+  });
+  }
+  
+  // Log de debug para variÃƒÂ¡veis nÃƒÂ£o substituÃƒÂ­das (apenas em desenvolvimento)
+  // Deno Edge pode definir `window` sem `location` — usar optional chaining.
+  if (typeof window !== "undefined" && window.location?.hostname === "localhost") {
+    const remainingVars = processed.match(/\{\{[\w.]+(?:\.[\w.]+)*\}\}/g);
+    if (remainingVars && remainingVars.length > 0) {
+      console.log('Ã¢Å¡Â Ã¯Â¸Â VariÃƒÂ¡veis nÃƒÂ£o substituÃƒÂ­das no template:', remainingVars);
+      console.log('Ã°Å¸â€œâ€¹ VariÃƒÂ¡veis disponÃƒÂ­veis:', Object.keys(variables));
+      console.log('Ã°Å¸â€Â Verificando review_link:', {
+        hasReviewLink: 'review_link' in variables,
+        reviewLinkValue: variables.review_link,
+        reviewLinkType: typeof variables.review_link,
+      });
+    }
+  }
+
+  return processed;
+}
+
+/**
+ * Processa condicionais no formato {{#if variable}}...{{/if}}
+ * Remove blocos onde a variÃƒÂ¡vel ÃƒÂ© falsy (null, undefined, '', 0, false)
+ * Suporta condicionais aninhados
+ */
+function processConditionals(template: string, variables: TemplateVariables): string {
+  let processed = template;
+  
+  // Encontrar todos os blocos condicionais, lidando com aninhamento
+  // Usar uma abordagem iterativa que processa de dentro para fora
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = 100; // Prevenir loop infinito
+  
+  while (changed && iterations < maxIterations) {
+    iterations++;
+    changed = false;
+    
+    // Regex para encontrar blocos {{#if variable}}...{{/if}}
+    // Suporta variÃƒÂ¡veis aninhadas (ex: {{#if main_guest.name}})
+    const ifRegex = /\{\{#if\s+(\w+(?:\.\w+)*)\}\}/g;
+    let match;
+    let lastIndex = 0;
+    
+    while ((match = ifRegex.exec(processed)) !== null) {
+      const startIndex = match.index;
+      const variableName = match[1];
+      const startTag = match[0];
+      
+      // Encontrar o {{/if}} correspondente, contando aninhamentos
+      let depth = 1;
+      let searchIndex = startIndex + startTag.length;
+      
+      while (depth > 0 && searchIndex < processed.length) {
+        const nextIf = processed.indexOf('{{#if', searchIndex);
+        const nextEndIf = processed.indexOf('{{/if}}', searchIndex);
+        const nextElse = processed.indexOf('{{else}}', searchIndex);
+        
+        if (nextEndIf === -1) {
+          // NÃƒÂ£o encontrou fechamento, sair
+          break;
+        }
+        
+        // Verificar se hÃƒÂ¡ um {{else}} antes do prÃƒÂ³ximo {{#if}} ou {{/if}}
+        // Se houver um {{else}} no mesmo nÃƒÂ­vel (depth === 1), ele pertence ao bloco atual
+        // Se houver um {{#if}} antes do {{else}}, incrementar depth
+        if (nextIf !== -1 && nextIf < nextEndIf && (nextElse === -1 || nextIf < nextElse)) {
+          // Encontrou um {{#if}} antes do {{/if}}, incrementar profundidade
+          depth++;
+          searchIndex = nextIf + 5; // AvanÃƒÂ§ar apÃƒÂ³s {{#if
+        } else {
+          // Encontrou um {{/if}}
+          depth--;
+          if (depth === 0) {
+            // Este ÃƒÂ© o {{/if}} correspondente
+            const endIndex = nextEndIf + 7; // {{/if}} tem 7 caracteres
+            const fullMatch = processed.substring(startIndex, endIndex);
+            const content = processed.substring(startIndex + startTag.length, nextEndIf);
+            
+            // Verificar se hÃƒÂ¡ um {{else}} dentro do conteÃƒÂºdo
+            // Precisamos encontrar o {{else}} que pertence a este bloco (nÃƒÂ£o aos aninhados)
+            let elseIndex = -1;
+            let elseDepth = 0;
+            let searchElseIndex = 0;
+            
+            while (searchElseIndex < content.length) {
+              const nextIfInContent = content.indexOf('{{#if', searchElseIndex);
+              const nextElseInContent = content.indexOf('{{else}}', searchElseIndex);
+              const nextEndIfInContent = content.indexOf('{{/if}}', searchElseIndex);
+              
+              // Encontrar qual tag vem primeiro
+              const positions = [];
+              if (nextIfInContent !== -1) positions.push({ type: 'if', pos: nextIfInContent });
+              if (nextElseInContent !== -1) positions.push({ type: 'else', pos: nextElseInContent });
+              if (nextEndIfInContent !== -1) positions.push({ type: 'endif', pos: nextEndIfInContent });
+              
+              if (positions.length === 0) {
+                break; // NÃƒÂ£o hÃƒÂ¡ mais tags
+              }
+              
+              // Ordenar por posiÃƒÂ§ÃƒÂ£o
+              positions.sort((a, b) => a.pos - b.pos);
+              const nextTag = positions[0];
+              
+              // Se encontramos um {{else}} no nÃƒÂ­vel 0 (sem blocos aninhados abertos), ele pertence ao bloco atual
+              if (nextTag.type === 'else' && elseDepth === 0) {
+                elseIndex = nextTag.pos;
+                break;
+              }
+              
+              // Ajustar depth para rastrear blocos aninhados
+              if (nextTag.type === 'if') {
+                elseDepth++;
+                searchElseIndex = nextTag.pos + 5;
+              } else if (nextTag.type === 'endif') {
+                elseDepth--;
+                searchElseIndex = nextTag.pos + 7;
+              } else if (nextTag.type === 'else') {
+                // {{else}} dentro de um bloco aninhado, ignorar
+                searchElseIndex = nextTag.pos + 8;
+              } else {
+                break;
+              }
+            }
+            
+            let ifContent = content;
+            let elseContent = '';
+            
+            if (elseIndex !== -1) {
+              // Separar conteÃƒÂºdo do if e do else
+              ifContent = content.substring(0, elseIndex);
+              elseContent = content.substring(elseIndex + 8); // {{else}} tem 8 caracteres
+              
+              // Processar condicionais recursivamente no conteÃƒÂºdo do else
+              // Fazer mÃƒÂºltiplas passadas para garantir que todas as condicionais sejam processadas
+              let elseProcessed = elseContent;
+              let elseChanged = true;
+              let elseIterations = 0;
+              while (elseChanged && elseIterations < 10) {
+                elseIterations++;
+                const beforeProcess = elseProcessed;
+                elseProcessed = processConditionals(elseProcessed, variables);
+                elseChanged = beforeProcess !== elseProcessed;
+              }
+              // Limpeza final: remover qualquer {{/if}} que possa ter sobrado
+              // Isso pode acontecer se houver blocos aninhados mal formados
+              elseProcessed = elseProcessed.replace(/\{\{\/if\}\}/g, '');
+              elseContent = elseProcessed;
+            }
+            
+            // Verificar se a variÃƒÂ¡vel existe e ÃƒÂ© truthy
+            // Suportar variÃƒÂ¡veis aninhadas (ex: main_guest.document_number)
+            const value = variableName.includes('.') 
+              ? getNestedValue(variables, variableName)
+              : variables[variableName];
+            
+            // Debug: log para variÃƒÂ¡veis aninhadas problemÃƒÂ¡ticas
+            if (variableName.includes('.') && (value === null || value === undefined)) {
+              console.log(`Ã°Å¸â€Â [Template Debug] VariÃƒÂ¡vel aninhada nÃƒÂ£o encontrada: ${variableName}`, {
+                variableName,
+                path: variableName.split('.'),
+                variablesKeys: Object.keys(variables),
+                mainGuest: variables['main_guest'],
+              });
+            }
+            
+            const isTruthy = value !== null && 
+                             value !== undefined && 
+                             value !== '' && 
+                             value !== 0 && 
+                             value !== false &&
+                             (typeof value === 'string' ? value.trim() !== '' : true);
+            
+            if (isTruthy) {
+              // VariÃƒÂ¡vel ÃƒÂ© truthy: manter o conteÃƒÂºdo do if, remover apenas as tags
+              // Processar condicionais recursivamente no conteÃƒÂºdo do if se necessÃƒÂ¡rio
+              // Fazer mÃƒÂºltiplas passadas para garantir que todas as condicionais sejam processadas
+              let finalIfContent = ifContent;
+              let ifChanged = true;
+              let ifIterations = 0;
+              while (ifChanged && ifIterations < 10) {
+                ifIterations++;
+                const beforeProcess = finalIfContent;
+                finalIfContent = processConditionals(finalIfContent, variables);
+                ifChanged = beforeProcess !== finalIfContent;
+              }
+              // Limpar qualquer {{/if}} solto que possa ter sobrado do processamento recursivo
+              // (isso nÃƒÂ£o deveria acontecer, mas ÃƒÂ© uma seguranÃƒÂ§a)
+              finalIfContent = finalIfContent.replace(/\{\{\/if\}\}/g, '');
+              // Substituir o bloco completo (incluindo {{#if}} e {{/if}}) usando substring
+              processed = processed.substring(0, startIndex) + finalIfContent + processed.substring(endIndex);
+            } else {
+              // VariÃƒÂ¡vel ÃƒÂ© falsy: manter o conteÃƒÂºdo do else (se existir), remover apenas as tags
+              if (elseContent) {
+                // O elseContent jÃƒÂ¡ foi processado recursivamente, entÃƒÂ£o nÃƒÂ£o deve ter {{/if}} soltos
+                // Mas vamos garantir removendo apenas se houver (pode haver casos edge)
+                // IMPORTANTE: NÃƒÂ£o remover {{/if}} que fazem parte de blocos aninhados jÃƒÂ¡ processados
+                // O processamento recursivo jÃƒÂ¡ removeu as tags dos blocos aninhados
+                // Apenas remover se realmente houver {{/if}} solto (nÃƒÂ£o deveria acontecer)
+                let finalElseContent = elseContent;
+                // Verificar se hÃƒÂ¡ {{/if}} que nÃƒÂ£o fazem parte de um bloco vÃƒÂ¡lido
+                // Se o elseContent foi processado recursivamente, nÃƒÂ£o deveria ter {{/if}}
+                // Mas vamos fazer uma limpeza final apenas para garantir
+                finalElseContent = finalElseContent.replace(/\{\{\/if\}\}/g, '');
+                // Substituir o bloco completo (incluindo {{#if}} e {{/if}}) usando substring
+                processed = processed.substring(0, startIndex) + finalElseContent + processed.substring(endIndex);
+              } else {
+                // Sem else: remover todo o bloco (incluindo {{#if}} e {{/if}})
+                processed = processed.substring(0, startIndex) + processed.substring(endIndex);
+              }
+            }
+            
+            changed = true;
+            break; // Processar um bloco por vez
+          } else {
+            searchIndex = nextEndIf + 7;
+          }
+        }
+      }
+      
+      if (changed) {
+        break; // Reiniciar busca apÃƒÂ³s processar um bloco
+      }
+    }
+  }
+  
+  return processed;
+}
+
+function detectBaseUrl(req: Request | null = null, supabaseUrl: string | null = null): string {
+  // 1. Tentar variÃƒÆ’Ã‚Â¡vel de ambiente SITE_URL (prioridade mÃƒÆ’Ã‚Â¡xima)
+  const siteUrl = Deno.env.get("SITE_URL");
+  if (siteUrl) {
+    console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Usando SITE_URL: ${siteUrl}`);
+    return siteUrl;
+  }
+
+  // 2. Verificar variÃƒÆ’Ã‚Â¡veis de ambiente de plataformas de produÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o
+  // Vercel
+  const vercelUrl = Deno.env.get("VERCEL_URL");
+  if (vercelUrl) {
+    const url = `https://${vercelUrl}`;
+    console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Usando VERCEL_URL: ${url}`);
+    return url;
+  }
+
+  // Render
+  const renderUrl = Deno.env.get("RENDER_EXTERNAL_URL");
+  if (renderUrl) {
+    console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Usando RENDER_EXTERNAL_URL: ${renderUrl}`);
+    return renderUrl;
+  }
+
+  // Netlify
+  const netlifyUrl = Deno.env.get("URL");
+  if (netlifyUrl) {
+    console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Usando Netlify URL: ${netlifyUrl}`);
+    return netlifyUrl;
+  }
+
+  // Railway
+  const railwayUrl = Deno.env.get("RAILWAY_PUBLIC_DOMAIN");
+  if (railwayUrl) {
+    const url = `https://${railwayUrl}`;
+    console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Usando RAILWAY_PUBLIC_DOMAIN: ${url}`);
+    return url;
+  }
+
+  // 3. Tentar extrair do header Referer ou Origin se disponÃƒÆ’Ã‚Â­vel (ÃƒÆ’Ã‚Âºtil para webhooks)
+  if (req) {
+    const referer = req.headers.get("referer");
+    const origin = req.headers.get("origin");
+    
+    if (origin) {
+      try {
+        const url = new URL(origin);
+        // Verificar se nÃƒÆ’Ã‚Â£o ÃƒÆ’Ã‚Â© localhost
+        if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
+          console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Usando Origin header: ${url.origin}`);
+        return url.origin;
+        }
+      } catch {
+        // Ignorar erro
+      }
+    }
+    
+    if (referer) {
+      try {
+        const url = new URL(referer);
+        // Verificar se nÃƒÆ’Ã‚Â£o ÃƒÆ’Ã‚Â© localhost
+        if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
+          console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Usando Referer header: ${url.origin}`);
+        return url.origin;
+        }
+      } catch {
+        // Ignorar erro
+      }
+    }
+  }
+
+  // 4. Analisar SUPABASE_URL para detectar ambiente
+  const supabaseUrlEnv = supabaseUrl || Deno.env.get("SUPABASE_URL");
+  if (supabaseUrlEnv) {
+    try {
+      const url = new URL(supabaseUrlEnv);
+      const hostname = url.hostname;
+      
+      // Se for localhost, retornar localhost
+      if (hostname.includes('localhost') || hostname.includes('127.0.0.1')) {
+        console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Detectado localhost via SUPABASE_URL: http://localhost:8080`);
+        return "http://localhost:8080";
+      }
+      
+      // Se for um projeto Supabase (.supabase.co), tentar inferir domÃƒÆ’Ã‚Â­nio de produÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o
+      if (hostname.includes('.supabase.co')) {
+        // Extrair o ID do projeto do hostname
+        // Exemplo: xxxxxx.supabase.co -> pode inferir domÃƒÆ’Ã‚Â­nio customizado se configurado
+        // Por enquanto, vamos tentar usar variÃƒÆ’Ã‚Â¡veis de ambiente ou inferir
+        console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Detectado Supabase Cloud, tentando inferir domÃƒÆ’Ã‚Â­nio de produÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o...`);
+      }
+      
+      // Se nÃƒÆ’Ã‚Â£o for um domÃƒÆ’Ã‚Â­nio .supabase.co, pode ser um domÃƒÆ’Ã‚Â­nio customizado
+      if (!hostname.includes('.supabase.co')) {
+        // Tentar inferir removendo subdomÃƒÆ’Ã‚Â­nios como 'api', 'app', etc.
+        const parts = hostname.split('.');
+        if (parts.length > 2) {
+          // Remover subdomÃƒÆ’Ã‚Â­nios como 'api', 'app', etc.
+          const domain = parts.slice(-2).join('.');
+          const inferredUrl = `${url.protocol}//${domain}`;
+          console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] DomÃƒÆ’Ã‚Â­nio customizado inferido: ${inferredUrl}`);
+          return inferredUrl;
+        } else {
+          // Se for um domÃƒÆ’Ã‚Â­nio direto, usar como estÃƒÆ’Ã‚Â¡
+          const directUrl = `${url.protocol}//${hostname}`;
+          console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Usando domÃƒÆ’Ã‚Â­nio direto do SUPABASE_URL: ${directUrl}`);
+          return directUrl;
+        }
+      }
+    } catch {
+      // Ignorar erro
+    }
+  }
+
+  // 5. Verificar variÃƒÆ’Ã‚Â¡vel de ambiente de ambiente (NODE_ENV, DENO_ENV, etc.)
+  const env = Deno.env.get("ENVIRONMENT") || Deno.env.get("NODE_ENV") || Deno.env.get("DENO_ENV");
+  if (env === "production" || env === "prod") {
+    // Em produÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o, tentar usar o SUPABASE_URL como base
+    if (supabaseUrlEnv) {
+      try {
+        const url = new URL(supabaseUrlEnv);
+        // Se nÃƒÆ’Ã‚Â£o for localhost, tentar inferir
+        if (!url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
+          console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Ambiente de produÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o detectado, usando SUPABASE_URL como base`);
+          // Retornar apenas o protocolo e hostname (sem path)
+          return `${url.protocol}//${url.hostname}`;
+        }
+      } catch {
+        // Ignorar erro
+      }
+    }
+  }
+
+  // 6. ÃƒÆ’Ã…Â¡ltimo fallback: detectar baseado no SUPABASE_URL
+  // Se SUPABASE_URL contÃƒÆ’Ã‚Â©m localhost, usar localhost
+  if (supabaseUrlEnv && (supabaseUrlEnv.includes('localhost') || supabaseUrlEnv.includes('127.0.0.1'))) {
+    console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Fallback: Detectado localhost, usando http://localhost:8080`);
+    return "http://localhost:8080";
+  }
+
+  // 7. Se chegou aqui e nÃƒÆ’Ã‚Â£o ÃƒÆ’Ã‚Â© localhost, tentar inferir domÃƒÆ’Ã‚Â­nio de produÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o
+  // Por padrÃƒÆ’Ã‚Â£o, se nÃƒÆ’Ã‚Â£o conseguir detectar, usar localhost (mais seguro para desenvolvimento)
+  console.log(`ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â [detectBaseUrl] Fallback final: Usando localhost (desenvolvimento)`);
+  return "http://localhost:8080";
+}
+
+function otaGuestNameFromReservation(reservation: Record<string, unknown>): string | null {
+  const ota = reservation?.ota_reservations;
+  const row = Array.isArray(ota) ? ota[0] : ota;
+  const n = (row as Record<string, unknown> | undefined)?.ota_guest_name;
+  if (n != null && String(n).trim() !== "") return String(n).trim();
+  const gn = reservation?.guest_name;
+  return gn != null && String(gn).trim() !== "" ? String(gn).trim() : null;
+}
+function formatDatePt(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  try {
+    return new Date(dateStr).toLocaleDateString("pt-BR");
+  } catch {
+    return "";
+  }
+}
+async function fetchReservationFull(
+  supabase: SupabaseClient,
+  reservationId: string,
+): Promise<any | null> {
+  const select = `
+    *,
+    financial_responsible:clients!client_id(*),
+    guest:clients!guest_id(*),
+    rooms (id, room_number, name, fixed_password),
+    room_categories (id, name, description, building_id),
+    reservation_service_fees (amount, quantity),
+    ota_reservations(ota_guest_email, ota_guest_name)
+  `;
+  const first = await supabase.from("reservations").select(select).eq("id", reservationId).maybeSingle();
+  let data = first.data;
+  if (first.error || !data) return null;
+  if (!data.reservation_code) {
+    await new Promise((r) => setTimeout(r, 300));
+    const second = await supabase.from("reservations").select(select).eq("id", reservationId).maybeSingle();
+    if (second.data) data = second.data;
+  }
+  return data;
+}
+function resolvePoliciesLink(
+  hotelSettings: any,
+  siteSettings: any,
+  reservation: any,
+  baseUrl: string,
+): string {
+  const buildingId = reservation.room_categories?.building_id ?? null;
+  const establishmentId = reservation.establishment_id ?? hotelSettings?.establishment_id;
+  const id = buildingId ?? establishmentId;
+  const type: "building" | "establishment" = buildingId ? "building" : "establishment";
+  if (!id) return "";
+  try {
+    const token = btoa(`${type}:${id}`);
+    const hotelName = hotelSettings?.name || "hotel";
+    const slug = hotelName
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return `${baseUrl}/policies/${slug}/${token}`;
+  } catch {
+    return "";
+  }
+}
+function resolveLogoUrls(
+  supabase: SupabaseClient,
+  hotelSettings: any,
+  siteSettings: any,
+): { logoUrl: string; hotelLogo: string } {
+  let logoUrl = siteSettings?.logo_url || hotelSettings?.logo_url || "";
+  let hotelLogo = hotelSettings?.logo_url || "";
+
+  const tryPublic = (raw: string): string => {
+    if (!raw || raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+    const buckets = ["hotel-assets", "uploads", "hotel-logos"];
+    for (const bucket of buckets) {
+      try {
+        let filePath = raw;
+        if (bucket === "hotel-assets" && !filePath.startsWith("hotel/") && !filePath.includes("/")) {
+          filePath = `hotel/${filePath}`;
+        }
+        if (filePath.includes("/storage/v1/object/public/")) {
+          const m = filePath.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
+          if (m?.[1]) filePath = m[1];
+        }
+        const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+        if (data?.publicUrl?.startsWith("http")) return data.publicUrl;
+      } catch {
+        /* next bucket */
+      }
+    }
+    return raw;
+  };
+
+  if (logoUrl) logoUrl = tryPublic(logoUrl);
+  if (hotelLogo) hotelLogo = tryPublic(hotelLogo);
+  return { logoUrl: logoUrl || "", hotelLogo: hotelLogo || "" };
+}
+async function buildVariables(
+  supabase: SupabaseClient,
+  reservation: any,
+  hotelSettings: any,
+  siteSettings: any,
+  baseUrl: string,
+  eventType: "reservation.created" | "payment.confirmed",
+): Promise<TemplateVariables> {
+  const checkinDate = formatDatePt(reservation.checkin_date);
+  const checkoutDate = formatDatePt(reservation.checkout_date);
+  const checkinTimeRaw =
+    reservation.checkin_time || hotelSettings?.checkin_time || hotelSettings?.default_checkin_time || "14:00";
+  const checkoutTimeRaw =
+    reservation.checkout_time || hotelSettings?.checkout_time || hotelSettings?.default_checkout_time || "12:00";
+  const checkinTime =
+    typeof checkinTimeRaw === "string" && checkinTimeRaw.includes(":")
+      ? checkinTimeRaw.substring(0, 5)
+      : checkinTimeRaw;
+  const checkoutTime =
+    typeof checkoutTimeRaw === "string" && checkoutTimeRaw.includes(":")
+      ? checkoutTimeRaw.substring(0, 5)
+      : checkoutTimeRaw;
+
+  const addressParts: string[] = [];
+  if (hotelSettings?.street) {
+    let streetLine = hotelSettings.street;
+    if (hotelSettings.number) streetLine += `, ${hotelSettings.number}`;
+    addressParts.push(streetLine);
+  }
+  if (hotelSettings?.neighborhood) addressParts.push(hotelSettings.neighborhood);
+  if (hotelSettings?.city) {
+    let cityLine = hotelSettings.city;
+    if (hotelSettings.state) cityLine += ` - ${hotelSettings.state}`;
+    if (hotelSettings.zip_code) cityLine += ` - CEP: ${hotelSettings.zip_code}`;
+    addressParts.push(cityLine);
+  }
+  const hotelAddress =
+    addressParts.length > 0
+      ? addressParts.join(", ")
+      : hotelSettings?.street
+        ? `${hotelSettings.street}, ${hotelSettings.city || ""}`
+        : "";
+
+  const hotelPhone =
+    hotelSettings?.phone_ddi && hotelSettings?.phone_number
+      ? `${hotelSettings.phone_ddi} ${hotelSettings.phone_number}`
+      : hotelSettings?.phone_number || hotelSettings?.phone || "";
+
+  const hotelWhatsApp =
+    hotelSettings?.whatsapp ||
+    (hotelSettings?.whatsapp_ddi && hotelSettings?.whatsapp_number
+      ? `${hotelSettings.whatsapp_ddi} ${hotelSettings.whatsapp_number}`
+      : hotelSettings?.whatsapp_number || "");
+
+  const policiesLink = resolvePoliciesLink(hotelSettings, siteSettings, reservation, baseUrl);
+
+  let webCheckinLink = "";
+  const { data: wc } = await supabase
+    .from("web_checkin")
+    .select("locator")
+    .eq("reservation_id", reservation.id)
+    .maybeSingle();
+  if (wc?.locator) webCheckinLink = `${baseUrl}/web-checkin/${wc.locator}`;
+  else if (reservation.reservation_code) {
+    webCheckinLink = `${baseUrl}/web-checkin/${reservation.reservation_code}`;
+  }
+
+  const { logoUrl, hotelLogo } = resolveLogoUrls(supabase, hotelSettings, siteSettings);
+
+  const guestName =
+    reservation.guest?.full_name ||
+    reservation.financial_responsible?.full_name ||
+    otaGuestNameFromReservation(reservation) ||
+    reservation.guest_name ||
+    "HÃƒÂ³spede";
+
+  const paymentLabel =
+    eventType === "payment.confirmed" || reservation.payment_status === "paid" ? "Pago" : "Pendente";
+
+  const baseTotalAmount = Number(reservation.total_amount || 0);
+  const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce(
+    (sum: number, fee: { amount?: unknown; quantity?: unknown }) =>
+      sum + Number(fee.amount || 0) * Number(fee.quantity || 1),
+    0,
+  );
+  const totalWithFees = baseTotalAmount + serviceFeesTotal;
+  const paidNum = Number(reservation.paid_amount || 0);
+
+  const idRaw = reservation.identification_number;
+  const identification_number =
+    idRaw != null && String(idRaw).trim() !== ""
+      ? `#${String(idRaw).trim()}`
+      : reservation.reservation_code || "";
+
+  const vars: TemplateVariables = {
+    guest_name: guestName,
+    reservation_code: reservation.reservation_code || "",
+    identification_number,
+    checkin_date: checkinDate,
+    checkout_date: checkoutDate,
+    checkin_time: checkinTime,
+    checkout_time: checkoutTime,
+    total_amount: totalWithFees.toFixed(2).replace(".", ","),
+    paid_amount: paidNum.toFixed(2).replace(".", ","),
+    payment_status: paymentLabel,
+    room_number: reservation.rooms?.room_number || "",
+    room_name: reservation.rooms?.name || "",
+    room_password: reservation.rooms?.fixed_password || "",
+    room_category: reservation.room_categories?.name || "",
+    category_name: reservation.room_categories?.name || "",
+    adults: reservation.adults || 0,
+    children: reservation.children || 0,
+    hotel_name: hotelSettings?.name || "",
+    hotel_address: hotelAddress,
+    hotel_contact: hotelPhone,
+    hotel_email: hotelSettings?.email || "",
+    hotel_phone: hotelPhone,
+    hotel_whatsapp: hotelWhatsApp,
+    hotel_website: hotelSettings?.website || "",
+    hotel_policies: hotelSettings?.policies || "",
+    policies_link: policiesLink,
+    web_checkin_link: webCheckinLink,
+    logo_url: logoUrl,
+    hotel_logo: hotelLogo,
+    payment_link: "",
+  };
+
+  return vars;
+}
+
+async function buildOtaGuestEmailVariables(
+  supabase: SupabaseClient,
+  args: {
+    reservationId: string;
+    establishmentId: string;
+    eventType: "reservation.created" | "payment.confirmed";
+    req?: Request | null;
+  },
+): Promise<TemplateVariables | null> {
+  const reservation = await fetchReservationFull(supabase, args.reservationId);
+  if (!reservation) return null;
+
+  const { data: hotelSettings } = await supabase
+    .from("hotel_settings")
+    .select("*")
+    .eq("establishment_id", args.establishmentId)
+    .maybeSingle();
+
+  const { data: siteSettings } = await supabase
+    .from("site_settings")
+    .select("logo_url, pms_base_url")
+    .maybeSingle();
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  let baseUrl = detectBaseUrl(args.req ?? null, supabaseUrl);
+  const pmsRaw = (siteSettings as { pms_base_url?: string } | null)?.pms_base_url?.trim();
+  if (pmsRaw) {
+    try {
+      baseUrl = new URL(
+        pmsRaw.startsWith("http://") || pmsRaw.startsWith("https://") ? pmsRaw : `https://${pmsRaw}`,
+      ).origin;
+    } catch {
+      baseUrl = pmsRaw;
+    }
+  }
+
+  return await buildVariables(
+    supabase,
+    reservation,
+    hotelSettings,
+    siteSettings,
+    baseUrl,
+    args.eventType,
+  );
+}
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -272,16 +1266,6 @@ function channexGuestEmailFromPayload(customer: AnyObj, firstGuest: AnyObj | nul
   return null;
 }
 
-function replaceVars(template: string, vars: Record<string, string>): string {
-  let out = template || "";
-  for (const [k, v] of Object.entries(vars)) {
-    const re1 = new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, "gi");
-    const re2 = new RegExp(`\\{${k}\\}`, "gi");
-    out = out.replace(re1, v ?? "").replace(re2, v ?? "");
-  }
-  return out;
-}
-
 /** Igual ao fluxo Aiosell: respeita `features_enabled.email` por estabelecimento. */
 function isFeatureEnabledForEstablishmentEmail(featureConfig: unknown, establishmentId: string): boolean {
   if (!establishmentId) return false;
@@ -488,18 +1472,31 @@ async function queueChannelReservationEmail(
   const template = pickEmailTemplateForEstablishment((templates || []) as AnyObj[], args.establishmentId);
   if (!template) return;
 
-  const vars: Record<string, string> = {
+  const variablesFromDb = await buildOtaGuestEmailVariables(supabase, {
+    reservationId: args.reservationId,
+    establishmentId: args.establishmentId,
+    eventType: eventType as "reservation.created" | "payment.confirmed",
+    req: null,
+  });
+
+  const vars: TemplateVariables = variablesFromDb ?? {
     guest_name: args.guestName || "Hóspede",
     reservation_code: String(args.reservationCode || ""),
+    identification_number: String(args.reservationCode || ""),
     reservation_id: args.reservationId,
     checkin_date: String(args.checkinDate || ""),
     checkout_date: String(args.checkoutDate || ""),
-    total_amount: String(args.totalAmount || 0),
-    paid_amount: String(args.paidAmount || 0),
+    total_amount: String(args.totalAmount ?? 0),
+    paid_amount: String(args.paidAmount ?? 0),
+    hotel_address: "",
+    hotel_phone: "",
+    hotel_whatsapp: "",
+    hotel_email: "",
+    hotel_website: "",
   };
 
-  const subject = replaceVars(String(template.subject || ""), vars);
-  const bodyHtml = replaceVars(String(template.body_html || ""), vars);
+  const subject = processTemplate(String(template.subject || ""), vars);
+  const bodyHtml = processTemplate(String(template.body_html || ""), vars);
   const ccText = ccBccToText(template.cc_emails);
   const bccText = ccBccToText(template.bcc_emails);
 
