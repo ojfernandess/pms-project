@@ -36,8 +36,8 @@ function pickQueryParams(rawQuery: Record<string, unknown> | undefined): URLSear
   return query;
 }
 
-/** Normaliza corpo de webhook (JSON em string/Buffer ou objeto já parseado pelo Fastify). */
-function integrationWebhookJsonBody(request: FastifyRequest): unknown {
+/** Corpo JSON para proxy às Edge Functions (webhooks públicos e POST /api/integrations/*). */
+function integrationPostJsonBody(request: FastifyRequest): unknown {
   const raw = request.body;
   if (raw === undefined || raw === null) return {};
   if (Buffer.isBuffer(raw)) {
@@ -67,7 +67,7 @@ export async function registerIntegrationOpsRoutes(app: FastifyInstance, env: En
   for (const r of routes) {
     app.post(r.path, { preHandler: authPre }, async (request, reply) => {
       try {
-        const data = await invokeLegacyFunction(env, r.functionName, request.body ?? {});
+        const data = await invokeLegacyFunction(env, r.functionName, integrationPostJsonBody(request));
         await reply.send(data);
       } catch (e) {
         throw new HttpError(400, e instanceof Error ? e.message : `Erro em ${r.functionName}`, "INTEGRATION_OP_FAILED");
@@ -98,7 +98,7 @@ export async function registerIntegrationOpsRoutes(app: FastifyInstance, env: En
       const data = await invokeLegacyFunctionWithOptions(
         env,
         "aiosell-reservation-webhook",
-        integrationWebhookJsonBody(request),
+        integrationPostJsonBody(request),
         {
           query,
           extraHeaders: forwardedHeaders,
@@ -140,7 +140,7 @@ export async function registerIntegrationOpsRoutes(app: FastifyInstance, env: En
       const data = await invokeLegacyFunctionWithOptions(
         env,
         "channex-reservation-webhook",
-        integrationWebhookJsonBody(request),
+        integrationPostJsonBody(request),
         {
           query,
           extraHeaders: forwardedHeaders,

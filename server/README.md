@@ -223,6 +223,10 @@ Resultado esperado:
 - Status HTTP `2xx` quando canal/configuração batem.
 - Status `401/404` quando credenciais/property_id não conferem (comportamento legado preservado).
 
+### 9.1. Integrações autenticadas (`POST /api/integrations/*`)
+
+Com **Bearer JWT** válido, o proxy encaminha para as Edge Functions correspondentes (ex.: `channex-reservations-sync`, `channex-sync`, `aiosell-reservations-sync`). O corpo do POST é normalizado da mesma forma que nos webhooks (objeto JSON, string JSON ou Buffer UTF-8), para o payload não ser corrompido ao chegar à Edge — importante quando o front ou jobs chamam estas rotas via `VITE_PMS_API_URL`.
+
 ### 10. O que não está neste servidor
 
 - Não há rota de compatibilidade `/functions/v1/:nome`.

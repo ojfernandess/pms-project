@@ -6,6 +6,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const SITE_SETTINGS_FEATURE_ROW = "00000000-0000-0000-0000-000000000001";
+
 type AnyObj = Record<string, unknown>;
 
 function json(body: unknown, status = 200) {
@@ -280,6 +282,150 @@ function replaceVars(template: string, vars: Record<string, string>): string {
   return out;
 }
 
+/** Igual ao fluxo Aiosell: respeita `features_enabled.email` por estabelecimento. */
+function isFeatureEnabledForEstablishmentEmail(featureConfig: unknown, establishmentId: string): boolean {
+  if (!establishmentId) return false;
+  if (typeof featureConfig === "boolean") return featureConfig;
+  if (typeof featureConfig === "object" && featureConfig !== null) {
+    const o = featureConfig as Record<string, unknown>;
+    if (o.enabled !== true) return false;
+    if (!o.establishment_ids || !Array.isArray(o.establishment_ids)) return true;
+    return (o.establishment_ids as string[]).includes(establishmentId);
+  }
+  return false;
+}
+
+/** Envia item da `email_queue` na hora (SMTP / Resend / Sendgrid), como `aiosell-reservations-sync`. */
+async function dispatchChannexOtaQueuedEmail(
+  supabase: ReturnType<typeof createClient>,
+  queueId: string,
+  emailSettings: AnyObj,
+  logPrefix: string,
+): Promise<void> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+  const { data: queueItem, error: fetchError } = await supabase
+    .from("email_queue")
+    .select("*")
+    .eq("id", queueId)
+    .maybeSingle();
+
+  if (fetchError || !queueItem) {
+    console.warn(`${logPrefix}: fila email — item não encontrado`, queueId);
+    return;
+  }
+
+  await supabase.from("email_queue").update({ status: "sending" }).eq("id", queueId);
+
+  const fail = async (msg: string) => {
+    await supabase
+      .from("email_queue")
+      .update({ status: "pending", error_message: msg.substring(0, 500) })
+      .eq("id", queueId);
+  };
+
+  try {
+    const provider = String(emailSettings.provider ?? "").toLowerCase();
+    if (provider === "smtp") {
+      const smtpResponse = await fetch(`${supabaseUrl}/functions/v1/send-email-smtp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({
+          to: queueItem.recipient_email,
+          to_name: queueItem.recipient_name,
+          from: emailSettings.sender_email,
+          from_name: emailSettings.sender_name,
+          reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+          subject: queueItem.subject,
+          html: queueItem.body_html,
+          text: queueItem.body_text || "",
+          smtp_config: {
+            host: emailSettings.smtp_host,
+            port: emailSettings.smtp_port || 587,
+            secure: emailSettings.smtp_secure || false,
+            auth: { user: emailSettings.smtp_username, pass: emailSettings.smtp_password },
+          },
+        }),
+      });
+      if (smtpResponse.ok) {
+        await supabase
+          .from("email_queue")
+          .update({ status: "sent", sent_at: new Date().toISOString() })
+          .eq("id", queueId);
+      } else {
+        await fail(await smtpResponse.text());
+      }
+      return;
+    }
+
+    if (provider === "resend") {
+      const res = await fetch(`${supabaseUrl}/functions/v1/send-email-resend`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({
+          to: queueItem.recipient_email,
+          to_name: queueItem.recipient_name,
+          from: emailSettings.sender_email,
+          from_name: emailSettings.sender_name,
+          reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+          subject: queueItem.subject,
+          html: queueItem.body_html,
+          text: queueItem.body_text || "",
+          api_key: emailSettings.api_key || "",
+        }),
+      });
+      if (res.ok) {
+        await supabase
+          .from("email_queue")
+          .update({ status: "sent", sent_at: new Date().toISOString() })
+          .eq("id", queueId);
+      } else {
+        await fail(await res.text());
+      }
+      return;
+    }
+
+    if (provider === "sendgrid") {
+      const res = await fetch(`${supabaseUrl}/functions/v1/send-email-sendgrid`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({
+          to: queueItem.recipient_email,
+          to_name: queueItem.recipient_name,
+          from: emailSettings.sender_email,
+          from_name: emailSettings.sender_name,
+          reply_to: emailSettings.reply_to_email || emailSettings.sender_email,
+          subject: queueItem.subject,
+          html: queueItem.body_html,
+          text: queueItem.body_text || "",
+          api_key: emailSettings.api_key || "",
+        }),
+      });
+      if (res.ok) {
+        await supabase
+          .from("email_queue")
+          .update({ status: "sent", sent_at: new Date().toISOString() })
+          .eq("id", queueId);
+      } else {
+        await fail(await res.text());
+      }
+    }
+  } catch (e) {
+    console.warn(`${logPrefix}: erro ao enviar fila`, e);
+    await fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
 async function queueChannelReservationEmail(
   supabase: ReturnType<typeof createClient>,
   args: {
@@ -309,6 +455,26 @@ async function queueChannelReservationEmail(
     }
   }
   if (!recipientEmail) return;
+
+  const { data: siteRow } = await supabase
+    .from("site_settings")
+    .select("features_enabled")
+    .eq("id", SITE_SETTINGS_FEATURE_ROW)
+    .maybeSingle();
+
+  const emailFeature = (siteRow?.features_enabled as AnyObj | undefined)?.email;
+  if (!isFeatureEnabledForEstablishmentEmail(emailFeature, args.establishmentId)) {
+    console.warn(
+      "channex-reservations-sync: e-mail OTA desativado para o estabelecimento (site_settings.features_enabled.email)",
+    );
+    return;
+  }
+
+  const { data: emailSettings } = await supabase.from("email_settings").select("*").eq("is_active", true).maybeSingle();
+  if (!emailSettings) {
+    console.warn("channex-reservations-sync: email_settings inativo ou ausente");
+    return;
+  }
 
   const eventType =
     args.paidAmount >= args.totalAmount && args.totalAmount > 0 ? "payment.confirmed" : "reservation.created";
@@ -353,22 +519,33 @@ async function queueChannelReservationEmail(
 
   if (queueError || !queueId) {
     console.warn("channex-reservations-sync insert_email_queue", queueError);
-    const { error: insErr } = await supabase.from("email_queue").insert({
-      template_id: template.id,
-      event_type: eventType,
-      recipient_email: recipientEmail,
-      recipient_name: args.guestName || "Hóspede",
-      subject,
-      body_html: bodyHtml,
-      reservation_id: args.reservationId,
-      variables: vars,
-      priority: 1,
-      status: "pending",
-      cc_emails: ccText,
-      bcc_emails: bccText,
-    });
-    if (insErr) console.warn("channex-reservations-sync email_queue direct insert", insErr);
+    const { data: inserted, error: insErr } = await supabase
+      .from("email_queue")
+      .insert({
+        template_id: template.id,
+        event_type: eventType,
+        recipient_email: recipientEmail,
+        recipient_name: args.guestName || "Hóspede",
+        subject,
+        body_html: bodyHtml,
+        reservation_id: args.reservationId,
+        variables: vars,
+        priority: 1,
+        status: "pending",
+        cc_emails: ccText,
+        bcc_emails: bccText,
+      })
+      .select("id")
+      .single();
+    if (insErr || !inserted?.id) {
+      console.warn("channex-reservations-sync email_queue direct insert", insErr);
+      return;
+    }
+    await dispatchChannexOtaQueuedEmail(supabase, String(inserted.id), emailSettings as AnyObj, "channex-reservation-email");
+    return;
   }
+
+  await dispatchChannexOtaQueuedEmail(supabase, String(queueId), emailSettings as AnyObj, "channex-reservation-email");
 }
 
 function normalizePartnerKey(raw: string | null | undefined): string {
