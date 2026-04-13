@@ -30,10 +30,146 @@ type StripePaymentRow = {
   id: string;
   establishment_id: string;
   reservation_id: string | null;
+  quote_id?: string | null;
   stripe_payment_intent_id: string;
   amount: number;
   status: string;
 };
+
+function mapStripeMethodToPms(method: string | null | undefined): "credit_card" | "debit_card" | "pix" | "deposit" {
+  if (!method) return "credit_card";
+  if (method === "card") return "credit_card";
+  if (method === "credit_card" || method === "debit_card" || method === "pix" || method === "deposit") return method;
+  return "credit_card";
+}
+
+async function getOrCreateStripeCarrier(db: SupabaseClient, establishmentId: string): Promise<string | null> {
+  const { data: byEst } = await db
+    .from("payment_carriers")
+    .select("id")
+    .eq("code", "STRIPE")
+    .eq("establishment_id", establishmentId)
+    .maybeSingle<{ id: string }>();
+  if (byEst?.id) return byEst.id;
+
+  const { data: global } = await db
+    .from("payment_carriers")
+    .select("id")
+    .eq("code", "STRIPE")
+    .maybeSingle<{ id: string }>();
+  if (global?.id) return global.id;
+
+  // Try with establishment_id first, fallback without it for older schemas.
+  const createWithEst = await db
+    .from("payment_carriers")
+    .insert({
+      code: "STRIPE",
+      description: "Stripe - Gateway de Pagamento",
+      establishment_id: establishmentId,
+      is_active: true,
+    })
+    .select("id")
+    .maybeSingle<{ id: string }>();
+  if (createWithEst.data?.id) return createWithEst.data.id;
+
+  const createLegacy = await db
+    .from("payment_carriers")
+    .insert({
+      code: "STRIPE",
+      description: "Stripe - Gateway de Pagamento",
+      is_active: true,
+    })
+    .select("id")
+    .maybeSingle<{ id: string }>();
+  return createLegacy.data?.id ?? null;
+}
+
+async function getOrCreateStripePaymentType(
+  db: SupabaseClient,
+  carrierId: string,
+  paymentMethod: "credit_card" | "debit_card" | "pix" | "deposit",
+  cardBrand: string | null
+): Promise<string | null> {
+  const normalizedBrand = paymentMethod === "credit_card" || paymentMethod === "debit_card" ? cardBrand ?? "unknown" : null;
+  const { data: existing } = await db
+    .from("payment_types")
+    .select("id")
+    .eq("carrier_id", carrierId)
+    .eq("payment_method", paymentMethod)
+    .eq("card_brand", normalizedBrand)
+    .maybeSingle<{ id: string }>();
+  if (existing?.id) return existing.id;
+
+  const name =
+    paymentMethod === "credit_card"
+      ? `Stripe - Cartão de Crédito ${normalizedBrand?.toUpperCase() ?? ""}`.trim()
+      : paymentMethod === "debit_card"
+        ? `Stripe - Cartão de Débito ${normalizedBrand?.toUpperCase() ?? ""}`.trim()
+        : `Stripe - ${paymentMethod.toUpperCase()}`;
+
+  const { data: created } = await db
+    .from("payment_types")
+    .insert({
+      carrier_id: carrierId,
+      name,
+      payment_method: paymentMethod,
+      card_brand: normalizedBrand,
+      is_active: true,
+    })
+    .select("id")
+    .maybeSingle<{ id: string }>();
+  return created?.id ?? null;
+}
+
+async function registerPaymentCarrierEntry(
+  db: SupabaseClient,
+  payment: StripePaymentRow,
+  paymentIntent: Stripe.PaymentIntent
+): Promise<void> {
+  if (!payment.reservation_id) return;
+
+  const { data: existing } = await db
+    .from("payments")
+    .select("id")
+    .eq("reservation_id", payment.reservation_id)
+    .ilike("notes", `%${paymentIntent.id}%`)
+    .maybeSingle<{ id: string }>();
+  if (existing?.id) return;
+
+  const charge = (paymentIntent as unknown as { charges?: { data?: Array<any> } }).charges?.data?.[0];
+  const paymentMethod = mapStripeMethodToPms(charge?.payment_method_details?.type);
+  const cardBrand = charge?.payment_method_details?.card?.brand ?? null;
+  const installments = charge?.payment_method_details?.card?.installments?.count ?? 1;
+
+  const carrierId = await getOrCreateStripeCarrier(db, payment.establishment_id);
+  if (!carrierId) return;
+  const paymentTypeId = await getOrCreateStripePaymentType(db, carrierId, paymentMethod, cardBrand);
+
+  const notes = `[STRIPE] Payment Intent: ${paymentIntent.id}\n[COMPONENT:base]`;
+  const amountInReais = Number(payment.amount ?? 0) / 100;
+
+  // Try rich schema first; fallback for older schemas.
+  const richInsert = await db.from("payments").insert({
+    reservation_id: payment.reservation_id,
+    establishment_id: payment.establishment_id,
+    carrier_id: carrierId,
+    payment_type_id: paymentTypeId,
+    amount: amountInReais,
+    payment_method: paymentMethod,
+    payment_date: new Date((paymentIntent.created ?? Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+    installments,
+    notes,
+  });
+  if (!richInsert.error) return;
+
+  await db.from("payments").insert({
+    reservation_id: payment.reservation_id,
+    amount: amountInReais,
+    payment_method: paymentMethod,
+    payment_date: new Date((paymentIntent.created ?? Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+    notes,
+  });
+}
 
 async function getStripeClientForEstablishment(db: SupabaseClient, establishmentId: string): Promise<Stripe> {
   const { data: config } = await db
@@ -242,6 +378,9 @@ export async function getStripePaymentStatus(
       if (isPreregistration || nextStatus === "confirmed") patch.status = nextStatus;
       await db.from("reservations").update(patch).eq("id", payment.reservation_id);
     }
+
+    // Ensure financial "payment carriers" entry is created in PMS.
+    await registerPaymentCarrierEntry(db, payment, paymentIntent);
   }
 
   const response = {
