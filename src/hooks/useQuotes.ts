@@ -5,6 +5,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { usePricing } from "./usePricing";
 import { format } from "date-fns";
+import { postPmsApi } from "@/lib/pmsApi";
 
 export type QuoteStatus = "pending" | "sent" | "accepted" | "rejected" | "expired" | "converted";
 
@@ -394,24 +395,32 @@ export const useQuotes = () => {
         throw new Error("Estabelecimento não selecionado");
       }
 
-      // Criar Payment Intent via Edge Function
-      const { data: paymentData, error: paymentError } = await supabase.functions.invoke(
-        "stripe-payment",
-        {
-          body: {
-            establishment_id: establishmentId,
-            amount: quote.total_amount,
-            currency: "BRL",
-            payment_type: "quote_payment",
-            quote_id: quoteId,
-            guest_email: quote.guest_email,
-            description: `Pagamento do orçamento #${quote.quote_code}`,
-          },
-        }
-      );
+      const intentBody = {
+        establishment_id: establishmentId,
+        amount: quote.total_amount,
+        currency: "BRL",
+        payment_type: "quote_payment",
+        quote_id: quoteId,
+        guest_email: quote.guest_email,
+        description: `Pagamento do orçamento #${quote.quote_code}`,
+      };
 
-      if (paymentError || !paymentData?.payment_intent_id) {
-        throw new Error(paymentError?.message || "Erro ao gerar link de pagamento");
+      const pmsBase = (import.meta.env.VITE_PMS_API_URL as string | undefined)?.replace(/\/+$/, "");
+      let paymentData: { payment_intent_id?: string };
+      if (pmsBase) {
+        paymentData = await postPmsApi<{ payment_intent_id?: string }>("/api/pagamentos/stripe/intent", intentBody);
+      } else {
+        const { data, error: paymentError } = await supabase.functions.invoke("stripe-payment", {
+          body: intentBody,
+        });
+        if (paymentError || !data?.payment_intent_id) {
+          throw new Error(paymentError?.message || "Erro ao gerar link de pagamento");
+        }
+        paymentData = data;
+      }
+
+      if (!paymentData?.payment_intent_id) {
+        throw new Error("Erro ao gerar link de pagamento");
       }
 
       // Atualizar orçamento com payment_intent_id e payment_link

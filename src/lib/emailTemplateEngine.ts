@@ -3,6 +3,7 @@
  */
 
 import { reservationGuestDisplayName } from './reservationChannelDisplay';
+import { postPmsApi } from '@/lib/pmsApi';
 
 export interface TemplateVariables {
   [key: string]: string | number | null | undefined | any; // Permite objetos e arrays
@@ -979,16 +980,6 @@ export async function generateReservationVariables(
         return '';
       }
 
-      // Criar Payment Intent
-      // Usar fetch direto para evitar problemas com autenticação automática do cliente Supabase
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-      
-      if (!supabaseUrl || !supabaseAnonKey) {
-        console.error('[Stripe] ❌ Variáveis de ambiente do Supabase não encontradas');
-        return '';
-      }
-
       const requestBody = {
         establishment_id: establishmentId,
         amount: pendingAmount,
@@ -999,45 +990,66 @@ export async function generateReservationVariables(
         description: `Pagamento da reserva #${reservation.reservation_code || reservation.id}`,
       };
 
-      console.log('[Stripe] Chamando Edge Function stripe-payment com:', requestBody);
-      
-      // Fazer chamada direta via fetch sem headers de autorização
-      const response = await fetch(`${supabaseUrl}/functions/v1/stripe-payment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Não incluir Authorization header - a função deve aceitar requisições anônimas
-        },
-        body: JSON.stringify(requestBody),
-      });
+      const pmsBase = (import.meta.env.VITE_PMS_API_URL as string | undefined)?.replace(/\/+$/, "");
+      let paymentData: { payment_intent_id?: string };
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorData;
+      if (pmsBase) {
+        console.log('[Stripe] Chamando API PMS /api/pagamentos/stripe/intent com:', requestBody);
         try {
-          errorData = JSON.parse(errorText);
-        } catch {
-          errorData = { message: errorText };
+          paymentData = await postPmsApi<{ payment_intent_id?: string }>(
+            '/api/pagamentos/stripe/intent',
+            requestBody
+          );
+        } catch (e) {
+          console.error('[Stripe] ❌ Erro ao criar Payment Intent (API PMS):', e);
+          return '';
         }
-        
-        console.error('[Stripe] ❌ Erro ao criar Payment Intent:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorData
-        });
-        
-        // Se for erro 401, fornecer instruções específicas
-        if (response.status === 401) {
-          console.error('[Stripe] ⚠️ ERRO 401: A função stripe-payment está exigindo autenticação.');
-          console.error('[Stripe] 📋 SOLUÇÃO: Acesse o Supabase Dashboard > Edge Functions > stripe-payment > Settings');
-          console.error('[Stripe] 📋 Desative "Require Authorization" ou "Verify JWT"');
-          console.error('[Stripe] 📋 Ou execute: supabase functions deploy stripe-payment --no-verify-jwt');
-        }
-        
-        return '';
-      }
+      } else {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-      const paymentData = await response.json();
+        if (!supabaseUrl || !supabaseAnonKey) {
+          console.error('[Stripe] ❌ Variáveis de ambiente do Supabase não encontradas');
+          return '';
+        }
+
+        console.log('[Stripe] Chamando Edge Function stripe-payment com:', requestBody);
+
+        const response = await fetch(`${supabaseUrl}/functions/v1/stripe-payment`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch {
+            errorData = { message: errorText };
+          }
+
+          console.error('[Stripe] ❌ Erro ao criar Payment Intent:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorData
+          });
+
+          if (response.status === 401) {
+            console.error('[Stripe] ⚠️ ERRO 401: A função stripe-payment está exigindo autenticação.');
+            console.error('[Stripe] 📋 SOLUÇÃO: Acesse o Supabase Dashboard > Edge Functions > stripe-payment > Settings');
+            console.error('[Stripe] 📋 Desative "Require Authorization" ou "Verify JWT"');
+            console.error('[Stripe] 📋 Ou execute: supabase functions deploy stripe-payment --no-verify-jwt');
+          }
+
+          return '';
+        }
+
+        paymentData = await response.json();
+      }
 
       if (!paymentData?.payment_intent_id) {
         console.error('[Stripe] ❌ Payment Intent criado mas sem payment_intent_id:', paymentData);

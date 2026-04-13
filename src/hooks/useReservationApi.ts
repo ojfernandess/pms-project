@@ -2,6 +2,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+function getReservationApiUrl(): string {
+  const pms = (import.meta.env.VITE_PMS_API_URL as string | undefined)?.replace(/\/+$/, "");
+  if (pms) return `${pms}/api/legacy/get-reservation`;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+  return `${String(supabaseUrl).replace(/\/$/, "")}/functions/v1/get-reservation`;
+}
+
 interface ReservationRequest {
   identifier?: string; // identification_number
   locator?: string; // reservation_code ou locator do web_checkin
@@ -193,9 +200,7 @@ export const useReservationApi = () => {
         throw new Error("Autenticação necessária para acessar informações da reserva");
       }
 
-      // Obter URL da função edge
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const functionUrl = `${supabaseUrl}/functions/v1/get-reservation`;
+      const functionUrl = getReservationApiUrl();
 
       // Preparar headers
       const headers: HeadersInit = {

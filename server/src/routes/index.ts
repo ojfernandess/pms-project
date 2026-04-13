@@ -14,6 +14,7 @@ import { registerStripePaymentOpsRoutes } from "./stripePaymentsOps.js";
 import { registerEmployeeAuthAdminRoutes } from "./employeeAuthAdmin.js";
 import { registerCheckinChargeRoutes } from "./checkinCharge.js";
 import { registerIntegrationOpsRoutes } from "./integrationOps.js";
+import { registerLegacyUserEdgeProxyRoutes } from "./legacyUserEdgeProxy.js";
 
 const uuidLoose = z.string().uuid();
 
@@ -121,6 +122,7 @@ export async function registerRoutes(app: FastifyInstance, env: Env, logger: Log
   await registerEmployeeAuthAdminRoutes(app, env);
   await registerCheckinChargeRoutes(app, env);
   await registerIntegrationOpsRoutes(app, env);
+  await registerLegacyUserEdgeProxyRoutes(app, env);
   await registerStripePaymentRoutes(app, env);
   await registerStripePaymentOpsRoutes(app, env);
   await registerStripeWebhookRoute(app, env, logger);

@@ -4,6 +4,35 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import { postPmsApiAuth } from '@/lib/pmsApi';
+
+function pmsApiBase(): string | undefined {
+  return (import.meta.env.VITE_PMS_API_URL as string | undefined)?.replace(/\/+$/, '');
+}
+
+type SendEmailEdgeName = 'send-email-smtp' | 'send-email-sendgrid' | 'send-email-resend';
+
+async function invokeSendEmailEdge<T = unknown>(
+  name: SendEmailEdgeName,
+  body: unknown
+): Promise<{ data: T | null; error: { message?: string } | null }> {
+  const base = pmsApiBase();
+  if (base) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        return { data: null, error: { message: 'Sessão necessária para enviar e-mail' } };
+      }
+      const data = await postPmsApiAuth<T>(`/api/legacy/${name}`, body, session.access_token);
+      return { data, error: null };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { data: null, error: { message } };
+    }
+  }
+  const result = await supabase.functions.invoke(name, { body });
+  return { data: result.data as T, error: result.error };
+}
 import { processTemplate, generateReservationVariables, type TemplateVariables } from './emailTemplateEngine';
 import { reservationGuestContactFields, reservationGuestDisplayName } from './reservationChannelDisplay';
 
@@ -658,11 +687,9 @@ async function sendViaSMTP(queueItem: any, settings: EmailSettings, hotelName?: 
       ),
     });
     
-    // Chamar Edge Function do Supabase para enviar via SMTP
+    // Edge (direto) ou API PMS → Edge (JWT do utilizador)
     try {
-      const result = await supabase.functions.invoke('send-email-smtp', {
-        body: smtpPayload,
-      });
+      const result = await invokeSendEmailEdge('send-email-smtp', smtpPayload);
       
       // Verificar se há erro no resultado
       if (result.error) {
@@ -784,21 +811,18 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings, hotelNam
     // Garantir que sender_name não esteja vazio - usar nome do hotel como fallback
     const senderName = settings.sender_name?.trim() || hotelName || 'PMS System';
 
-    // Chamar Edge Function para enviar e-mail (evita CORS)
-    const result = await supabase.functions.invoke('send-email-sendgrid', {
-      body: {
-        to: queueItem.recipient_email,
-        to_name: queueItem.recipient_name || undefined,
-        from: settings.sender_email,
-        from_name: senderName,
-        reply_to: settings.reply_to_email || settings.sender_email,
-        subject: queueItem.subject,
-        html: queueItem.body_html,
-        text: queueItem.body_text || undefined,
-        api_key: settings.api_key,
-        ...(ccEmails.length > 0 ? { cc: ccEmails } : {}),
-        ...(bccEmails.length > 0 ? { bcc: bccEmails } : {}),
-      },
+    const result = await invokeSendEmailEdge('send-email-sendgrid', {
+      to: queueItem.recipient_email,
+      to_name: queueItem.recipient_name || undefined,
+      from: settings.sender_email,
+      from_name: senderName,
+      reply_to: settings.reply_to_email || settings.sender_email,
+      subject: queueItem.subject,
+      html: queueItem.body_html,
+      text: queueItem.body_text || undefined,
+      api_key: settings.api_key,
+      ...(ccEmails.length > 0 ? { cc: ccEmails } : {}),
+      ...(bccEmails.length > 0 ? { bcc: bccEmails } : {}),
     });
     
     if (ccEmails.length > 0 || bccEmails.length > 0) {
@@ -1028,21 +1052,18 @@ async function sendViaResend(queueItem: any, settings: EmailSettings, hotelName?
       from_email: settings.sender_email
     });
     
-    // Usar Edge Function para evitar problemas de CORS
-    const result = await supabase.functions.invoke('send-email-resend', {
-      body: {
-        to: queueItem.recipient_email,
-        to_name: queueItem.recipient_name || undefined,
-        from: settings.sender_email,
-        from_name: senderName,
-        reply_to: settings.reply_to_email || settings.sender_email,
-        subject: queueItem.subject,
-        html: queueItem.body_html,
-        text: queueItem.body_text || undefined,
-        api_key: settings.api_key,
-        ...(ccEmails.length > 0 ? { cc: ccEmails } : {}),
-        ...(bccEmails.length > 0 ? { bcc: bccEmails } : {}),
-      },
+    const result = await invokeSendEmailEdge('send-email-resend', {
+      to: queueItem.recipient_email,
+      to_name: queueItem.recipient_name || undefined,
+      from: settings.sender_email,
+      from_name: senderName,
+      reply_to: settings.reply_to_email || settings.sender_email,
+      subject: queueItem.subject,
+      html: queueItem.body_html,
+      text: queueItem.body_text || undefined,
+      api_key: settings.api_key,
+      ...(ccEmails.length > 0 ? { cc: ccEmails } : {}),
+      ...(bccEmails.length > 0 ? { bcc: bccEmails } : {}),
     });
     
     if (ccEmails.length > 0 || bccEmails.length > 0) {

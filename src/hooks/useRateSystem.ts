@@ -1,6 +1,7 @@
 import { useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { postPmsApiAuth } from "@/lib/pmsApi";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { fetchRatesMap } from "@/lib/ratesApi";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
@@ -1324,9 +1325,42 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       throw new Error("Establishment ID não encontrado");
     }
 
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const { data: { session } } = await supabase.auth.getSession();
-    
+    const body = {
+      establishment_id: establishmentId,
+      category_id: categoryId,
+      pricing_plan_id: planId,
+      date: format(date, "yyyy-MM-dd"),
+      adults,
+      children,
+    };
+
+    const pmsBase = (import.meta.env.VITE_PMS_API_URL as string | undefined)?.replace(/\/+$/, "");
+    if (pmsBase) {
+      if (!session?.access_token) {
+        throw new Error("Sessão necessária para calcular preço dinâmico");
+      }
+      return await postPmsApiAuth<{
+        final_price: number;
+        base_price: number;
+        adjustments_applied: Array<{
+          rule_id: string;
+          rule_name: string;
+          adjustment_type: string;
+          adjustment_value: number;
+          final_adjustment: number;
+        }>;
+        auto_apply_enabled: boolean;
+        metrics?: {
+          occupancy: number;
+          pickup_rate: number;
+          has_local_event: boolean;
+          event_impact: number;
+        };
+      }>("/api/legacy/apply-dynamic-pricing-rules", body, session.access_token);
+    }
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     if (!supabaseUrl) {
       throw new Error("VITE_SUPABASE_URL não configurado");
     }
@@ -1338,14 +1372,7 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
         "Content-Type": "application/json",
         "Authorization": session ? `Bearer ${session.access_token}` : "",
       },
-      body: JSON.stringify({
-        establishment_id: establishmentId,
-        category_id: categoryId,
-        pricing_plan_id: planId,
-        date: format(date, "yyyy-MM-dd"),
-        adults,
-        children,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {

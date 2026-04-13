@@ -5,6 +5,9 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { getPmsApiAuth, postPmsApiAuth } from "@/lib/pmsApi";
+
+const pmsApiBase = (import.meta.env.VITE_PMS_API_URL as string | undefined)?.replace(/\/+$/, "");
 
 const getFunctionUrl = (path: string) => {
   const base = import.meta.env.VITE_SUPABASE_URL;
@@ -50,11 +53,21 @@ export interface RatesDashboardResponse {
 export async function fetchRatesDashboard(
   establishmentId: string
 ): Promise<RatesDashboardResponse | null> {
-  const url = getFunctionUrl("rates-dashboard");
-  if (!url) return null;
+  const params = new URLSearchParams({ establishment_id: establishmentId });
 
   try {
-    const params = new URLSearchParams({ establishment_id: establishmentId });
+    if (pmsApiBase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return null;
+      return await getPmsApiAuth<RatesDashboardResponse>(
+        `/api/legacy/rates-dashboard?${params.toString()}`,
+        session.access_token
+      );
+    }
+
+    const url = getFunctionUrl("rates-dashboard");
+    if (!url) return null;
+
     const headers = await getAuthHeaders();
     const response = await fetch(`${url}?${params}`, { headers });
 
@@ -85,15 +98,32 @@ export interface RatesMapResponse {
 export async function invokeRecalcRates(
   options?: { establishmentId?: string; daysAhead?: number }
 ): Promise<{ success: boolean; total_updated: number; error?: string }> {
-  const url = getFunctionUrl("recalc-rates");
-  if (!url) {
-    return { success: false, total_updated: 0, error: "URL da função não configurada" };
-  }
-
   try {
     const params = new URLSearchParams();
     if (options?.establishmentId) params.set("establishment_id", options.establishmentId);
     if (options?.daysAhead != null) params.set("days_ahead", String(options.daysAhead));
+
+    if (pmsApiBase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        return { success: false, total_updated: 0, error: "Sessão não encontrada" };
+      }
+      const data = await postPmsApiAuth<{
+        success?: boolean;
+        total_updated?: number;
+        error?: string;
+      }>(`/api/legacy/recalc-rates?${params.toString()}`, {}, session.access_token);
+      return {
+        success: data.success === true,
+        total_updated: data.total_updated ?? 0,
+        error: data.error,
+      };
+    }
+
+    const url = getFunctionUrl("recalc-rates");
+    if (!url) {
+      return { success: false, total_updated: 0, error: "URL da função não configurada" };
+    }
 
     const headers = await getAuthHeaders();
     const response = await fetch(`${url}?${params}`, {
@@ -126,13 +156,22 @@ export async function fetchRatesMap(
   establishmentId: string,
   options?: { startDate?: string; endDate?: string }
 ): Promise<RatesMapResponse | null> {
-  const url = getFunctionUrl("rates-map");
-  if (!url) return null;
-
   try {
     const params = new URLSearchParams({ establishment_id: establishmentId });
     if (options?.startDate) params.set("start_date", options.startDate);
     if (options?.endDate) params.set("end_date", options.endDate);
+
+    if (pmsApiBase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return null;
+      return await getPmsApiAuth<RatesMapResponse>(
+        `/api/legacy/rates-map?${params.toString()}`,
+        session.access_token
+      );
+    }
+
+    const url = getFunctionUrl("rates-map");
+    if (!url) return null;
 
     const headers = await getAuthHeaders();
     const response = await fetch(`${url}?${params}`, { headers });

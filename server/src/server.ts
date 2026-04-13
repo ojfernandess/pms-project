@@ -28,7 +28,8 @@ export async function buildServer(opts: BuildServerOptions): Promise<FastifyInst
   await app.register(cors, {
     origin: env.CORS_ORIGIN === "*" ? true : env.CORS_ORIGIN,
     credentials: true,
-    allowedHeaders: ["authorization", "content-type", "stripe-signature", "x-request-id"],
+    // GET com Authorization dispara preflight; o browser pede `accept` em Access-Control-Request-Headers.
+    allowedHeaders: ["authorization", "content-type", "accept", "stripe-signature", "x-request-id"],
   });
 
   await registerRoutes(app, env, logger);

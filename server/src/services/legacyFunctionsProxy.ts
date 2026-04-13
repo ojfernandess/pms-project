@@ -46,3 +46,49 @@ export async function invokeLegacyFunctionWithOptions<T>(
   }
   return data as T;
 }
+
+/** Chama uma Edge Function com o JWT do cliente (ou anon key), como o browser faria com `functions.invoke`. */
+export async function invokeLegacyFunctionForwardAuth<T>(
+  env: Env,
+  functionName: string,
+  options: {
+    method: "GET" | "POST";
+    body?: unknown;
+    query?: URLSearchParams;
+    /** Valor completo do header, ex.: `Bearer <access_token>`. */
+    authorization: string;
+  }
+): Promise<T> {
+  const base = (env.FUNCTIONS_INVOKE_BASE_URL ?? `${env.SUPABASE_URL}/functions/v1`).replace(/\/+$/, "");
+  const url = new URL(`${base}/${functionName}`);
+  if (options.query) {
+    for (const [key, value] of options.query.entries()) {
+      url.searchParams.append(key, value);
+    }
+  }
+
+  const auth =
+    options.authorization.trim().startsWith("Bearer ") ? options.authorization.trim() : `Bearer ${options.authorization.trim()}`;
+
+  const headers: Record<string, string> = {
+    Authorization: auth,
+    apikey: env.SUPABASE_ANON_KEY,
+  };
+
+  const init: RequestInit = { method: options.method, headers };
+  if (options.method === "POST") {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(options.body ?? {});
+  }
+
+  const response = await fetch(url.toString(), init);
+  const data = (await response.json().catch(() => ({}))) as { error?: string; message?: string } & T;
+  if (!response.ok) {
+    const msg =
+      (typeof data?.message === "string" && data.message) ||
+      (typeof data?.error === "string" && data.error) ||
+      `Legacy function ${functionName} failed (${response.status})`;
+    throw new Error(msg);
+  }
+  return data as T;
+}

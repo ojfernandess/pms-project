@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Env } from "../config/env.js";
 import { requireAuth } from "../middleware/auth.js";
+import { invokeLegacyFunctionForwardAuth } from "../services/legacyFunctionsProxy.js";
 import { createServiceClient } from "../services/supabase.js";
 import { HttpError } from "../utils/httpError.js";
 
@@ -75,6 +76,14 @@ const resendSchema = z.object({
   user_id: z.string().uuid(),
 });
 
+const createEmployeeAuthSchema = z.object({
+  action: z.literal("create_employee_auth"),
+  establishment_id: z.string().uuid(),
+  email: z.string().email(),
+  password: z.string().min(6),
+  full_name: z.string().max(500).optional(),
+});
+
 export async function registerEmployeeAuthAdminRoutes(app: FastifyInstance, env: Env): Promise<void> {
   const db = createServiceClient(env);
   const authPre = requireAuth(env);
@@ -145,6 +154,42 @@ export async function registerEmployeeAuthAdminRoutes(app: FastifyInstance, env:
       return;
     }
 
-    throw new HttpError(400, "Ação inválida. Use auth_status_batch ou resend_confirmation.", "INVALID_ACTION");
+    if (action === "create_employee_auth") {
+      const parsed = createEmployeeAuthSchema.safeParse(raw);
+      if (!parsed.success) throw new HttpError(400, "Corpo inválido", "VALIDATION", parsed.error.flatten());
+      await assertCallerCanManage(db, request.user!.id, parsed.data.establishment_id);
+
+      const authHeader = request.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        throw new HttpError(401, "Unauthorized", "NO_BEARER");
+      }
+
+      try {
+        const fnData = await invokeLegacyFunctionForwardAuth<Record<string, unknown>>(env, "create-employee-auth", {
+          method: "POST",
+          body: {
+            email: parsed.data.email,
+            password: parsed.data.password,
+            full_name: parsed.data.full_name,
+            establishment_id: parsed.data.establishment_id,
+          },
+          authorization: authHeader,
+        });
+        await reply.send(fnData);
+      } catch (e) {
+        throw new HttpError(
+          400,
+          e instanceof Error ? e.message : "Falha ao criar utilizador na Edge",
+          "CREATE_EMPLOYEE_AUTH_FAILED"
+        );
+      }
+      return;
+    }
+
+    throw new HttpError(
+      400,
+      "Ação inválida. Use auth_status_batch, resend_confirmation ou create_employee_auth.",
+      "INVALID_ACTION"
+    );
   });
 }

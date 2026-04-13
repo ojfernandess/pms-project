@@ -98,8 +98,10 @@ function FieldHint({ children }: { children: React.ReactNode }) {
   return <p className="text-xs text-muted-foreground leading-relaxed mt-1.5">{children}</p>;
 }
 
-const aiosellReservationWebhookBase =
-  typeof import.meta.env.VITE_SUPABASE_URL === "string" && import.meta.env.VITE_SUPABASE_URL
+const pmsApiForWebhook = (import.meta.env.VITE_PMS_API_URL as string | undefined)?.replace(/\/+$/, "");
+const aiosellReservationWebhookBase = pmsApiForWebhook
+  ? `${pmsApiForWebhook}/api/webhooks/aiosell-reservation`
+  : typeof import.meta.env.VITE_SUPABASE_URL === "string" && import.meta.env.VITE_SUPABASE_URL
     ? `${String(import.meta.env.VITE_SUPABASE_URL).replace(/\/$/, "")}/functions/v1/aiosell-reservation-webhook`
     : null;
 

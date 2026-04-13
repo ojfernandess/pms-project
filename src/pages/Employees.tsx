@@ -335,20 +335,37 @@ const Employees = () => {
           }
 
           try {
-            // Edge Function: createUser com confirmação de e-mail (template Confirm sign up).
-            const { data: fnData, error: fnError } = await supabase.functions.invoke(
-              "create-employee-auth",
-              {
+            const pmsBase = (import.meta.env.VITE_PMS_API_URL as string | undefined)?.replace(/\/+$/, "");
+            let fnData: unknown;
+
+            if (pmsBase) {
+              const { data: sessionData } = await supabase.auth.getSession();
+              const jwt = sessionData.session?.access_token;
+              if (!jwt) throw new Error("Sessão inválida");
+              fnData = await postPmsApiAuth(
+                "/api/employees/auth-admin",
+                {
+                  action: "create_employee_auth",
+                  email: formData.email,
+                  password: formData.password,
+                  full_name: formData.full_name || undefined,
+                  establishment_id: establishmentId,
+                },
+                jwt
+              );
+            } else {
+              const { data, error: fnError } = await supabase.functions.invoke("create-employee-auth", {
                 body: {
                   email: formData.email,
                   password: formData.password,
                   full_name: formData.full_name || undefined,
                   establishment_id: establishmentId,
                 },
-              }
-            );
+              });
+              if (fnError) throw fnError;
+              fnData = data;
+            }
 
-            if (fnError) throw fnError;
             if (fnData && typeof fnData === "object" && "error" in fnData && fnData.error) {
               throw new Error(String((fnData as { error: string }).error));
             }
