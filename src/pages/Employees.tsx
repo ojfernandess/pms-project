@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { useEmployees, useEmployeeRoles, useCurrentEmployeeRole } from "@/hooks/useEmployees";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useUserLimits } from "@/hooks/useUserLimits";
+import { postPmsApiAuth } from "@/lib/pmsApi";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Edit, Trash2, Loader2, Users, Shield, AlertCircle, Key, UserPlus, User, Briefcase, Mail, Phone, FileText, MapPin, Building2, Calendar, Lock, CheckCircle2, XCircle, Sparkles, Send } from "lucide-react";
@@ -115,15 +116,18 @@ const Employees = () => {
       const user_ids = employeeUserIdsKey.split(",").filter(Boolean);
       if (user_ids.length === 0) return {};
 
-      const { data, error } = await supabase.functions.invoke("employee-auth-admin", {
-        body: {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const jwt = sessionData.session?.access_token;
+      if (!jwt) throw new Error("Sessão inválida");
+      const data = await postPmsApiAuth<{ statuses?: Record<string, EmployeeAuthStatus | null> }>(
+        "/api/employees/auth-admin",
+        {
           action: "auth_status_batch",
           establishment_id: establishmentIdForAuth,
           user_ids,
         },
-      });
-
-      if (error) throw error;
+        jwt,
+      );
       if (data && typeof data === "object" && "error" in data && (data as { error: string }).error) {
         throw new Error(String((data as { error: string }).error));
       }
@@ -703,14 +707,18 @@ const Employees = () => {
     }
     setResendingUserId(employee.user_id);
     try {
-      const { data, error } = await supabase.functions.invoke("employee-auth-admin", {
-        body: {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const jwt = sessionData.session?.access_token;
+      if (!jwt) throw new Error("Sessão inválida");
+      const data = await postPmsApiAuth<{ ok?: boolean; error?: string }>(
+        "/api/employees/auth-admin",
+        {
           action: "resend_confirmation",
           establishment_id: est,
           user_id: employee.user_id,
         },
-      });
-      if (error) throw error;
+        jwt,
+      );
       if (data && typeof data === "object" && "error" in data && (data as { error: string }).error) {
         throw new Error((data as { error: string }).error);
       }

@@ -22,6 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { postPmsApiAuth } from "@/lib/pmsApi";
 import { useChannelManager } from "@/hooks/useChannelManager";
 import { Loader2, CheckCircle2, AlertCircle, Plus, Trash2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -155,13 +156,22 @@ export function ChannexMappingPanel() {
     enabled: !!establishmentId && !!channelId,
     staleTime: 60 * 1000,
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("channex-mapping-options", {
-        body: {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const jwt = sessionData.session?.access_token;
+      if (!jwt) throw new Error("Sessão inválida");
+      const data = await postPmsApiAuth<{
+        success?: boolean;
+        error?: string;
+        room_types?: ChannexRoomTypeOption[];
+        rate_plans?: ChannexRatePlanOption[];
+      }>(
+        "/api/integrations/channex-mapping-options",
+        {
           channel_id: channelId,
           establishment_id: establishmentId,
         },
-      });
-      if (error) throw error;
+        jwt,
+      );
       if (!data?.success) throw new Error(data?.error || "Erro ao carregar opções do Channex");
       return {
         roomTypes: (data.room_types || []) as ChannexRoomTypeOption[],

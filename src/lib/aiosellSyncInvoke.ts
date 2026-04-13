@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { postPmsApiAuth } from "@/lib/pmsApi";
 
 export type AiosellSyncedRatePair = { roomCode: string; rateplanCode: string };
 
@@ -83,28 +84,28 @@ export async function invokeAiosellSync(
   channelId: string,
   establishmentId: string
 ): Promise<AiosellSyncPayload> {
-  const { data, error, response } = await supabase.functions.invoke("aiosell-sync", {
-    body: {
-      channel_id: channelId,
-      establishment_id: establishmentId,
-    },
-  });
-
-  let payload = data as AiosellSyncPayload | null;
-
-  if (error && response) {
-    try {
-      const parsed = await response.clone().json();
-      if (parsed && typeof parsed === "object") {
-        payload = parsed as AiosellSyncPayload;
-      }
-    } catch {
-      /* ignore */
-    }
+  const { data: sessionData } = await supabase.auth.getSession();
+  const jwt = sessionData.session?.access_token;
+  if (!jwt) throw new Error("Sessão inválida");
+  let error: { message?: string } | null = null;
+  let data: unknown = null;
+  try {
+    data = await postPmsApiAuth(
+      "/api/integrations/aiosell-sync",
+      {
+        channel_id: channelId,
+        establishment_id: establishmentId,
+      },
+      jwt,
+    );
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
 
+  const payload = data as AiosellSyncPayload | null;
+
   const errMsg =
-    payload?.error || (error as { message?: string } | null)?.message || null;
+    payload?.error || error?.message || null;
 
   const detailsBlock =
     payload?.details?.length && payload.details.length > 0

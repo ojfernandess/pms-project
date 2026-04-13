@@ -256,7 +256,7 @@ const RELATIONSHIP_REVERSE_EXAMPLE = String.raw`GET /rest/v1/clients?select=*,re
 const STRIPE_INTEGRATION_DETAILS = String.raw`// Fluxo de Pagamento Stripe
 
 1. Frontend chama Edge Function: stripe-payment
-   POST /functions/v1/stripe-payment
+   POST /api/pagamentos/stripe/intent
    Body: {
      "establishment_id": "uuid",
      "amount": 50000, // em centavos
@@ -274,7 +274,7 @@ const STRIPE_INTEGRATION_DETAILS = String.raw`// Fluxo de Pagamento Stripe
    - Confirma pagamento com client_secret
 
 4. Webhook do Stripe atualiza status
-   POST /functions/v1/stripe-webhook
+   POST /api/webhooks/stripe
    - Atualiza payment_status na reserva
    - Registra pagamento na tabela payments`;
 
@@ -449,7 +449,7 @@ Endpoint: GET /rest/v1/web_checkin?reservation_id=eq.{id}&order=created_at.desc&
 const WEBHOOK_DETAILS = String.raw`// Sistema de Webhooks
 
 1. Stripe Webhook
-   Endpoint: /functions/v1/stripe-webhook
+   Endpoint: /api/webhooks/stripe
    Eventos processados:
    - payment_intent.succeeded
    - payment_intent.payment_failed
@@ -507,7 +507,7 @@ const STRIPE_CONFIGURATION_GUIDE = String.raw`// CONFIGURAÇÃO NO STRIPE DASHBO
 5. Configure Webhooks:
    a) Vá em Developers > Webhooks
    b) Clique em "Add endpoint"
-   c) URL: https://[seu-projeto].supabase.co/functions/v1/stripe-webhook
+   c) URL: https://[seu-dominio-api]/api/webhooks/stripe
    d) Selecione eventos:
       - payment_intent.succeeded
       - payment_intent.payment_failed
@@ -1564,7 +1564,7 @@ const Documentation = () => {
                     <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500 mb-3">
                       <div className="flex items-center gap-2 mb-2">
                         <Badge variant="outline" className="bg-green-100">POST</Badge>
-                        <code className="text-sm font-mono">/functions/v1/stripe-payment</code>
+                        <code className="text-sm font-mono">/api/pagamentos/stripe/intent</code>
                       </div>
                       <p className="text-sm text-slate-700 mb-2"><strong>Descrição:</strong> Criar Payment Intent do Stripe</p>
                       <div className="space-y-2 text-xs">
@@ -1605,7 +1605,7 @@ const Documentation = () => {
                     <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500 mb-3">
                       <div className="flex items-center gap-2 mb-2">
                         <Badge variant="outline" className="bg-green-100">POST</Badge>
-                        <code className="text-sm font-mono">/functions/v1/stripe-payment-status</code>
+                        <code className="text-sm font-mono">/api/pagamentos/stripe/status</code>
                       </div>
                       <p className="text-sm text-slate-700 mb-2"><strong>Descrição:</strong> Verificar status de um Payment Intent</p>
                       <div className="space-y-2 text-xs">
@@ -1628,7 +1628,7 @@ const Documentation = () => {
                     <div className="p-4 bg-slate-50 rounded border-l-4 border-green-500 mb-3">
                       <div className="flex items-center gap-2 mb-2">
                         <Badge variant="outline" className="bg-green-100">POST</Badge>
-                        <code className="text-sm font-mono">/functions/v1/stripe-refund</code>
+                        <code className="text-sm font-mono">/api/pagamentos/stripe/refund</code>
                       </div>
                       <p className="text-sm text-slate-700 mb-2"><strong>Descrição:</strong> Processar reembolso de um pagamento</p>
                       <div className="space-y-2 text-xs">
@@ -1651,7 +1651,7 @@ const Documentation = () => {
                     <div className="p-4 bg-slate-50 rounded border-l-4 border-purple-500 mb-3">
                       <div className="flex items-center gap-2 mb-2">
                         <Badge variant="outline" className="bg-purple-100">POST</Badge>
-                        <code className="text-sm font-mono">/functions/v1/stripe-webhook</code>
+                        <code className="text-sm font-mono">/api/webhooks/stripe</code>
                       </div>
                       <p className="text-sm text-slate-700 mb-2"><strong>Descrição:</strong> Endpoint para receber webhooks do Stripe</p>
                       <div className="space-y-2 text-xs">
@@ -1680,7 +1680,7 @@ content-type: application/json`}
                         <div>
                           <strong>Configuração no Stripe:</strong>
                           <p className="text-slate-600 mt-1">
-                            Configure a URL do webhook no Stripe Dashboard: <code>{`{SUPABASE_URL}/functions/v1/stripe-webhook`}</code>
+                            Configure a URL do webhook no Stripe Dashboard: <code>{`{PMS_API_URL}/api/webhooks/stripe`}</code>
                           </p>
                         </div>
                       </div>
@@ -3276,10 +3276,10 @@ await logError({
                                 <tr><td className="p-2">rates-map</td><td className="p-2">/functions/v1/rates-map</td><td className="p-2">GET</td><td className="p-2">Bearer</td><td className="p-2">rate_calendar + Redis (Upstash)</td></tr>
                                 <tr><td className="p-2">recalc-rates</td><td className="p-2">/functions/v1/recalc-rates</td><td className="p-2">GET/POST</td><td className="p-2">Bearer/Service</td><td className="p-2">Worker Cron de preços dinâmicos</td></tr>
                                 <tr><td className="p-2">process-no-shows</td><td className="p-2">/functions/v1/process-no-shows</td><td className="p-2">POST</td><td className="p-2">-</td><td className="p-2">Processa no-shows (Cron diário)</td></tr>
-                                <tr><td className="p-2">stripe-payment</td><td className="p-2">/functions/v1/stripe-payment</td><td className="p-2">POST</td><td className="p-2">Opcional</td><td className="p-2">Cria Payment Intent Stripe</td></tr>
-                                <tr><td className="p-2">stripe-payment-status</td><td className="p-2">/functions/v1/stripe-payment-status</td><td className="p-2">POST</td><td className="p-2">-</td><td className="p-2">Verifica status do pagamento</td></tr>
-                                <tr><td className="p-2">stripe-refund</td><td className="p-2">/functions/v1/stripe-refund</td><td className="p-2">POST</td><td className="p-2">Bearer</td><td className="p-2">Reembolso Stripe</td></tr>
-                                <tr><td className="p-2">stripe-webhook</td><td className="p-2">/functions/v1/stripe-webhook</td><td className="p-2">POST</td><td className="p-2">Stripe-Signature</td><td className="p-2">Webhook Stripe</td></tr>
+                                <tr><td className="p-2">stripe-payment</td><td className="p-2">/api/pagamentos/stripe/intent</td><td className="p-2">POST</td><td className="p-2">Opcional</td><td className="p-2">Cria Payment Intent Stripe</td></tr>
+                                <tr><td className="p-2">stripe-payment-status</td><td className="p-2">/api/pagamentos/stripe/status</td><td className="p-2">POST</td><td className="p-2">-</td><td className="p-2">Verifica status do pagamento</td></tr>
+                                <tr><td className="p-2">stripe-refund</td><td className="p-2">/api/pagamentos/stripe/refund</td><td className="p-2">POST</td><td className="p-2">Bearer</td><td className="p-2">Reembolso Stripe</td></tr>
+                                <tr><td className="p-2">stripe-webhook</td><td className="p-2">/api/webhooks/stripe</td><td className="p-2">POST</td><td className="p-2">Stripe-Signature</td><td className="p-2">Webhook Stripe</td></tr>
                                 <tr><td className="p-2">send-email-resend</td><td className="p-2">/functions/v1/send-email-resend</td><td className="p-2">POST</td><td className="p-2">Bearer</td><td className="p-2">E-mail via Resend API</td></tr>
                                 <tr><td className="p-2">send-email-smtp</td><td className="p-2">/functions/v1/send-email-smtp</td><td className="p-2">POST</td><td className="p-2">Bearer</td><td className="p-2">E-mail via SMTP</td></tr>
                                 <tr><td className="p-2">send-email-sendgrid</td><td className="p-2">/functions/v1/send-email-sendgrid</td><td className="p-2">POST</td><td className="p-2">Bearer</td><td className="p-2">E-mail via SendGrid</td></tr>
@@ -3789,7 +3789,7 @@ export const handler: Handler = async (event) => {
                               <ol className="list-decimal list-inside mt-1 ml-4 space-y-1">
                                 <li><strong>Criação do Payment Intent:</strong>
                                   <ul className="list-disc list-inside mt-1 ml-4">
-                                    <li>Chama Edge Function: <code>POST /functions/v1/stripe-payment</code></li>
+                                    <li>Chama API Node: <code>POST /api/pagamentos/stripe/intent</code></li>
                                     <li>Body: <code>{`{establishment_id, amount, currency, reservation_id, guest_id, description}`}</code></li>
                                     <li>Retorna: <code>{`{payment_intent_id, client_secret, status}`}</code></li>
                                   </ul>
@@ -3803,7 +3803,7 @@ export const handler: Handler = async (event) => {
                                 </li>
                                 <li><strong>Webhook do Stripe:</strong>
                                   <ul className="list-disc list-inside mt-1 ml-4">
-                                    <li>Endpoint: <code>POST /functions/v1/stripe-webhook</code></li>
+                                    <li>Endpoint: <code>POST /api/webhooks/stripe</code></li>
                                     <li>Eventos: <code>payment_intent.succeeded</code>, <code>payment_intent.payment_failed</code></li>
                                     <li>Atualiza <code>payment_status</code> e <code>paid_amount</code> na reserva</li>
                                     <li>Cria registro na tabela <code>payments</code></li>
@@ -3811,7 +3811,7 @@ export const handler: Handler = async (event) => {
                                 </li>
                                 <li><strong>Validação de Status:</strong>
                                   <ul className="list-disc list-inside mt-1 ml-4">
-                                    <li>Verifica status via: <code>POST /functions/v1/stripe-payment-status</code></li>
+                                    <li>Verifica status via: <code>POST /api/pagamentos/stripe/status</code></li>
                                     <li>Atualiza UI com status atualizado</li>
                                     <li>Redireciona para confirmação em caso de sucesso</li>
                                   </ul>
@@ -3822,7 +3822,7 @@ export const handler: Handler = async (event) => {
                               <ul className="list-disc list-inside mt-1 ml-4">
                                 <li>Stripe habilitado globalmente (<code>stripe_global_config.is_enabled = true</code>)</li>
                                 <li>Stripe habilitado para o estabelecimento (<code>stripe_establishment_config.is_enabled = true</code>)</li>
-                                <li>Chaves configuradas: <code>STRIPE_SECRET_KEY</code> e <code>STRIPE_WEBHOOK_SECRET</code> em Supabase Secrets</li>
+                                <li>Chaves por estabelecimento em <code>stripe_establishment_config</code> + modo em <code>stripe_global_config.test_mode</code></li>
                                 <li>Publishable Key configurada no PMS (Configurações &gt; Integrações &gt; Stripe)</li>
                               </ul>
                             </li>
@@ -5042,7 +5042,7 @@ if (data) {
                                 <li>Copie a <strong>Publishable key</strong> (começa com <code>pk_test_</code> ou <code>pk_live_</code>)</li>
                                 <li>Vá em <strong>Developers</strong> &gt; <strong>Webhooks</strong></li>
                                 <li>Clique em <strong>Add endpoint</strong></li>
-                                <li>URL: <code>https://[seu-projeto].supabase.co/functions/v1/stripe-webhook</code></li>
+                                <li>URL: <code>https://[seu-dominio-api]/api/webhooks/stripe</code></li>
                                 <li>Selecione eventos: <code>payment_intent.succeeded</code>, <code>payment_intent.payment_failed</code>, <code>charge.refunded</code></li>
                                 <li>Copie o <strong>Signing secret</strong> (começa com <code>whsec_</code>)</li>
                               </ol>
@@ -5395,7 +5395,7 @@ const data = await apiRequest("booking_engine", "/reservations", {
                           <div className="p-3 bg-white rounded border border-slate-200">
                             <div className="font-semibold text-slate-800 mb-2">Stripe Webhook</div>
                             <ul className="list-disc list-inside text-slate-600 space-y-1 text-xs">
-                              <li><strong>Endpoint:</strong> <code>/functions/v1/stripe-webhook</code></li>
+                              <li><strong>Endpoint:</strong> <code>/api/webhooks/stripe</code></li>
                               <li><strong>Método:</strong> POST</li>
                               <li><strong>Autenticação:</strong> Validação de assinatura Stripe-Signature</li>
                               <li><strong>Eventos:</strong> payment_intent.succeeded, payment_intent.payment_failed, charge.refunded</li>

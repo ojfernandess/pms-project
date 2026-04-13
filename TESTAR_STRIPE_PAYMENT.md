@@ -1,14 +1,14 @@
-# 🧪 Testar stripe-payment Function
+# 🧪 Testar endpoint Stripe (API Node)
 
 ## ⚠️ Problema Atual
 
-Mesmo com JWT desativado, ainda está dando erro 401.
+Erros 401/404 ao chamar endpoint antigo de Edge Function.
 
 ## ✅ Mudanças Aplicadas
 
-1. **Código atualizado** para usar `fetch` direto em vez de `supabase.functions.invoke()`
-2. **Versão do Deno atualizada** na função Edge
-3. **Logs adicionados** para debug
+1. **Frontend atualizado** para chamar a API Node
+2. **Endpoints Stripe migrados** para `/api/pagamentos/stripe/*`
+3. **Webhook migrado** para `/api/webhooks/stripe`
 
 ## 🧪 Teste Manual
 
@@ -17,9 +17,9 @@ Mesmo com JWT desativado, ainda está dando erro 401.
 Abra o console do navegador (F12) e execute:
 
 ```javascript
-const SUPABASE_URL = 'https://spccmzvizaobinccqpvn.supabase.co';
+const PMS_API_URL = 'https://api.seudominio.com';
 
-fetch(`${SUPABASE_URL}/functions/v1/stripe-payment`, {
+fetch(`${PMS_API_URL}/api/pagamentos/stripe/intent`, {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -45,47 +45,34 @@ fetch(`${SUPABASE_URL}/functions/v1/stripe-payment`, {
 
 ### 2. Verificar Logs no Supabase Dashboard
 
-1. Acesse: https://app.supabase.com/project/spccmzvizaobinccqpvn/functions/stripe-payment/logs
+1. Acesse o painel do backend (EasyPanel/Docker logs)
 2. Verifique se há logs de chamadas
 3. Procure por erros ou mensagens de debug
 
-### 3. Redeploy da Função
+### 3. Redeploy do Backend API
 
 Se ainda não funcionar, faça o redeploy:
 
 ```bash
 cd C:\Users\bonma\Downloads\pms-project-main
-supabase functions deploy stripe-payment --no-verify-jwt
+npm run build
 ```
 
 ## 🔍 Verificar Configuração
 
-No Supabase Dashboard:
+No backend API:
 
-1. **Edge Functions** > **stripe-payment** > **Settings**
-2. Verifique:
-   - ❌ **"Verify JWT"** = DESATIVADO
-   - ❌ **"Require Authorization"** = DESATIVADO
-   - ✅ **"Allow Anonymous"** = ATIVADO (se houver)
+1. Rota pública `POST /api/pagamentos/stripe/intent` ativa
+2. Variáveis `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` e `SUPABASE_ANON_KEY` definidas
 
 ## 📝 Nota Importante
 
-O arquivo `.supabase-config.json` existe e está correto:
-```json
-{
-  "verify_jwt": false,
-  "allow_anonymous": true
-}
-```
-
-Mas o Supabase pode não estar respeitando esse arquivo. Por isso, é importante:
-1. Configurar manualmente no Dashboard
-2. OU fazer redeploy com a flag `--no-verify-jwt`
+A autenticação pública/privada agora é controlada no backend Node, não por flags de Edge Function.
 
 ## 🆘 Se Ainda Não Funcionar
 
 1. **Aguarde 2-3 minutos** após fazer alterações
 2. **Limpe o cache do navegador** (Ctrl+Shift+R)
-3. **Verifique se a função foi deployada corretamente**
+3. **Verifique se a API foi deployada corretamente**
 4. **Tente criar uma nova reserva** para testar o fluxo completo
 

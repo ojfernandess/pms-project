@@ -10,6 +10,7 @@ import { format } from "date-fns";
 import { recalculatePolicyAfterDateChange } from "@/utils/cancellationPolicyDateChange";
 import { recordProcessedRefund } from "@/services/financial/refundService";
 import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
+import { postPmsApiAuth } from "@/lib/pmsApi";
 
 type ReservationInsert = TablesInsert<"reservations">;
 type ReservationUpdate = TablesUpdate<"reservations">;
@@ -533,13 +534,19 @@ export const useReservations = () => {
                     guest_name: newReservation.guest?.full_name ?? newReservation.financial_responsible?.full_name ?? null,
                     guest_email: newReservation.guest?.email ?? newReservation.financial_responsible?.email ?? null,
                   };
-                  await supabase.functions.invoke("call-company-webhook", {
-                    body: {
-                      establishment_id: newReservation.establishment_id,
-                      event: "reservation.created",
-                      payload,
-                    },
-                  });
+                  const { data: sessionData } = await supabase.auth.getSession();
+                  const jwt = sessionData.session?.access_token;
+                  if (jwt) {
+                    await postPmsApiAuth(
+                      "/api/integrations/call-company-webhook",
+                      {
+                        establishment_id: newReservation.establishment_id,
+                        event: "reservation.created",
+                        payload,
+                      },
+                      jwt,
+                    );
+                  }
                 } catch (webhookError) {
                   console.error("Erro ao disparar webhook da empresa:", webhookError);
                 }
@@ -560,9 +567,15 @@ export const useReservations = () => {
                 .eq("enabled", true)
                 .maybeSingle();
               if (ccConfig?.send_timing === "after_confirmation") {
-                await supabase.functions.invoke("send-checkin-charge", {
-                  body: { reservation_id: newReservation.id, intent: "checkin_reminder" },
-                });
+                const { data: sessionData } = await supabase.auth.getSession();
+                const jwt = sessionData.session?.access_token;
+                if (jwt) {
+                  await postPmsApiAuth(
+                    "/api/checkin-charge/send",
+                    { reservation_id: newReservation.id, intent: "checkin_reminder" },
+                    jwt,
+                  );
+                }
               }
             } catch (e) {
               console.warn("Mensagens & Cobranças (after_confirmation, create):", e);
@@ -581,9 +594,15 @@ export const useReservations = () => {
                 .eq("enabled", true)
                 .maybeSingle();
               if (ccConfig) {
-                await supabase.functions.invoke("send-checkin-charge", {
-                  body: { reservation_id: newReservation.id, intent: "payment_pending" },
-                });
+                const { data: sessionData } = await supabase.auth.getSession();
+                const jwt = sessionData.session?.access_token;
+                if (jwt) {
+                  await postPmsApiAuth(
+                    "/api/checkin-charge/send",
+                    { reservation_id: newReservation.id, intent: "payment_pending" },
+                    jwt,
+                  );
+                }
               }
             } catch (e) {
               console.warn("Mensagens & Cobranças (payment_pending, create):", e);
@@ -724,9 +743,15 @@ export const useReservations = () => {
             .eq("enabled", true)
             .maybeSingle();
           if (ccConfig?.send_timing === "after_confirmation") {
-            await supabase.functions.invoke("send-checkin-charge", {
-              body: { reservation_id: id, intent: "checkin_reminder" },
-            });
+            const { data: sessionData } = await supabase.auth.getSession();
+            const jwt = sessionData.session?.access_token;
+            if (jwt) {
+              await postPmsApiAuth(
+                "/api/checkin-charge/send",
+                { reservation_id: id, intent: "checkin_reminder" },
+                jwt,
+              );
+            }
           }
         } catch (e) {
           console.warn("Mensagens & Cobranças (after_confirmation):", e);
@@ -872,14 +897,18 @@ export const useReservations = () => {
         if ((roomChanged || categoryChanged || categoryChangedByRoom) && data?.category_id) {
           const overbookingContext = String(oldReservation?.notes ?? "").toLowerCase().includes("overbooking");
           try {
-            const { data: channexSyncResult, error: channexSyncError } = await supabase.functions.invoke("channex-booking-crs-update", {
-              body: {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const jwt = sessionData.session?.access_token;
+            if (!jwt) throw new Error("Sessão inválida");
+            const channexSyncResult = await postPmsApiAuth<{ success?: boolean; skipped?: boolean; reason?: string }>(
+              "/api/integrations/channex-booking-crs-update",
+              {
                 reservation_id: data.id,
                 category_id: data.category_id,
                 overbooking_context: overbookingContext,
               },
-            });
-            if (channexSyncError) throw channexSyncError;
+              jwt,
+            );
 
             const channexPayload = (channexSyncResult ?? {}) as { success?: boolean; skipped?: boolean; reason?: string };
             if (channexPayload.success) {
@@ -1471,14 +1500,18 @@ export const useReservations = () => {
 
       if (data?.category_id) {
         try {
-          const { data: channexSyncResult, error: channexSyncError } = await supabase.functions.invoke("channex-booking-crs-update", {
-            body: {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const jwt = sessionData.session?.access_token;
+          if (!jwt) throw new Error("Sessão inválida");
+          const channexSyncResult = await postPmsApiAuth<{ success?: boolean; skipped?: boolean; reason?: string }>(
+            "/api/integrations/channex-booking-crs-update",
+            {
               reservation_id: data.id,
               category_id: data.category_id,
               overbooking_context: overbookingContext,
             },
-          });
-          if (channexSyncError) throw channexSyncError;
+            jwt,
+          );
 
           const channexPayload = (channexSyncResult ?? {}) as { success?: boolean; skipped?: boolean; reason?: string };
           if (channexPayload.success) {

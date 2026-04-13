@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
+import { postPmsApi } from "@/lib/pmsApi";
 
 /**
  * Página de pagamento da cobrança de check-in acessada via link seguro (token).
@@ -40,22 +41,14 @@ export default function CheckinChargePaymentPage() {
           return;
         }
 
-        const { data: result, error: invokeError } = await supabase.functions.invoke("stripe-payment", {
-          body: {
-            establishment_id: charge.establishment_id,
-            amount: Number(charge.amount),
-            payment_type: "reservation",
-            reservation_id: charge.reservation_id,
-            guest_id: charge.guest_id || undefined,
-            description: `Cobrança de check-in - Reserva ${charge.reservation_code || charge.reservation_id}`,
-          },
+        const result = await postPmsApi<{ payment_intent_id: string }>("/api/pagamentos/stripe/intent", {
+          establishment_id: charge.establishment_id,
+          amount: Number(charge.amount),
+          payment_type: "reservation",
+          reservation_id: charge.reservation_id,
+          guest_id: charge.guest_id || undefined,
+          description: `Cobrança de check-in - Reserva ${charge.reservation_code || charge.reservation_id}`,
         });
-
-        if (invokeError) {
-          setMessage(invokeError.message || "Não foi possível iniciar o pagamento.");
-          setStatus("error");
-          return;
-        }
 
         const paymentIntentId = result?.payment_intent_id;
         if (paymentIntentId) {

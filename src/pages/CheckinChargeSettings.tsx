@@ -58,6 +58,7 @@ import {
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { postPmsApiAuth } from "@/lib/pmsApi";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1083,10 +1084,15 @@ export default function CheckinChargeSettings() {
   const { data: channelTemplates, isLoading: channelTemplatesLoading, isFetching: channelTemplatesFetching, refetch: refetchChannelTemplates } = useQuery({
     queryKey: ["list-channel-templates", establishmentUuid, channel],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("list-channel-templates", {
-        body: { establishment_id: establishmentUuid },
-      });
-      if (error) throw error;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const jwt = sessionData.session?.access_token;
+      if (!jwt) throw new Error("Sessão inválida");
+      const data = await postPmsApiAuth<{
+        internal: Array<{ id: string; name: string; body: string }>;
+        meta?: Array<{ name: string; language: string; status?: string }>;
+        chatwoot?: Array<{ id: number; short_code: string; content: string }>;
+        chatwoot_inbox?: { id: number; channel_type?: string; provider?: string; is_whatsapp_cloud: boolean };
+      }>("/api/checkin-charge/templates", { establishment_id: establishmentUuid }, jwt);
       return (data ?? { internal: [], meta: [], chatwoot: [] }) as {
         internal: Array<{ id: string; name: string; body: string }>;
         meta?: Array<{ name: string; language: string; status?: string }>;
@@ -1338,10 +1344,14 @@ export default function CheckinChargeSettings() {
       if (intent) body.intent = intent;
       if (options?.template_id_override) body.template_id_override = options.template_id_override;
       if (options?.phone_overrides && Object.keys(options.phone_overrides).length > 0) body.phone_overrides = options.phone_overrides;
-      const { data, error } = await supabase.functions.invoke("send-checkin-charge", {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const jwt = sessionData.session?.access_token;
+      if (!jwt) throw new Error("Sessão inválida");
+      const data = await postPmsApiAuth<{ results?: Array<{ reservation_id: string; success: boolean; error?: string }> }>(
+        "/api/checkin-charge/send",
         body,
-      });
-      if (error) throw error;
+        jwt,
+      );
       const results = (data as { results?: Array<{ reservation_id: string; success: boolean; error?: string }> })?.results ?? [];
       const ok = results.filter((r) => r.success).length;
       const fail = results.filter((r) => !r.success);
@@ -2573,13 +2583,14 @@ export default function CheckinChargeSettings() {
                   if (!establishmentUuid) return;
                   setSendingDigest(true);
                   try {
-                    const { data, error } = await supabase.functions.invoke("send-daily-digest", {
-                      body: { establishment_id: establishmentUuid, date: digestDate },
-                    });
-                    if (error) {
-                      toast.error(error.message || "Erro ao enviar resumo");
-                      return;
-                    }
+                    const { data: sessionData } = await supabase.auth.getSession();
+                    const jwt = sessionData.session?.access_token;
+                    if (!jwt) throw new Error("Sessão inválida");
+                    const data = await postPmsApiAuth<{
+                      sent_chatwoot?: boolean;
+                      sent_whatsapp?: number;
+                      errors?: string[];
+                    }>("/api/integrations/send-daily-digest", { establishment_id: establishmentUuid, date: digestDate }, jwt);
                     const sentChatwoot = (data as { sent_chatwoot?: boolean })?.sent_chatwoot;
                     const sentWhatsapp = (data as { sent_whatsapp?: number })?.sent_whatsapp;
                     const errs = (data as { errors?: string[] })?.errors;

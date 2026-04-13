@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { postPmsApi } from "@/lib/pmsApi";
 
 /**
  * Gera um link de pagamento para uma reserva
@@ -26,21 +27,15 @@ export const generatePaymentLink = async (
   }
 
   // Criar Payment Intent
-  const { data, error } = await supabase.functions.invoke("stripe-payment", {
-    body: {
-      establishment_id: establishmentId,
-      amount,
-      currency: "BRL",
-      payment_type: "reservation_payment",
-      reservation_id: reservationId,
-      guest_id: reservation.guest_id,
-      description: description || `Pagamento da reserva #${reservationId}`,
-    },
+  const data = await postPmsApi<{ payment_intent_id: string }>("/api/pagamentos/stripe/intent", {
+    establishment_id: establishmentId,
+    amount,
+    currency: "BRL",
+    payment_type: "reservation_payment",
+    reservation_id: reservationId,
+    guest_id: reservation.guest_id,
+    description: description || `Pagamento da reserva #${reservationId}`,
   });
-
-  if (error) {
-    throw error;
-  }
 
   // Retornar URL de pagamento
   // Você pode criar uma página de pagamento dedicada ou usar o Checkout do Stripe

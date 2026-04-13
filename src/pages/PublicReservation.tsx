@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, CheckCircle2, MapPin, Phone, Mail, Wifi, Car, UtensilsCrossed, Waves, Wind, Tv, Coffee, Bed, Users, Calendar, DollarSign, AlertCircle, MessageCircle, Star, ChevronRight, Sparkles, ChevronLeft, X, ImageIcon, Home, Clock, Plus, Minus, ChevronDown, XCircle, FileText, Info, Instagram, Facebook, Twitter, Youtube, Globe2, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { postPmsApi } from "@/lib/pmsApi";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -2868,20 +2869,17 @@ const PublicReservation = () => {
       }
 
       // Gerar link de pagamento
-      const { data: paymentData, error: paymentError } = await supabase.functions.invoke("stripe-payment", {
-        body: {
-          establishment_id: establishment.id,
-          amount: totalAmount * 100, // Converter para centavos
-          currency: "brl",
-          payment_type: "quote_payment",
-          quote_id: quote.id,
-          guest_email: formData.email,
-          guestName: `${formData.firstName} ${formData.lastName}`,
-        },
+      const paymentData = await postPmsApi<{ payment_intent_id: string }>("/api/pagamentos/stripe/intent", {
+        establishment_id: establishment.id,
+        amount: totalAmount * 100, // quote_payment já em centavos
+        currency: "brl",
+        payment_type: "quote_payment",
+        quote_id: quote.id,
+        guest_email: formData.email,
       });
 
-      if (paymentError || !paymentData?.payment_intent_id) {
-        console.error("Erro ao gerar link de pagamento:", paymentError);
+      if (!paymentData?.payment_intent_id) {
+        console.error("Erro ao gerar link de pagamento: resposta inválida");
         toast.error(t("publicReservation.errors.quoteCreatedPaymentError"));
         return;
       }

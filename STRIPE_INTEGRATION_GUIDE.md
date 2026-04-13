@@ -19,10 +19,10 @@
 - ✅ `ExtendReservationDialog` - Extensão de reserva com pagamento
 - ✅ `stripePaymentLink.ts` - Funções para gerar links de pagamento
 
-### 3. Edge Functions
-- ✅ `stripe-payment` - Processar pagamentos
-- ✅ `stripe-webhook` - Receber e processar webhooks
-- ✅ `stripe-refund` - Processar reembolsos
+### 3. API Node (Fastify)
+- ✅ `POST /api/pagamentos/stripe/intent` - Processar pagamentos
+- ✅ `POST /api/webhooks/stripe` - Receber e processar webhooks
+- ✅ `POST /api/pagamentos/stripe/refund` - Processar reembolsos
 
 ## 📋 Próximos Passos
 
@@ -50,7 +50,7 @@ npm install @stripe/stripe-js @stripe/react-stripe-js
 
 1. Acesse [Stripe Dashboard](https://dashboard.stripe.com)
 2. Vá em Developers > Webhooks
-3. Adicione endpoint: `https://seu-projeto.supabase.co/functions/v1/stripe-webhook`
+3. Adicione endpoint: `https://seu-dominio-api/api/webhooks/stripe`
 4. Selecione eventos:
    - `payment_intent.succeeded`
    - `payment_intent.payment_failed`
@@ -170,7 +170,7 @@ await createRefund({
 
 ### Boas Práticas Implementadas:
 - ✅ Chaves secretas nunca expostas no frontend
-- ✅ Todas as operações sensíveis via Edge Functions
+- ✅ Todas as operações sensíveis via API backend (Node/Fastify)
 - ✅ Validação de webhooks com assinatura
 - ✅ RLS (Row Level Security) em todas as tabelas
 - ✅ Dados de cartão nunca armazenados (apenas tokens do Stripe)
@@ -208,7 +208,7 @@ await createRefund({
 ## 📞 Suporte
 
 Para dúvidas ou problemas:
-1. Verifique os logs das Edge Functions no Supabase Dashboard
+1. Verifique os logs da API Node no servidor (EasyPanel/Docker)
 2. Verifique os webhooks no Stripe Dashboard
 3. Consulte a documentação do Stripe: https://stripe.com/docs
 

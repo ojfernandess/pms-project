@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { postPmsApiAuth } from "@/lib/pmsApi";
 
 export type ChannexReservationsSyncPayload = {
   success?: boolean;
@@ -42,30 +43,32 @@ export async function invokeChannexReservationsSync(
     sourceEvent?: "booking_modification" | "booking_cancellation" | "booking" | "booking_new";
   }
 ): Promise<ChannexReservationsSyncPayload> {
-  const { data, error, response } = await supabase.functions.invoke("channex-reservations-sync", {
-    body: {
-      channel_id: channelId,
-      establishment_id: establishmentId,
-      revision_id: opts?.revisionId,
-      booking_id: opts?.bookingId,
-      booking_unique_id: opts?.bookingUniqueId,
-      force_reprocess: opts?.forceReprocess === true,
-      auto_apply_lifecycle: opts?.autoApplyLifecycle === true,
-      source_event: opts?.sourceEvent,
-    },
-  });
-
-  let payload = data as ChannexReservationsSyncPayload | null;
-  if (error && response) {
-    try {
-      const parsed = await response.clone().json();
-      if (parsed && typeof parsed === "object") payload = parsed as ChannexReservationsSyncPayload;
-    } catch {
-      // ignore
-    }
+  const { data: sessionData } = await supabase.auth.getSession();
+  const jwt = sessionData.session?.access_token;
+  if (!jwt) throw new Error("Sessão inválida");
+  let error: { message?: string } | null = null;
+  let data: unknown = null;
+  try {
+    data = await postPmsApiAuth(
+      "/api/integrations/channex-reservations-sync",
+      {
+        channel_id: channelId,
+        establishment_id: establishmentId,
+        revision_id: opts?.revisionId,
+        booking_id: opts?.bookingId,
+        booking_unique_id: opts?.bookingUniqueId,
+        force_reprocess: opts?.forceReprocess === true,
+        auto_apply_lifecycle: opts?.autoApplyLifecycle === true,
+        source_event: opts?.sourceEvent,
+      },
+      jwt,
+    );
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
 
-  const errMsg = payload?.error || (error as { message?: string } | null)?.message || null;
+  let payload = data as ChannexReservationsSyncPayload | null;
+  const errMsg = payload?.error || error?.message || null;
   const hint = payload?.hint;
   const combined = [errMsg, hint].filter(Boolean).join(" — ");
   if (payload?.success === false) throw new Error(combined || "Falha no pull de reservas Channex");
@@ -80,26 +83,28 @@ export async function invokeChannexFinalizeCancellationRevision(
   establishmentId: string,
   revisionId: string,
 ): Promise<ChannexReservationsSyncPayload> {
-  const { data, error, response } = await supabase.functions.invoke("channex-reservations-sync", {
-    body: {
-      channel_id: channelId,
-      establishment_id: establishmentId,
-      revision_id: revisionId,
-      finalize_channex_cancellation_revision: true,
-    },
-  });
-
-  let payload = data as ChannexReservationsSyncPayload | null;
-  if (error && response) {
-    try {
-      const parsed = await response.clone().json();
-      if (parsed && typeof parsed === "object") payload = parsed as ChannexReservationsSyncPayload;
-    } catch {
-      // ignore
-    }
+  const { data: sessionData } = await supabase.auth.getSession();
+  const jwt = sessionData.session?.access_token;
+  if (!jwt) throw new Error("Sessão inválida");
+  let error: { message?: string } | null = null;
+  let data: unknown = null;
+  try {
+    data = await postPmsApiAuth(
+      "/api/integrations/channex-reservations-sync",
+      {
+        channel_id: channelId,
+        establishment_id: establishmentId,
+        revision_id: revisionId,
+        finalize_channex_cancellation_revision: true,
+      },
+      jwt,
+    );
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
 
-  const errMsg = payload?.error || (error as { message?: string } | null)?.message || null;
+  let payload = data as ChannexReservationsSyncPayload | null;
+  const errMsg = payload?.error || error?.message || null;
   const hint = payload?.hint;
   const combined = [errMsg, hint].filter(Boolean).join(" — ");
   if (payload?.success === false) throw new Error(combined || "Não foi possível finalizar a revisão Channex");

@@ -115,33 +115,26 @@ Após salvar, você verá:
 
 Os webhooks são **essenciais** para sincronizar pagamentos entre Stripe e o PMS.
 
-### ⚠️ IMPORTANTE: Deploy da Edge Function
+### ⚠️ IMPORTANTE: Backend API online
 
-**Antes de configurar o webhook, você DEVE fazer o deploy da Edge Function `stripe-webhook`!**
+**Antes de configurar o webhook, você DEVE ter o backend Node/Fastify online com a rota `POST /api/webhooks/stripe`!**
 
-#### Opção 1: Deploy via CLI do Supabase
+#### Opção 1: Deploy via EasyPanel/Docker (recomendado)
 
 ```bash
-# Instalar Supabase CLI (se ainda não tiver)
-npm install -g supabase
-
-# Fazer login
-supabase login
-
-# Linkar ao projeto (se ainda não tiver)
-supabase link --project-ref SEU_PROJETO_ID
-
-# Deploy da função
-supabase functions deploy stripe-webhook
+cd server
+npm ci
+npm run build
+npm start
 ```
 
-#### Opção 2: Deploy via Dashboard do Supabase
+#### Opção 2: Deploy via EasyPanel
 
-1. Acesse o [Supabase Dashboard](https://app.supabase.com)
-2. Vá em **Edge Functions**
-3. Clique em **"Deploy a new function"** ou **"Create function"**
-4. Selecione a pasta `supabase/functions/stripe-webhook`
-5. Clique em **"Deploy"**
+1. Acesse seu painel EasyPanel
+2. Selecione o app do backend (`server/`)
+3. Configure as variáveis de ambiente do backend
+4. Faça deploy da imagem/serviço
+5. Valide `GET /health`
 
 #### Opção 3: Deploy via GitHub Actions (se configurado)
 
@@ -151,10 +144,10 @@ Se você tem CI/CD configurado, o deploy pode ser automático ao fazer push.
 
 A URL do webhook é:
 ```
-https://SEU_PROJETO.supabase.co/functions/v1/stripe-webhook
+https://SEU_DOMINIO_API/api/webhooks/stripe
 ```
 
-**Substitua `SEU_PROJETO` pelo ID do seu projeto Supabase.**
+**Substitua `SEU_DOMINIO_API` pelo domínio público da sua API backend.**
 
 Você pode encontrar o ID do projeto em:
 - Supabase Dashboard > Settings > General > Reference ID
@@ -162,18 +155,18 @@ Você pode encontrar o ID do projeto em:
 
 **Exemplo:**
 ```
-https://spccmzvizaobinccqpvn.supabase.co/functions/v1/stripe-webhook
+https://api.seudominio.com/api/webhooks/stripe
 ```
 
-### Passo 2: Verificar se a Função está Deployada
+### Passo 2: Verificar se a API está online
 
 Antes de configurar no Stripe, teste a URL:
 
 ```bash
-curl https://SEU_PROJETO.supabase.co/functions/v1/stripe-webhook
+curl https://SEU_DOMINIO_API/health
 ```
 
-Se retornar algo diferente de 404, a função está deployada.
+Se retornar `ok` (ou status 200), a API está online.
 
 ### Passo 3: Configurar no Stripe Dashboard
 
@@ -452,20 +445,20 @@ Use estes cartões para testar pagamentos:
 1. URL do webhook está correta?
 2. Webhook secret está configurado?
 3. Eventos estão selecionados no Stripe Dashboard?
-4. Edge Function `stripe-webhook` está deployada?
+4. API backend está online?
 
 **Solução:**
 1. Verifique a URL no Stripe Dashboard
 2. Copie o webhook secret corretamente
 3. Selecione todos os eventos necessários
-4. Deploy da Edge Function no Supabase Dashboard
+4. Verifique deploy/logs da API no EasyPanel
 
 ### Pagamento Não Atualiza Status da Reserva
 
 **Causa:** Webhook não está processando corretamente.
 
 **Solução:**
-1. Verifique logs da Edge Function no Supabase Dashboard
+1. Verifique logs da API backend
 2. Verifique se o webhook está sendo recebido (tabela `stripe_webhooks`)
 3. Verifique se há erros no processamento
 
@@ -474,12 +467,12 @@ Use estes cartões para testar pagamentos:
 **Causas Possíveis:**
 1. Chaves do Stripe incorretas
 2. Estabelecimento não configurado
-3. Edge Function não deployada
+3. API backend indisponível
 
 **Solução:**
 1. Verifique se as chaves estão corretas
 2. Verifique se o estabelecimento tem Stripe ativado
-3. Deploy da Edge Function `stripe-payment` no Supabase Dashboard
+3. Verifique deploy da API e rota `POST /api/pagamentos/stripe/intent`
 
 ---
 
@@ -491,7 +484,7 @@ Use estes cartões para testar pagamentos:
 - [ ] Chaves de teste configuradas
 - [ ] Webhook configurado no Stripe Dashboard
 - [ ] Webhook secret configurado no PMS
-- [ ] Edge Functions deployadas
+- [ ] API backend deployada e saudável (`/health`)
 
 ### Estabelecimento
 - [ ] Stripe ativado para o estabelecimento
@@ -511,7 +504,7 @@ Use estes cartões para testar pagamentos:
 ### Boas Práticas
 
 1. **Nunca exponha chaves secretas no frontend**
-   - As chaves secretas são usadas apenas nas Edge Functions
+   - As chaves secretas são usadas apenas no backend API
    - O frontend usa apenas a chave pública
 
 2. **Use HTTPS em produção**
@@ -532,7 +525,7 @@ Use estes cartões para testar pagamentos:
 
 Para problemas ou dúvidas:
 
-1. **Logs do Supabase:** Verifique logs das Edge Functions
+1. **Logs da API:** Verifique logs do backend (EasyPanel/Docker)
 2. **Stripe Dashboard:** Verifique eventos e webhooks
 3. **Console do Navegador:** Verifique erros JavaScript
 4. **Documentação Stripe:** https://stripe.com/docs

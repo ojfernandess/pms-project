@@ -228,7 +228,7 @@ Envio de emails via Resend API.
 
 ### Stripe Payment
 
-**Endpoint:** `/functions/v1/stripe-payment`
+**Endpoint:** `/api/pagamentos/stripe/intent`
 
 Processamento de pagamentos via Stripe.
 
@@ -236,19 +236,19 @@ Processamento de pagamentos via Stripe.
 
 ### Stripe Webhook
 
-**Endpoint:** `/functions/v1/stripe-webhook`
+**Endpoint:** `/api/webhooks/stripe`
 
 Webhooks do Stripe para eventos de pagamento.
 
 ### Stripe Payment Status
 
-**Endpoint:** `/functions/v1/stripe-payment-status`
+**Endpoint:** `/api/pagamentos/stripe/status`
 
 Verificação de status de pagamento.
 
 ### Stripe Refund
 
-**Endpoint:** `/functions/v1/stripe-refund`
+**Endpoint:** `/api/pagamentos/stripe/refund`
 
 Processamento de reembolsos.
 

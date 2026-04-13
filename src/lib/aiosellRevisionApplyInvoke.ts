@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { postPmsApiAuth } from "@/lib/pmsApi";
 
 export type AiosellApplyRevisionPayload = {
   success?: boolean;
@@ -14,26 +15,28 @@ export async function invokeAiosellApplyBookingRevision(
   establishmentId: string,
   revisionId: string,
 ): Promise<AiosellApplyRevisionPayload> {
-  const { data, error, response } = await supabase.functions.invoke("aiosell-reservation-webhook", {
-    body: {
-      apply_revision_id: revisionId,
-      establishment_id: establishmentId,
-    },
-  });
-
-  let payload = (data ?? null) as AiosellApplyRevisionPayload | null;
-  if (error && response) {
-    try {
-      const parsed = await response.clone().json();
-      if (parsed && typeof parsed === "object") payload = parsed as AiosellApplyRevisionPayload;
-    } catch {
-      // ignore
-    }
+  const { data: sessionData } = await supabase.auth.getSession();
+  const jwt = sessionData.session?.access_token;
+  if (!jwt) throw new Error("Sessão inválida");
+  let error: { message?: string } | null = null;
+  let data: unknown = null;
+  try {
+    data = await postPmsApiAuth(
+      "/api/integrations/aiosell-reservation-webhook",
+      {
+        apply_revision_id: revisionId,
+        establishment_id: establishmentId,
+      },
+      jwt,
+    );
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
 
+  let payload = (data ?? null) as AiosellApplyRevisionPayload | null;
   const errMsg =
     (payload?.error != null ? String(payload.error) : null) ||
-    (error as { message?: string } | null)?.message ||
+    error?.message ||
     null;
 
   if (payload?.success === false) {
@@ -55,26 +58,28 @@ export async function invokeAiosellFinalizeCancellationRevision(
   establishmentId: string,
   revisionId: string,
 ): Promise<{ success?: boolean; finalized?: boolean; error?: string }> {
-  const { data, error, response } = await supabase.functions.invoke("aiosell-reservation-webhook", {
-    body: {
-      finalize_cancellation_revision_id: revisionId,
-      establishment_id: establishmentId,
-    },
-  });
-
-  let payload = (data ?? null) as Record<string, unknown> | null;
-  if (error && response) {
-    try {
-      const parsed = await response.clone().json();
-      if (parsed && typeof parsed === "object") payload = parsed as Record<string, unknown>;
-    } catch {
-      // ignore
-    }
+  const { data: sessionData } = await supabase.auth.getSession();
+  const jwt = sessionData.session?.access_token;
+  if (!jwt) throw new Error("Sessão inválida");
+  let error: { message?: string } | null = null;
+  let data: unknown = null;
+  try {
+    data = await postPmsApiAuth(
+      "/api/integrations/aiosell-reservation-webhook",
+      {
+        finalize_cancellation_revision_id: revisionId,
+        establishment_id: establishmentId,
+      },
+      jwt,
+    );
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
   }
 
+  let payload = (data ?? null) as Record<string, unknown> | null;
   const errMsg =
     (payload?.error != null ? String(payload.error) : null) ||
-    (error as { message?: string } | null)?.message ||
+    error?.message ||
     null;
 
   if (payload?.success === false) {

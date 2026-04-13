@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { postPmsApiAuth } from "@/lib/pmsApi";
 
 /** Campos obrigatórios no `ota_channels` para pull HTTP (botão «Reservas» no Channel Manager). */
 export function validateAiosellChannelForReservationsPull(channel: {
@@ -49,31 +50,31 @@ export async function invokeAiosellReservationsSync(
   establishmentId: string,
   opts?: { pull?: boolean; bookings?: unknown[]; days?: number }
 ): Promise<AiosellReservationsSyncPayload> {
-  const { data, error, response } = await supabase.functions.invoke("aiosell-reservations-sync", {
-    body: {
-      channel_id: channelId,
-      establishment_id: establishmentId,
-      pull: opts?.pull === true,
-      bookings: opts?.bookings,
-      days: opts?.days,
-    },
-  });
+  const { data: sessionData } = await supabase.auth.getSession();
+  const jwt = sessionData.session?.access_token;
+  if (!jwt) throw new Error("Sessão inválida");
+  let error: { message?: string } | null = null;
+  let data: unknown = null;
+  try {
+    data = await postPmsApiAuth(
+      "/api/integrations/aiosell-reservations-sync",
+      {
+        channel_id: channelId,
+        establishment_id: establishmentId,
+        pull: opts?.pull === true,
+        bookings: opts?.bookings,
+        days: opts?.days,
+      },
+      jwt,
+    );
+  } catch (e) {
+    error = { message: e instanceof Error ? e.message : String(e) };
+  }
 
   let payload = data as AiosellReservationsSyncPayload | null;
 
-  if (error && response) {
-    try {
-      const parsed = await response.clone().json();
-      if (parsed && typeof parsed === "object") {
-        payload = parsed as AiosellReservationsSyncPayload;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-
   const errMsg =
-    payload?.error || (error as { message?: string } | null)?.message || null;
+    payload?.error || error?.message || null;
   const hint = payload?.hint;
   const combinedMsg = [errMsg, hint].filter(Boolean).join(" — ") || null;
 

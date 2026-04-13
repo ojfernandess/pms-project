@@ -10,6 +10,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { useStripe as useStripeHook } from "@/hooks/useStripe";
+import { postPmsApi } from "@/lib/pmsApi";
 
 interface PaymentDialogProps {
   open: boolean;
@@ -235,24 +236,10 @@ export const PaymentDialog = ({
         return;
       }
 
-      // Buscar o client_secret do Payment Intent existente via Edge Function
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const response = await fetch(`${supabaseUrl}/functions/v1/stripe-payment-status`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          payment_intent_id: paymentIntentId,
-          get_client_secret: true, // Flag para indicar que queremos o client_secret
-        }),
+      const data = await postPmsApi<{ client_secret?: string }>("/api/pagamentos/stripe/status", {
+        payment_intent_id: paymentIntentId,
+        get_client_secret: true,
       });
-
-      if (!response.ok) {
-        throw new Error("Erro ao buscar Payment Intent existente");
-      }
-
-      const data = await response.json();
       
       // Se a função retornar o client_secret, usar ele
       if (data.client_secret) {
@@ -299,26 +286,22 @@ export const PaymentDialog = ({
         return;
       }
 
-      // Chamar a Edge Function sem autenticação (acesso anônimo permitido)
-      const { data, error } = await supabase.functions.invoke("stripe-payment", {
-        body: {
-          establishment_id: establishmentId,
-          amount,
-          currency,
-          payment_type: paymentType,
-          reservation_id: reservationId,
-          quote_id: quoteId,
-          guest_id: guestId,
-          guest_email: guestEmail,
-          description,
-          save_payment_method: savePaymentMethod,
-          ...(metadata || {}),
-        },
-        // Não passar headers de autenticação para permitir acesso anônimo
-        // A função usa Service Role Key internamente
+      const data = await postPmsApi<{
+        client_secret: string;
+        payment_intent_id: string;
+      }>("/api/pagamentos/stripe/intent", {
+        establishment_id: establishmentId,
+        amount,
+        currency,
+        payment_type: paymentType,
+        reservation_id: reservationId,
+        quote_id: quoteId,
+        guest_id: guestId,
+        guest_email: guestEmail,
+        description,
+        save_payment_method: savePaymentMethod,
+        metadata: metadata || {},
       });
-
-      if (error) throw error;
 
       if (!data?.client_secret) {
         throw new Error("Client secret não retornado");

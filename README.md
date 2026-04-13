@@ -170,10 +170,10 @@ function MyComponent() {
 
 #### 3. Stripe Integration
 
-- **Stripe Payment** (`/functions/v1/stripe-payment`): Processamento de pagamentos
-- **Stripe Webhook** (`/functions/v1/stripe-webhook`): Webhooks do Stripe
-- **Stripe Payment Status** (`/functions/v1/stripe-payment-status`): Verificação de status de pagamento
-- **Stripe Refund** (`/functions/v1/stripe-refund`): Processamento de reembolsos
+- **Stripe Payment** (`/api/pagamentos/stripe/intent`): Processamento de pagamentos
+- **Stripe Webhook** (`/api/webhooks/stripe`): Webhooks do Stripe
+- **Stripe Payment Status** (`/api/pagamentos/stripe/status`): Verificação de status de pagamento
+- **Stripe Refund** (`/api/pagamentos/stripe/refund`): Processamento de reembolsos
 
 ### Hooks do Frontend
 

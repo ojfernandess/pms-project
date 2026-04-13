@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { CancellationPolicyDisplay } from "@/components/booking-engine/CancellationPolicyDisplay";
 import { getReservationCancellationPolicy } from "@/utils/cancellationPolicyService";
 import type { CancellationPolicy } from "@/utils/cancellationPolicyCalculator";
+import { postPmsApi } from "@/lib/pmsApi";
 
 // Função para traduzir status do Stripe para português
 const getPaymentStatusLabel = (status: string): string => {
@@ -57,51 +58,14 @@ const PaymentPage = () => {
     try {
       console.log("[PaymentPage] Verificando status do pagamento:", paymentIntentId);
       
-      // Verificar o status do pagamento no Stripe e atualizar se necessário
-      const { data, error } = await supabase.functions.invoke("stripe-payment-status", {
-        body: {
-          payment_intent_id: paymentIntentId,
-        },
-      });
-
-      if (error) {
-        console.error("[PaymentPage] Erro ao verificar status:", error);
-        // Tentar usar fetch direto como fallback
-        return await checkPaymentStatusFallback(paymentIntentId);
-      }
-
+      const data = await postPmsApi<{ status: string; updated: boolean; payment_intent_id: string }>(
+        "/api/pagamentos/stripe/status",
+        { payment_intent_id: paymentIntentId },
+      );
       console.log("[PaymentPage] Status verificado:", data);
       return data;
     } catch (error) {
       console.error("[PaymentPage] Erro ao verificar status (catch):", error);
-      // Tentar usar fetch direto como fallback
-      return await checkPaymentStatusFallback(paymentIntentId);
-    }
-  };
-
-  const checkPaymentStatusFallback = async (paymentIntentId: string) => {
-    try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const response = await fetch(`${supabaseUrl}/functions/v1/stripe-payment-status`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          payment_intent_id: paymentIntentId,
-        }),
-      });
-
-      if (!response.ok) {
-        console.error("[PaymentPage] Fallback falhou:", response.status, await response.text());
-        return null;
-      }
-
-      const data = await response.json();
-      console.log("[PaymentPage] Status verificado (fallback):", data);
-      return data;
-    } catch (error) {
-      console.error("[PaymentPage] Erro no fallback:", error);
       return null;
     }
   };
