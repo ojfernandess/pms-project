@@ -15,6 +15,7 @@ import { registerEmployeeAuthAdminRoutes } from "./employeeAuthAdmin.js";
 import { registerCheckinChargeRoutes } from "./checkinCharge.js";
 import { registerIntegrationOpsRoutes } from "./integrationOps.js";
 import { registerLegacyUserEdgeProxyRoutes } from "./legacyUserEdgeProxy.js";
+import { registerCompanyPublicApiProxyRoutes } from "./companyPublicApiProxy.js";
 
 const uuidLoose = z.string().uuid();
 
@@ -61,6 +62,8 @@ const checkinBody = z.object({
 });
 
 export async function registerRoutes(app: FastifyInstance, env: Env, logger: Logger): Promise<void> {
+  await registerCompanyPublicApiProxyRoutes(app, env);
+
   const db = createServiceClient(env);
   const authPre = requireAuth(env);
 

@@ -1,5 +1,6 @@
 /**
- * Gera uma Postman Collection v2.1 para a Edge Function `company-public-api`.
+ * Gera uma Postman Collection v2.1 para a API pública da empresa (`company-public-api`).
+ * A `apiUrl` pode ser o proxy no Node (`…/api/public/company-public-api`) ou a Edge no Supabase (`…/functions/v1/company-public-api`).
  * Variáveis da coleção: apiUrl, clientId, clientSecret, bookingId, roomId.
  */
 
@@ -69,7 +70,7 @@ export function buildCompanyPublicApiPostmanCollectionV21(
     info: {
       name: "PMS — API pública da empresa",
       description:
-        "Coleção para a Edge Function `company-public-api`. Após importar no Postman, confira as variáveis da coleção: `apiUrl`, `clientId`, `clientSecret`. Para rotas com placeholder, use `bookingId` ou `roomId`.",
+        "Coleção para a API pública `company-public-api` (ClientId / ClientSecret). A variável `apiUrl` deve ser a base completa: proxy PMS (`…/api/public/company-public-api`) ou Edge Supabase (`…/functions/v1/company-public-api`). Após importar, confira `clientId` e `clientSecret`. Para placeholders, use `bookingId` ou `roomId`.",
       schema: POSTMAN_SCHEMA,
     },
     variable: variables,

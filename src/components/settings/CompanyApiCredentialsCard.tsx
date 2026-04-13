@@ -30,6 +30,8 @@ import { toast } from "sonner";
 type Props = {
   companyId: string | null | undefined;
   supabaseProjectUrl: string | null;
+  /** Ex.: `VITE_PMS_API_URL` — quando definido, a base pública aponta para o proxy no Node (`/api/public/company-public-api`). */
+  pmsPublicApiUrl?: string | null;
   isFeatureEnabled: boolean;
 };
 
@@ -63,7 +65,7 @@ type EndpointDoc = {
   responseExample: string;
 };
 
-export function CompanyApiCredentialsCard({ companyId, supabaseProjectUrl, isFeatureEnabled }: Props) {
+export function CompanyApiCredentialsCard({ companyId, supabaseProjectUrl, pmsPublicApiUrl, isFeatureEnabled }: Props) {
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [status, setStatus] = useState<CredentialStatus | null>(null);
@@ -79,10 +81,18 @@ export function CompanyApiCredentialsCard({ companyId, supabaseProjectUrl, isFea
   }, [companyId]);
 
   const endpointBase = useMemo(() => {
-    const base = (supabaseProjectUrl || "").trim().replace(/\/$/, "");
-    if (!base) return "";
-    return `${base}/functions/v1/company-public-api`;
-  }, [supabaseProjectUrl]);
+    const pms = (pmsPublicApiUrl ?? "").trim().replace(/\/$/, "");
+    if (pms) return `${pms}/api/public/company-public-api`;
+    const sb = (supabaseProjectUrl || "").trim().replace(/\/$/, "");
+    if (!sb) return "";
+    return `${sb}/functions/v1/company-public-api`;
+  }, [pmsPublicApiUrl, supabaseProjectUrl]);
+
+  const publicApiBaseSource = useMemo<"pms" | "supabase" | null>(() => {
+    if ((pmsPublicApiUrl ?? "").trim()) return "pms";
+    if ((supabaseProjectUrl || "").trim()) return "supabase";
+    return null;
+  }, [pmsPublicApiUrl, supabaseProjectUrl]);
 
   const endpointDocs = useMemo<EndpointDoc[]>(() => {
     if (!endpointBase) return [];
@@ -777,6 +787,20 @@ export function CompanyApiCredentialsCard({ companyId, supabaseProjectUrl, isFea
                     Baixe a coleção Postman (v2.1) e importe em Postman → Import → arquivo JSON. Preencha as variáveis
                     `clientId`, `clientSecret`, `bookingId` e `roomId` na coleção.
                   </p>
+                  {publicApiBaseSource === "pms" && (
+                    <p className="text-xs text-muted-foreground">
+                      URL base: API PMS (`…/api/public/company-public-api`, proxy no servidor). Produção com{" "}
+                      <code className="text-[11px]">VITE_PMS_API_URL</code> deve usar esta base em vez da URL direta do
+                      Supabase.
+                    </p>
+                  )}
+                  {publicApiBaseSource === "supabase" && (
+                    <p className="text-xs text-muted-foreground">
+                      URL base: Supabase Edge (<code className="text-[11px]">functions/v1/company-public-api</code>).
+                      Defina <code className="text-[11px]">VITE_PMS_API_URL</code> no frontend para documentar e chamar
+                      via proxy no Node (mesmo host da app).
+                    </p>
+                  )}
                 </div>
                 <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={handleDownloadPostmanCollection}>
                   <FileDown className="h-4 w-4 mr-2" />

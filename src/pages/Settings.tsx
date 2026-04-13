@@ -27,6 +27,7 @@ import { useIsSuperAdmin } from "@/hooks/useUsers";
 import RoomDisplayConfig from "@/components/settings/RoomDisplayConfig";
 import DiscountCouponsManager from "@/components/settings/DiscountCouponsManager";
 import { CompanyApiCredentialsCard } from "@/components/settings/CompanyApiCredentialsCard";
+import { IntegrationWebhooksCard } from "@/components/settings/IntegrationWebhooksCard";
 import {
   Table,
   TableBody,
@@ -1709,6 +1710,7 @@ const PoliciesManager = () => {
 const ApiSettingsManager = ({ isApiIntegrationsEnabled }: { isApiIntegrationsEnabled: boolean }) => {
   const { selectedEstablishment } = useEstablishment();
   const { apiSettings, isLoading, saveApiSetting, deleteApiSetting, isSaving } = useApiSettings();
+  const [integrationSectionTab, setIntegrationSectionTab] = useState<"apis" | "webhooks">("apis");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [formData, setFormData] = useState({
@@ -1837,21 +1839,41 @@ const ApiSettingsManager = ({ isApiIntegrationsEnabled }: { isApiIntegrationsEna
     );
   }
 
-  return (
-    <Card className="p-6">
-      <div className="space-y-6">
-        <CompanyApiCredentialsCard
-          companyId={selectedEstablishment?.company_id}
-          supabaseProjectUrl={import.meta.env.VITE_SUPABASE_URL ?? null}
-          isFeatureEnabled={isApiIntegrationsEnabled}
-        />
+  const pmsPublic = import.meta.env.VITE_PMS_API_URL ?? null;
+  const supabasePublic = import.meta.env.VITE_SUPABASE_URL ?? null;
 
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
-              <Key className="w-5 h-5" />
-              Configurações de API
-            </h3>
+  return (
+    <div className="space-y-4">
+      <Tabs value={integrationSectionTab} onValueChange={(v) => setIntegrationSectionTab(v as "apis" | "webhooks")}>
+        <TabsList className="w-full sm:w-auto flex flex-wrap h-auto gap-1 py-1">
+          <TabsTrigger value="apis">APIs e credenciais</TabsTrigger>
+          <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="webhooks" className="mt-4 space-y-0">
+          <IntegrationWebhooksCard
+            pmsPublicApiUrl={pmsPublic}
+            supabaseProjectUrl={supabasePublic}
+            establishmentId={selectedEstablishment?.id ?? null}
+          />
+        </TabsContent>
+
+        <TabsContent value="apis" className="mt-4 space-y-0">
+          <Card className="p-6">
+            <div className="space-y-6">
+              <CompanyApiCredentialsCard
+                companyId={selectedEstablishment?.company_id}
+                supabaseProjectUrl={supabasePublic}
+                pmsPublicApiUrl={pmsPublic}
+                isFeatureEnabled={isApiIntegrationsEnabled}
+              />
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+                    <Key className="w-5 h-5" />
+                    Configurações de API
+                  </h3>
             <p className="text-sm text-muted-foreground mb-2">
               Gerencie as integrações com APIs externas (Booking Engine, Channel Manager, Payment Gateway, etc.)
             </p>
@@ -2131,8 +2153,11 @@ const ApiSettingsManager = ({ isApiIntegrationsEnabled }: { isApiIntegrationsEna
             </div>
           )
         )}
-      </div>
-    </Card>
+            </div>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 };
 
