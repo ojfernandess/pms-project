@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Env } from "../config/env.js";
 import { requireAuth } from "../middleware/auth.js";
-import { invokeLegacyFunctionForwardAuth } from "../services/legacyFunctionsProxy.js";
+import { invokeLegacyFunction, invokeLegacyFunctionForwardAuth } from "../services/legacyFunctionsProxy.js";
 import { HttpError } from "../utils/httpError.js";
 
 function pickQueryParams(rawQuery: Record<string, unknown> | undefined): URLSearchParams {
@@ -114,15 +114,12 @@ export async function registerLegacyUserEdgeProxyRoutes(app: FastifyInstance, en
     }
   });
 
+  // Mesmo padrão que stripe-webhook nas Edge Functions: Authorization com service role ao chamar send-email-*.
+  // Reencaminhar só o JWT do browser falha no gateway em alguns projetos; o utilizador já foi validado pelo requireAuth.
   for (const name of ["send-email-smtp", "send-email-sendgrid", "send-email-resend"] as const) {
     app.post(`/api/legacy/${name}`, { preHandler: authPre }, async (request, reply) => {
-      const authorization = bearerFrom(request);
       try {
-        const data = await invokeLegacyFunctionForwardAuth(env, name, {
-          method: "POST",
-          body: request.body ?? {},
-          authorization,
-        });
+        const data = await invokeLegacyFunction(env, name, request.body ?? {});
         await reply.send(data);
       } catch (e) {
         throw new HttpError(400, e instanceof Error ? e.message : `${name} failed`, "LEGACY_PROXY_FAILED");

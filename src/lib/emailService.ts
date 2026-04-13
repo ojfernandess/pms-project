@@ -5,6 +5,8 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { postPmsApiAuth } from '@/lib/pmsApi';
+import { processTemplate, generateReservationVariables, type TemplateVariables } from './emailTemplateEngine';
+import { reservationGuestContactFields, reservationGuestDisplayName } from './reservationChannelDisplay';
 
 function pmsApiBase(): string | undefined {
   return (import.meta.env.VITE_PMS_API_URL as string | undefined)?.replace(/\/+$/, '');
@@ -27,14 +29,19 @@ async function invokeSendEmailEdge<T = unknown>(
       return { data, error: null };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      return { data: null, error: { message } };
+      // Fallback: API Node indisponível ou erro transitório — mesmo fluxo que antes (Edge direto).
+      try {
+        const result = await supabase.functions.invoke(name, { body });
+        if (result.error) return { data: result.data as T, error: result.error as { message?: string } };
+        return { data: result.data as T, error: null };
+      } catch {
+        return { data: null, error: { message } };
+      }
     }
   }
   const result = await supabase.functions.invoke(name, { body });
-  return { data: result.data as T, error: result.error };
+  return { data: result.data as T, error: result.error as { message?: string } | null };
 }
-import { processTemplate, generateReservationVariables, type TemplateVariables } from './emailTemplateEngine';
-import { reservationGuestContactFields, reservationGuestDisplayName } from './reservationChannelDisplay';
 
 export interface EmailSettings {
   id: string;
