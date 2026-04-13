@@ -8,6 +8,7 @@ import {
   getStripeSigningConfigByEstablishment,
   type StripeSigningConfig,
 } from "../services/stripeConfig.js";
+import { getStripePaymentStatus } from "../services/stripePayments.js";
 
 /**
  * Plugin encapsulado: JSON do Stripe chega como **Buffer** (verificação HMAC).
@@ -93,6 +94,22 @@ export async function registerStripeWebhookRoute(parent: FastifyInstance, env: E
             },
             "stripe webhook",
           );
+
+          if (event.type === "payment_intent.succeeded" || event.type === "payment_intent.payment_failed") {
+            const paymentIntentId =
+              event.data?.object && typeof event.data.object === "object" && "id" in event.data.object
+                ? String((event.data.object as { id?: string }).id ?? "")
+                : "";
+            if (paymentIntentId) {
+              try {
+                const syncResult = await getStripePaymentStatus(db, { payment_intent_id: paymentIntentId });
+                logger.info({ paymentIntentId, syncResult }, "stripe webhook sync status");
+              } catch (syncErr) {
+                logger.warn({ err: syncErr, paymentIntentId }, "stripe webhook sync failed");
+              }
+            }
+          }
+
           await reply.send({ received: true, type: event.type });
         } catch (e) {
           logger.warn({ err: e }, "stripe verify failed");

@@ -206,8 +206,9 @@ export async function getStripePaymentStatus(
   const stripe = await getStripeClientForEstablishment(db, payment.establishment_id);
   const paymentIntent = await stripe.paymentIntents.retrieve(input.payment_intent_id, { expand: ["charges"] });
 
+  const previousStatus = payment.status;
   let updated = false;
-  if (payment.status !== paymentIntent.status) {
+  if (previousStatus !== paymentIntent.status) {
     await db
       .from("stripe_payments")
       .update({
@@ -217,12 +218,14 @@ export async function getStripePaymentStatus(
     updated = true;
   }
 
-  if (paymentIntent.status === "succeeded" && payment.reservation_id) {
+  // Idempotency: only apply reservation credit when transitioning into succeeded.
+  const transitionedToSucceeded = paymentIntent.status === "succeeded" && previousStatus !== "succeeded";
+  if (transitionedToSucceeded && payment.reservation_id) {
     const { data: reservation } = await db
       .from("reservations")
-      .select("paid_amount, total_amount, status")
+      .select("paid_amount, total_amount, status, payment_status")
       .eq("id", payment.reservation_id)
-      .single<{ paid_amount: number | null; total_amount: number | null; status: string }>();
+      .single<{ paid_amount: number | null; total_amount: number | null; status: string; payment_status: string | null }>();
 
     if (reservation) {
       const currentPaid = Number(reservation.paid_amount ?? 0);
@@ -231,7 +234,11 @@ export async function getStripePaymentStatus(
       const nextPaid = Math.min(currentPaid + paymentAmount, totalAmount || Number.MAX_SAFE_INTEGER);
       const isPreregistration = reservation.status === "preregistration";
       const nextStatus = totalAmount > 0 && nextPaid >= totalAmount ? "confirmed" : nextPaid > 0 ? "pending" : reservation.status;
-      const patch: { paid_amount: number; status?: string } = { paid_amount: nextPaid };
+      const nextPaymentStatus = totalAmount > 0 && nextPaid >= totalAmount ? "paid" : nextPaid > 0 ? "partial" : reservation.payment_status;
+      const patch: { paid_amount: number; status?: string; payment_status?: string | null } = {
+        paid_amount: nextPaid,
+        payment_status: nextPaymentStatus,
+      };
       if (isPreregistration || nextStatus === "confirmed") patch.status = nextStatus;
       await db.from("reservations").update(patch).eq("id", payment.reservation_id);
     }
@@ -241,7 +248,7 @@ export async function getStripePaymentStatus(
     status: paymentIntent.status,
     updated,
     payment_intent_id: input.payment_intent_id,
-    previous_status: payment.status,
+    previous_status: previousStatus,
   } as { status: string; updated: boolean; payment_intent_id: string; previous_status: string; client_secret?: string | null };
 
   if (input.get_client_secret && paymentIntent.status !== "succeeded" && paymentIntent.status !== "canceled") {
