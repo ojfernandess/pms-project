@@ -1,0 +1,153 @@
+{
+  "tech_stack": [
+    "TypeScript",
+    "React",
+    "Vite",
+    "Supabase",
+    "React Router",
+    "TanStack Query",
+    "Tailwind CSS",
+    "shadcn/ui",
+    "date-fns"
+  ],
+  "features": [
+    {
+      "name": "Autenticação",
+      "description": "Sistema de autenticação de usuários com Supabase Auth",
+      "files": [
+        "src/pages/Auth.tsx",
+        "src/hooks/useAuth.tsx",
+        "src/components/layout/ProtectedRoute.tsx"
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "description": "Painel principal com visão geral do sistema",
+      "files": [
+        "src/pages/Dashboard.tsx",
+        "src/pages/UserDashboard.tsx",
+        "src/pages/EstablishmentDashboard.tsx",
+        "src/hooks/useDashboard.ts"
+      ]
+    },
+    {
+      "name": "Reservas",
+      "description": "Gerenciamento completo de reservas com calendário e mapa de ocupação",
+      "files": [
+        "src/pages/Reservations.tsx",
+        "src/pages/ReservationDetails.tsx",
+        "src/pages/OccupancyMap.tsx",
+        "src/hooks/useReservations.ts",
+        "src/components/reservations/ReservationDialog.tsx",
+        "src/components/reservations/ReservationCalendarMap.tsx",
+        "src/components/reservations/ReservationTransferModal.tsx"
+      ]
+    },
+    {
+      "name": "Web Check-in",
+      "description": "Sistema de check-in online para hóspedes",
+      "files": [
+        "src/pages/WebCheckin.tsx",
+        "src/hooks/useWebCheckin.ts",
+        "src/components/webcheckin/VerifyReservationStep.tsx",
+        "src/components/webcheckin/GuestInformationStep.tsx",
+        "src/components/webcheckin/DocumentUploadStep.tsx",
+        "src/components/webcheckin/GuestPreferencesStep.tsx",
+        "src/components/webcheckin/ReviewAndConfirmStep.tsx",
+        "src/components/webcheckin/CheckinCompleteStep.tsx"
+      ]
+    },
+    {
+      "name": "Clientes",
+      "description": "Gerenciamento de clientes e hóspedes",
+      "files": [
+        "src/pages/Clients.tsx",
+        "src/pages/ClientDeduplication.tsx",
+        "src/components/clients/ClientDialog.tsx"
+      ]
+    },
+    {
+      "name": "Unidades",
+      "description": "Gerenciamento de quartos, categorias e prédios",
+      "files": [
+        "src/pages/Units.tsx",
+        "src/hooks/useBuildings.ts",
+        "src/components/units/RoomDialog.tsx",
+        "src/components/units/CategoryDialog.tsx"
+      ]
+    },
+    {
+      "name": "Financeiro",
+      "description": "Relatórios e gestão financeira",
+      "files": [
+        "src/pages/Financial.tsx",
+        "src/hooks/useFinancialReports.ts",
+        "src/lib/financialUtils.ts"
+      ]
+    },
+    {
+      "name": "Manutenção",
+      "description": "Sistema de tickets de manutenção",
+      "files": [
+        "src/pages/Maintenance.tsx",
+        "src/hooks/useMaintenance.ts",
+        "src/components/maintenance/MaintenanceTicketDialog.tsx"
+      ]
+    },
+    {
+      "name": "Precificação",
+      "description": "Gestão de preços, temporadas e planos",
+      "files": [
+        "src/pages/Pricing.tsx",
+        "src/hooks/usePricing.ts",
+        "src/hooks/usePricingPlans.ts",
+        "src/hooks/useSimplifiedPricing.ts"
+      ]
+    },
+    {
+      "name": "Channel Manager",
+      "description": "Integração com canais de distribuição",
+      "files": [
+        "src/pages/ChannelManager.tsx",
+        "src/hooks/useChannelManager.ts"
+      ]
+    },
+    {
+      "name": "Configurações",
+      "description": "Configurações do hotel e estabelecimento",
+      "files": [
+        "src/pages/Settings.tsx",
+        "src/hooks/useHotelSettings.ts",
+        "src/hooks/useApiSettings.ts"
+      ]
+    },
+    {
+      "name": "Funcionários",
+      "description": "Gerenciamento de funcionários e permissões",
+      "files": [
+        "src/pages/Employees.tsx",
+        "src/hooks/useEmployees.ts",
+        "src/hooks/useUsers.ts",
+        "src/hooks/usePermissions.ts"
+      ]
+    },
+    {
+      "name": "Super Admin",
+      "description": "Painel administrativo para super administradores",
+      "files": [
+        "src/pages/SuperAdmin.tsx",
+        "src/components/layout/SuperAdminRoute.tsx"
+      ]
+    },
+    {
+      "name": "Utilitários",
+      "description": "Funções auxiliares e serviços",
+      "files": [
+        "src/lib/locatorService.ts",
+        "src/lib/reservationUtils.ts",
+        "src/lib/establishmentUtils.ts",
+        "src/lib/permissions.ts"
+      ]
+    }
+  ]
+}

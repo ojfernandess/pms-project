@@ -1,0 +1,298 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
+
+type EmailTemplateInsert = TablesInsert<'email_templates'>;
+type EmailTemplateUpdate = TablesUpdate<'email_templates'>;
+
+export const useEmailTemplates = () => {
+  const queryClient = useQueryClient();
+
+  // Buscar todos os templates
+  const templatesQuery = useQuery({
+    queryKey: ['email_templates'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('email_templates')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      // Normalizar establishment_ids para garantir que seja sempre um array ou null
+      const normalizedData = data?.map((template: any) => {
+        if (template.establishment_ids !== null && template.establishment_ids !== undefined) {
+          // Se não é null/undefined, garantir que seja um array
+          if (!Array.isArray(template.establishment_ids)) {
+            try {
+              // Tentar parsear se for string JSON
+              if (typeof template.establishment_ids === 'string' && template.establishment_ids.trim() !== '') {
+                template.establishment_ids = JSON.parse(template.establishment_ids);
+              } else {
+                template.establishment_ids = [];
+              }
+            } catch (e) {
+              template.establishment_ids = [];
+            }
+          }
+        }
+        return template;
+      });
+      
+      return normalizedData || data;
+    },
+  });
+
+  // Criar template
+  const createTemplate = useMutation({
+    mutationFn: async (template: EmailTemplateInsert) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Garantir que establishment_ids seja salvo corretamente
+      // null = permite todos (padrão)
+      // [] = não permite nenhum
+      // [id1, id2, ...] = permite apenas esses IDs
+      const templateData: any = {
+        ...template,
+        created_by: user?.id || null,
+      };
+      
+      if ('establishment_ids' in template) {
+        if (template.establishment_ids === null || template.establishment_ids === undefined) {
+          // Manter null (permite todos)
+          templateData.establishment_ids = null;
+        } else if (Array.isArray(template.establishment_ids)) {
+          // Manter como array (pode ser vazio ou com valores)
+          templateData.establishment_ids = template.establishment_ids;
+        } else {
+          // Se não é null nem array, converter para array vazio
+          templateData.establishment_ids = [];
+        }
+      }
+      
+      console.log('📝 Criando template com establishment_ids:', {
+        establishment_ids: templateData.establishment_ids,
+        isNull: templateData.establishment_ids === null,
+        isArray: Array.isArray(templateData.establishment_ids),
+        length: Array.isArray(templateData.establishment_ids) ? templateData.establishment_ids.length : 'N/A'
+      });
+      
+      const { data, error } = await supabase
+        .from('email_templates')
+        .insert([templateData])
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      console.log('✅ Template criado:', {
+        id: data.id,
+        establishment_ids: data.establishment_ids,
+        isArray: Array.isArray(data.establishment_ids)
+      });
+      
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['email_templates'] });
+      toast.success('Template criado com sucesso!');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Erro ao criar template');
+    },
+  });
+
+  // Atualizar template
+  const updateTemplate = useMutation({
+    mutationFn: async ({ id, ...updates }: { id: string } & EmailTemplateUpdate) => {
+      console.log('📝 Atualizando template:', { id, updates: Object.keys(updates) });
+      
+      // Primeiro, verificar se o template existe
+      const { data: existingTemplate, error: checkError } = await supabase
+        .from('email_templates')
+        .select('id')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('❌ Erro ao verificar template:', checkError);
+        throw checkError;
+      }
+
+      if (!existingTemplate) {
+        const error = new Error('Template não encontrado. Pode ter sido deletado ou você não tem permissão para editá-lo.');
+        console.error('❌', error.message);
+        throw error;
+      }
+      
+      // Garantir que updated_at seja atualizado explicitamente (o trigger deve fazer isso, mas vamos garantir)
+      // Garantir que establishment_ids seja salvo corretamente como JSONB
+      const updateData: any = {
+        ...updates,
+        updated_at: new Date().toISOString(), // Forçar atualização do updated_at
+      };
+      
+      // Se establishment_ids está presente, garantir que seja salvo corretamente
+      // null = permite todos (padrão)
+      // [] = não permite nenhum
+      // [id1, id2, ...] = permite apenas esses IDs
+      if ('establishment_ids' in updates) {
+        if (updates.establishment_ids === null || updates.establishment_ids === undefined) {
+          // Manter null (permite todos)
+          updateData.establishment_ids = null;
+        } else if (Array.isArray(updates.establishment_ids)) {
+          // Manter como array (pode ser vazio ou com valores)
+          updateData.establishment_ids = updates.establishment_ids;
+        } else {
+          // Se não é null nem array, converter para array vazio
+          updateData.establishment_ids = [];
+        }
+      }
+      
+      console.log('📝 Dados para atualização:', {
+        id,
+        establishment_ids: updateData.establishment_ids,
+        isNull: updateData.establishment_ids === null,
+        isArray: Array.isArray(updateData.establishment_ids),
+        length: Array.isArray(updateData.establishment_ids) ? updateData.establishment_ids.length : 'N/A'
+      });
+      
+      const { data, error } = await supabase
+        .from('email_templates')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .maybeSingle();
+
+      if (error) {
+        console.error('❌ Erro ao atualizar template:', error);
+        throw error;
+      }
+
+      if (!data) {
+        const error = new Error('Template não foi atualizado. Pode ser um problema de permissões (RLS) ou o template foi deletado durante a atualização.');
+        console.error('❌', error.message);
+        throw error;
+      }
+      
+      console.log('✅ Template atualizado com sucesso:', { 
+        id: data.id, 
+        name: data.name,
+        updated_at: data.updated_at,
+        body_html_length: data.body_html?.length || 0,
+        subject_length: data.subject?.length || 0,
+        cc_emails: data.cc_emails || 'Nenhum',
+        bcc_emails: data.bcc_emails || 'Nenhum',
+        establishment_ids: data.establishment_ids,
+        establishment_ids_type: typeof data.establishment_ids,
+        establishment_ids_isArray: Array.isArray(data.establishment_ids),
+        establishment_ids_length: Array.isArray(data.establishment_ids) ? data.establishment_ids.length : 'N/A'
+      });
+      
+      return data;
+    },
+    onSuccess: (data) => {
+      // Invalidar cache de templates
+      queryClient.invalidateQueries({ queryKey: ['email_templates'] });
+      // Também remover do cache para forçar recarregamento
+      queryClient.removeQueries({ queryKey: ['email_templates'] });
+      console.log('🔄 Cache de templates invalidado');
+      toast.success('Template atualizado com sucesso!');
+    },
+    onError: (error: any) => {
+      console.error('❌ Erro ao atualizar template:', error);
+      toast.error(error.message || 'Erro ao atualizar template');
+    },
+  });
+
+  // Deletar template
+  const deleteTemplate = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('email_templates')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['email_templates'] });
+      toast.success('Template deletado com sucesso!');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Erro ao deletar template');
+    },
+  });
+
+  // Enviar e-mail de teste
+  const sendTestEmail = useMutation({
+    mutationFn: async ({ templateId, recipientEmail, variables }: {
+      templateId: string;
+      recipientEmail: string;
+      variables?: Record<string, any>;
+    }) => {
+      // Buscar template
+      const { data: template, error: templateError } = await supabase
+        .from('email_templates')
+        .select('*')
+        .eq('id', templateId)
+        .single();
+
+      if (templateError || !template) {
+        throw new Error('Template não encontrado');
+      }
+
+      // Processar template (simplificado para teste)
+      const { processTemplate } = await import('@/lib/emailTemplateEngine');
+      const subject = processTemplate(template.subject, variables || {});
+      const bodyHtml = processTemplate(template.body_html, variables || {});
+
+      // Adicionar à fila (incluindo CC e BCC do template)
+      console.log('📧 Enviando email de teste com CC e BCC:', {
+        cc_emails: template.cc_emails || 'Nenhum',
+        bcc_emails: template.bcc_emails || 'Nenhum'
+      });
+      
+      const { data, error } = await supabase
+        .from('email_queue')
+        .insert([{
+          template_id: templateId,
+          event_type: template.event_type,
+          recipient_email: recipientEmail,
+          subject,
+          body_html: bodyHtml,
+          status: 'pending',
+          priority: 2, // Alta prioridade para testes
+          cc_emails: template.cc_emails || null,
+          bcc_emails: template.bcc_emails || null,
+        }])
+        .select('id')
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      toast.success('E-mail de teste adicionado à fila!');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Erro ao enviar e-mail de teste');
+    },
+  });
+
+  return {
+    templates: templatesQuery.data || [],
+    isLoading: templatesQuery.isLoading,
+    refetch: templatesQuery.refetch,
+    createTemplate: createTemplate.mutateAsync,
+    updateTemplate: updateTemplate.mutateAsync,
+    deleteTemplate: deleteTemplate.mutateAsync,
+    sendTestEmail: sendTestEmail.mutateAsync,
+    isCreating: createTemplate.isPending,
+    isUpdating: updateTemplate.isPending,
+    isDeleting: deleteTemplate.isPending,
+    isSendingTest: sendTestEmail.isPending,
+  };
+};
+

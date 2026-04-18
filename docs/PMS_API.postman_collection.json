@@ -1,0 +1,713 @@
+{
+  "info": {
+    "name": "PMS API",
+    "description": "Collection completa da API do sistema de gestão de propriedades (PMS).\n\n## Autenticação\n\nA API utiliza dois tipos de autenticação:\n\n1. **JWT Token (Supabase Auth)**: Para usuários admin/user\n2. **Guest Account ID**: Para hóspedes autenticados\n\n## Variáveis de Ambiente\n\nConfigure as seguintes variáveis na collection ou no ambiente Postman:\n\n- `supabase_url`: URL do seu projeto Supabase (ex: https://xxxxx.supabase.co)\n- `supabase_anon_key`: Chave anônima do Supabase\n- `jwt_token`: Token JWT obtido via Supabase Auth\n- `guest_account_id`: ID da conta do hóspede (para requisições de hóspede)\n\n## Como obter o JWT Token\n\n```typescript\nconst { data: { session } } = await supabase.auth.getSession();\nconst token = session?.access_token;\n```\n\nOu use a requisição de login do Supabase Auth:\n\n```\nPOST https://{supabase_url}/auth/v1/token?grant_type=password\n```",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "pms-api"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Get JWT Token (Login)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.environment.set('jwt_token', jsonData.access_token);",
+                  "    pm.environment.set('user_id', jsonData.user.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"your-password\"\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/token?grant_type=password",
+              "host": ["{{supabase_url}}"],
+              "path": ["auth", "v1", "token"],
+              "query": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                }
+              ]
+            },
+            "description": "Faz login e obtém o JWT token. O token é automaticamente salvo na variável `jwt_token`."
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints de autenticação"
+    },
+    {
+      "name": "Reservations",
+      "item": [
+        {
+          "name": "Get Reservation (GET)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/functions/v1/get-reservation?locator=RSV742516",
+              "host": ["{{supabase_url}}"],
+              "path": ["functions", "v1", "get-reservation"],
+              "query": [
+                {
+                  "key": "locator",
+                  "value": "RSV742516",
+                  "description": "reservation_code ou locator do web_checkin"
+                },
+                {
+                  "key": "identifier",
+                  "value": "123456",
+                  "description": "identification_number da reserva",
+                  "disabled": true
+                },
+                {
+                  "key": "reservation_code",
+                  "value": "RSV742516",
+                  "description": "reservation_code da reserva",
+                  "disabled": true
+                },
+                {
+                  "key": "guest_account_id",
+                  "value": "{{guest_account_id}}",
+                  "description": "ID da conta do hóspede (para autenticação de hóspede)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Busca informações completas de uma reserva por identificador, localizador ou reservation_code.\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Reservation (POST)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"locator\": \"RSV742516\",\n  \"guest_account_id\": \"{{guest_account_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/functions/v1/get-reservation",
+              "host": ["{{supabase_url}}"],
+              "path": ["functions", "v1", "get-reservation"]
+            },
+            "description": "Busca informações completas de uma reserva via POST (útil para enviar dados sensíveis no body).\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "List Reservations (REST API)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Prefer",
+                "value": "return=representation"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/reservations?select=*&order=created_at.desc&limit=10",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "reservations"],
+              "query": [
+                {
+                  "key": "select",
+                  "value": "*",
+                  "description": "Campos a retornar"
+                },
+                {
+                  "key": "order",
+                  "value": "created_at.desc",
+                  "description": "Ordenação"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Limite de registros"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Offset para paginação",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lista reservas usando a API REST do Supabase (PostgREST).\n\n**Autenticação**: Obrigatória (JWT token)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints relacionados a reservas"
+    },
+    {
+      "name": "Email",
+      "item": [
+        {
+          "name": "Send Email (Resend)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"destinatario@example.com\",\n  \"subject\": \"Assunto do Email\",\n  \"html\": \"<h1>Conteúdo HTML</h1>\",\n  \"from\": \"noreply@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/functions/v1/send-email-resend",
+              "host": ["{{supabase_url}}"],
+              "path": ["functions", "v1", "send-email-resend"]
+            },
+            "description": "Envia email usando a API do Resend.\n\n**Autenticação**: Obrigatória (JWT token)"
+          },
+          "response": []
+        },
+        {
+          "name": "Send Email (SMTP)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"destinatario@example.com\",\n  \"subject\": \"Assunto do Email\",\n  \"html\": \"<h1>Conteúdo HTML</h1>\",\n  \"smtpConfig\": {\n    \"host\": \"smtp.example.com\",\n    \"port\": 587,\n    \"secure\": false,\n    \"auth\": {\n      \"user\": \"usuario\",\n      \"pass\": \"senha\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/functions/v1/send-email-smtp",
+              "host": ["{{supabase_url}}"],
+              "path": ["functions", "v1", "send-email-smtp"]
+            },
+            "description": "Envia email usando configuração SMTP personalizada.\n\n**Autenticação**: Obrigatória (JWT token)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints de envio de emails"
+    },
+    {
+      "name": "Payments (Stripe)",
+      "item": [
+        {
+          "name": "Create Payment Intent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"establishment_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"amount\": 50000,\n  \"currency\": \"brl\",\n  \"reservation_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"guest_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"description\": \"Pagamento da reserva RSV123456\"\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/functions/v1/stripe-payment",
+              "host": ["{{supabase_url}}"],
+              "path": ["functions", "v1", "stripe-payment"]
+            },
+            "description": "Cria uma PaymentIntent no Stripe para processar pagamento.\n\n**Autenticação**: Obrigatória (JWT token)\n\n**Nota**: O valor `amount` está em centavos (ex: 50000 = R$ 500,00)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Payment Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_intent_id\": \"pi_xxx\"\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/functions/v1/stripe-payment-status",
+              "host": ["{{supabase_url}}"],
+              "path": ["functions", "v1", "stripe-payment-status"]
+            },
+            "description": "Verifica o status de um PaymentIntent no Stripe.\n\n**Autenticação**: Obrigatória (JWT token)"
+          },
+          "response": []
+        },
+        {
+          "name": "Process Refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_intent_id\": \"pi_xxx\",\n  \"amount\": 50000,\n  \"reason\": \"requested_by_customer\"\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/functions/v1/stripe-refund",
+              "host": ["{{supabase_url}}"],
+              "path": ["functions", "v1", "stripe-refund"]
+            },
+            "description": "Processa um reembolso no Stripe.\n\n**Autenticação**: Obrigatória (JWT token)\n\n**Nota**: O valor `amount` está em centavos"
+          },
+          "response": []
+        },
+        {
+          "name": "Stripe Webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Stripe-Signature",
+                "value": "{{stripe_signature}}",
+                "description": "Assinatura do Stripe para validação"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"payment_intent.succeeded\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"pi_xxx\",\n      \"status\": \"succeeded\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/functions/v1/stripe-webhook",
+              "host": ["{{supabase_url}}"],
+              "path": ["functions", "v1", "stripe-webhook"]
+            },
+            "description": "Endpoint para receber webhooks do Stripe.\n\n**Autenticação**: Validação de assinatura Stripe-Signature"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints de processamento de pagamentos via Stripe"
+    },
+    {
+      "name": "Web Check-in",
+      "item": [
+        {
+          "name": "Get Web Check-in by Locator",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text",
+                "disabled": true
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin?locator=RSV742516&select=*",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin"],
+              "query": [
+                {
+                  "key": "locator",
+                  "value": "RSV742516",
+                  "description": "Localizador do web check-in"
+                },
+                {
+                  "key": "select",
+                  "value": "*",
+                  "description": "Campos a retornar"
+                },
+                {
+                  "key": "token",
+                  "value": "",
+                  "description": "Token do web check-in",
+                  "disabled": true
+                },
+                {
+                  "key": "reservation_id",
+                  "value": "",
+                  "description": "ID da reserva",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Busca informações de web check-in por locator, token ou reservation_id.\n\n**Autenticação**: Opcional (JWT token ou guest_account_id para dados completos)"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Web Check-in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Prefer",
+                "value": "return=representation"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reservation_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"establishment_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"locator\": \"RSV742516\",\n  \"expires_at\": \"2024-01-20T12:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin"]
+            },
+            "description": "Cria um novo web check-in para uma reserva.\n\n**Autenticação**: Obrigatória (JWT token)"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Web Check-in Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Prefer",
+                "value": "return=representation"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"in_progress\",\n  \"started_at\": \"2024-01-15T14:00:00Z\",\n  \"ip_address\": \"192.168.1.1\",\n  \"user_agent\": \"Mozilla/5.0...\"\n}"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin?id=eq.550e8400-e29b-41d4-a716-446655440000",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin"],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "eq.550e8400-e29b-41d4-a716-446655440000",
+                  "description": "ID do web check-in"
+                }
+              ]
+            },
+            "description": "Atualiza informações do web check-in (status, dados dos hóspedes, etc.).\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "List Web Check-in Guests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin_guests?web_checkin_id=eq.550e8400-e29b-41d4-a716-446655440000&select=*&order=order.asc",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin_guests"],
+              "query": [
+                {
+                  "key": "web_checkin_id",
+                  "value": "eq.550e8400-e29b-41d4-a716-446655440000",
+                  "description": "ID do web check-in"
+                },
+                {
+                  "key": "select",
+                  "value": "*",
+                  "description": "Campos a retornar"
+                },
+                {
+                  "key": "order",
+                  "value": "order.asc",
+                  "description": "Ordenação"
+                }
+              ]
+            },
+            "description": "Lista hóspedes associados a um web check-in.\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "Add Web Check-in Guests",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Prefer",
+                "value": "return=representation"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"web_checkin_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"João Silva\",\n    \"email\": \"joao@example.com\",\n    \"phone\": \"+5511999999999\",\n    \"cpf\": \"12345678900\",\n    \"birth_date\": \"1990-01-01\",\n    \"is_main_guest\": true,\n    \"order\": 0\n  },\n  {\n    \"web_checkin_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"Maria Silva\",\n    \"email\": \"maria@example.com\",\n    \"is_main_guest\": false,\n    \"order\": 1\n  }\n]"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin_guests",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin_guests"]
+            },
+            "description": "Adiciona ou atualiza hóspedes de um web check-in.\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "List Web Check-in Documents",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin_documents?web_checkin_id=eq.550e8400-e29b-41d4-a716-446655440000&select=*&order=order.asc",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin_documents"],
+              "query": [
+                {
+                  "key": "web_checkin_id",
+                  "value": "eq.550e8400-e29b-41d4-a716-446655440000",
+                  "description": "ID do web check-in"
+                },
+                {
+                  "key": "select",
+                  "value": "*",
+                  "description": "Campos a retornar"
+                },
+                {
+                  "key": "order",
+                  "value": "order.asc",
+                  "description": "Ordenação"
+                }
+              ]
+            },
+            "description": "Lista documentos associados a um web check-in.\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "Add Web Check-in Documents",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Prefer",
+                "value": "return=representation"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"web_checkin_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"guest_name\": \"João Silva\",\n    \"document_type\": \"cpf\",\n    \"document_number\": \"12345678900\",\n    \"document_front_url\": \"https://example.com/doc-front.jpg\",\n    \"document_back_url\": \"https://example.com/doc-back.jpg\",\n    \"selfie_url\": \"https://example.com/selfie.jpg\",\n    \"is_main_guest\": true,\n    \"order\": 0\n  }\n]"
+            },
+            "url": {
+              "raw": "{{supabase_url}}/rest/v1/web_checkin_documents",
+              "host": ["{{supabase_url}}"],
+              "path": ["rest", "v1", "web_checkin_documents"]
+            },
+            "description": "Adiciona ou atualiza documentos de um web check-in.\n\n**Autenticação**: Obrigatória (JWT token ou guest_account_id)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints relacionados ao processo de web check-in de hóspedes"
+    }
+  ],
+  "variable": [
+    {
+      "key": "supabase_url",
+      "value": "https://your-project.supabase.co",
+      "type": "string"
+    },
+    {
+      "key": "supabase_anon_key",
+      "value": "your-anon-key",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guest_account_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
+

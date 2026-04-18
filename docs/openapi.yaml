@@ -1,0 +1,1227 @@
+openapi: 3.0.3
+info:
+  title: PMS API
+  description: |
+    API completa do sistema de gestão de propriedades (PMS).
+    
+    ## Autenticação
+    
+    A API utiliza dois tipos de autenticação:
+    
+    1. **JWT Token (Supabase Auth)**: Para usuários admin/user
+    2. **Guest Account ID**: Para hóspedes autenticados
+    
+    ## Base URLs
+    
+    - **Supabase REST API**: `{SUPABASE_URL}/rest/v1`
+    - **Edge Functions**: `{SUPABASE_URL}/functions/v1`
+    
+    Substitua `{SUPABASE_URL}` pela URL do seu projeto Supabase.
+  version: 1.0.0
+  contact:
+    name: Suporte PMS
+    email: suporte@pms.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://{project}.supabase.co/rest/v1
+    description: Supabase REST API
+    variables:
+      project:
+        default: your-project
+        description: ID do seu projeto Supabase
+  - url: https://{project}.supabase.co/functions/v1
+    description: Supabase Edge Functions
+    variables:
+      project:
+        default: your-project
+        description: ID do seu projeto Supabase
+
+tags:
+  - name: Authentication
+    description: Autenticação e autorização
+  - name: Reservations
+    description: Gestão de reservas
+  - name: Email
+    description: Envio de emails
+  - name: Payments
+    description: Processamento de pagamentos via Stripe
+  - name: Web Check-in
+    description: Web check-in de hóspedes
+
+paths:
+  /functions/v1/get-reservation:
+    get:
+      tags:
+        - Reservations
+      summary: Buscar reserva (GET)
+      description: |
+        Busca informações completas de uma reserva por identificador, localizador ou reservation_code.
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: getReservation
+      parameters:
+        - name: identifier
+          in: query
+          description: identification_number da reserva
+          required: false
+          schema:
+            type: string
+        - name: locator
+          in: query
+          description: reservation_code ou locator do web_checkin
+          required: false
+          schema:
+            type: string
+        - name: reservation_code
+          in: query
+          description: reservation_code da reserva
+          required: false
+          schema:
+            type: string
+        - name: guest_account_id
+          in: query
+          description: ID da conta do hóspede (para autenticação de hóspede)
+          required: false
+          schema:
+            type: string
+            format: uuid
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Reserva encontrada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+              example:
+                success: true
+                reservation:
+                  id: "550e8400-e29b-41d4-a716-446655440000"
+                  reservation_code: "RSV742516"
+                  identification_number: "123456"
+                  checkin_date: "2024-01-15"
+                  checkout_date: "2024-01-20"
+                  status: "confirmed"
+                  guest:
+                    full_name: "João Silva"
+                    email: "joao@example.com"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+        - Reservations
+      summary: Buscar reserva (POST)
+      description: |
+        Busca informações completas de uma reserva via POST (útil para enviar dados sensíveis no body).
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: getReservationPost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationRequest'
+            example:
+              locator: "RSV742516"
+              guest_account_id: "550e8400-e29b-41d4-a716-446655440000"
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Reserva encontrada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /functions/v1/send-email-resend:
+    post:
+      tags:
+        - Email
+      summary: Enviar email via Resend
+      description: |
+        Envia email usando a API do Resend.
+        
+        **Autenticação**: Obrigatória (JWT token)
+      operationId: sendEmailResend
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailResendRequest'
+            example:
+              to: "destinatario@example.com"
+              subject: "Assunto do Email"
+              html: "<h1>Conteúdo HTML</h1>"
+              from: "noreply@example.com"
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Email enviado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /functions/v1/send-email-smtp:
+    post:
+      tags:
+        - Email
+      summary: Enviar email via SMTP
+      description: |
+        Envia email usando configuração SMTP personalizada.
+        
+        **Autenticação**: Obrigatória (JWT token)
+      operationId: sendEmailSMTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailSMTPRequest'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Email enviado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /functions/v1/stripe-payment:
+    post:
+      tags:
+        - Payments
+      summary: Criar intenção de pagamento Stripe
+      description: |
+        Cria uma PaymentIntent no Stripe para processar pagamento.
+        
+        **Autenticação**: Obrigatória (JWT token)
+      operationId: createStripePayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StripePaymentRequest'
+            example:
+              establishment_id: "550e8400-e29b-41d4-a716-446655440000"
+              amount: 50000
+              currency: "brl"
+              reservation_id: "550e8400-e29b-41d4-a716-446655440000"
+              guest_id: "550e8400-e29b-41d4-a716-446655440000"
+              description: "Pagamento da reserva RSV123456"
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: PaymentIntent criado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripePaymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /functions/v1/stripe-payment-status:
+    post:
+      tags:
+        - Payments
+      summary: Verificar status de pagamento Stripe
+      description: |
+        Verifica o status de um PaymentIntent no Stripe.
+        
+        **Autenticação**: Obrigatória (JWT token)
+      operationId: getStripePaymentStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - payment_intent_id
+              properties:
+                payment_intent_id:
+                  type: string
+                  description: ID do PaymentIntent
+            example:
+              payment_intent_id: "pi_xxx"
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Status do pagamento
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripePaymentStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /functions/v1/stripe-refund:
+    post:
+      tags:
+        - Payments
+      summary: Processar reembolso Stripe
+      description: |
+        Processa um reembolso no Stripe.
+        
+        **Autenticação**: Obrigatória (JWT token)
+      operationId: processStripeRefund
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StripeRefundRequest'
+            example:
+              payment_intent_id: "pi_xxx"
+              amount: 50000
+              reason: "requested_by_customer"
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Reembolso processado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripeRefundResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /functions/v1/stripe-webhook:
+    post:
+      tags:
+        - Payments
+      summary: Webhook do Stripe
+      description: |
+        Endpoint para receber webhooks do Stripe.
+        
+        **Autenticação**: Validação de assinatura Stripe-Signature
+      operationId: stripeWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processado com sucesso
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /rest/v1/reservations:
+    get:
+      tags:
+        - Reservations
+      summary: Listar reservas
+      description: |
+        Lista reservas usando a API REST do Supabase (PostgREST).
+        
+        **Autenticação**: Obrigatória (JWT token)
+      operationId: listReservations
+      parameters:
+        - name: select
+          in: query
+          description: Campos a retornar (PostgREST)
+          schema:
+            type: string
+        - name: filter
+          in: query
+          description: Filtros (PostgREST)
+          schema:
+            type: string
+        - name: order
+          in: query
+          description: Ordenação (PostgREST)
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Limite de registros
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          description: Offset para paginação
+          schema:
+            type: integer
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de reservas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Reservation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /rest/v1/web_checkin:
+    get:
+      tags:
+        - Web Check-in
+      summary: Buscar web check-in
+      description: |
+        Busca informações de web check-in por locator, token ou reservation_id.
+        
+        **Autenticação**: Opcional (JWT token ou guest_account_id para dados completos)
+      operationId: getWebCheckin
+      parameters:
+        - name: locator
+          in: query
+          description: Localizador do web check-in
+          schema:
+            type: string
+        - name: token
+          in: query
+          description: Token do web check-in
+          schema:
+            type: string
+        - name: reservation_id
+          in: query
+          description: ID da reserva
+          schema:
+            type: string
+            format: uuid
+        - name: select
+          in: query
+          description: Campos a retornar (PostgREST)
+          schema:
+            type: string
+            default: "*"
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Web check-in encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebCheckin'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+        - Web Check-in
+      summary: Criar web check-in
+      description: |
+        Cria um novo web check-in para uma reserva.
+        
+        **Autenticação**: Obrigatória (JWT token)
+      operationId: createWebCheckin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebCheckinCreate'
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Web check-in criado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebCheckin'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags:
+        - Web Check-in
+      summary: Atualizar web check-in
+      description: |
+        Atualiza informações do web check-in (status, dados dos hóspedes, etc.).
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: updateWebCheckin
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: ID do web check-in
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebCheckinUpdate'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Web check-in atualizado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebCheckin'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /rest/v1/web_checkin_guests:
+    get:
+      tags:
+        - Web Check-in
+      summary: Listar hóspedes do web check-in
+      description: |
+        Lista hóspedes associados a um web check-in.
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: listWebCheckinGuests
+      parameters:
+        - name: web_checkin_id
+          in: query
+          required: true
+          description: ID do web check-in
+          schema:
+            type: string
+            format: uuid
+        - name: select
+          in: query
+          description: Campos a retornar
+          schema:
+            type: string
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de hóspedes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebCheckinGuest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags:
+        - Web Check-in
+      summary: Adicionar hóspedes ao web check-in
+      description: |
+        Adiciona ou atualiza hóspedes de um web check-in.
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: createWebCheckinGuests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/WebCheckinGuestCreate'
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Hóspedes adicionados com sucesso
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebCheckinGuest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /rest/v1/web_checkin_documents:
+    get:
+      tags:
+        - Web Check-in
+      summary: Listar documentos do web check-in
+      description: |
+        Lista documentos associados a um web check-in.
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: listWebCheckinDocuments
+      parameters:
+        - name: web_checkin_id
+          in: query
+          required: true
+          description: ID do web check-in
+          schema:
+            type: string
+            format: uuid
+        - name: select
+          in: query
+          description: Campos a retornar
+          schema:
+            type: string
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de documentos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebCheckinDocument'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags:
+        - Web Check-in
+      summary: Adicionar documentos ao web check-in
+      description: |
+        Adiciona ou atualiza documentos de um web check-in.
+        
+        **Autenticação**: Obrigatória (JWT token ou guest_account_id)
+      operationId: createWebCheckinDocuments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/WebCheckinDocumentCreate'
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Documentos adicionados com sucesso
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebCheckinDocument'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT token obtido via Supabase Auth.
+        
+        **Como obter:**
+        ```typescript
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        ```
+        
+        **Headers:**
+        ```
+        Authorization: Bearer {token}
+        apikey: {SUPABASE_ANON_KEY}
+        ```
+
+  schemas:
+    ReservationRequest:
+      type: object
+      properties:
+        identifier:
+          type: string
+          description: identification_number da reserva
+        locator:
+          type: string
+          description: reservation_code ou locator do web_checkin
+        reservation_code:
+          type: string
+          description: reservation_code da reserva
+        guest_account_id:
+          type: string
+          format: uuid
+          description: ID da conta do hóspede (para autenticação de hóspede)
+      example:
+        locator: "RSV742516"
+
+    ReservationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        reservation:
+          $ref: '#/components/schemas/Reservation'
+
+    Reservation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        reservation_code:
+          type: string
+        identification_number:
+          type: string
+        checkin_date:
+          type: string
+          format: date
+        checkout_date:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [pending, confirmed, checked_in, checked_out, cancelled]
+        guest:
+          $ref: '#/components/schemas/Guest'
+        room:
+          $ref: '#/components/schemas/Room'
+        payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Payment'
+
+    Guest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        full_name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        document_number:
+          type: string
+
+    Room:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        room_number:
+          type: string
+        name:
+          type: string
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        amount:
+          type: number
+        payment_date:
+          type: string
+          format: date
+        payment_method:
+          type: string
+
+    EmailResendRequest:
+      type: object
+      required:
+        - to
+        - subject
+        - html
+      properties:
+        to:
+          type: string
+          format: email
+        subject:
+          type: string
+        html:
+          type: string
+        from:
+          type: string
+          format: email
+
+    EmailSMTPRequest:
+      type: object
+      required:
+        - to
+        - subject
+        - html
+        - smtpConfig
+      properties:
+        to:
+          type: string
+          format: email
+        subject:
+          type: string
+        html:
+          type: string
+        smtpConfig:
+          type: object
+          properties:
+            host:
+              type: string
+            port:
+              type: integer
+            secure:
+              type: boolean
+            auth:
+              type: object
+              properties:
+                user:
+                  type: string
+                pass:
+                  type: string
+
+    EmailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        id:
+          type: string
+
+    StripePaymentRequest:
+      type: object
+      required:
+        - establishment_id
+        - amount
+        - currency
+      properties:
+        establishment_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          description: Valor em centavos (ex: 50000 = R$ 500,00)
+        currency:
+          type: string
+          default: brl
+        reservation_id:
+          type: string
+          format: uuid
+        guest_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        payment_method_id:
+          type: string
+        save_payment_method:
+          type: boolean
+          default: false
+
+    StripePaymentResponse:
+      type: object
+      properties:
+        payment_intent_id:
+          type: string
+        client_secret:
+          type: string
+        status:
+          type: string
+
+    StripePaymentStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        amount:
+          type: integer
+        currency:
+          type: string
+        charges:
+          type: array
+
+    StripeRefundRequest:
+      type: object
+      required:
+        - payment_intent_id
+        - amount
+      properties:
+        payment_intent_id:
+          type: string
+        amount:
+          type: integer
+          description: Valor em centavos
+        reason:
+          type: string
+          enum: [duplicate, fraudulent, requested_by_customer]
+
+    StripeRefundResponse:
+      type: object
+      properties:
+        refund_id:
+          type: string
+        status:
+          type: string
+        amount:
+          type: integer
+
+    WebCheckin:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        reservation_id:
+          type: string
+          format: uuid
+        establishment_id:
+          type: string
+          format: uuid
+        locator:
+          type: string
+          description: Localizador único do web check-in
+        token:
+          type: string
+          description: Token de acesso do web check-in
+        status:
+          type: string
+          enum: [pending, in_progress, completed, expired, cancelled]
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+        ip_address:
+          type: string
+          nullable: true
+        user_agent:
+          type: string
+          nullable: true
+        guest_data:
+          type: object
+          nullable: true
+        documents:
+          type: array
+          nullable: true
+
+    WebCheckinCreate:
+      type: object
+      required:
+        - reservation_id
+      properties:
+        reservation_id:
+          type: string
+          format: uuid
+        establishment_id:
+          type: string
+          format: uuid
+        locator:
+          type: string
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    WebCheckinUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, in_progress, completed, expired, cancelled]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        guest_data:
+          type: object
+        documents:
+          type: array
+        ip_address:
+          type: string
+        user_agent:
+          type: string
+
+    WebCheckinGuest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        web_checkin_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        cpf:
+          type: string
+          nullable: true
+        birth_date:
+          type: string
+          format: date
+          nullable: true
+        document_type:
+          type: string
+          nullable: true
+        document_number:
+          type: string
+          nullable: true
+        is_main_guest:
+          type: boolean
+        order:
+          type: integer
+        zip_code:
+          type: string
+          nullable: true
+        street:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        complement:
+          type: string
+          nullable: true
+        neighborhood:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+        nationality:
+          type: string
+          nullable: true
+
+    WebCheckinGuestCreate:
+      type: object
+      required:
+        - web_checkin_id
+        - name
+      properties:
+        web_checkin_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        cpf:
+          type: string
+        birth_date:
+          type: string
+          format: date
+        document_type:
+          type: string
+        document_number:
+          type: string
+        is_main_guest:
+          type: boolean
+          default: false
+        order:
+          type: integer
+        zip_code:
+          type: string
+        street:
+          type: string
+        number:
+          type: string
+        complement:
+          type: string
+        neighborhood:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        country:
+          type: string
+        nationality:
+          type: string
+
+    WebCheckinDocument:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        web_checkin_id:
+          type: string
+          format: uuid
+        guest_name:
+          type: string
+        document_type:
+          type: string
+        document_number:
+          type: string
+          nullable: true
+        document_front_url:
+          type: string
+          nullable: true
+        document_back_url:
+          type: string
+          nullable: true
+        selfie_url:
+          type: string
+          nullable: true
+        is_main_guest:
+          type: boolean
+        order:
+          type: integer
+
+    WebCheckinDocumentCreate:
+      type: object
+      required:
+        - web_checkin_id
+        - guest_name
+      properties:
+        web_checkin_id:
+          type: string
+          format: uuid
+        guest_name:
+          type: string
+        document_type:
+          type: string
+          default: cpf
+        document_number:
+          type: string
+        document_front_url:
+          type: string
+        document_back_url:
+          type: string
+        selfie_url:
+          type: string
+        is_main_guest:
+          type: boolean
+          default: false
+        order:
+          type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Requisição inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Bad Request"
+            message: "Dados inválidos"
+
+    Unauthorized:
+      description: Não autenticado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Authentication required"
+            message: "Autenticação necessária. Forneça um token de usuário ou guest_account_id"
+
+    Forbidden:
+      description: Sem permissão
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Access denied"
+            message: "Você não tem permissão para acessar este recurso"
+
+    NotFound:
+      description: Recurso não encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Not Found"
+            message: "Recurso não encontrado"
+
+    InternalServerError:
+      description: Erro interno do servidor
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Internal Server Error"
+            message: "Erro ao processar requisição"
+

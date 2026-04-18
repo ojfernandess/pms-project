@@ -1,0 +1,34 @@
+project_id = "maqgvfjcoarxtyyvntql"
+
+[functions.aiosell-reservation-webhook]
+verify_jwt = false
+
+[functions.aiosell-sync]
+verify_jwt = true
+
+[functions.aiosell-reservations-sync]
+verify_jwt = true
+
+[functions.create-employee-auth]
+verify_jwt = true
+
+[functions.employee-auth-admin]
+verify_jwt = true
+
+[functions.company-public-api]
+verify_jwt = false
+
+[functions.channex-sync]
+verify_jwt = true
+
+[functions.channex-reservations-sync]
+verify_jwt = true
+
+[functions.channex-reservation-webhook]
+verify_jwt = false
+
+[functions.channex-ack-worker]
+verify_jwt = true
+
+[functions.channex-mapping-options]
+verify_jwt = true

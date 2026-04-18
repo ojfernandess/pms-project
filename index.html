@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Favicon: não declarar aqui — evita múltiplos loads. PMS: useSiteMeta injeta o do SuperAdmin. Motor: applyMotorBookingEngineFavicon (apenas o do cliente). -->
+    <!-- Título e meta tags serão atualizados dinamicamente via useSiteMeta -->
+    <title>Carregando...</title>
+    <meta name="description" content="" />
+    <meta name="author" content="" />
+
+    <meta property="og:title" content="" />
+    <meta property="og:description" content="" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="" />
+    <!-- og:image será adicionado dinamicamente apenas se houver imagem configurada -->
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="" />
+    <meta name="twitter:title" content="" />
+    <meta name="twitter:description" content="" />
+    <!-- twitter:image será adicionado dinamicamente apenas se houver imagem configurada -->
+    
+    <script>
+      // Script para buscar e injetar meta tags Open Graph ANTES do React carregar
+      // IMPORTANTE: Este script tenta buscar as configurações, mas crawlers podem não executar JavaScript
+      // Para garantir que funcione, use a Edge Function render-html ou configure SSR
+      (function() {
+        // Função para atualizar meta tags
+        function updateMetaTag(property, content, isName) {
+          if (!content) return; // Não atualizar se não houver conteúdo
+          
+          const selector = isName 
+            ? `meta[name="${property}"]` 
+            : `meta[property="${property}"]`;
+          
+          let meta = document.querySelector(selector);
+          if (!meta) {
+            meta = document.createElement('meta');
+            if (isName) {
+              meta.setAttribute('name', property);
+            } else {
+              meta.setAttribute('property', property);
+            }
+            document.head.appendChild(meta);
+          }
+          meta.setAttribute('content', content);
+        }
+        
+        // Função para garantir URL absoluta
+        function ensureAbsoluteUrl(url) {
+          if (!url) return null;
+          if (url.startsWith('http://') || url.startsWith('https://')) {
+            return url;
+          }
+          if (url.startsWith('data:')) {
+            return null; // Data URLs não funcionam com Open Graph
+          }
+          if (url.startsWith('/')) {
+            return window.location.origin + url;
+          }
+          if (url.startsWith('//')) {
+            return window.location.protocol + url;
+          }
+          return window.location.origin + '/' + url;
+        }
+        
+        // Buscar configurações do site via API route ou Edge Function
+        // Tentar obter URL do Supabase de várias fontes
+        const fetchSettings = async () => {
+          try {
+            // Estratégia 1: Tentar usar API route local primeiro (mais confiável)
+            try {
+              const apiResponse = await fetch('/api/get-site-settings', {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                signal: AbortSignal.timeout(2000), // 2 segundos timeout
+              });
+              
+              if (apiResponse.ok) {
+                const settings = await apiResponse.json();
+                applySettings(settings);
+                return; // Sucesso, não precisa tentar outras estratégias
+              }
+            } catch (apiError) {
+              // Se a API route não existir ou falhar, continuar com outras estratégias
+              console.debug('API route não disponível, tentando Edge Function...');
+            }
+            
+            // Estratégia 2: Tentar obter URL do Supabase e chamar Edge Function
+            // 1. Tentar obter da variável global (injetada pelo Vite)
+            let supabaseUrl = window.__SUPABASE_URL__;
+            
+            // 2. Tentar obter do localStorage (mas validar que não seja localhost se não estiver em desenvolvimento)
+            if (!supabaseUrl) {
+              const storedUrl = localStorage.getItem('__supabase_url__');
+              // Validar URL armazenada - não usar localhost em produção
+              if (storedUrl && !storedUrl.includes('localhost:54321')) {
+                supabaseUrl = storedUrl;
+              } else if (storedUrl && storedUrl.includes('localhost:54321')) {
+                // Limpar URL inválida do localStorage
+                localStorage.removeItem('__supabase_url__');
+              }
+            }
+            
+            // 3. Tentar obter de uma variável de ambiente injetada no HTML
+            if (!supabaseUrl) {
+              const metaTag = document.querySelector('meta[name="supabase-url"]');
+              if (metaTag) {
+                supabaseUrl = metaTag.getAttribute('content');
+              }
+            }
+            
+            // 4. Tentar obter do window.__ENV__ ou outras variáveis globais
+            if (!supabaseUrl && window.__ENV__) {
+              supabaseUrl = window.__ENV__.VITE_SUPABASE_URL;
+            }
+            
+            // 5. Tentar inferir da URL atual (para desenvolvimento local)
+            // NOTA: Não tentar usar localhost:54321 automaticamente, pois pode não estar rodando
+            // Deixar que a API route ou outras estratégias funcionem primeiro
+            // Se realmente precisar usar Supabase local, deve ser configurado explicitamente
+            
+            // 6. Tentar obter de scripts já carregados (se o código React já estiver disponível)
+            if (!supabaseUrl) {
+              // Aguardar um pouco para ver se o código React já carregou
+              await new Promise(resolve => setTimeout(resolve, 100));
+              // Tentar acessar através de window se disponível
+              if (window.__SUPABASE_CONFIG__) {
+                supabaseUrl = window.__SUPABASE_CONFIG__.url;
+              }
+            }
+            
+            if (!supabaseUrl) {
+              // Apenas avisar se a API route também falhou (já tentamos antes)
+              // Se chegou aqui, significa que a API route não está disponível E não temos URL do Supabase
+              console.debug('URL do Supabase não encontrada. Meta tags Open Graph não serão atualizadas via script inline.');
+              console.debug('Dica: Configure VITE_SUPABASE_URL no Vercel ou use a API route /api/get-site-settings');
+              return;
+            }
+            
+            // Construir URL da Edge Function
+            const cleanUrl = supabaseUrl.replace('/rest/v1', '').replace(/\/$/, '');
+            const edgeFunctionUrl = cleanUrl + '/functions/v1/get-site-settings';
+            
+            // Fazer requisição com timeout curto para não bloquear
+            try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 segundos timeout
+            
+            const response = await fetch(edgeFunctionUrl, {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              signal: controller.signal,
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+              const settings = await response.json();
+              applySettings(settings);
+              
+              // Salvar URL no localStorage para próximas vezes
+              if (supabaseUrl && !localStorage.getItem('__supabase_url__')) {
+                localStorage.setItem('__supabase_url__', supabaseUrl);
+              }
+            } else {
+                console.debug('Edge Function retornou erro:', response.status, response.statusText);
+              }
+            } catch (fetchError) {
+              // Ignorar erros de conexão silenciosamente (pode ser que a Edge Function não esteja disponível)
+              // Isso é esperado em desenvolvimento local ou quando a Edge Function não está configurada
+              console.debug('Não foi possível acessar Edge Function (isso é normal se não estiver configurada):', fetchError.name);
+            }
+          } catch (error) {
+            // Ignorar erros silenciosamente (não bloquear o carregamento)
+            if (error.name !== 'AbortError') {
+              console.warn('Erro ao buscar configurações do site para meta tags:', error);
+            }
+          }
+        };
+        
+        // Função para aplicar as configurações nas meta tags
+        function applySettings(settings) {
+          if (!settings) return;
+          
+          // Atualizar título
+          if (settings.site_title) {
+            document.title = settings.site_title;
+          }
+          
+          // Atualizar meta description
+          if (settings.meta_description || settings.site_description) {
+            updateMetaTag('description', settings.meta_description || settings.site_description || '', true);
+          }
+          
+          // Atualizar Open Graph
+          const ogTitle = settings.og_title || settings.site_title || '';
+          const ogDescription = settings.og_description || settings.site_description || '';
+          
+          if (ogTitle) updateMetaTag('og:title', ogTitle);
+          if (ogDescription) updateMetaTag('og:description', ogDescription);
+          updateMetaTag('og:type', 'website');
+          updateMetaTag('og:url', window.location.origin + window.location.pathname);
+          
+          const ogImageUrl = ensureAbsoluteUrl(settings.og_image);
+          if (ogImageUrl) {
+            updateMetaTag('og:image', ogImageUrl);
+            updateMetaTag('og:image:width', '1200');
+            updateMetaTag('og:image:height', '630');
+            updateMetaTag('og:image:type', 'image/png');
+          }
+          
+          // Atualizar Twitter Card
+          updateMetaTag('twitter:card', 'summary_large_image', true);
+          if (ogTitle) updateMetaTag('twitter:title', ogTitle, true);
+          if (ogDescription) updateMetaTag('twitter:description', ogDescription, true);
+          if (ogImageUrl) {
+            updateMetaTag('twitter:image', ogImageUrl, true);
+          }
+        }
+        
+        // Executar imediatamente (não bloquear, mas tentar buscar)
+        // Usar requestIdleCallback se disponível, senão setTimeout
+        if (window.requestIdleCallback) {
+          requestIdleCallback(fetchSettings, { timeout: 1000 });
+        } else {
+          setTimeout(fetchSettings, 0);
+        }
+      })();
+    </script>
+    
+    <style>
+      /* Loading inicial para evitar flash de conteúdo não estilizado */
+      #root:empty::before {
+        content: "";
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        background: #f8f9fa;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="root">
+      <!-- Loading inicial -->
+      <div style="display: flex; align-items: center; justify-content: center; height: 100vh; background: #f8f9fa;">
+        <div style="text-align: center;">
+          <div style="width: 48px; height: 48px; border: 4px solid #e5e7eb; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px;"></div>
+          <p style="color: #6b7280; font-size: 14px;">Carregando...</p>
+        </div>
+      </div>
+    </div>
+    <script>
+      // Adicionar animação de spin inline
+      const style = document.createElement('style');
+      style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+      document.head.appendChild(style);
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
