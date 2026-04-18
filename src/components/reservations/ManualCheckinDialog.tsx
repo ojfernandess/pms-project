@@ -26,7 +26,12 @@ import {
   FNRH_TIPOS_DEFICIENCIA,
 } from "@/lib/fnrh/domainOptions";
 
-/** Campos FNRH (API v2 / ficha nacional) — mesmo modelo do web check-in */
+/**
+ * Tipo de fluxo deste diálogo: check-in manual na recepção.
+ * Não invoca fnrh-submit aqui; os dados FNRH são salvos no web check-in para o botão na reserva.
+ */
+const CHECKIN_FLOW_TYPE = "manual" as const;
+
 const DEFAULT_FNRH_GUEST_FIELDS = {
   fnrh_genero_id: "",
   fnrh_motivo_viagem_id: "",
@@ -104,24 +109,6 @@ function DocumentImage({ filePath, onRemove }: { filePath: string; onRemove: () 
       </Button>
     </div>
   );
-}
-
-/** Corpo JSON da Edge Function (ex.: { error: "..." }) quando HTTP ≠ 2xx */
-async function edgeFunctionErrorMessage(error: unknown): Promise<string> {
-  if (error && typeof error === "object" && "context" in error) {
-    const ctx = (error as { context?: unknown }).context;
-    if (ctx instanceof Response) {
-      try {
-        const j = (await ctx.json()) as { error?: string; message?: string };
-        if (typeof j?.error === "string" && j.error.trim()) return j.error;
-        if (typeof j?.message === "string" && j.message.trim()) return j.message;
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-  if (error instanceof Error && error.message) return error.message;
-  return "Falha ao chamar FNRH";
 }
 
 interface ManualCheckinDialogProps {
@@ -740,6 +727,17 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
     }
   };
 
+  const guestIsMinor = (g: { birth_date?: string }) => {
+    if (!g.birth_date) return false;
+    const bd = new Date(g.birth_date);
+    if (Number.isNaN(bd.getTime())) return false;
+    const today = new Date();
+    let age = today.getFullYear() - bd.getFullYear();
+    const md = today.getMonth() - bd.getMonth();
+    if (md < 0 || (md === 0 && today.getDate() < bd.getDate())) age--;
+    return age < 18;
+  };
+
   const handleRemoveDocument = (guestIndex: number, documentType: "front" | "back" | "selfie") => {
     const guest = guests[guestIndex];
     if (!guest) return;
@@ -757,19 +755,12 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
     }
   };
 
-  const guestIsMinor = (g: { birth_date?: string }) => {
-    if (!g.birth_date) return false;
-    const bd = new Date(g.birth_date);
-    if (Number.isNaN(bd.getTime())) return false;
-    const today = new Date();
-    let age = today.getFullYear() - bd.getFullYear();
-    const md = today.getMonth() - bd.getMonth();
-    if (md < 0 || (md === 0 && today.getDate() < bd.getDate())) age--;
-    return age < 18;
-  };
-
   const handleSubmit = async () => {
     if (!reservation?.id) return;
+
+    // Validação de tipo de fluxo: este diálogo é somente check-in manual (CHECKIN_FLOW_TYPE).
+    // Não invocar fnrh-submit / fnrh-lifecycle — ver comentário no topo do arquivo.
+    void CHECKIN_FLOW_TYPE;
 
     // Validar campos obrigatórios antes de submeter
     const guestsWithNames = guests.filter((g) => g.name && g.name.trim() !== "");
@@ -855,7 +846,6 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         return;
       }
 
-      // FNRH — domínios oficiais (API v2 / ficha nacional)
       if (!guest.fnrh_genero_id?.trim()) {
         toast.error(`Informe o gênero (FNRH) de ${guestLabel}.`);
         return;
@@ -887,7 +877,9 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
       if (guestIsMinor(guest)) {
         const doc = (guest.responsavel_numero_documento || "").trim();
         if (!doc) {
-          toast.error(`Informe o documento do responsável legal (FNRH) para ${guestLabel} (menor de idade).`);
+          toast.error(
+            `Informe o documento do responsável legal (FNRH) para ${guestLabel} (menor de idade).`,
+          );
           return;
         }
       }
@@ -966,62 +958,8 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         });
       }
 
-      // 5. Completar web check-in
+      // 5. Completar web check-in (CHECKIN_FLOW_TYPE === 'manual': sem fnrh-submit)
       await completeWebCheckin.mutateAsync(token!);
-
-      // 5b. FNRH — envio pelo fluxo da equipe (check-in manual na recepção = confirmação explícita, como o botão na reserva)
-      try {
-        const { data: sess } = await supabase.auth.getSession();
-        const access = sess?.session?.access_token;
-        if (!access) {
-          toast.error("Sessão expirada. Faça login novamente. O envio à FNRH não foi feito.");
-        } else {
-          const { data: fnrhResult, error: fnrhErr } = await supabase.functions.invoke(
-            "fnrh-submit",
-            {
-              body: {
-                reservation_id: reservation.id,
-                source: "staff",
-                commit_checkin: true,
-                confirm_explicit: true,
-              },
-              headers: { Authorization: `Bearer ${access}` },
-            },
-          );
-          if (fnrhErr) {
-            toast.error(await edgeFunctionErrorMessage(fnrhErr));
-          } else {
-            const payload = fnrhResult as {
-              success?: boolean;
-              skipped?: boolean;
-              error?: string;
-              reason?: string;
-            };
-            if (payload?.skipped) {
-              toast.message(
-                payload.reason === "already_synced"
-                  ? "Check-in já registrado na FNRH para esta reserva."
-                  : (payload.error || "Envio à FNRH ignorado pelas configurações."),
-              );
-            } else if (payload?.success === false && payload?.error) {
-              toast.error(payload.error);
-            } else if (payload?.success !== false) {
-              toast.success("Check-in confirmado na FNRH.");
-            }
-            queryClient.invalidateQueries({
-              queryKey: ["fnrh_submission_success", reservation.id],
-            });
-            if (reservation.establishment_id) {
-              queryClient.invalidateQueries({
-                queryKey: ["fnrh_settings", reservation.establishment_id],
-              });
-            }
-          }
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Erro ao enviar à FNRH";
-        toast.error(msg);
-      }
 
       // 6. Realizar check-in da reserva (atualizar status para checkedin)
       // skipEmail: true porque o email já foi enviado pelo completeWebCheckin
@@ -1127,7 +1065,8 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         <DialogHeader>
           <DialogTitle>Check-in Manual</DialogTitle>
           <DialogDescription>
-            Preencha os dados dos hóspedes para realizar o check-in manual
+            Preencha os dados dos hóspedes, incluindo meio de hospedagem (FNRH). O envio à Polícia Federal é
+            feito depois pelo botão &quot;Confirmar check-in na FNRH&quot; na reserva (não automático aqui).
           </DialogDescription>
         </DialogHeader>
 
@@ -1676,12 +1615,11 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
 
                   <div className="mt-6 pt-6 border-t border-slate-200">
                     <h4 className="font-semibold text-slate-900 mb-1">
-                      Ficha Nacional de Registro de Hóspedes (FNRH)
+                      Meio de hospedagem (FNRH)
                     </h4>
                     <p className="text-xs text-muted-foreground mb-4">
-                      Campos exigidos pela legislação e pela API FNRH (domínios oficiais v2): gênero, raça/cor,
-                      deficiência, motivo da viagem e meio de transporte. Com residência no Brasil, o município
-                      (IBGE) é obtido a partir do CEP no envio.
+                      Obrigatório para envio à Ficha Nacional: gênero, raça/cor, deficiência, motivo da viagem e
+                      meio de transporte.
                     </p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
@@ -1859,8 +1797,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
                       </div>
                       <div>
                         <Label htmlFor={`fnrh_meio-${index}`}>
-                          Meio de transporte utilizado para chegar ao hotel{" "}
-                          <span className="text-red-500">*</span>
+                          Meio de transporte <span className="text-red-500">*</span>
                         </Label>
                         <Select
                           value={
@@ -1893,7 +1830,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
                     {guestIsMinor(guest) && (
                       <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 p-3 rounded-md bg-amber-50 border border-amber-200">
                         <p className="md:col-span-2 text-sm text-amber-900">
-                          Menor de idade: informe o documento do responsável legal (exigência FNRH).
+                          Menor de idade: documento do responsável legal (FNRH).
                         </p>
                         <div>
                           <Label>Documento do responsável</Label>

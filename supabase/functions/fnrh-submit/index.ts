@@ -43,6 +43,22 @@ function jsonResponse(
   });
 }
 
+/** Marca web_checkin como tendo registro FNRH concluído (check-in realizado na ficha). */
+async function setWebCheckinFnrhRegistered(
+  admin: ReturnType<typeof createClient>,
+  webCheckinId: string | null,
+): Promise<void> {
+  if (!webCheckinId) return;
+  const iso = new Date().toISOString();
+  const { error } = await admin
+    .from("web_checkin")
+    .update({ fnrh_registered_at: iso, updated_at: iso })
+    .eq("id", webCheckinId);
+  if (error) {
+    console.error("fnrh-submit: atualizar fnrh_registered_at", error);
+  }
+}
+
 /** Aceita número (ex.: CEP salvo como int no JSON) ou string. */
 function onlyDigits(s: string | number | null | undefined): string {
   return String(s ?? "").replace(/\D/g, "");
@@ -528,6 +544,7 @@ serve(async (req) => {
       .maybeSingle();
 
     if (prevLog?.status === "success") {
+      await setWebCheckinFnrhRegistered(admin, webCheckinId);
       return jsonResponse(200, {
         success: true,
         skipped: true,
@@ -922,6 +939,8 @@ serve(async (req) => {
         error_message: null,
       })
       .eq("idempotency_key", idempotencyKey);
+
+    await setWebCheckinFnrhRegistered(admin, webCheckinId);
 
     return jsonResponse(200, {
       success: true,

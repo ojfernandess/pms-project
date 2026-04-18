@@ -75,6 +75,45 @@ import {
   reservationGuestContactFields,
   formatOtaGuestAddressLines,
 } from "@/lib/reservationChannelDisplay";
+import { FNRH_MEIOS_TRANSPORTE, FNRH_MOTIVOS_VIAGEM } from "@/lib/fnrh/domainOptions";
+
+function fnrhDomainLabel(
+  list: readonly { id: string; label: string }[],
+  id: string | undefined | null,
+): string | null {
+  if (!id || String(id).trim() === "") return null;
+  return list.find((o) => o.id === id)?.label ?? id;
+}
+
+/** Bloco motivo da viagem + meio de transporte (dados FNRH / meio de hospedagem) por hóspede */
+function FnrhMeioHospedagemGuestBlock({ guest }: { guest: Record<string, unknown> }) {
+  const motivoId = guest.fnrh_motivo_viagem_id as string | undefined;
+  const meioId = guest.fnrh_meio_transporte_id as string | undefined;
+  if (!motivoId?.trim() && !meioId?.trim()) return null;
+  const motivo = fnrhDomainLabel(FNRH_MOTIVOS_VIAGEM, motivoId);
+  const meio = fnrhDomainLabel(FNRH_MEIOS_TRANSPORTE, meioId);
+  return (
+    <div className="md:col-span-2 border-t pt-4 mt-2">
+      <Label className="text-sm font-semibold text-slate-600 mb-2 block">
+        Meio de hospedagem (FNRH)
+      </Label>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-lg bg-slate-50/80 p-3 border border-slate-100">
+        {motivoId?.trim() ? (
+          <div>
+            <Label className="text-xs text-slate-500">Motivo da viagem</Label>
+            <div className="mt-1 text-sm font-medium text-slate-800">{motivo ?? motivoId}</div>
+          </div>
+        ) : null}
+        {meioId?.trim() ? (
+          <div>
+            <Label className="text-xs text-slate-500">Meio de transporte</Label>
+            <div className="mt-1 text-sm font-medium text-slate-800">{meio ?? meioId}</div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 const ReservationDetails = () => {
   const { reservationCode } = useParams<{ establishmentId?: string; reservationCode?: string }>();
@@ -1947,32 +1986,55 @@ const ReservationDetails = () => {
                       </div>
                 <h2 className="text-xl font-semibold text-slate-900">Detalhes da Reserva</h2>
                         </div>
-              <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  "flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end",
+                  "rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/90 p-1.5 shadow-sm",
+                )}
+              >
                 {activityLogs && activityLogs.length > 0 && (
                   <Button
+                    type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => setLogsDialogOpen(true)}
-                    className="gap-2 rounded-lg border-slate-200 hover:bg-slate-50"
+                    className={cn(
+                      "h-9 gap-2 rounded-xl border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-sm",
+                      "transition-all hover:border-slate-300 hover:bg-slate-50 hover:shadow",
+                    )}
                   >
-                    <Activity className="h-4 w-4" />
-                    Ver Logs ({activityLogs.length})
-                  </Button>
-                      )}
-                {reservation?.web_checkin && 
-                 (reservation.web_checkin.status === "completed" || reservation.status === "checkedin") && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setWebCheckinDialogOpen(true)}
-                    className="gap-2 rounded-lg border-slate-200 hover:bg-slate-50"
-                  >
-                    <EyeIcon className="h-4 w-4" />
-                    Ver Pré check-in
+                    <Activity className="h-4 w-4 shrink-0 text-slate-500" />
+                    <span className="whitespace-nowrap">Ver logs</span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 tabular-nums">
+                      {activityLogs.length}
+                    </span>
                   </Button>
                 )}
+                {reservation?.web_checkin &&
+                  (reservation.web_checkin.status === "completed" ||
+                    reservation.status === "checkedin") && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setWebCheckinDialogOpen(true)}
+                      className={cn(
+                        "h-9 gap-2 rounded-xl border-sky-200 bg-gradient-to-b from-white to-sky-50/90 px-3.5 text-sm font-medium text-sky-900 shadow-sm",
+                        "transition-all hover:border-sky-300 hover:shadow-md",
+                      )}
+                    >
+                      <EyeIcon className="h-4 w-4 shrink-0 text-sky-600" />
+                      <span className="whitespace-nowrap">
+                        {(reservation.web_checkin as { fnrh_registered_at?: string | null })
+                          ?.fnrh_registered_at
+                          ? "Ver check-in"
+                          : "Ver pré check-in"}
+                      </span>
+                    </Button>
+                  )}
                 <FnrhConfirmCheckinButton
                   reservationId={reservation?.id}
+                  reservationCode={reservation?.reservation_code}
                   establishmentId={
                     reservation?.establishment_id ||
                     getSelectedEstablishmentId() ||
@@ -1983,22 +2045,26 @@ const ReservationDetails = () => {
                   }
                   disabled={reservation?.status === "cancelled"}
                 />
-                {reservation && 
-                 reservation.status !== "checkedin" && 
-                 reservation.status !== "checkedout" && 
-                 reservation.status !== "cancelled" && 
-                 !(reservation.web_checkin && reservation.web_checkin.status === "completed") && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setManualCheckinDialogOpen(true)}
-                    className="gap-2 rounded-lg border-green-200 hover:bg-green-50 text-green-700"
-                  >
-                    <CheckCircle2 className="h-4 w-4" />
-                    Check-in Manual
-                  </Button>
+                {reservation &&
+                  reservation.status !== "checkedin" &&
+                  reservation.status !== "checkedout" &&
+                  reservation.status !== "cancelled" &&
+                  !(reservation.web_checkin && reservation.web_checkin.status === "completed") && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setManualCheckinDialogOpen(true)}
+                      className={cn(
+                        "h-9 gap-2 rounded-xl border-emerald-600/25 bg-gradient-to-b from-emerald-600 to-emerald-700 px-3.5 text-sm font-semibold text-white shadow-md shadow-emerald-900/10",
+                        "transition-all hover:from-emerald-500 hover:to-emerald-600 hover:shadow-lg",
                       )}
-                    </div>
+                    >
+                      <CheckCircle2 className="h-4 w-4 shrink-0" />
+                      <span className="whitespace-nowrap">Check-in manual</span>
+                    </Button>
+                  )}
+              </div>
                   </div>
             
             {/* Visual Timeline */}
@@ -4048,43 +4114,79 @@ const ReservationDetails = () => {
             <div className="space-y-6 mt-4">
               {/* Status do Check-in */}
               <Card className="p-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <Label className="text-sm font-semibold text-slate-600">Status</Label>
                     <div className="mt-1">
-                      <Badge 
+                      <Badge
                         variant={
-                          reservation.web_checkin.status === "completed" ? "default" :
-                          reservation.web_checkin.status === "in_progress" ? "secondary" :
-                          reservation.web_checkin.status === "expired" ? "destructive" :
-                          "outline"
+                          reservation.web_checkin.fnrh_registered_at
+                            ? "default"
+                            : reservation.web_checkin.status === "completed"
+                              ? "default"
+                              : reservation.web_checkin.status === "in_progress"
+                                ? "secondary"
+                                : reservation.web_checkin.status === "expired"
+                                  ? "destructive"
+                                  : "outline"
                         }
                         className={
-                          reservation.web_checkin.status === "completed" ? "bg-green-500" :
-                          reservation.web_checkin.status === "in_progress" ? "bg-blue-500" :
-                          reservation.web_checkin.status === "expired" ? "bg-red-500" :
-                          ""
+                          reservation.web_checkin.fnrh_registered_at
+                            ? "bg-emerald-600 hover:bg-emerald-600"
+                            : reservation.web_checkin.status === "completed"
+                              ? "bg-green-600 hover:bg-green-600"
+                              : reservation.web_checkin.status === "in_progress"
+                                ? "bg-blue-500"
+                                : reservation.web_checkin.status === "expired"
+                                  ? "bg-red-500"
+                                  : ""
                         }
                       >
-                        {reservation.web_checkin.status === "completed" ? "Concluído" :
-                         reservation.web_checkin.status === "in_progress" ? "Em Andamento" :
-                         reservation.web_checkin.status === "expired" ? "Expirado" :
-                         reservation.web_checkin.status === "pending" ? "Pendente" :
-                         reservation.web_checkin.status}
+                        {reservation.web_checkin.fnrh_registered_at
+                          ? "Check-in realizado"
+                          : reservation.web_checkin.status === "completed"
+                            ? "Pré check-in concluído"
+                            : reservation.web_checkin.status === "in_progress"
+                              ? "Em andamento"
+                              : reservation.web_checkin.status === "expired"
+                                ? "Expirado"
+                                : reservation.web_checkin.status === "pending"
+                                  ? "Pendente"
+                                  : reservation.web_checkin.status}
                       </Badge>
                     </div>
                   </div>
-                  {reservation.web_checkin.status === "completed" && reservation.web_checkin.completed_at && (() => {
-                    const completedDate = parseISO(reservation.web_checkin.completed_at);
-                    return isValid(completedDate) ? (
-                      <div className="text-right">
-                        <Label className="text-sm font-semibold text-slate-600">Concluído em</Label>
-                        <div className="mt-1 text-sm text-slate-700">
-                          {format(completedDate, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                        </div>
-                      </div>
-                    ) : null;
-                  })()}
+                  <div className="text-left sm:text-right space-y-3 min-w-0">
+                    {reservation.web_checkin.status === "completed" &&
+                      reservation.web_checkin.completed_at &&
+                      (() => {
+                        const completedDate = parseISO(reservation.web_checkin.completed_at);
+                        return isValid(completedDate) ? (
+                          <div>
+                            <Label className="text-sm font-semibold text-slate-600">
+                              Pré check-in concluído em
+                            </Label>
+                            <div className="mt-1 text-sm text-slate-700">
+                              {format(completedDate, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                            </div>
+                          </div>
+                        ) : null;
+                      })()}
+                    {reservation.web_checkin.fnrh_registered_at &&
+                      (() => {
+                        const fnrhDate = parseISO(reservation.web_checkin.fnrh_registered_at);
+                        return isValid(fnrhDate) ? (
+                          <div>
+                            <Label className="text-sm font-semibold text-slate-600">
+                              Registro FNRH (check-in realizado)
+                            </Label>
+                            <div className="mt-1 text-sm text-slate-700">
+                              {format(fnrhDate, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                            </div>
+                          </div>
+                        ) : null;
+                      })()}
+                  </div>
                 </div>
               </Card>
 
@@ -4294,6 +4396,9 @@ const ReservationDetails = () => {
                               </div>
                             </div>
                           )}
+                          <FnrhMeioHospedagemGuestBlock
+                            guest={mainGuestFromWebCheckin as Record<string, unknown>}
+                          />
                         </div>
                       </Card>
                     );
@@ -4539,6 +4644,7 @@ const ReservationDetails = () => {
                                 </div>
                               </div>
                             )}
+                            <FnrhMeioHospedagemGuestBlock guest={guest as Record<string, unknown>} />
                           </div>
                         </Card>
                       ))}

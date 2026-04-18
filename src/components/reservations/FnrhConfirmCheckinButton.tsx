@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFnrhSettings } from "@/hooks/useFnrhSettings";
@@ -26,10 +27,13 @@ async function edgeFunctionErrorMessage(error: unknown): Promise<string> {
 
 type Props = {
   reservationId: string | undefined;
+  /** Localizador — refetch da reserva após FNRH (atualiza fnrh_registered_at e rótulo Ver check-in) */
+  reservationCode?: string;
   establishmentId: string | undefined;
   /** Web check-in concluído (pré-check-in) — habilita confirmação presencial na FNRH */
   webCheckinCompleted: boolean;
   disabled?: boolean;
+  className?: string;
 };
 
 /**
@@ -38,9 +42,11 @@ type Props = {
  */
 export function FnrhConfirmCheckinButton({
   reservationId,
+  reservationCode,
   establishmentId,
   webCheckinCompleted,
   disabled,
+  className,
 }: Props) {
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
@@ -105,6 +111,13 @@ export function FnrhConfirmCheckinButton({
         queryClient.invalidateQueries({
           queryKey: ["fnrh_submission_success", reservationId],
         });
+        queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+        queryClient.invalidateQueries({ queryKey: ["reservation"] });
+        if (reservationCode) {
+          void queryClient.refetchQueries({ queryKey: ["reservation", reservationCode] });
+        } else {
+          void queryClient.refetchQueries({ queryKey: ["reservation"] });
+        }
         return;
       }
       if (payload?.success === false && payload?.error) {
@@ -116,7 +129,13 @@ export function FnrhConfirmCheckinButton({
         queryKey: ["fnrh_submission_success", reservationId],
       });
       queryClient.invalidateQueries({ queryKey: ["fnrh_settings", establishmentId] });
+      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
       queryClient.invalidateQueries({ queryKey: ["reservation"] });
+      if (reservationCode) {
+        void queryClient.refetchQueries({ queryKey: ["reservation", reservationCode] });
+      } else {
+        void queryClient.refetchQueries({ queryKey: ["reservation"] });
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro ao confirmar na FNRH";
       toast.error(msg);
@@ -132,7 +151,10 @@ export function FnrhConfirmCheckinButton({
       type="button"
       variant="default"
       size="sm"
-      className="gap-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800"
+      className={cn(
+        "h-9 gap-2 rounded-xl border border-slate-800/20 bg-gradient-to-b from-slate-800 to-slate-900 px-3.5 text-sm font-semibold text-white shadow-md shadow-slate-900/15 transition-all hover:from-slate-700 hover:to-slate-800 hover:shadow-lg",
+        className,
+      )}
       disabled={disabled || loading}
       onClick={handleClick}
       title="Registra o check-in presencial na Ficha Nacional (FNRH), após o pré-check-in online."
