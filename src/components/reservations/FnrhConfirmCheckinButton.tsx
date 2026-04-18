@@ -1,0 +1,148 @@
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useFnrhSettings } from "@/hooks/useFnrhSettings";
+import { Loader2, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
+
+/** Corpo JSON da Edge Function (ex.: { error: "..." }) quando HTTP ≠ 2xx */
+async function edgeFunctionErrorMessage(error: unknown): Promise<string> {
+  if (error && typeof error === "object" && "context" in error) {
+    const ctx = (error as { context?: unknown }).context;
+    if (ctx instanceof Response) {
+      try {
+        const j = (await ctx.json()) as { error?: string; message?: string };
+        if (typeof j?.error === "string" && j.error.trim()) return j.error;
+        if (typeof j?.message === "string" && j.message.trim()) return j.message;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return "Falha ao chamar FNRH";
+}
+
+type Props = {
+  reservationId: string | undefined;
+  establishmentId: string | undefined;
+  /** Web check-in concluído (pré-check-in) — habilita confirmação presencial na FNRH */
+  webCheckinCompleted: boolean;
+  disabled?: boolean;
+};
+
+/**
+ * Confirma o check-in presencial na API FNRH (CHECKIN_REALIZADO).
+ * O web check-in no app é apenas pré-check-in; o envio à Polícia Federal ocorre aqui na recepção.
+ */
+export function FnrhConfirmCheckinButton({
+  reservationId,
+  establishmentId,
+  webCheckinCompleted,
+  disabled,
+}: Props) {
+  const queryClient = useQueryClient();
+  const [loading, setLoading] = useState(false);
+  const { data: fnrhSettings } = useFnrhSettings(establishmentId);
+
+  const { data: fnrhSuccess } = useQuery({
+    queryKey: ["fnrh_submission_success", reservationId],
+    enabled: !!reservationId,
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("fnrh_submission_log")
+        .select("id, status")
+        .eq("reservation_id", reservationId!)
+        .eq("operation", "hospedagem_registrar")
+        .eq("status", "success")
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const enabledFnrh = !!fnrhSettings?.enabled;
+  const alreadySent = !!fnrhSuccess;
+  const visible =
+    enabledFnrh && webCheckinCompleted && !alreadySent && !!reservationId;
+
+  const handleClick = async () => {
+    if (!reservationId) return;
+    setLoading(true);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const access = sess?.session?.access_token;
+      if (!access) {
+        toast.error("Sessão expirada. Faça login novamente.");
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke("fnrh-submit", {
+        body: {
+          reservation_id: reservationId,
+          source: "staff",
+          commit_checkin: true,
+          confirm_explicit: true,
+        },
+        headers: { Authorization: `Bearer ${access}` },
+      });
+      if (error) {
+        toast.error(await edgeFunctionErrorMessage(error));
+        return;
+      }
+      const payload = data as {
+        success?: boolean;
+        skipped?: boolean;
+        error?: string;
+        reason?: string;
+      };
+      if (payload?.skipped) {
+        toast.message(
+          payload.reason === "already_synced"
+            ? "Check-in já registrado na FNRH para esta reserva."
+            : (payload.error || "Envio ignorado pelas configurações."),
+        );
+        queryClient.invalidateQueries({
+          queryKey: ["fnrh_submission_success", reservationId],
+        });
+        return;
+      }
+      if (payload?.success === false && payload?.error) {
+        toast.error(payload.error);
+        return;
+      }
+      toast.success("Check-in confirmado na FNRH.");
+      queryClient.invalidateQueries({
+        queryKey: ["fnrh_submission_success", reservationId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["fnrh_settings", establishmentId] });
+      queryClient.invalidateQueries({ queryKey: ["reservation"] });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro ao confirmar na FNRH";
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!visible) return null;
+
+  return (
+    <Button
+      type="button"
+      variant="default"
+      size="sm"
+      className="gap-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800"
+      disabled={disabled || loading}
+      onClick={handleClick}
+      title="Registra o check-in presencial na Ficha Nacional (FNRH), após o pré-check-in online."
+    >
+      {loading ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <ShieldCheck className="h-4 w-4" />
+      )}
+      Confirmar check-in na FNRH
+    </Button>
+  );
+}

@@ -1037,6 +1037,13 @@ export const useReservations = () => {
         .eq("id", id);
 
       if (error) throw error;
+
+      try {
+        const { invokeFnrhLifecycle } = await import("@/lib/fnrh/invokeFnrhLifecycle");
+        void invokeFnrhLifecycle(id, "cancel");
+      } catch {
+        /* FNRH opcional */
+      }
       
       return { ...reservationData, refundPayments, originalStatus, cancellation_reason: reason };
     },
@@ -1241,6 +1248,13 @@ export const useReservations = () => {
         .single();
 
       if (error) throw error;
+
+      try {
+        const { invokeFnrhLifecycle } = await import("@/lib/fnrh/invokeFnrhLifecycle");
+        void invokeFnrhLifecycle(id, "checkout");
+      } catch {
+        /* FNRH opcional */
+      }
 
       // Atualizar status do quarto para cleaning
       if (reservation?.room_id) {

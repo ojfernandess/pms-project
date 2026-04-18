@@ -78,7 +78,7 @@ export function ReviewAndConfirmStep({
         }
       }
 
-      // Completar check-in
+      // Completar pré check-in (web). O envio à FNRH ocorre na recepção, no check-in presencial.
       await completeWebCheckin.mutateAsync(token);
 
       // Invalidar queries para garantir atualização

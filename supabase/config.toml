@@ -32,3 +32,9 @@ verify_jwt = true
 
 [functions.channex-mapping-options]
 verify_jwt = true
+
+[functions.fnrh-submit]
+verify_jwt = false
+
+[functions.fnrh-lifecycle]
+verify_jwt = false

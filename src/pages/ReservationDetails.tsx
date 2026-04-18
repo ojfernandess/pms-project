@@ -63,6 +63,7 @@ import { recordProcessedRefund } from "@/services/financial/refundService";
 import { useActivityLogs, ActivityLog } from "@/hooks/useActivityLogs";
 import { Activity, Clock as ClockIcon } from "lucide-react";
 import { ManualCheckinDialog } from "@/components/reservations/ManualCheckinDialog";
+import { FnrhConfirmCheckinButton } from "@/components/reservations/FnrhConfirmCheckinButton";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
@@ -401,33 +402,43 @@ const ReservationDetails = () => {
           })
         );
         
+        // Pré check-in: mesclar web_checkin.guest_data.guests[] (FNRH/dados do fluxo) com as linhas
+        const gdRoot = webCheckinData.guest_data as
+          | { guests?: Record<string, unknown>[] }
+          | null
+          | undefined;
+        const guestDataGuestsArr = Array.isArray(gdRoot?.guests)
+          ? gdRoot.guests
+          : [];
+
         // Processar guests para incluir dados de guest_data (JSONB) se disponível
-        const processedGuests = (guestsData || []).map((guest: any) => {
-          // Se houver guest_data (JSONB), mesclar com os dados da tabela
+        const processedGuests = (guestsData || []).map((guest: any, index: number) => {
+          const fromPrereg = guestDataGuestsArr[index] || {};
+          const mergedBase = { ...guest, ...fromPrereg };
+          // Se houver guest_data (JSONB na linha), mesclar com os dados da tabela
           if (guest.guest_data && typeof guest.guest_data === 'object') {
             const processedGuest = {
-              ...guest,
+              ...mergedBase,
               ...guest.guest_data,
               // Priorizar dados do JSONB, mas manter dados da tabela se não existirem no JSONB
-              name: guest.guest_data.name || guest.name,
-              email: guest.guest_data.email || guest.email,
-              phone: guest.guest_data.phone || guest.phone,
-              cpf: guest.guest_data.cpf || guest.cpf,
-              birth_date: guest.guest_data.birth_date || guest.birth_date,
-              document_type: guest.guest_data.document_type || guest.document_type,
-              document_number: guest.guest_data.document_number || guest.document_number,
-              // Priorizar country e nationality do JSONB, depois da tabela, depois usar um como fallback do outro
-              nationality: guest.guest_data.nationality || guest.nationality || guest.guest_data.country || guest.country || null,
-              country: guest.guest_data.country || guest.country || guest.guest_data.nationality || guest.nationality || null,
-              zip_code: guest.guest_data.zip_code || guest.zip_code,
-              postal_code: guest.guest_data.postal_code || guest.postal_code,
-              street: guest.guest_data.street || guest.street,
-              number: guest.guest_data.number || guest.number,
-              complement: guest.guest_data.complement || guest.complement,
-              neighborhood: guest.guest_data.neighborhood || guest.neighborhood,
-              city: guest.guest_data.city || guest.city,
-              state: guest.guest_data.state || guest.state,
-              is_main_guest: guest.guest_data.is_main_guest !== undefined ? guest.guest_data.is_main_guest : guest.is_main_guest,
+              name: guest.guest_data.name || mergedBase.name,
+              email: guest.guest_data.email || mergedBase.email,
+              phone: guest.guest_data.phone || mergedBase.phone,
+              cpf: guest.guest_data.cpf || mergedBase.cpf,
+              birth_date: guest.guest_data.birth_date || mergedBase.birth_date,
+              document_type: guest.guest_data.document_type || mergedBase.document_type,
+              document_number: guest.guest_data.document_number || mergedBase.document_number,
+              nationality: guest.guest_data.nationality || mergedBase.nationality || guest.guest_data.country || mergedBase.country || null,
+              country: guest.guest_data.country || mergedBase.country || guest.guest_data.nationality || mergedBase.nationality || null,
+              zip_code: guest.guest_data.zip_code || mergedBase.zip_code,
+              postal_code: guest.guest_data.postal_code || mergedBase.postal_code,
+              street: guest.guest_data.street || mergedBase.street,
+              number: guest.guest_data.number || mergedBase.number,
+              complement: guest.guest_data.complement || mergedBase.complement,
+              neighborhood: guest.guest_data.neighborhood || mergedBase.neighborhood,
+              city: guest.guest_data.city || mergedBase.city,
+              state: guest.guest_data.state || mergedBase.state,
+              is_main_guest: guest.guest_data.is_main_guest !== undefined ? guest.guest_data.is_main_guest : mergedBase.is_main_guest,
             };
             // Debug: verificar se country está presente
             if (processedGuest.is_main_guest) {
@@ -442,12 +453,11 @@ const ReservationDetails = () => {
             }
             return processedGuest;
           }
-          // Se não houver guest_data, usar dados da tabela e fazer fallback entre country e nationality
+          // Se não houver guest_data na linha, usar dados mesclados (tabela + pré check-in)
           const processedGuest = {
-            ...guest,
-            // Fazer fallback entre country e nationality se um estiver vazio
-            nationality: guest.nationality || guest.country || null,
-            country: guest.country || guest.nationality || null,
+            ...mergedBase,
+            nationality: mergedBase.nationality || mergedBase.country || null,
+            country: mergedBase.country || mergedBase.nationality || null,
           };
           // Debug: verificar guest sem guest_data
           if (processedGuest.is_main_guest) {
@@ -1958,9 +1968,21 @@ const ReservationDetails = () => {
                     className="gap-2 rounded-lg border-slate-200 hover:bg-slate-50"
                   >
                     <EyeIcon className="h-4 w-4" />
-                    Ver Check-in
+                    Ver Pré check-in
                   </Button>
                 )}
+                <FnrhConfirmCheckinButton
+                  reservationId={reservation?.id}
+                  establishmentId={
+                    reservation?.establishment_id ||
+                    getSelectedEstablishmentId() ||
+                    undefined
+                  }
+                  webCheckinCompleted={
+                    reservation?.web_checkin?.status === "completed"
+                  }
+                  disabled={reservation?.status === "cancelled"}
+                />
                 {reservation && 
                  reservation.status !== "checkedin" && 
                  reservation.status !== "checkedout" && 

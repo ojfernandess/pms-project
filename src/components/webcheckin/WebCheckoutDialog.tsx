@@ -17,6 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { logActivity } from "@/lib/activityLogger";
+import { invokeFnrhLifecycle } from "@/lib/fnrh/invokeFnrhLifecycle";
 
 interface WebCheckoutDialogProps {
   open: boolean;
@@ -59,6 +60,10 @@ export function WebCheckoutDialog({
         .eq("id", reservation.id);
 
       if (updateError) throw updateError;
+
+      await invokeFnrhLifecycle(reservation.id, "checkout", {
+        webCheckinToken: token || webCheckin?.token || null,
+      });
 
       // Atualizar status do quarto para cleaning
       if (currentReservation?.room_id) {

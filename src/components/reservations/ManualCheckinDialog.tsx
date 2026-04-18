@@ -16,6 +16,29 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReuseDataDialog } from "@/components/webcheckin/ReuseDataDialog";
+import {
+  FNRH_DEFICIENCIA,
+  FNRH_GENEROS,
+  FNRH_MEIOS_TRANSPORTE,
+  FNRH_MOTIVOS_VIAGEM,
+  FNRH_RACAS,
+  FNRH_SELECT_PLACEHOLDER,
+  FNRH_TIPOS_DEFICIENCIA,
+} from "@/lib/fnrh/domainOptions";
+
+/** Campos FNRH (API v2 / ficha nacional) — mesmo modelo do web check-in */
+const DEFAULT_FNRH_GUEST_FIELDS = {
+  fnrh_genero_id: "",
+  fnrh_motivo_viagem_id: "",
+  fnrh_meio_transporte_id: "",
+  fnrh_raca_id: "",
+  fnrh_deficiencia_id: "",
+  fnrh_tipo_deficiencia_id: "",
+  fnrh_genero_descricao: "",
+  cidade_ibge_id: "",
+  responsavel_numero_documento: "",
+  responsavel_tipo_documento_id: "CPF",
+} as const;
 
 // Componente auxiliar para exibir imagem de documento
 function DocumentImage({ filePath, onRemove }: { filePath: string; onRemove: () => void }) {
@@ -83,6 +106,24 @@ function DocumentImage({ filePath, onRemove }: { filePath: string; onRemove: () 
   );
 }
 
+/** Corpo JSON da Edge Function (ex.: { error: "..." }) quando HTTP ≠ 2xx */
+async function edgeFunctionErrorMessage(error: unknown): Promise<string> {
+  if (error && typeof error === "object" && "context" in error) {
+    const ctx = (error as { context?: unknown }).context;
+    if (ctx instanceof Response) {
+      try {
+        const j = (await ctx.json()) as { error?: string; message?: string };
+        if (typeof j?.error === "string" && j.error.trim()) return j.error;
+        if (typeof j?.message === "string" && j.message.trim()) return j.message;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return "Falha ao chamar FNRH";
+}
+
 interface ManualCheckinDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -131,6 +172,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
       country: "BR",
       nationality: "BR",
       use_main_guest_address: false,
+      ...DEFAULT_FNRH_GUEST_FIELDS,
     },
   ]);
   
@@ -227,6 +269,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
           country: "BR",
           nationality: "BR",
           use_main_guest_address: false,
+          ...DEFAULT_FNRH_GUEST_FIELDS,
         };
 
         // Ajustar número de hóspedes baseado na reserva, respeitando a capacidade máxima
@@ -256,6 +299,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
             country: "BR",
             nationality: "BR",
             use_main_guest_address: false,
+            ...DEFAULT_FNRH_GUEST_FIELDS,
           }));
           initialGuests.push(...additionalGuests);
         }
@@ -287,6 +331,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
           country: "BR",
           nationality: "BR",
           use_main_guest_address: false,
+          ...DEFAULT_FNRH_GUEST_FIELDS,
         }));
         
         setGuests(emptyGuests);
@@ -320,6 +365,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         country: "BR",
         nationality: "BR",
         use_main_guest_address: false,
+        ...DEFAULT_FNRH_GUEST_FIELDS,
       }]);
       setDocuments([]);
       setPreferences({
@@ -381,6 +427,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         country: "BR",
         nationality: "BR",
         use_main_guest_address: false,
+        ...DEFAULT_FNRH_GUEST_FIELDS,
       }));
       setGuests(prevGuests => [...prevGuests, ...newGuests]);
     } else if (guests.length > maxAllowed) {
@@ -512,6 +559,13 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         ...updatedGuests[index],
         nationality: value,
       };
+    } else if (field === "fnrh_deficiencia_id") {
+      updatedGuests[index] = {
+        ...updatedGuests[index],
+        fnrh_deficiencia_id: value,
+        fnrh_tipo_deficiencia_id:
+          value === "SIM" ? updatedGuests[index].fnrh_tipo_deficiencia_id : "",
+      };
     } else if (field === "zip_code") {
       // Se for CEP, formatar e buscar endereço quando completo (apenas para Brasil)
       const formattedCep = formatCEP(value);
@@ -587,6 +641,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         country: "BR",
         nationality: "BR",
         use_main_guest_address: false,
+        ...DEFAULT_FNRH_GUEST_FIELDS,
       },
     ]);
   };
@@ -702,6 +757,17 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
     }
   };
 
+  const guestIsMinor = (g: { birth_date?: string }) => {
+    if (!g.birth_date) return false;
+    const bd = new Date(g.birth_date);
+    if (Number.isNaN(bd.getTime())) return false;
+    const today = new Date();
+    let age = today.getFullYear() - bd.getFullYear();
+    const md = today.getMonth() - bd.getMonth();
+    if (md < 0 || (md === 0 && today.getDate() < bd.getDate())) age--;
+    return age < 18;
+  };
+
   const handleSubmit = async () => {
     if (!reservation?.id) return;
 
@@ -788,6 +854,43 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         toast.error(`O Estado do ${guestLabel} é obrigatório.`);
         return;
       }
+
+      // FNRH — domínios oficiais (API v2 / ficha nacional)
+      if (!guest.fnrh_genero_id?.trim()) {
+        toast.error(`Informe o gênero (FNRH) de ${guestLabel}.`);
+        return;
+      }
+      if (!guest.fnrh_raca_id?.trim()) {
+        toast.error(`Informe a raça/cor (FNRH) de ${guestLabel}.`);
+        return;
+      }
+      if (!guest.fnrh_deficiencia_id?.trim()) {
+        toast.error(`Informe se possui deficiência (FNRH) — ${guestLabel}.`);
+        return;
+      }
+      if (guest.fnrh_deficiencia_id === "SIM" && !guest.fnrh_tipo_deficiencia_id?.trim()) {
+        toast.error(`Informe o tipo de deficiência (FNRH) de ${guestLabel}.`);
+        return;
+      }
+      if (!guest.fnrh_motivo_viagem_id?.trim()) {
+        toast.error(`Informe o motivo da viagem (FNRH) de ${guestLabel}.`);
+        return;
+      }
+      if (!guest.fnrh_meio_transporte_id?.trim()) {
+        toast.error(`Informe o meio de transporte (FNRH) de ${guestLabel}.`);
+        return;
+      }
+      if (guest.fnrh_genero_id === "OUTRO" && !(guest.fnrh_genero_descricao || "").trim()) {
+        toast.error(`Descreva o gênero (FNRH, opção "Outros") para ${guestLabel}.`);
+        return;
+      }
+      if (guestIsMinor(guest)) {
+        const doc = (guest.responsavel_numero_documento || "").trim();
+        if (!doc) {
+          toast.error(`Informe o documento do responsável legal (FNRH) para ${guestLabel} (menor de idade).`);
+          return;
+        }
+      }
     }
 
     setIsSubmitting(true);
@@ -814,32 +917,9 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
       }
 
       // 2. Salvar hóspedes (incluindo endereço)
-      const guestsToSave = guests.map((guest, index) => ({
-        name: guest.name,
-        cpf: guest.cpf,
-        birth_date: guest.birth_date || null,
-        email: guest.email || null,
-        phone: guest.phone || null,
-        is_main_guest: guest.is_main_guest || false,
-        document_type: guest.document_type,
-        document_number: guest.document_number || guest.cpf,
-        order: index,
-        // Campos de endereço
-        zip_code: guest.zip_code || guest.postal_code || null,
-        postal_code: guest.postal_code || guest.zip_code || null,
-        street: guest.street || null,
-        number: guest.number || null,
-        complement: guest.complement || null,
-        neighborhood: guest.neighborhood || null,
-        city: guest.city || null,
-        state: guest.state || null,
-        country: guest.country || "BR",
-        nationality: guest.nationality || "BR",
-      }));
-
       await saveGuests.mutateAsync({
         token: token!,
-        guests: guestsToSave,
+        guests,
       });
 
       // 3. Salvar documentos (se houver)
@@ -888,6 +968,60 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
 
       // 5. Completar web check-in
       await completeWebCheckin.mutateAsync(token!);
+
+      // 5b. FNRH — envio pelo fluxo da equipe (check-in manual na recepção = confirmação explícita, como o botão na reserva)
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        const access = sess?.session?.access_token;
+        if (!access) {
+          toast.error("Sessão expirada. Faça login novamente. O envio à FNRH não foi feito.");
+        } else {
+          const { data: fnrhResult, error: fnrhErr } = await supabase.functions.invoke(
+            "fnrh-submit",
+            {
+              body: {
+                reservation_id: reservation.id,
+                source: "staff",
+                commit_checkin: true,
+                confirm_explicit: true,
+              },
+              headers: { Authorization: `Bearer ${access}` },
+            },
+          );
+          if (fnrhErr) {
+            toast.error(await edgeFunctionErrorMessage(fnrhErr));
+          } else {
+            const payload = fnrhResult as {
+              success?: boolean;
+              skipped?: boolean;
+              error?: string;
+              reason?: string;
+            };
+            if (payload?.skipped) {
+              toast.message(
+                payload.reason === "already_synced"
+                  ? "Check-in já registrado na FNRH para esta reserva."
+                  : (payload.error || "Envio à FNRH ignorado pelas configurações."),
+              );
+            } else if (payload?.success === false && payload?.error) {
+              toast.error(payload.error);
+            } else if (payload?.success !== false) {
+              toast.success("Check-in confirmado na FNRH.");
+            }
+            queryClient.invalidateQueries({
+              queryKey: ["fnrh_submission_success", reservation.id],
+            });
+            if (reservation.establishment_id) {
+              queryClient.invalidateQueries({
+                queryKey: ["fnrh_settings", reservation.establishment_id],
+              });
+            }
+          }
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Erro ao enviar à FNRH";
+        toast.error(msg);
+      }
 
       // 6. Realizar check-in da reserva (atualizar status para checkedin)
       // skipEmail: true porque o email já foi enviado pelo completeWebCheckin
@@ -948,6 +1082,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
     if (reusedData.guests && Array.isArray(reusedData.guests)) {
       // Garantir que todos os campos de endereço estejam presentes
       const guestsWithAddress = reusedData.guests.map((g: any) => ({
+        ...DEFAULT_FNRH_GUEST_FIELDS,
         ...g,
         zip_code: g.zip_code || "",
         postal_code: g.postal_code || "",
@@ -1207,6 +1342,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
                             country: "BR",
                             nationality: "BR",
                             use_main_guest_address: false,
+                            ...DEFAULT_FNRH_GUEST_FIELDS,
                           }));
                           
                           setGuests(emptyGuests);
@@ -1536,6 +1672,266 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
                         </div>
                       )}
                     </div>
+                  </div>
+
+                  <div className="mt-6 pt-6 border-t border-slate-200">
+                    <h4 className="font-semibold text-slate-900 mb-1">
+                      Ficha Nacional de Registro de Hóspedes (FNRH)
+                    </h4>
+                    <p className="text-xs text-muted-foreground mb-4">
+                      Campos exigidos pela legislação e pela API FNRH (domínios oficiais v2): gênero, raça/cor,
+                      deficiência, motivo da viagem e meio de transporte. Com residência no Brasil, o município
+                      (IBGE) é obtido a partir do CEP no envio.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor={`fnrh_genero-${index}`}>
+                          Gênero <span className="text-red-500">*</span>
+                        </Label>
+                        <Select
+                          value={
+                            guest.fnrh_genero_id?.trim()
+                              ? guest.fnrh_genero_id
+                              : FNRH_SELECT_PLACEHOLDER
+                          }
+                          onValueChange={(v) =>
+                            handleGuestChange(
+                              index,
+                              "fnrh_genero_id",
+                              v === FNRH_SELECT_PLACEHOLDER ? "" : v,
+                            )
+                          }
+                        >
+                          <SelectTrigger id={`fnrh_genero-${index}`}>
+                            <SelectValue placeholder="Selecione" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
+                            {FNRH_GENEROS.map((o) => (
+                              <SelectItem key={o.id} value={o.id}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {guest.fnrh_genero_id === "OUTRO" && (
+                        <div className="md:col-span-2">
+                          <Label htmlFor={`fnrh_genero_desc-${index}`}>
+                            Descreva o gênero (obrigatório para &quot;Outros&quot;){" "}
+                            <span className="text-red-500">*</span>
+                          </Label>
+                          <Input
+                            id={`fnrh_genero_desc-${index}`}
+                            value={guest.fnrh_genero_descricao || ""}
+                            onChange={(e) =>
+                              handleGuestChange(index, "fnrh_genero_descricao", e.target.value)
+                            }
+                            maxLength={200}
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <Label htmlFor={`fnrh_raca-${index}`}>
+                          Raça/cor <span className="text-red-500">*</span>
+                        </Label>
+                        <Select
+                          value={
+                            guest.fnrh_raca_id?.trim()
+                              ? guest.fnrh_raca_id
+                              : FNRH_SELECT_PLACEHOLDER
+                          }
+                          onValueChange={(v) =>
+                            handleGuestChange(
+                              index,
+                              "fnrh_raca_id",
+                              v === FNRH_SELECT_PLACEHOLDER ? "" : v,
+                            )
+                          }
+                        >
+                          <SelectTrigger id={`fnrh_raca-${index}`}>
+                            <SelectValue placeholder="Selecione" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
+                            {FNRH_RACAS.map((o) => (
+                              <SelectItem key={o.id} value={o.id}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor={`fnrh_def-${index}`}>
+                          Possui deficiência? <span className="text-red-500">*</span>
+                        </Label>
+                        <Select
+                          value={
+                            guest.fnrh_deficiencia_id?.trim()
+                              ? guest.fnrh_deficiencia_id
+                              : FNRH_SELECT_PLACEHOLDER
+                          }
+                          onValueChange={(v) =>
+                            handleGuestChange(
+                              index,
+                              "fnrh_deficiencia_id",
+                              v === FNRH_SELECT_PLACEHOLDER ? "" : v,
+                            )
+                          }
+                        >
+                          <SelectTrigger id={`fnrh_def-${index}`}>
+                            <SelectValue placeholder="Selecione" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
+                            {FNRH_DEFICIENCIA.map((o) => (
+                              <SelectItem key={o.id} value={o.id}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {guest.fnrh_deficiencia_id === "SIM" && (
+                        <div>
+                          <Label htmlFor={`fnrh_tipo_def-${index}`}>
+                            Tipo de deficiência <span className="text-red-500">*</span>
+                          </Label>
+                          <Select
+                            value={
+                              guest.fnrh_tipo_deficiencia_id?.trim()
+                                ? guest.fnrh_tipo_deficiencia_id
+                                : FNRH_SELECT_PLACEHOLDER
+                            }
+                            onValueChange={(v) =>
+                              handleGuestChange(
+                                index,
+                                "fnrh_tipo_deficiencia_id",
+                                v === FNRH_SELECT_PLACEHOLDER ? "" : v,
+                              )
+                            }
+                          >
+                            <SelectTrigger id={`fnrh_tipo_def-${index}`}>
+                              <SelectValue placeholder="Selecione" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
+                              {FNRH_TIPOS_DEFICIENCIA.map((o) => (
+                                <SelectItem key={o.id} value={o.id}>
+                                  {o.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      <div>
+                        <Label htmlFor={`fnrh_motivo-${index}`}>
+                          Motivo da viagem <span className="text-red-500">*</span>
+                        </Label>
+                        <Select
+                          value={
+                            guest.fnrh_motivo_viagem_id?.trim()
+                              ? guest.fnrh_motivo_viagem_id
+                              : FNRH_SELECT_PLACEHOLDER
+                          }
+                          onValueChange={(v) =>
+                            handleGuestChange(
+                              index,
+                              "fnrh_motivo_viagem_id",
+                              v === FNRH_SELECT_PLACEHOLDER ? "" : v,
+                            )
+                          }
+                        >
+                          <SelectTrigger id={`fnrh_motivo-${index}`}>
+                            <SelectValue placeholder="Selecione" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
+                            {FNRH_MOTIVOS_VIAGEM.map((o) => (
+                              <SelectItem key={o.id} value={o.id}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor={`fnrh_meio-${index}`}>
+                          Meio de transporte utilizado para chegar ao hotel{" "}
+                          <span className="text-red-500">*</span>
+                        </Label>
+                        <Select
+                          value={
+                            guest.fnrh_meio_transporte_id?.trim()
+                              ? guest.fnrh_meio_transporte_id
+                              : FNRH_SELECT_PLACEHOLDER
+                          }
+                          onValueChange={(v) =>
+                            handleGuestChange(
+                              index,
+                              "fnrh_meio_transporte_id",
+                              v === FNRH_SELECT_PLACEHOLDER ? "" : v,
+                            )
+                          }
+                        >
+                          <SelectTrigger id={`fnrh_meio-${index}`}>
+                            <SelectValue placeholder="Selecione" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
+                            {FNRH_MEIOS_TRANSPORTE.map((o) => (
+                              <SelectItem key={o.id} value={o.id}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    {guestIsMinor(guest) && (
+                      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 p-3 rounded-md bg-amber-50 border border-amber-200">
+                        <p className="md:col-span-2 text-sm text-amber-900">
+                          Menor de idade: informe o documento do responsável legal (exigência FNRH).
+                        </p>
+                        <div>
+                          <Label>Documento do responsável</Label>
+                          <Select
+                            value={guest.responsavel_tipo_documento_id || "CPF"}
+                            onValueChange={(v) =>
+                              handleGuestChange(index, "responsavel_tipo_documento_id", v)
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="CPF">CPF</SelectItem>
+                              <SelectItem value="PASSAPORTE">Passaporte</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label>Número do documento do responsável</Label>
+                          <Input
+                            value={guest.responsavel_numero_documento || ""}
+                            onChange={(e) =>
+                              handleGuestChange(
+                                index,
+                                "responsavel_numero_documento",
+                                e.target.value.replace(
+                                  guest.responsavel_tipo_documento_id === "PASSAPORTE"
+                                    ? /[^\w]/g
+                                    : /\D/g,
+                                  "",
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </Card>
               ))}

@@ -29,6 +29,7 @@ import DiscountCouponsManager from "@/components/settings/DiscountCouponsManager
 import { CompanyApiCredentialsCard } from "@/components/settings/CompanyApiCredentialsCard";
 import { PmsWebhooksReference } from "@/components/settings/PmsWebhooksReference";
 import { CompanyApiRequestLogsPanel } from "@/components/settings/CompanyApiRequestLogsPanel";
+import { FnrhSettingsCard } from "@/components/settings/FnrhSettingsCard";
 import {
   Table,
   TableBody,
@@ -433,6 +434,7 @@ const Settings = () => {
           <TabsTrigger value="policies">Políticas</TabsTrigger>
           <TabsTrigger value="room-display">Exibição de Quartos</TabsTrigger>
           <TabsTrigger value="discounts">Descontos</TabsTrigger>
+          <TabsTrigger value="fnrh">FNRH</TabsTrigger>
           {isApiIntegrationsEnabled && (
             <TabsTrigger value="integration">Integrações</TabsTrigger>
           )}
@@ -1043,6 +1045,10 @@ const Settings = () => {
 
         <TabsContent value="discounts">
           <DiscountCouponsManager />
+        </TabsContent>
+
+        <TabsContent value="fnrh">
+          <FnrhSettingsCard establishmentId={selectedEstablishment?.id} />
         </TabsContent>
 
         {isApiIntegrationsEnabled && (
