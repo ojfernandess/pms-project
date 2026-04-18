@@ -1,7 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 
 /**
- * Notifica a API FNRH (check-out em lote ou cancelamento de reserva) após a ação no PMS.
+ * Notifica a API FNRH (check-out, cancelamento de reserva ou no-show) após a ação no PMS.
+ * No-show: PATCH /hospedes/{id}/noshow ou /reservas/{id}/noshow (Edge `fnrh-lifecycle`, action `noshow`).
  * Silencia falhas (não bloqueia fluxo); requer envio prévio bem-sucedido de hospedagem/registrar.
  *
  * `webCheckinToken`: no web check-in o JWT do hóspede pode não passar no RLS de `reservations`;
@@ -9,7 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
  */
 export async function invokeFnrhLifecycle(
   reservationId: string,
-  action: "checkout" | "cancel",
+  action: "checkout" | "cancel" | "noshow",
   opts?: { webCheckinToken?: string | null },
 ): Promise<void> {
   try {

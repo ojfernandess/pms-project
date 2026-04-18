@@ -88,6 +88,30 @@ async function sha256Hex(text: string): Promise<string> {
     .join("");
 }
 
+/** hospede_id retornados por POST /hospedagem/registrar (mesma ordem dos hóspedes enviados). */
+function extractHospedeIdsFromRegistrarResponse(
+  parsed: Record<string, unknown>,
+): string[] {
+  const dados = parsed?.dados as Record<string, unknown> | undefined;
+  if (!dados || typeof dados !== "object") return [];
+  const out: string[] = [];
+  const pushFromObject = (h: unknown) => {
+    if (!h || typeof h !== "object" || Array.isArray(h)) return;
+    const o = h as Record<string, unknown>;
+    const id = o.hospede_id ?? o.Hospede_id;
+    if (typeof id === "string" && id.trim()) out.push(id.trim());
+  };
+  const collect = (arr: unknown) => {
+    if (!Array.isArray(arr)) return;
+    for (const item of arr) pushFromObject(item);
+  };
+  collect(dados.hospede);
+  collect(dados.hospedes);
+  collect(dados.dados_hospede);
+  pushFromObject(dados.hospede);
+  return out;
+}
+
 function parseIbge7(raw: unknown): number | null {
   if (typeof raw === "number" && Number.isFinite(raw)) {
     const n = Math.floor(raw);
@@ -927,6 +951,19 @@ serve(async (req) => {
       });
     }
 
+    const hospedeIds = extractHospedeIdsFromRegistrarResponse(parsed);
+    for (let i = 0; i < rows.length && i < hospedeIds.length; i++) {
+      const gid = (rows[i] as { id?: string }).id;
+      if (!gid) continue;
+      await admin
+        .from("web_checkin_guests")
+        .update({
+          fnrh_hospede_id: hospedeIds[i],
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", gid);
+    }
+
     await admin
       .from("fnrh_submission_log")
       .update({
@@ -935,6 +972,7 @@ serve(async (req) => {
         fnrh_reserva_id: fnrhReservaId || null,
         response_summary: {
           reserva_id: fnrhReservaId || null,
+          fnrh_hospede_ids: hospedeIds,
         },
         error_message: null,
       })

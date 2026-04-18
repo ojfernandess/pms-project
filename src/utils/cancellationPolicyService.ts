@@ -294,6 +294,104 @@ export async function applyCancellation(
   }
 }
 
+const RESERVATION_SELECT_WITH_PRICING = `
+  *,
+  pricing_plans:cancellation_policy_id(
+    cancellation_policies(*)
+  )
+`;
+
+async function applyNoShowCore(
+  reservationId: string,
+  reservation: Record<string, unknown>,
+  userId: string | undefined,
+  logReason: string
+): Promise<{
+  success: boolean;
+  penalty: number;
+  result: CancellationCalculationResult | null;
+  error?: string;
+}> {
+  const policy = await getReservationCancellationPolicy(reservationId);
+  if (!policy) {
+    await supabase
+      .from("reservations")
+      .update({
+        status: "noshow" as any,
+        no_show_at: new Date().toISOString(),
+      })
+      .eq("id", reservationId);
+
+    return {
+      success: true,
+      penalty: 0,
+      result: null,
+    };
+  }
+
+  const reservationData: ReservationData = {
+    id: reservation.id as string,
+    checkin_date: reservation.checkin_date as string,
+    checkout_date: reservation.checkout_date as string,
+    total_amount: (reservation.total_amount as number) || 0,
+    paid_amount: (reservation.paid_amount as number) || 0,
+    pricing_plan_id: (reservation as any).pricing_plan_id || null,
+    pricing_plan: (reservation as any).pricing_plans
+      ? {
+          cancellation_policy_id:
+            (reservation as any).pricing_plans.cancellation_policy_id || null,
+        }
+      : undefined,
+    status: reservation.status as string,
+    establishment_id: reservation.establishment_id as string,
+    created_at: reservation.created_at as string,
+    channel: (reservation as any).channel || "direct",
+  };
+
+  const calculationResult = calculateNoShowPenalty(policy, reservationData);
+
+  await logCancellation({
+    reservation_id: reservationId,
+    policy_id: policy.id,
+    cancellation_date: new Date(),
+    checkin_date: new Date(reservation.checkin_date as string),
+    penalty_amount: calculationResult.penalty,
+    penalty_type: "no_show",
+    calculation_details: calculationResult.calculationDetails,
+    reason: logReason,
+    user_id: userId || "system",
+    channel: (reservation as any).channel || "direct",
+  });
+
+  await supabase
+    .from("reservations")
+    .update({
+      status: "noshow" as any,
+      no_show_at: new Date().toISOString(),
+      cancellation_penalty: calculationResult.penalty,
+      cancellation_policy_applied: policy.id,
+      cancellation_calculation_details: calculationResult.calculationDetails,
+    })
+    .eq("id", reservationId);
+
+  if (calculationResult.penalty > 0) {
+    await createPenaltyInvoice(
+      reservationId,
+      calculationResult.penalty,
+      policy.name,
+      reservationData.establishment_id,
+      (reservation as any).client_id,
+      "cancellation"
+    );
+  }
+
+  return {
+    success: true,
+    penalty: calculationResult.penalty,
+    result: calculationResult,
+  };
+}
+
 /**
  * Detectar e aplicar no-show automático
  */
@@ -309,19 +407,13 @@ export async function detectAndApplyNoShow(
   try {
     const { data: reservation, error: resError } = await supabase
       .from("reservations")
-      .select(`
-        *,
-        pricing_plans:cancellation_policy_id(
-          cancellation_policies(*)
-        )
-      `)
+      .select(RESERVATION_SELECT_WITH_PRICING)
       .eq("id", reservationId)
       .single();
 
     if (resError) throw resError;
     if (!reservation) throw new Error("Reserva não encontrada");
 
-    // Verificar se é no-show
     if (!isNoShow(reservation as ReservationData)) {
       return {
         success: false,
@@ -331,93 +423,74 @@ export async function detectAndApplyNoShow(
       };
     }
 
-    // Buscar política
-    const policy = await getReservationCancellationPolicy(reservationId);
-    if (!policy) {
-      // Marcar como no-show sem multa
-      await supabase
-        .from("reservations")
-        .update({
-          status: "noshow" as any,
-          no_show_at: new Date().toISOString(),
-        })
-        .eq("id", reservationId);
+    return await applyNoShowCore(
+      reservationId,
+      reservation as Record<string, unknown>,
+      userId,
+      "No-show automático detectado"
+    );
+  } catch (error: any) {
+    console.error("Erro ao aplicar no-show:", error);
+    return {
+      success: false,
+      penalty: 0,
+      result: null,
+      error: error.message || "Erro ao processar no-show",
+    };
+  }
+}
 
+/** Status em que não faz sentido marcar no-show manualmente */
+const STAFF_NOSHOW_BLOCKED = new Set([
+  "checkedin",
+  "checkedout",
+  "cancelled",
+  "noshow",
+  "blocked",
+]);
+
+/**
+ * No-show acionado pela equipe em Detalhes da Reserva (não exige prazo automático).
+ * Aplica multa conforme política quando existir.
+ */
+export async function applyStaffNoShow(
+  reservationId: string,
+  userId?: string
+): Promise<{
+  success: boolean;
+  penalty: number;
+  result: CancellationCalculationResult | null;
+  error?: string;
+}> {
+  try {
+    const { data: reservation, error: resError } = await supabase
+      .from("reservations")
+      .select(RESERVATION_SELECT_WITH_PRICING)
+      .eq("id", reservationId)
+      .single();
+
+    if (resError) throw resError;
+    if (!reservation) throw new Error("Reserva não encontrada");
+
+    const st = String((reservation as { status?: string }).status ?? "");
+    if (STAFF_NOSHOW_BLOCKED.has(st)) {
       return {
-        success: true,
+        success: false,
         penalty: 0,
         result: null,
+        error:
+          "Esta reserva não pode ser marcada como no-show no status atual.",
       };
     }
 
-    // Preparar dados da reserva
-    const reservationData: ReservationData = {
-      id: reservation.id,
-      checkin_date: reservation.checkin_date,
-      checkout_date: reservation.checkout_date,
-      total_amount: reservation.total_amount || 0,
-      paid_amount: reservation.paid_amount || 0,
-      pricing_plan_id: (reservation as any).pricing_plan_id || null,
-      pricing_plan: (reservation as any).pricing_plans ? {
-        cancellation_policy_id: (reservation as any).pricing_plans.cancellation_policy_id || null,
-      } : undefined,
-      status: reservation.status,
-      establishment_id: reservation.establishment_id,
-      created_at: reservation.created_at,
-      channel: (reservation as any).channel || "direct",
-    };
-
-    // Calcular multa de no-show
-    const calculationResult = calculateNoShowPenalty(
-      policy,
-      reservationData
+    return await applyNoShowCore(
+      reservationId,
+      reservation as Record<string, unknown>,
+      userId,
+      "No-show registrado manualmente pelo usuário"
     );
-
-    // Registrar log
-    await logCancellation({
-      reservation_id: reservationId,
-      policy_id: policy.id,
-      cancellation_date: new Date(),
-      checkin_date: new Date(reservation.checkin_date),
-      penalty_amount: calculationResult.penalty,
-      penalty_type: "no_show",
-      calculation_details: calculationResult.calculationDetails,
-      reason: "No-show automático detectado",
-      user_id: userId || "system",
-      channel: reservation.channel || "direct",
-    });
-
-    // Atualizar reserva
-    await supabase
-      .from("reservations")
-      .update({
-        status: "noshow" as any, // Usar o status correto do sistema
-        no_show_at: new Date().toISOString(),
-        cancellation_penalty: calculationResult.penalty,
-        cancellation_policy_applied: policy.id,
-        cancellation_calculation_details: calculationResult.calculationDetails,
-      })
-      .eq("id", reservationId);
-
-    // Criar lançamento financeiro
-    if (calculationResult.penalty > 0) {
-      await createPenaltyInvoice(
-        reservationId, 
-        calculationResult.penalty, 
-        policy.name,
-        reservationData.establishment_id,
-        (reservation as any).client_id,
-        'cancellation'
-      );
-    }
-
-    return {
-      success: true,
-      penalty: calculationResult.penalty,
-      result: calculationResult,
-    };
   } catch (error: any) {
-    console.error("Erro ao aplicar no-show:", error);
+    console.error("Erro ao aplicar no-show manual:", error);
     return {
       success: false,
       penalty: 0,

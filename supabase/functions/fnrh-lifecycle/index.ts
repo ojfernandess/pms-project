@@ -1,7 +1,10 @@
 /**
- * FNRH — check-out e cancelamento de reserva na API v2 (credenciais só server-side).
+ * FNRH — check-out, cancelamento de reserva e no-show na API v2 (credenciais só server-side).
  *
- * POST body: { reservation_id, action: "checkout" | "cancel", web_checkin_token? }
+ * POST body: { reservation_id, action: "checkout" | "cancel" | "noshow", web_checkin_token? }
+ * - noshow: PATCH /hospedes/{hospede_id}/noshow para cada hóspede com fnrh_hospede_id; se nenhum,
+ *   PATCH /reservas/{reserva_id}/noshow (reserva federal).
+ *
  * Autorização: JWT com SELECT em `reservations` **ou** `web_checkin_token` válido para o par token+reserva (web check-in).
  *
  * Requer envio prévio bem-sucedido de hospedagem/registrar (fnrh_reserva_id no log).
@@ -20,7 +23,7 @@ const FNRH_BASE_HOMOLOG = "https://hom-lowcode.serpro.gov.br/FNRH_API/rest/v2";
 
 type Body = {
   reservation_id?: string;
-  action?: "checkout" | "cancel";
+  action?: "checkout" | "cancel" | "noshow";
   /** Web check-in: quando o JWT do hóspede não passa no RLS de `reservations`, valida o acesso pelo token secreto do fluxo. */
   web_checkin_token?: string;
 };
@@ -100,10 +103,13 @@ serve(async (req) => {
 
   const reservationId = body.reservation_id?.trim();
   const action = body.action;
-  if (!reservationId || (action !== "checkout" && action !== "cancel")) {
+  if (
+    !reservationId ||
+    (action !== "checkout" && action !== "cancel" && action !== "noshow")
+  ) {
     return jsonResponse(400, {
       success: false,
-      error: "Informe reservation_id e action: checkout | cancel",
+      error: "Informe reservation_id e action: checkout | cancel | noshow",
     });
   }
 
@@ -225,6 +231,160 @@ serve(async (req) => {
         reason: "no_fnrh_reserva",
         message:
           "Reserva ainda não consta na FNRH (sem envio hospedagem/registrar bem-sucedido).",
+      });
+    }
+
+    if (action === "noshow") {
+      const wcList = await admin
+        .from("web_checkin")
+        .select("id")
+        .eq("reservation_id", reservationId)
+        .order("created_at", { ascending: false })
+        .limit(8);
+      const wcIds = (wcList.data ?? []).map((r: { id: string }) => r.id);
+      const hospedeIds: string[] = [];
+      const seen = new Set<string>();
+      if (wcIds.length > 0) {
+        const gRes = await admin
+          .from("web_checkin_guests")
+          .select("fnrh_hospede_id")
+          .in("web_checkin_id", wcIds)
+          .not("fnrh_hospede_id", "is", null);
+        for (const g of gRes.data ?? []) {
+          const hid = String(
+            (g as { fnrh_hospede_id?: string }).fnrh_hospede_id ?? "",
+          ).trim();
+          if (hid && !seen.has(hid)) {
+            seen.add(hid);
+            hospedeIds.push(hid);
+          }
+        }
+      }
+
+      const webCheckinRowsNs = await admin
+        .from("web_checkin")
+        .select("id")
+        .eq("reservation_id", reservationId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const webCheckinIdNs = webCheckinRowsNs.data?.[0]?.id ?? null;
+
+      const basicNs = btoa(`${apiUser}:${apiPass}`);
+      const baseHeaders: Record<string, string> = {
+        Authorization: `Basic ${basicNs}`,
+        cpf_solicitante: cpfSol,
+        "Content-Type": "application/json",
+      };
+
+      const patchNoshowOnce = async (
+        relPath: string,
+        opName: string,
+        idempotencyExtra: string,
+      ): Promise<{ ok: boolean; error?: string; http?: number }> => {
+        const idKey = await sha256Hex(
+          `${establishmentId}:${reservationId}:${opName}:${idempotencyExtra}`,
+        );
+        const { data: prevOk } = await admin
+          .from("fnrh_submission_log")
+          .select("id")
+          .eq("idempotency_key", idKey)
+          .eq("status", "success")
+          .maybeSingle();
+        if (prevOk) return { ok: true };
+
+        await admin.from("fnrh_submission_log").delete().eq(
+          "idempotency_key",
+          idKey,
+        );
+        await admin.from("fnrh_submission_log").insert({
+          establishment_id: establishmentId,
+          reservation_id: reservationId,
+          web_checkin_id: webCheckinIdNs,
+          operation: opName,
+          idempotency_key: idKey,
+          status: "pending",
+        });
+        const url = `${baseUrl}${relPath}`;
+        const fr = await fetch(url, {
+          method: "PATCH",
+          headers: baseHeaders,
+          body: "{}",
+        });
+        const text = await fr.text();
+        let parsed: Record<string, unknown> = {};
+        try {
+          parsed = JSON.parse(text) as Record<string, unknown>;
+        } catch {
+          parsed = { raw: text.slice(0, 500) };
+        }
+        if (!fr.ok) {
+          const errMsg =
+            (parsed?.mensagem as string) ||
+            (parsed?.erro as string) ||
+            text.slice(0, 400);
+          await admin
+            .from("fnrh_submission_log")
+            .update({
+              status: "failed",
+              http_status: fr.status,
+              error_message: errMsg,
+              response_summary: { status: fr.status },
+            })
+            .eq("idempotency_key", idKey);
+          return { ok: false, error: errMsg, http: fr.status };
+        }
+        await admin
+          .from("fnrh_submission_log")
+          .update({
+            status: "success",
+            http_status: fr.status,
+            fnrh_reserva_id: fnrhReservaId,
+            response_summary: { action: "noshow", op: opName },
+            error_message: null,
+          })
+          .eq("idempotency_key", idKey);
+        return { ok: true };
+      };
+
+      if (hospedeIds.length > 0) {
+        for (const hid of hospedeIds) {
+          const r = await patchNoshowOnce(
+            `/hospedes/${encodeURIComponent(hid)}/noshow`,
+            "hospede_noshow",
+            hid,
+          );
+          if (!r.ok) {
+            return jsonResponse(200, {
+              success: false,
+              error: r.error ?? "Falha ao informar no-show na FNRH (hóspede)",
+              http_status: r.http,
+            });
+          }
+        }
+        return jsonResponse(200, {
+          success: true,
+          action: "noshow",
+          mode: "hospedes",
+          count: hospedeIds.length,
+        });
+      }
+
+      const rRes = await patchNoshowOnce(
+        `/reservas/${encodeURIComponent(fnrhReservaId)}/noshow`,
+        "reserva_noshow",
+        fnrhReservaId,
+      );
+      if (!rRes.ok) {
+        return jsonResponse(200, {
+          success: false,
+          error: rRes.error ?? "Falha ao informar no-show na FNRH (reserva)",
+          http_status: rRes.http,
+        });
+      }
+      return jsonResponse(200, {
+        success: true,
+        action: "noshow",
+        mode: "reserva",
       });
     }
 

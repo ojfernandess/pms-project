@@ -380,9 +380,9 @@ export function isNoShow(
   // Verificar se passou do deadline e não está checked-in
   return (
     isAfter(currentZoned, checkinDeadline) &&
-    reservation.status !== "checked_in" &&
+    reservation.status !== "checkedin" &&
     reservation.status !== "cancelled" &&
-    reservation.status !== "no_show"
+    reservation.status !== "noshow"
   );
 }
 

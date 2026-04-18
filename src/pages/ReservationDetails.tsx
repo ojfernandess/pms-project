@@ -24,6 +24,8 @@ import {
   CheckCircle2,
   XCircle,
   Trash2,
+  ChevronDown,
+  UserX,
   Plus,
   X,
   FileText,
@@ -37,7 +39,6 @@ import {
   Users,
   Receipt,
   CreditCard,
-  ChevronDown,
   Tag
 } from "lucide-react";
 import { format, parseISO, differenceInDays, addDays, isAfter, isBefore, isValid } from "date-fns";
@@ -58,6 +59,13 @@ import { CalendarIcon, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { logActivity } from "@/lib/activityLogger";
 import { recordProcessedRefund } from "@/services/financial/refundService";
 import { useActivityLogs, ActivityLog } from "@/hooks/useActivityLogs";
@@ -122,7 +130,15 @@ const ReservationDetails = () => {
   const { selectedEstablishment } = useEstablishment();
   const [currentStep, setCurrentStep] = useState(1);
   const [isBasicInfoOpen, setIsBasicInfoOpen] = useState(false);
-  const { cancelReservation, updateReservation, confirmPreregistration } = useReservations();
+  const {
+    cancelReservation,
+    updateReservation,
+    confirmPreregistration,
+    markReservationNoShow,
+    isMarkingNoShow,
+    checkOut,
+    isCheckoutPending,
+  } = useReservations();
   const { calculatePrice } = usePricing();
   const { canDelete } = usePermissions();
   
@@ -667,6 +683,8 @@ const ReservationDetails = () => {
   const [editingServiceFee, setEditingServiceFee] = useState<{ id: string; amount: number; quantity: number; notes?: string } | null>(null);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
+  const [checkoutDialogOpen, setCheckoutDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [webCheckinDialogOpen, setWebCheckinDialogOpen] = useState(false);
   const [manualCheckinDialogOpen, setManualCheckinDialogOpen] = useState(false);
@@ -1050,6 +1068,17 @@ const ReservationDetails = () => {
       fromWebCheckin: false,
     };
   }, [reservation?.web_checkin?.guests, reservation?.adults, reservation?.children]);
+
+  /** Menu «Ver check-in» com no-show/checkout/cancelar — só quando há fluxo de check-in visível no topo. */
+  const showWebCheckinStatusMenu = useMemo(
+    () =>
+      Boolean(
+        reservation?.web_checkin &&
+          (reservation.web_checkin.status === "completed" ||
+            reservation.status === "checkedin"),
+      ),
+    [reservation?.web_checkin, reservation?.status],
+  );
 
   // Função para estornar pagamento
   const handleRefundPayment = async () => {
@@ -2013,24 +2042,69 @@ const ReservationDetails = () => {
                 {reservation?.web_checkin &&
                   (reservation.web_checkin.status === "completed" ||
                     reservation.status === "checkedin") && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setWebCheckinDialogOpen(true)}
-                      className={cn(
-                        "h-9 gap-2 rounded-xl border-sky-200 bg-gradient-to-b from-white to-sky-50/90 px-3.5 text-sm font-medium text-sky-900 shadow-sm",
-                        "transition-all hover:border-sky-300 hover:shadow-md",
-                      )}
-                    >
-                      <EyeIcon className="h-4 w-4 shrink-0 text-sky-600" />
-                      <span className="whitespace-nowrap">
-                        {(reservation.web_checkin as { fnrh_registered_at?: string | null })
-                          ?.fnrh_registered_at
-                          ? "Ver check-in"
-                          : "Ver pré check-in"}
-                      </span>
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className={cn(
+                            "h-9 gap-2 rounded-xl border-sky-200 bg-gradient-to-b from-white to-sky-50/90 px-3.5 text-sm font-medium text-sky-900 shadow-sm",
+                            "transition-all hover:border-sky-300 hover:shadow-md",
+                          )}
+                        >
+                          <EyeIcon className="h-4 w-4 shrink-0 text-sky-600" />
+                          <span className="whitespace-nowrap">
+                            {(reservation.web_checkin as { fnrh_registered_at?: string | null })
+                              ?.fnrh_registered_at
+                              ? "Ver check-in"
+                              : "Ver pré check-in"}
+                          </span>
+                          <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-56">
+                        <DropdownMenuItem
+                          onClick={() => setWebCheckinDialogOpen(true)}
+                          className="cursor-pointer"
+                        >
+                          Abrir detalhes do check-in
+                        </DropdownMenuItem>
+                        {canDelete("reservations") && (
+                          <>
+                            <DropdownMenuSeparator />
+                            {!["checkedin", "checkedout", "cancelled", "noshow", "blocked"].includes(
+                              reservation.status,
+                            ) && (
+                              <DropdownMenuItem
+                                className="cursor-pointer text-destructive focus:text-destructive"
+                                disabled={isMarkingNoShow}
+                                onClick={() => setNoShowDialogOpen(true)}
+                              >
+                                Marcar reserva como no-show
+                              </DropdownMenuItem>
+                            )}
+                            {reservation.status === "checkedin" && (
+                              <DropdownMenuItem
+                                className="cursor-pointer"
+                                disabled={isCheckoutPending}
+                                onClick={() => setCheckoutDialogOpen(true)}
+                              >
+                                Realizar check-out
+                              </DropdownMenuItem>
+                            )}
+                            {!["checkedout", "cancelled"].includes(reservation.status) && (
+                              <DropdownMenuItem
+                                className="cursor-pointer text-destructive focus:text-destructive"
+                                onClick={() => setCancelDialogOpen(true)}
+                              >
+                                Cancelar reserva
+                              </DropdownMenuItem>
+                            )}
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   )}
                 <FnrhConfirmCheckinButton
                   reservationId={reservation?.id}
@@ -3118,6 +3192,25 @@ const ReservationDetails = () => {
                   Efetivar Pré-reserva
                 </Button>
               )}
+              {!showWebCheckinStatusMenu &&
+                !["checkedin", "checkedout", "cancelled", "noshow", "blocked"].includes(
+                  reservation.status,
+                ) &&
+                canDelete("reservations") && (
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start gap-2 text-destructive hover:text-destructive"
+                    onClick={() => setNoShowDialogOpen(true)}
+                    disabled={isMarkingNoShow}
+                  >
+                    {isMarkingNoShow ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <UserX className="h-4 w-4" />
+                    )}
+                    Marcar como no-show
+                  </Button>
+                )}
               {!["checkedout", "cancelled"].includes(reservation.status) && canDelete("reservations") && (
                 <Button
                   variant="outline"
@@ -4065,6 +4158,101 @@ const ReservationDetails = () => {
                 </>
               )}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={checkoutDialogOpen} onOpenChange={setCheckoutDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Realizar check-out?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O status da reserva será alterado para check-out e o quarto será liberado para limpeza, quando
+              aplicável. A FNRH será notificada com o endpoint de check-out da reserva (quando houver
+              integração ativa).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isCheckoutPending}
+              onClick={() => setCheckoutDialogOpen(false)}
+            >
+              Voltar
+            </Button>
+            <Button
+              type="button"
+              disabled={isCheckoutPending}
+              onClick={async () => {
+                if (!reservation?.id) return;
+                try {
+                  await checkOut(reservation.id);
+                  setCheckoutDialogOpen(false);
+                  refetch();
+                } catch {
+                  /* toast no hook */
+                }
+              }}
+            >
+              {isCheckoutPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Processando...
+                </>
+              ) : (
+                "Confirmar check-out"
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={noShowDialogOpen} onOpenChange={setNoShowDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Marcar como no-show?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <span className="block">
+                O hóspede não compareceu. O status será alterado para <strong>No-show</strong>, a multa da
+                política (se houver) será aplicada e, quando integrado, a FNRH receberá o informe de no-show
+                (PATCH por hóspede em /hospedes/…/noshow; se não houver id de hóspede salvo, PATCH em
+                /reservas/…/noshow).
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isMarkingNoShow}
+              onClick={() => setNoShowDialogOpen(false)}
+            >
+              Voltar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isMarkingNoShow}
+              onClick={async () => {
+                if (!reservation?.id) return;
+                try {
+                  await markReservationNoShow({ id: reservation.id });
+                  setNoShowDialogOpen(false);
+                } catch {
+                  /* toast no hook */
+                }
+              }}
+            >
+              {isMarkingNoShow ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Processando...
+                </>
+              ) : (
+                "Confirmar no-show"
+              )}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

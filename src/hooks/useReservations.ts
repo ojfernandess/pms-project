@@ -1155,6 +1155,92 @@ export const useReservations = () => {
     },
   });
 
+  /** No-show manual: política + FNRH PATCH noshow (hóspedes ou reserva). */
+  const markReservationNoShow = useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const { data: beforeRow } = await supabase
+        .from("reservations")
+        .select("id, reservation_code, establishment_id, status, guest_name, payment_status")
+        .eq("id", id)
+        .single();
+
+      const { data: { user } } = await supabase.auth.getUser();
+      const { applyStaffNoShow } = await import("@/utils/cancellationPolicyService");
+      const result = await applyStaffNoShow(id, user?.id);
+      if (!result.success) {
+        throw new Error(result.error || "Não foi possível registrar no-show");
+      }
+
+      try {
+        const { invokeFnrhLifecycle } = await import("@/lib/fnrh/invokeFnrhLifecycle");
+        void invokeFnrhLifecycle(id, "noshow");
+      } catch {
+        /* FNRH opcional */
+      }
+
+      const { data: reservationData } = await supabase
+        .from("reservations")
+        .select("id, reservation_code, establishment_id, status, guest_name, payment_status")
+        .eq("id", id)
+        .single();
+
+      return {
+        ...result,
+        reservationData,
+        previousStatus: beforeRow?.status ?? null,
+      };
+    },
+    onSuccess: async (payload) => {
+      const reservationData = payload.reservationData;
+      if (reservationData) {
+        try {
+          await logActivity({
+            actionType: "updated",
+            entityType: "reservation",
+            entityId: reservationData.id,
+            entityCode: reservationData.reservation_code,
+            description: `Reserva ${reservationData.reservation_code} marcada como no-show`,
+            oldValues: { status: payload.previousStatus },
+            newValues: { status: "noshow", penalty: payload.penalty },
+            metadata: { no_show: true },
+          });
+        } catch (logError) {
+          console.error("Erro ao registrar log de no-show:", logError);
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["reservation"] });
+      queryClient.invalidateQueries({ queryKey: ["rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["reservation_payments"] });
+      queryClient.invalidateQueries({ queryKey: ["pending"] });
+      await queryClient.refetchQueries({ queryKey: ["reservations"], exact: false });
+      await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
+
+      try {
+        if (reservationData?.id) {
+          await maybeFinalizeOtaCancellationAfterPmsCancel(reservationData.id);
+        }
+      } catch (finalizeErr) {
+        console.warn(
+          "No-show no PMS: finalização OTA/Channex (pendência) opcional falhou — use Pendências se necessário.",
+          finalizeErr,
+        );
+      }
+
+      scheduleChannelSyncAfterInventoryChange(
+        reservationData?.establishment_id || getEstablishmentId()
+      );
+
+      toast.success("Reserva marcada como no-show.");
+    },
+    onError: (error: unknown) => {
+      const msg = error instanceof Error ? error.message : "Erro ao marcar no-show";
+      toast.error(msg);
+    },
+  });
+
   // Check-in
   const checkIn = useMutation({
     mutationFn: async ({ id, roomId, skipEmail }: { id: string; roomId?: string; skipEmail?: boolean }) => {
@@ -1332,6 +1418,7 @@ export const useReservations = () => {
           }
           // Invalidar e refetch todas as queries relacionadas para atualizar o mapa em tempo real
           queryClient.invalidateQueries({ queryKey: ["reservations"] });
+          queryClient.invalidateQueries({ queryKey: ["reservation"] });
           queryClient.invalidateQueries({ queryKey: ["rooms"] });
           queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
           // Invalidar também para atualizar informações dos hóspedes (próximas entradas)
@@ -1868,8 +1955,11 @@ export const useReservations = () => {
     createReservation: createReservation.mutateAsync,
     updateReservation: updateReservation.mutateAsync,
     cancelReservation: cancelReservation.mutateAsync,
+    markReservationNoShow: markReservationNoShow.mutateAsync,
+    isMarkingNoShow: markReservationNoShow.isPending,
     checkIn: checkIn.mutateAsync,
     checkOut: checkOut.mutateAsync,
+    isCheckoutPending: checkOut.isPending,
     replaceReservationRoom: replaceReservationRoom.mutateAsync,
     confirmPreregistration: confirmPreregistration.mutateAsync,
     isCreating: createReservation.isPending,
