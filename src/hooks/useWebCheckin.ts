@@ -986,7 +986,13 @@ export const useWebCheckin = () => {
 
   // Completar web check-in
   const completeWebCheckin = useMutation({
-    mutationFn: async (token: string) => {
+    mutationFn: async (
+      arg: string | { token: string; skipFnrhInvoke?: boolean },
+    ) => {
+      const token = typeof arg === "string" ? arg : arg.token;
+      const skipFnrhInvoke =
+        typeof arg === "object" && arg.skipFnrhInvoke === true;
+
       const { data: webCheckin } = await supabase
         .from("web_checkin")
         .select(`
@@ -1103,6 +1109,29 @@ export const useWebCheckin = () => {
           console.error("❌ Erro ao registrar log de atividade do web check-in:", logError);
           // Não lançar erro para não interromper o fluxo principal
         }
+      }
+
+      // FNRH: fluxo hóspede (web). Exige auto_submit_on_web_checkin na Edge.
+      // Check-in manual na recepção usa skipFnrhInvoke e dispara fnrh-submit com source staff depois.
+      try {
+        if (reservationId && !skipFnrhInvoke) {
+          const { error: fnrhInvokeErr } = await supabase.functions.invoke(
+            "fnrh-submit",
+            {
+              body: {
+                reservation_id: reservationId,
+                source: "web",
+                web_checkin_token: token,
+                commit_checkin: false,
+              },
+            },
+          );
+          if (fnrhInvokeErr) {
+            console.warn("FNRH após web check-in:", fnrhInvokeErr);
+          }
+        }
+      } catch (fnrhCatch) {
+        console.warn("FNRH após web check-in:", fnrhCatch);
       }
 
       queryClient.invalidateQueries({ queryKey: ["reservations"] });

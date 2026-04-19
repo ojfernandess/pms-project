@@ -11,6 +11,8 @@
  * Autenticação:
  * - Equipe PMS: body { reservation_id, source: "staff", commit_checkin?, confirm_explicit? }
  *   + Authorization Bearer (JWT do funcionário)
+ * - Pré check-in web (se `auto_submit_on_web_checkin` no estabelecimento): body
+ *   { reservation_id, source: "web", web_checkin_token } — sem JWT; valida token + reserva.
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -26,7 +28,9 @@ const FNRH_BASE_HOMOLOG = "https://hom-lowcode.serpro.gov.br/FNRH_API/rest/v2";
 
 type Body = {
   reservation_id?: string;
-  source?: "staff";
+  source?: "staff" | "web";
+  /** Token secreto do fluxo web (obrigatório com source: web) */
+  web_checkin_token?: string;
   /** default true — CHECKIN_REALIZADO + check_in_em na FNRH */
   commit_checkin?: boolean;
   /** true ignora `auto_submit_on_manual_checkin === false` (botão explícito na reserva) */
@@ -411,67 +415,129 @@ serve(async (req) => {
   const confirmExplicit = body.confirm_explicit === true;
 
   try {
-    // Web não envia mais à FNRH (pré-check-in apenas no app).
-    if (
-      (body as { web_checkin_id?: string; web_checkin_token?: string })
-        .web_checkin_id ||
-      (body as { web_checkin_id?: string; web_checkin_token?: string })
-        .web_checkin_token ||
-      body.source === "web"
-    ) {
+    const webToken = String(
+      (body as { web_checkin_token?: string }).web_checkin_token ?? "",
+    ).trim();
+    const webSource = body.source === "web";
+    const hasWebCheckinId = !!(body as { web_checkin_id?: string }).web_checkin_id;
+
+    if (hasWebCheckinId) {
       return jsonResponse(400, {
         success: false,
-        error:
-          "O envio à FNRH é feito apenas pela equipe no check-in presencial. O web check-in é pré-cadastro.",
+        error: "Parâmetro web_checkin_id não é suportado neste endpoint.",
       });
     }
 
-    const authHeader = req.headers.get("Authorization") || "";
-    const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
-    if (!jwt || !anonKey) {
-      return jsonResponse(401, {
-        success: false,
-        error: "Autenticação obrigatória (equipe)",
-      });
-    }
-    if (!body.reservation_id) {
+    if (webToken && !webSource) {
       return jsonResponse(400, {
         success: false,
-        error: "reservation_id é obrigatório",
+        error: 'Informe source: "web" junto com web_checkin_token.',
       });
     }
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: `Bearer ${jwt}` } },
-    });
-    const { data: res, error: resErr } = await userClient
-      .from("reservations")
-      .select("id")
-      .eq("id", body.reservation_id)
-      .maybeSingle();
-    if (resErr || !res) {
-      return jsonResponse(403, {
+    if (webSource && !webToken) {
+      return jsonResponse(400, {
         success: false,
-        error: "Sem acesso a esta reserva",
+        error: 'web_checkin_token é obrigatório quando source é "web".',
       });
     }
-    reservationId = res.id;
-    // Várias linhas para a mesma reserva quebram .maybeSingle(); usar o registro mais recente.
-    const { data: wcRows, error: wcLookupErr } = await admin
-      .from("web_checkin")
-      .select("id, guest_data")
-      .eq("reservation_id", reservationId)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    if (wcLookupErr) {
-      console.error("fnrh-submit web_checkin lookup", wcLookupErr);
-      return jsonResponse(500, {
-        success: false,
-        error: "Erro ao localizar web check-in desta reserva.",
-      });
+
+    let webGuestFlow = false;
+
+    if (webSource && webToken) {
+      const rid = body.reservation_id?.trim();
+      if (!rid) {
+        return jsonResponse(400, {
+          success: false,
+          error: "reservation_id é obrigatório",
+        });
+      }
+      const { data: wcGuest } = await admin
+        .from("web_checkin")
+        .select("id")
+        .eq("token", webToken)
+        .eq("reservation_id", rid)
+        .maybeSingle();
+      if (!wcGuest) {
+        return jsonResponse(403, {
+          success: false,
+          error: "Token de check-in web inválido ou não corresponde à reserva.",
+        });
+      }
+      const { data: rPre } = await admin
+        .from("reservations")
+        .select("establishment_id")
+        .eq("id", rid)
+        .maybeSingle();
+      if (!rPre?.establishment_id) {
+        return jsonResponse(404, {
+          success: false,
+          error: "Reserva não encontrada",
+        });
+      }
+      const { data: webOpt } = await admin
+        .from("establishment_fnrh_settings")
+        .select("auto_submit_on_web_checkin")
+        .eq("establishment_id", rPre.establishment_id)
+        .maybeSingle();
+      if (!webOpt?.auto_submit_on_web_checkin) {
+        return jsonResponse(400, {
+          success: false,
+          error:
+            "Envio à FNRH ao concluir o pré check-in online não está habilitado neste estabelecimento.",
+        });
+      }
+      webGuestFlow = true;
+      reservationId = rid;
+      webCheckinId = wcGuest.id;
     }
-    const wc2 = wcRows?.[0];
-    if (wc2) {
-      webCheckinId = wc2.id;
+
+    if (!webGuestFlow) {
+      const authHeader = req.headers.get("Authorization") || "";
+      const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
+      if (!jwt || !anonKey) {
+        return jsonResponse(401, {
+          success: false,
+          error: "Autenticação obrigatória (equipe)",
+        });
+      }
+      if (!body.reservation_id) {
+        return jsonResponse(400, {
+          success: false,
+          error: "reservation_id é obrigatório",
+        });
+      }
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: `Bearer ${jwt}` } },
+      });
+      const { data: res, error: resErr } = await userClient
+        .from("reservations")
+        .select("id")
+        .eq("id", body.reservation_id)
+        .maybeSingle();
+      if (resErr || !res) {
+        return jsonResponse(403, {
+          success: false,
+          error: "Sem acesso a esta reserva",
+        });
+      }
+      reservationId = res.id;
+      const { data: wcRows, error: wcLookupErr } = await admin
+        .from("web_checkin")
+        .select("id, guest_data")
+        .eq("reservation_id", reservationId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (wcLookupErr) {
+        console.error("fnrh-submit web_checkin lookup", wcLookupErr);
+        return jsonResponse(500, {
+          success: false,
+          error: "Erro ao localizar web check-in desta reserva.",
+        });
+      }
+      const wc2 = wcRows?.[0];
+      if (wc2) {
+        webCheckinId = wc2.id;
+      }
     }
 
     if (!reservationId) {
@@ -484,7 +550,7 @@ serve(async (req) => {
     const { data: reservation, error: rErr } = await admin
       .from("reservations")
       .select(
-        "id, reservation_code, establishment_id, checkin_date, checkout_date, adults, children, channel",
+        "id, reservation_code, establishment_id, checkin_date, checkout_date, adults, children, channel, category_id",
       )
       .eq("id", reservationId)
       .single();
@@ -512,7 +578,36 @@ serve(async (req) => {
       });
     }
 
+    const fnrhScope = String(
+      (settings as { fnrh_category_scope?: string }).fnrh_category_scope ||
+        "all",
+    );
+    const fnrhCatIds =
+      (settings as { fnrh_category_ids?: string[] | null })
+        .fnrh_category_ids ?? [];
+    const resCatId = String(
+      (reservation as { category_id?: string | null }).category_id ?? "",
+    ).trim();
+    if (fnrhScope === "selected") {
+      if (!fnrhCatIds.length) {
+        return jsonResponse(200, {
+          success: true,
+          skipped: true,
+          reason: "fnrh_category_scope_empty",
+        });
+      }
+      const allowed = fnrhCatIds.some((id) => String(id) === resCatId);
+      if (!resCatId || !allowed) {
+        return jsonResponse(200, {
+          success: true,
+          skipped: true,
+          reason: "fnrh_category_not_in_scope",
+        });
+      }
+    }
+
     if (
+      !webGuestFlow &&
       !confirmExplicit &&
       settings.auto_submit_on_manual_checkin === false
     ) {

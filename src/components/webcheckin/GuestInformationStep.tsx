@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +20,25 @@ import {
   FNRH_SELECT_PLACEHOLDER,
   FNRH_TIPOS_DEFICIENCIA,
 } from "@/lib/fnrh/domainOptions";
+
+function useFnrhGuestFormVisibility(
+  establishmentId: string | null | undefined,
+  categoryId: string | null | undefined,
+) {
+  const needsRpc = !!establishmentId && !!categoryId;
+  return useQuery({
+    queryKey: ["fnrh_guest_form_visibility", establishmentId, categoryId],
+    enabled: needsRpc,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_fnrh_guest_form_visibility", {
+        p_establishment_id: establishmentId!,
+        p_category_id: categoryId!,
+      });
+      if (error) throw error;
+      return data === true;
+    },
+  });
+}
 
 interface GuestInformationStepProps {
   webCheckin: any;
@@ -40,13 +61,16 @@ export function GuestInformationStep({
   const { t } = useTranslation();
   const { saveGuests } = useWebCheckin();
   const reservation = webCheckin.reservation;
-  
-  // Debug: verificar dados da categoria
-  console.log("🔍 Dados da reserva:", reservation);
-  console.log("🔍 Categoria:", reservation?.room_categories);
-  console.log("🔍 Capacity adults:", reservation?.room_categories?.capacity_adults);
-  console.log("🔍 Capacity children:", reservation?.room_categories?.capacity_children);
-  
+  const establishmentId = webCheckin?.establishment_id ?? webCheckin?.establishment?.id;
+  const categoryId = reservation?.category_id as string | undefined;
+  const { data: fnrhGuestFormVisible, isPending: fnrhVisibilityLoading } = useFnrhGuestFormVisibility(
+    establishmentId,
+    categoryId,
+  );
+  const showFnrhGuestFields = fnrhGuestFormVisible === true;
+  const fnrhVisibilityGate =
+    !!establishmentId && !!categoryId ? !fnrhVisibilityLoading : true;
+
   // Obter capacidade da categoria
   const maxCapacity = reservation?.room_categories?.capacity_adults !== undefined && reservation?.room_categories?.capacity_adults !== null
     ? (reservation.room_categories.capacity_adults + (reservation.room_categories.capacity_children || 0))
@@ -492,6 +516,11 @@ export function GuestInformationStep({
   };
 
   const handleSubmit = async () => {
+    if (!fnrhVisibilityGate) {
+      toast.info("Aguarde um instante…");
+      return;
+    }
+
     // Validação básica
     const hasMainGuest = guests.some((g) => g.is_main_guest);
     if (!hasMainGuest) {
@@ -631,34 +660,45 @@ export function GuestInformationStep({
         }
       }
 
-      // FNRH — dados declarados pelo próprio hóspede (obrigatórios, conforme ficha nacional)
-      if (!guest.fnrh_genero_id?.trim()) {
-        alert(`Informe o gênero (Ficha Nacional / FNRH) de ${guestLabel}.`);
-        return;
-      }
-      if (!guest.fnrh_raca_id?.trim()) {
-        alert(`Informe a raça/cor (FNRH) de ${guestLabel}.`);
-        return;
-      }
-      if (!guest.fnrh_deficiencia_id?.trim()) {
-        alert(`Informe a deficiência (FNRH) de ${guestLabel}.`);
-        return;
-      }
-      if (guest.fnrh_deficiencia_id === "SIM" && !guest.fnrh_tipo_deficiencia_id?.trim()) {
-        alert(`Informe o tipo de deficiência (FNRH) de ${guestLabel}.`);
-        return;
-      }
-      if (!guest.fnrh_motivo_viagem_id?.trim()) {
-        alert(`Informe o motivo da viagem (FNRH) de ${guestLabel}.`);
-        return;
-      }
-      if (!guest.fnrh_meio_transporte_id?.trim()) {
-        alert(`Informe o meio de transporte (FNRH) de ${guestLabel}.`);
-        return;
-      }
-      if (guest.fnrh_genero_id === "OUTRO" && !(guest.fnrh_genero_descricao || "").trim()) {
-        alert(`Descreva o gênero (campo exigido quando a opção é "Outros") para ${guestLabel}.`);
-        return;
+      // FNRH — apenas quando integração + categoria no escopo
+      if (showFnrhGuestFields) {
+        if (!guest.fnrh_genero_id?.trim()) {
+          alert(`Informe o gênero (Ficha Nacional / FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (!guest.fnrh_raca_id?.trim()) {
+          alert(`Informe a raça/cor (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (!guest.fnrh_deficiencia_id?.trim()) {
+          alert(`Informe a deficiência (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (guest.fnrh_deficiencia_id === "SIM" && !guest.fnrh_tipo_deficiencia_id?.trim()) {
+          alert(`Informe o tipo de deficiência (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (!guest.fnrh_motivo_viagem_id?.trim()) {
+          alert(`Informe o motivo da viagem (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (!guest.fnrh_meio_transporte_id?.trim()) {
+          alert(`Informe o meio de transporte (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (guest.fnrh_genero_id === "OUTRO" && !(guest.fnrh_genero_descricao || "").trim()) {
+          alert(`Descreva o gênero (campo exigido quando a opção é "Outros") para ${guestLabel}.`);
+          return;
+        }
+        if (guestIsMinor(guest)) {
+          const doc = (guest.responsavel_numero_documento || "").trim();
+          if (!doc) {
+            alert(
+              `Informe o documento do responsável legal (FNRH) para ${guestLabel} (menor de idade).`,
+            );
+            return;
+          }
+        }
       }
     }
 
@@ -1110,6 +1150,7 @@ export function GuestInformationStep({
               </div>
             </div>
 
+            {showFnrhGuestFields && (
             <div className="mt-6 pt-6 border-t border-slate-200">
               <h4 className="font-semibold text-slate-900 mb-1">Ficha Nacional de Registro de Hóspedes (FNRH)</h4>
               <p className="text-xs text-muted-foreground mb-4">
@@ -1362,6 +1403,7 @@ export function GuestInformationStep({
                 </div>
               )}
             </div>
+            )}
           </Card>
         ))}
       </div>
@@ -1409,7 +1451,7 @@ export function GuestInformationStep({
         <Button variant="outline" onClick={onBack} disabled={isFirstStep}>
           {t("webCheckin.guests.back")}
         </Button>
-        <Button onClick={handleSubmit} disabled={saveGuests.isPending}>
+        <Button onClick={handleSubmit} disabled={saveGuests.isPending || !fnrhVisibilityGate}>
           {saveGuests.isPending ? t("webCheckin.guests.saving") : t("webCheckin.guests.continue")}
         </Button>
       </div>

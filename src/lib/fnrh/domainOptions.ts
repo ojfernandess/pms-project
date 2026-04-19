@@ -61,3 +61,12 @@ export const FNRH_SITUACOES_HOSPEDE = [
   { id: "CHECKIN_REALIZADO", label: "Check-in realizado" },
   { id: "PRECHECKIN_REALIZADO", label: "Pré-check-in realizado" },
 ] as const;
+
+/** Valores usados no servidor (fnrh-submit) quando o hóspede já preencheu no fluxo; não expor em Configurações. */
+export const FNRH_DEFAULTS_STAFF = {
+  motivo_viagem_id: "LAZER_FERIAS",
+  meio_transporte_id: "AUTOMOVEL",
+  raca_id: "NAOINFORMAR",
+  deficiencia_id: "NAO",
+  genero_id: "NAOINFORMADO",
+} as const;

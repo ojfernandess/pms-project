@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -22,19 +23,18 @@ import {
 import { useFnrhSettings } from "@/hooks/useFnrhSettings";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
-import {
-  FNRH_DEFICIENCIA,
-  FNRH_GENEROS,
-  FNRH_MEIOS_TRANSPORTE,
-  FNRH_MOTIVOS_VIAGEM,
-  FNRH_RACAS,
-  FNRH_SITUACOES_HOSPEDE,
-} from "@/lib/fnrh/domainOptions";
+import { FNRH_DEFAULTS_STAFF, FNRH_SITUACOES_HOSPEDE } from "@/lib/fnrh/domainOptions";
 import { Loader2, Shield, Save } from "lucide-react";
 import { toast } from "sonner";
 
 type Props = {
   establishmentId: string | undefined;
+};
+
+type CategoryRow = {
+  id: string;
+  name: string;
+  building_id: string | null;
 };
 
 export function FnrhSettingsCard({ establishmentId }: Props) {
@@ -47,13 +47,11 @@ export function FnrhSettingsCard({ establishmentId }: Props) {
   const [apiUsername, setApiUsername] = useState("");
   const [apiPassword, setApiPassword] = useState("");
   const [cpfSolicitante, setCpfSolicitante] = useState("");
-  const [defaultMotivo, setDefaultMotivo] = useState("LAZER_FERIAS");
-  const [defaultMeio, setDefaultMeio] = useState("AUTOMOVEL");
-  const [defaultRaca, setDefaultRaca] = useState("NAOINFORMAR");
-  const [defaultDef, setDefaultDef] = useState("NAO");
-  const [defaultGenero, setDefaultGenero] = useState("NAOINFORMADO");
   const [situacao, setSituacao] = useState("CHECKIN_REALIZADO");
+  const [autoWeb, setAutoWeb] = useState(false);
   const [autoManual, setAutoManual] = useState(true);
+  const [categoryScopeAll, setCategoryScopeAll] = useState(true);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!row) return;
@@ -62,15 +60,32 @@ export function FnrhSettingsCard({ establishmentId }: Props) {
     setBaseUrlOverride(row.base_url_override || "");
     setApiUsername(row.api_username || "");
     setCpfSolicitante(row.cpf_solicitante || "");
-    setDefaultMotivo(row.default_motivo_viagem_id || "LAZER_FERIAS");
-    setDefaultMeio(row.default_meio_transporte_id || "AUTOMOVEL");
-    setDefaultRaca(row.default_raca_id || "NAOINFORMAR");
-    setDefaultDef(row.default_deficiencia_id || "NAO");
-    setDefaultGenero(row.default_genero_id || "NAOINFORMADO");
     setSituacao(row.situacao_hospede_inicial || "CHECKIN_REALIZADO");
+    setAutoWeb(row.auto_submit_on_web_checkin ?? false);
     setAutoManual(row.auto_submit_on_manual_checkin ?? true);
+    const scope = row.fnrh_category_scope === "selected" ? "selected" : "all";
+    setCategoryScopeAll(scope === "all");
+    setSelectedCategoryIds(
+      Array.isArray(row.fnrh_category_ids)
+        ? row.fnrh_category_ids.map(String)
+        : [],
+    );
     setApiPassword("");
   }, [row]);
+
+  const categoriesQuery = useQuery({
+    queryKey: ["room_categories_fnrh", establishmentId],
+    enabled: !!establishmentId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("room_categories")
+        .select("id, name, building_id")
+        .eq("establishment_id", establishmentId!)
+        .order("name");
+      if (error) throw error;
+      return (data || []) as CategoryRow[];
+    },
+  });
 
   const logsQuery = useQuery({
     queryKey: ["fnrh_submission_log", establishmentId],
@@ -89,8 +104,20 @@ export function FnrhSettingsCard({ establishmentId }: Props) {
     },
   });
 
+  const toggleCategory = (id: string) => {
+    setSelectedCategoryIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
   const handleSave = async () => {
     if (!establishmentId) return;
+    if (!categoryScopeAll && selectedCategoryIds.length === 0) {
+      toast.error(
+        "Selecione ao menos uma categoria de quarto para aplicar o FNRH, ou marque «Todas as categorias».",
+      );
+      return;
+    }
     try {
       await saveSettings({
         enabled,
@@ -99,14 +126,16 @@ export function FnrhSettingsCard({ establishmentId }: Props) {
         api_username: apiUsername,
         api_password: apiPassword,
         cpf_solicitante: cpfSolicitante.replace(/\D/g, ""),
-        default_motivo_viagem_id: defaultMotivo,
-        default_meio_transporte_id: defaultMeio,
-        default_raca_id: defaultRaca,
-        default_deficiencia_id: defaultDef,
-        default_genero_id: defaultGenero,
+        default_motivo_viagem_id: FNRH_DEFAULTS_STAFF.motivo_viagem_id,
+        default_meio_transporte_id: FNRH_DEFAULTS_STAFF.meio_transporte_id,
+        default_raca_id: FNRH_DEFAULTS_STAFF.raca_id,
+        default_deficiencia_id: FNRH_DEFAULTS_STAFF.deficiencia_id,
+        default_genero_id: FNRH_DEFAULTS_STAFF.genero_id,
         situacao_hospede_inicial: situacao,
-        auto_submit_on_web_checkin: false,
+        auto_submit_on_web_checkin: autoWeb,
         auto_submit_on_manual_checkin: autoManual,
+        fnrh_category_scope: categoryScopeAll ? "all" : "selected",
+        fnrh_category_ids: categoryScopeAll ? [] : selectedCategoryIds,
       });
       toast.success("Configuração FNRH salva.");
       setApiPassword("");
@@ -136,11 +165,10 @@ export function FnrhSettingsCard({ establishmentId }: Props) {
               Integração com a API oficial (v2) via HTTPS e autenticação Basic. As credenciais ficam
               armazenadas no servidor; a senha não é exibida após salvar. O cabeçalho{" "}
               <code className="text-xs bg-muted px-1 rounded">cpf_solicitante</code> é obrigatório
-              para auditoria (CPF do responsável legal ou recepção). No web check-in, gênero, raça/cor,
-              deficiência, motivo da viagem e meio de transporte são preenchidos pelo próprio hóspede.
-              Os valores padrão abaixo valem para o envio pela equipe (check-in manual) quando esses
-              campos não estiverem no cadastro. Tratamento de dados pessoais conforme LGPD e políticas
-              do Ministério do Turismo.
+              para auditoria (CPF do responsável legal ou recepção). Motivo da viagem, meio de
+              transporte, raça/cor, deficiência e gênero são definidos pelo hóspede no check-in web ou
+              manual; o envio à API usa valores padrão compatíveis com a documentação apenas quando
+              necessário no servidor.
             </p>
           </div>
         </div>
@@ -155,8 +183,8 @@ export function FnrhSettingsCard({ establishmentId }: Props) {
               <div>
                 <Label>Ativar integração</Label>
                 <p className="text-xs text-muted-foreground">
-                  Quando ativo, o envio pode ocorrer após concluir o web check-in ou o check-in manual
-                  (conforme interruptores abaixo).
+                  Quando ativo, o envio pode ocorrer conforme as regras abaixo (categorias, check-in
+                  manual automático e botão na reserva).
                 </p>
               </div>
               <Switch checked={enabled} onCheckedChange={setEnabled} />
@@ -223,114 +251,124 @@ export function FnrhSettingsCard({ establishmentId }: Props) {
               />
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Motivo de viagem (padrão)</Label>
-                <Select value={defaultMotivo} onValueChange={setDefaultMotivo}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FNRH_MOTIVOS_VIAGEM.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Meio de transporte (padrão)</Label>
-                <Select value={defaultMeio} onValueChange={setDefaultMeio}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FNRH_MEIOS_TRANSPORTE.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Raça/cor (padrão)</Label>
-                <Select value={defaultRaca} onValueChange={setDefaultRaca}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FNRH_RACAS.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Deficiência (padrão)</Label>
-                <Select value={defaultDef} onValueChange={setDefaultDef}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FNRH_DEFICIENCIA.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Gênero (padrão)</Label>
-                <Select value={defaultGenero} onValueChange={setDefaultGenero}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FNRH_GENEROS.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Situação inicial do hóspede no envio</Label>
-                <Select value={situacao} onValueChange={setSituacao}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FNRH_SITUACOES_HOSPEDE.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-6">
-              <div className="flex-1 space-y-1">
-                <Label>Pré check-in online (web)</Label>
-                <p className="text-xs text-muted-foreground">
-                  O envio à FNRH não ocorre ao concluir o pré check-in no link do hóspede; use o botão «Confirmar check-in na FNRH» nos detalhes da reserva na recepção.
-                </p>
-              </div>
-              <div className="flex items-center justify-between gap-4 flex-1">
+            <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="fnrh-all-categories"
+                  checked={categoryScopeAll}
+                  onCheckedChange={(v) => setCategoryScopeAll(v === true)}
+                />
                 <div className="space-y-1">
-                  <Label>Permitir envio ao concluir check-in manual na recepção</Label>
+                  <Label htmlFor="fnrh-all-categories" className="cursor-pointer font-medium">
+                    Todas as categorias de quarto
+                  </Label>
                   <p className="text-xs text-muted-foreground">
-                    Se desligado, o envio só ocorre pelo botão explícito na reserva (com confirmação).
+                    Quando desmarcado, o FNRH aplica apenas às categorias que você selecionar (útil
+                    quando parte das acomodações — por exemplo em um prédio — não exige FNRH).
                   </p>
                 </div>
-                <Switch checked={autoManual} onCheckedChange={setAutoManual} />
+              </div>
+
+              {!categoryScopeAll && (
+                <div className="space-y-2 pl-1">
+                  <Label>Categorias com FNRH</Label>
+                  {categoriesQuery.isLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  ) : (categoriesQuery.data || []).length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Nenhuma categoria cadastrada.</p>
+                  ) : (
+                    <div className="max-h-52 overflow-y-auto rounded-md border bg-background p-3 space-y-2">
+                      {(categoriesQuery.data || []).map((cat) => (
+                          <div key={cat.id} className="flex items-start gap-2">
+                            <Checkbox
+                              id={`fnrh-cat-${cat.id}`}
+                              checked={selectedCategoryIds.includes(cat.id)}
+                              onCheckedChange={() => toggleCategory(cat.id)}
+                            />
+                            <label
+                              htmlFor={`fnrh-cat-${cat.id}`}
+                              className="text-sm cursor-pointer leading-tight"
+                            >
+                              {cat.name}
+                              {cat.building_id ? (
+                                <span className="block text-xs text-muted-foreground">
+                                  Categoria vinculada a um prédio
+                                </span>
+                              ) : null}
+                            </label>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 max-w-xl">
+              <Label>Situação inicial do hóspede no envio</Label>
+              <p className="text-xs text-muted-foreground">
+                Define <code className="text-xs">situacao_hospede</code> no primeiro envio à API
+                (hospedagem/registrar). Use «Check-in realizado» quando o envio ocorre após o
+                check-in presencial; «Pré-check-in» quando ainda é apenas cadastro prévio.
+              </p>
+              <Select value={situacao} onValueChange={setSituacao}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FNRH_SITUACOES_HOSPEDE.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
+              <div className="rounded-lg border p-4 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="fnrh-auto-web">Pré check-in online (web)</Label>
+                  <Switch
+                    id="fnrh-auto-web"
+                    checked={autoWeb}
+                    onCheckedChange={setAutoWeb}
+                    disabled={!enabled}
+                  />
+                </div>
+                {!enabled ? (
+                  <p className="text-xs text-muted-foreground">
+                    Ative primeiro a <strong>integração FNRH</strong> acima para permitir esta opção.
+                  </p>
+                ) : autoWeb ? (
+                  <p className="text-xs text-muted-foreground">
+                    <strong>Ligado:</strong> ao concluir o pré check-in no link do hóspede, o sistema
+                    pode enviar o cadastro à FNRH (hospedagem/registrar) usando a{" "}
+                    <strong>situação inicial do hóspede</strong> definida acima (por exemplo
+                    pré-check-in pendente ou realizado) e respeitando o{" "}
+                    <strong>escopo de categorias</strong>, quando configurado. A recepção pode
+                    complementar ou confirmar depois, conforme o fluxo do estabelecimento.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    <strong>Desligado:</strong> o link do hóspede serve apenas para pré-cadastro; o
+                    envio oficial à FNRH fica na recepção (botão «Confirmar check-in na FNRH» na
+                    reserva ou envio automático do check-in manual, se estiver ativo ao lado).
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-lg border p-4 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label>Enviar à FNRH ao concluir check-in manual na recepção</Label>
+                  <Switch checked={autoManual} onCheckedChange={setAutoManual} />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Quando <strong>ligado</strong>, após finalizar o check-in manual o sistema tenta o
+                  envio (hospedagem/registrar) automaticamente, desde que a categoria da reserva
+                  esteja no escopo acima. Quando <strong>desligado</strong>, só envia pelo botão
+                  «Confirmar check-in na FNRH» na reserva.
+                </p>
               </div>
             </div>
 

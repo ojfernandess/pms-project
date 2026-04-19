@@ -17,6 +17,8 @@ export type FnrhSettingsPublic = {
   situacao_hospede_inicial: string;
   auto_submit_on_web_checkin: boolean;
   auto_submit_on_manual_checkin: boolean;
+  fnrh_category_scope: string;
+  fnrh_category_ids: string[] | null;
   updated_at: string | null;
 };
 
@@ -52,6 +54,8 @@ export function useFnrhSettings(establishmentId: string | undefined) {
       situacao_hospede_inicial: string;
       auto_submit_on_web_checkin: boolean;
       auto_submit_on_manual_checkin: boolean;
+      fnrh_category_scope: string;
+      fnrh_category_ids: string[];
     }) => {
       const { error } = await supabase.rpc("upsert_fnrh_settings", {
         p_establishment_id: establishmentId!,
@@ -69,6 +73,8 @@ export function useFnrhSettings(establishmentId: string | undefined) {
         p_situacao_hospede_inicial: input.situacao_hospede_inicial,
         p_auto_submit_on_web_checkin: input.auto_submit_on_web_checkin,
         p_auto_submit_on_manual_checkin: input.auto_submit_on_manual_checkin,
+        p_fnrh_category_scope: input.fnrh_category_scope,
+        p_fnrh_category_ids: input.fnrh_category_ids,
       });
       if (error) throw error;
     },

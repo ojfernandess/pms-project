@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFnrhSettings } from "@/hooks/useFnrhSettings";
+import { shouldShowFnrhGuestFields } from "@/lib/fnrh/fnrhCategoryScope";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
@@ -30,8 +31,12 @@ type Props = {
   /** Localizador — refetch da reserva após FNRH (atualiza fnrh_registered_at e rótulo Ver check-in) */
   reservationCode?: string;
   establishmentId: string | undefined;
+  /** Categoria da reserva — usado com escopo FNRH por categoria nas configurações */
+  categoryId?: string | null;
   /** Web check-in concluído (pré-check-in) — habilita confirmação presencial na FNRH */
   webCheckinCompleted: boolean;
+  /** Preenchido após envio bem-sucedido à FNRH (evita botão redundante após auto-submit manual) */
+  fnrhRegisteredAt?: string | null;
   disabled?: boolean;
   className?: string;
 };
@@ -44,7 +49,9 @@ export function FnrhConfirmCheckinButton({
   reservationId,
   reservationCode,
   establishmentId,
+  categoryId,
   webCheckinCompleted,
+  fnrhRegisteredAt,
   disabled,
   className,
 }: Props) {
@@ -70,8 +77,15 @@ export function FnrhConfirmCheckinButton({
 
   const enabledFnrh = !!fnrhSettings?.enabled;
   const alreadySent = !!fnrhSuccess;
+  const alreadyRegisteredOnCheckin = !!fnrhRegisteredAt?.trim();
+  const categoryOk = shouldShowFnrhGuestFields(fnrhSettings, categoryId);
   const visible =
-    enabledFnrh && webCheckinCompleted && !alreadySent && !!reservationId;
+    enabledFnrh &&
+    webCheckinCompleted &&
+    !alreadySent &&
+    !alreadyRegisteredOnCheckin &&
+    !!reservationId &&
+    categoryOk;
 
   const handleClick = async () => {
     if (!reservationId) return;

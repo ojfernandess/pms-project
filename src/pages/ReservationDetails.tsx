@@ -2114,8 +2114,13 @@ const ReservationDetails = () => {
                     getSelectedEstablishmentId() ||
                     undefined
                   }
+                  categoryId={reservation?.category_id}
                   webCheckinCompleted={
                     reservation?.web_checkin?.status === "completed"
+                  }
+                  fnrhRegisteredAt={
+                    (reservation?.web_checkin as { fnrh_registered_at?: string | null } | undefined)
+                      ?.fnrh_registered_at
                   }
                   disabled={reservation?.status === "cancelled"}
                 />
