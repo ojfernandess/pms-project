@@ -5,7 +5,12 @@
  * O preço retornado segue a liga de preços por quantidade de hóspedes (x1, x2, x3, x4):
  * - adults=1 → Preço x1 | adults=2 → Preço padrão x2 | adults=3 → Preço x3 | adults≥4 → Preço x4
  * Usado pelo motor de reservas e pela página pública de reserva.
+ *
+ * RPC `calculate_rate_price` passa por `calculateRatePriceWithResilience` (cache, semáforo,
+ * circuit breaker, janela deslizante) para evitar net::ERR_INSUFFICIENT_RESOURCES.
  */
+
+import { calculateRatePriceWithResilience } from "@/lib/calculateRatePriceRpc";
 
 interface PriceRequest {
   establishmentId: string;
@@ -22,41 +27,6 @@ interface PriceResult {
   price: number;
   basePrice: number;
   error?: string;
-}
-
-/** Verifica se o erro é de rede (retentável): ERR_FAILED, Failed to fetch, timeout, 502 */
-function isRetriableNetworkError(err: unknown): boolean {
-  const msg = String((err as { message?: string })?.message ?? "");
-  return (
-    msg.includes("ERR_FAILED") ||
-    msg.includes("Failed to fetch") ||
-    msg.includes("ERR_INSUFFICIENT_RESOURCES") ||
-    msg.includes("502") ||
-    msg.includes("503") ||
-    msg.includes("504") ||
-    msg.includes("NetworkError") ||
-    msg.includes("load failed") ||
-    msg.toLowerCase().includes("gateway") ||
-    msg.toLowerCase().includes("timeout")
-  );
-}
-
-/** Erro retornado pelo supabase-js (RPC) em 502/503/504 ou timeout — não lança, vem em `error` */
-function isRpcRetryableServerError(error: { message?: string; code?: string } | null | undefined): boolean {
-  if (!error) return false;
-  const m = String(error.message || "").toLowerCase();
-  const c = String(error.code || "");
-  return (
-    m.includes("502") ||
-    m.includes("503") ||
-    m.includes("504") ||
-    m.includes("bad gateway") ||
-    m.includes("gateway timeout") ||
-    m.includes("timeout") ||
-    m.includes("service unavailable") ||
-    c === "PGRST301" ||
-    c === "PGRST302"
-  );
 }
 
 /**
@@ -126,44 +96,33 @@ export async function batchCalculateRatePrice(
           p_children: req.children,
         };
 
-        for (let rpcAttempt = 0; rpcAttempt < 3; rpcAttempt++) {
-          if (abortSignal?.aborted) {
-            return { success: false, price: basePrice, basePrice, error: "Request cancelled" };
-          }
+        if (abortSignal?.aborted) {
+          return { success: false, price: basePrice, basePrice, error: "Request cancelled" };
+        }
 
-          const { data, error } = await supabase.rpc("calculate_rate_price", rpcParams);
+        const result = await calculateRatePriceWithResilience(supabase, rpcParams, {
+          basePrice,
+          signal: abortSignal,
+        });
 
-          if (abortSignal?.aborted) {
-            return { success: false, price: basePrice, basePrice, error: "Request cancelled" };
-          }
+        if (abortSignal?.aborted) {
+          return { success: false, price: basePrice, basePrice, error: "Request cancelled" };
+        }
 
-          if (!error) {
-            const price = Number(data || 0);
-            return {
-              success: true,
-              price: price > 0 ? price : basePrice,
-              basePrice,
-            };
-          }
-
-          if (isRpcRetryableServerError(error) && rpcAttempt < 2) {
-            await new Promise((r) => setTimeout(r, 350 * (rpcAttempt + 1)));
-            continue;
-          }
-
+        if (result.error) {
           return {
             success: false,
             price: basePrice,
             basePrice,
-            error: error.message || "Unknown error",
+            error: result.error.message || "Unknown error",
           };
         }
 
+        const price = Number(result.data || 0);
         return {
-          success: false,
-          price: basePrice,
+          success: true,
+          price: price > 0 ? price : basePrice,
           basePrice,
-          error: "calculate_rate_price RPC failed after retries",
         };
       };
 
@@ -172,23 +131,6 @@ export async function batchCalculateRatePrice(
       } catch (fetchError: unknown) {
         if (abortSignal?.aborted) {
           return { success: false, price: basePrice, basePrice, error: "Request cancelled" };
-        }
-        // Retry uma vez para erros de rede (ERR_FAILED, Failed to fetch, 502, etc.)
-        if (isRetriableNetworkError(fetchError)) {
-          await new Promise((r) => setTimeout(r, 400));
-          if (abortSignal?.aborted) {
-            return { success: false, price: basePrice, basePrice, error: "Request cancelled" };
-          }
-          try {
-            return await doRpc();
-          } catch (retryErr) {
-            return {
-              success: false,
-              price: basePrice,
-              basePrice,
-              error: (retryErr as Error).message || "Network error",
-            };
-          }
         }
         return {
           success: false,

@@ -22,6 +22,7 @@ import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
+import { calculateRatePriceWithResilience } from "@/lib/calculateRatePriceRpc";
 import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 import { DateRangePicker } from "@/components/booking-engine/DateRangePicker";
 
@@ -757,20 +758,24 @@ const PublicReservation = () => {
           const dateStr = formatDateLocal(currentDate);
 
           try {
-            const { data, error } = await supabase.rpc("calculate_rate_price", {
-              p_establishment_id: establishment!.id,
-              p_category_id: category.id,
-              p_pricing_plan_id: planId,
-              p_date: dateStr,
-              p_adults: adultsPerRoom,
-              p_children: childrenPerRoom,
-            });
+            const res = await calculateRatePriceWithResilience(
+              supabase,
+              {
+                p_establishment_id: establishment!.id,
+                p_category_id: category.id,
+                p_pricing_plan_id: planId,
+                p_date: dateStr,
+                p_adults: adultsPerRoom,
+                p_children: childrenPerRoom,
+              },
+              { basePrice }
+            );
 
-            if (error) {
-              console.warn(`[calculateCategoryPriceForPlan] Erro ao calcular preço para plano ${planId} na data ${dateStr}:`, error);
+            if (res.error) {
+              console.warn(`[calculateCategoryPriceForPlan] Erro ao calcular preço para plano ${planId} na data ${dateStr}:`, res.error);
               categoryTotal += basePrice;
             } else {
-              const price = Number(data || 0);
+              const price = Number(res.data || 0);
               if (price > 0) {
                 categoryTotal += price;
               } else {
@@ -787,19 +792,23 @@ const PublicReservation = () => {
     } else {
       const todayStr = formatDateLocal(new Date());
       try {
-        const { data, error } = await supabase.rpc("calculate_rate_price", {
-          p_establishment_id: establishment!.id,
-          p_category_id: category.id,
-          p_pricing_plan_id: planId,
-          p_date: todayStr,
-          p_adults: adultsPerRoom,
-          p_children: childrenPerRoom,
-        });
+        const res = await calculateRatePriceWithResilience(
+          supabase,
+          {
+            p_establishment_id: establishment!.id,
+            p_category_id: category.id,
+            p_pricing_plan_id: planId,
+            p_date: todayStr,
+            p_adults: adultsPerRoom,
+            p_children: childrenPerRoom,
+          },
+          { basePrice }
+        );
 
-        if (error) {
+        if (res.error) {
           categoryTotal = basePrice;
         } else {
-          const price = Number(data || 0);
+          const price = Number(res.data || 0);
           categoryTotal = price > 0 ? price : basePrice;
         }
       } catch (error) {
@@ -1386,19 +1395,23 @@ const PublicReservation = () => {
                         ? publicPricingPlan2Id 
                         : publicPricingPlanId || null;
                     
-                    const { data, error } = await supabase.rpc("calculate_rate_price", {
-                      p_establishment_id: establishment.id,
-                      p_category_id: selectedCategory,
-                      p_pricing_plan_id: planIdToUse,
-                      p_date: dateStr,
-                      p_adults: adults,
-                      p_children: children,
-                    });
+                    const res = await calculateRatePriceWithResilience(
+                      supabase,
+                      {
+                        p_establishment_id: establishment.id,
+                        p_category_id: selectedCategory,
+                        p_pricing_plan_id: planIdToUse,
+                        p_date: dateStr,
+                        p_adults: adults,
+                        p_children: children,
+                      },
+                      { basePrice }
+                    );
 
-                    if (error) {
+                    if (res.error) {
                       categoryTotal += basePrice;
                     } else {
-                      const price = Number(data || 0);
+                      const price = Number(res.data || 0);
                       categoryTotal += price > 0 ? price : basePrice;
                     }
                   } catch (error) {
@@ -1468,19 +1481,23 @@ const PublicReservation = () => {
                             ? publicPricingPlan2Id 
                             : publicPricingPlanId || null;
                         
-                        const { data, error } = await supabase.rpc("calculate_rate_price", {
-                          p_establishment_id: establishment.id,
-                          p_category_id: item.categoryId,
-                          p_pricing_plan_id: planIdToUse,
-                          p_date: dateStr,
-                          p_adults: item.adults,
-                          p_children: children,
-                        });
+                        const res = await calculateRatePriceWithResilience(
+                          supabase,
+                          {
+                            p_establishment_id: establishment.id,
+                            p_category_id: item.categoryId,
+                            p_pricing_plan_id: planIdToUse,
+                            p_date: dateStr,
+                            p_adults: item.adults,
+                            p_children: children,
+                          },
+                          { basePrice }
+                        );
 
-                        if (error) {
+                        if (res.error) {
                           categoryTotal += basePrice;
                         } else {
-                          const price = Number(data || 0);
+                          const price = Number(res.data || 0);
                           categoryTotal += price > 0 ? price : basePrice;
                         }
                       } catch (error) {
@@ -1603,19 +1620,23 @@ const PublicReservation = () => {
                     : (item.rooms > 0 ? Math.ceil(item.adults / item.rooms) : item.adults);
                   const childrenPerRoom = item.rooms > 0 ? Math.ceil(children / item.rooms) : children;
                   
-                  const { data, error } = await supabase.rpc("calculate_rate_price", {
-                    p_establishment_id: establishment.id,
-                    p_category_id: item.categoryId,
-                    p_pricing_plan_id: planIdToUse,
-                    p_date: dateStr,
-                    p_adults: adultsPerRoom,
-                    p_children: childrenPerRoom,
-                  });
+                  const res = await calculateRatePriceWithResilience(
+                    supabase,
+                    {
+                      p_establishment_id: establishment.id,
+                      p_category_id: item.categoryId,
+                      p_pricing_plan_id: planIdToUse,
+                      p_date: dateStr,
+                      p_adults: adultsPerRoom,
+                      p_children: childrenPerRoom,
+                    },
+                    { basePrice }
+                  );
 
-                  if (error) {
+                  if (res.error) {
                     categoryTotal += basePrice;
                   } else {
-                    const price = Number(data || 0);
+                    const price = Number(res.data || 0);
                     categoryTotal += price > 0 ? price : basePrice;
                   }
                 } catch (error) {

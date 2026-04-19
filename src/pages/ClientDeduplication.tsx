@@ -43,6 +43,33 @@ import { formatCurrency } from "@/lib/reservationUtils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
+/** Campos permitidos em PATCH de clients (evita 400 por colunas extras / id no corpo). */
+const CLIENT_UPDATE_KEYS = [
+  "full_name",
+  "email",
+  "phone",
+  "document_number",
+  "document_type",
+  "birth_date",
+  "nationality",
+  "address",
+  "city",
+  "state",
+  "postal_code",
+  "country",
+  "notes",
+  "establishment_id",
+] as const;
+
+function buildClientUpdatePayload(merged: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of CLIENT_UPDATE_KEYS) {
+    const v = merged[k];
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
 interface DuplicateGroup {
   id: string;
   clients: any[];
@@ -62,6 +89,10 @@ const ClientDeduplication = () => {
   const [selectedGroup, setSelectedGroup] = useState<DuplicateGroup | null>(null);
   const [primaryClientId, setPrimaryClientId] = useState<string | null>(null);
   const [isMerging, setIsMerging] = useState(false);
+  /** Feedback durante mesclagem (evita “só carregando” sem contexto). */
+  const [mergePhase, setMergePhase] = useState<
+    "idle" | "profile" | "references" | "cleanup"
+  >("idle");
 
   // Verificar se a funcionalidade está habilitada para este estabelecimento
   const isFeatureEnabled = isFeatureEnabledForEstablishment(
@@ -314,6 +345,7 @@ const ClientDeduplication = () => {
     if (!selectedGroup || !primaryClientId) return;
 
     setIsMerging(true);
+    setMergePhase("profile");
     try {
       const primaryClient = selectedGroup.clients.find(c => c.id === primaryClientId);
       if (!primaryClient) throw new Error("Cliente primário não encontrado");
@@ -322,8 +354,12 @@ const ClientDeduplication = () => {
         .filter(c => c.id !== primaryClientId)
         .map(c => c.id);
 
+      if (duplicateIds.length === 0) {
+        throw new Error("Não há clientes duplicados para mesclar.");
+      }
+
       // 1. Mesclar dados do cliente primário (usar dados mais completos)
-      const mergedData: any = { ...primaryClient };
+      const mergedData: Record<string, unknown> = { ...primaryClient };
       
       for (const duplicate of selectedGroup.clients) {
         if (duplicate.id === primaryClientId) continue;
@@ -345,57 +381,87 @@ const ClientDeduplication = () => {
         }
       }
 
-      // Atualizar cliente primário
+      const clientPayload = buildClientUpdatePayload(mergedData);
+      if (!clientPayload.full_name && typeof primaryClient.full_name === "string") {
+        clientPayload.full_name = primaryClient.full_name;
+      }
+
+      // Apenas colunas válidas — evita 400 ao enviar id/created_at/relacionamentos no PATCH
       const { error: updateError } = await supabase
         .from("clients")
-        .update(mergedData)
+        .update(clientPayload as never)
         .eq("id", primaryClientId);
 
       if (updateError) throw updateError;
 
-      // 2. Atualizar todas as referências nas reservas
-      for (const duplicateId of duplicateIds) {
-        // Atualizar client_id
-        const { error: resError1 } = await supabase
+      setMergePhase("references");
+
+      // 2. Uma transação no servidor: reservas + financeiro + cotações + … + delete duplicados
+      const { error: rpcError } = await supabase.rpc("merge_duplicate_clients_into_primary", {
+        p_primary_id: primaryClientId,
+        p_duplicate_ids: duplicateIds,
+      });
+
+      if (rpcError) {
+        console.warn("RPC merge_duplicate_clients_into_primary falhou, tentando modo compatível:", rpcError);
+        // Fallback: menos requisições que o loop por duplicado (2 updates em lote + delete)
+        const { error: bulkClient } = await supabase
           .from("reservations")
           .update({ client_id: primaryClientId })
-          .eq("client_id", duplicateId);
+          .in("client_id", duplicateIds);
+        if (bulkClient) throw bulkClient;
 
-        if (resError1) throw resError1;
-
-        // Atualizar guest_id
-        const { error: resError2 } = await supabase
+        const { error: bulkGuest } = await supabase
           .from("reservations")
           .update({ guest_id: primaryClientId })
-          .eq("guest_id", duplicateId);
+          .in("guest_id", duplicateIds);
+        if (bulkGuest) throw bulkGuest;
 
-        if (resError2) throw resError2;
+        setMergePhase("cleanup");
+        const { error: deleteError } = await supabase
+          .from("clients")
+          .delete()
+          .in("id", duplicateIds);
+        if (deleteError) throw deleteError;
+
+        toast.success(
+          `${duplicateIds.length} cliente(s) mesclado(s) em modo compatível (apenas reservas). Publique a migração merge_duplicate_clients no Supabase para mesclagem completa.`,
+          { duration: 10000 },
+        );
+      } else {
+        setMergePhase("cleanup");
+        toast.success(`${duplicateIds.length} cliente(s) mesclado(s) com sucesso!`);
       }
-
-      // 3. Deletar clientes duplicados
-      const { error: deleteError } = await supabase
-        .from("clients")
-        .delete()
-        .in("id", duplicateIds);
-
-      if (deleteError) throw deleteError;
 
       // Invalidar queries
       queryClient.invalidateQueries({ queryKey: ["all-clients-deduplication"] });
       queryClient.invalidateQueries({ queryKey: ["all-reservations-deduplication"] });
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
-
-      toast.success(`${duplicateIds.length} cliente(s) mesclado(s) com sucesso!`);
       setMergeDialogOpen(false);
       setSelectedGroup(null);
       setPrimaryClientId(null);
       setSelectedGroups(new Set());
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Erro ao mesclar clientes:", error);
-      toast.error(error.message || "Erro ao mesclar clientes");
+      const msg =
+        error &&
+        typeof error === "object" &&
+        "message" in error &&
+        typeof (error as { message: unknown }).message === "string"
+          ? (error as { message: string }).message
+          : "Erro ao mesclar clientes";
+      const details =
+        error &&
+        typeof error === "object" &&
+        "details" in error &&
+        typeof (error as { details: unknown }).details === "string"
+          ? (error as { details: string }).details
+          : "";
+      toast.error(details ? `${msg} (${details})` : msg);
     } finally {
       setIsMerging(false);
+      setMergePhase("idle");
     }
   };
 
@@ -618,7 +684,13 @@ const ClientDeduplication = () => {
       )}
 
       {/* Dialog de Mesclagem */}
-      <Dialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
+      <Dialog
+        open={mergeDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && isMerging) return;
+          setMergeDialogOpen(open);
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Mesclar Clientes Duplicados</DialogTitle>
@@ -630,6 +702,28 @@ const ClientDeduplication = () => {
 
           {selectedGroup && (
             <div className="space-y-4">
+              {isMerging && (
+                <Alert className="border-primary/30 bg-primary/5">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <AlertDescription className="text-sm">
+                    {mergePhase === "profile" && (
+                      <>
+                        <strong>Passo 1/2:</strong> a gravar dados consolidados no cliente primário…
+                      </>
+                    )}
+                    {mergePhase === "references" && (
+                      <>
+                        <strong>Passo 2/2:</strong> a reatribuir reservas, registos financeiros e a remover
+                        perfis duplicados (pode demorar com muitos vínculos)…
+                      </>
+                    )}
+                    {mergePhase === "cleanup" && (
+                      <>A concluir e a atualizar a lista…</>
+                    )}
+                    {mergePhase === "idle" && <>A processar…</>}
+                  </AlertDescription>
+                </Alert>
+              )}
               <Alert>
                 <AlertTriangle className="h-4 w-4" />
                 <AlertDescription>

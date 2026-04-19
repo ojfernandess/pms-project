@@ -25,6 +25,7 @@ import {
   flushChannelSyncNow,
   scheduleChannelSyncAfterRateEdit,
 } from "@/lib/channelSyncAfterRates";
+import { calculateRatePriceWithResilience } from "@/lib/calculateRatePriceRpc";
 
 export interface RatePlan {
   id: string;
@@ -1230,32 +1231,36 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       }
     }
 
-    // Usar função PostgreSQL (padrão)
+    // Usar função PostgreSQL (padrão) — camada de resiliência (cache, semáforo, circuit breaker)
     try {
-      const { data, error } = await supabase.rpc("calculate_rate_price", {
-        p_establishment_id: establishmentId,
-        p_category_id: categoryId,
-        p_pricing_plan_id: planId,
-        p_date: format(date, "yyyy-MM-dd"),
-        p_adults: adults,
-        p_children: children,
-      });
+      const result = await calculateRatePriceWithResilience(
+        supabase,
+        {
+          p_establishment_id: establishmentId,
+          p_category_id: categoryId,
+          p_pricing_plan_id: planId,
+          p_date: format(date, "yyyy-MM-dd"),
+          p_adults: adults,
+          p_children: children,
+        },
+        { basePrice: 0 }
+      );
 
-      if (error) {
-        const isNetworkError = 
-          error.message?.includes("CORS") || 
-          error.message?.includes("Failed to fetch") || 
-          error.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
-          error.message?.includes("ERR_QUIC_PROTOCOL_ERROR") ||
-          error.message?.includes("502") ||
-          error.message?.includes("503") ||
-          error.message?.includes("504") ||
-          error.message?.toLowerCase().includes("gateway") ||
-          error.code === "PGRST301" ||
-          error.code === "PGRST302";
+      if (result.error) {
+        const isNetworkError =
+          result.error.message?.includes("CORS") ||
+          result.error.message?.includes("Failed to fetch") ||
+          result.error.message?.includes("ERR_INSUFFICIENT_RESOURCES") ||
+          result.error.message?.includes("ERR_QUIC_PROTOCOL_ERROR") ||
+          result.error.message?.includes("502") ||
+          result.error.message?.includes("503") ||
+          result.error.message?.includes("504") ||
+          result.error.message?.toLowerCase().includes("gateway") ||
+          result.error.code === "PGRST301" ||
+          result.error.code === "PGRST302";
 
         if (isNetworkError && retryCount < MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, 300 * (retryCount + 1)));
+          await new Promise((r) => setTimeout(r, 300 * (retryCount + 1)));
           return calculateRatePrice(categoryId, planId, date, adults, children, false, retryCount + 1);
         }
         if (isNetworkError) {
@@ -1266,12 +1271,28 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
               .eq("id", categoryId)
               .maybeSingle();
             if (categoryData?.base_price) return Number(categoryData.base_price);
-          } catch (e) { /* fallback */ }
+          } catch (e) {
+            /* fallback */
+          }
         }
         return 0;
       }
 
-      return Number(data || 0);
+      const n = Number(result.data || 0);
+      if (n > 0) return n;
+      if (result.fallback) {
+        try {
+          const { data: categoryData } = await supabase
+            .from("room_categories")
+            .select("base_price")
+            .eq("id", categoryId)
+            .maybeSingle();
+          if (categoryData?.base_price) return Number(categoryData.base_price);
+        } catch (e) {
+          /* fallback */
+        }
+      }
+      return n;
     } catch (fetchError: any) {
       const isNetworkError = 
         fetchError?.message?.includes("Failed to fetch") || 

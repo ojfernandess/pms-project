@@ -226,6 +226,52 @@ function normalizeCalendarDate(v: unknown): string | null {
   return m ? m[1] : null;
 }
 
+function eachDateInRangeInclusiveAiosell(startIso: string, endIso: string): string[] {
+  const out: string[] = [];
+  let c = new Date(`${startIso}T12:00:00.000Z`);
+  const end = new Date(`${endIso}T12:00:00.000Z`);
+  while (c.getTime() <= end.getTime()) {
+    out.push(c.toISOString().slice(0, 10));
+    c.setUTCDate(c.getUTCDate() + 1);
+  }
+  return out;
+}
+
+/** PostgREST limita a 1000 linhas por pedido; janela 365d × N planos/categorias excede e truncava o sync. */
+const RATE_CALENDAR_PAGE_SIZE_AI = 1000;
+
+async function fetchAllRateCalendarRowsAiosell(
+  client: ReturnType<typeof createClient>,
+  establishmentId: string,
+  today: string,
+  futureDateStr: string
+): Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }> {
+  const select = `
+      *,
+      pricing_plans (*),
+      room_categories (*)
+    `;
+  const all: Record<string, unknown>[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await client
+      .from("rate_calendar")
+      .select(select)
+      .eq("establishment_id", establishmentId)
+      .gte("date", today)
+      .lte("date", futureDateStr)
+      .order("date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + RATE_CALENDAR_PAGE_SIZE_AI - 1);
+    if (error) return { data: null, error };
+    const batch = (data ?? []) as Record<string, unknown>[];
+    all.push(...batch);
+    if (batch.length < RATE_CALENDAR_PAGE_SIZE_AI) break;
+    offset += RATE_CALENDAR_PAGE_SIZE_AI;
+  }
+  return { data: all, error: null };
+}
+
 /**
  * Índice `categoria|data|planId` → base_price no calendário (para recomputar planos derivados).
  * Deve incluir **todas** as linhas do `rate_calendar` na janela, não só as que têm mapeamento Aiosell:
@@ -1116,19 +1162,12 @@ serve(async (req) => {
     console.warn("[aiosell-sync] SUPABASE_SERVICE_ROLE_KEY ausente — usando JWT (RLS pode bloquear dados).");
   }
 
-  const { data: rateCalendar, error: rateError } = await db
-    .from("rate_calendar")
-    .select(
-      `
-      *,
-      pricing_plans (*),
-      room_categories (*)
-    `
-    )
-    .eq("establishment_id", establishmentId)
-    .gte("date", today)
-    .lte("date", futureDateStr)
-    .order("date", { ascending: true });
+  const { data: rateCalendar, error: rateError } = await fetchAllRateCalendarRowsAiosell(
+    db,
+    establishmentId,
+    today,
+    futureDateStr
+  );
 
   if (rateError) {
     return new Response(JSON.stringify({ success: false, error: rateError.message }), {
@@ -1295,6 +1334,13 @@ serve(async (req) => {
   }
 
   const rows = rateCalendarRowsAll.filter(rowHasCompleteMapping);
+
+  const tariffCategoryDateKeysAiosell = new Set<string>();
+  for (const rate of rateCalendarRowsAll) {
+    const cid = String(rate.category_id ?? "").trim();
+    const d = normalizeCalendarDate(rate.date) ?? String(rate.date).slice(0, 10);
+    if (cid && d) tariffCategoryDateKeysAiosell.add(`${cid}|${d}`);
+  }
 
   if (rateCalendarRowsAll.length > 0 && rows.length === 0) {
     return new Response(
@@ -1520,6 +1566,40 @@ serve(async (req) => {
     });
   });
 
+  /**
+   * Datas sem linha em rate_calendar: inventário 0 + stopSell no CM (evita meses sem tarifário com stock/valor residual).
+   * Só quando existe tarifário parcial (≥1 linha na janela); com calendário vazio mantém-se o erro «sem dados» mais abaixo.
+   */
+  if (tariffCategoryDateKeysAiosell.size > 0) {
+    const mappedCategoryIdsForInventory = new Set<string>();
+    for (const c of channelPricingConfig || []) {
+      if (configHasCompleteAiosellMapping(c as Record<string, unknown>)) {
+        mappedCategoryIdsForInventory.add(c.category_id as string);
+      }
+    }
+    const datesInWindowAiosell = eachDateInRangeInclusiveAiosell(today, futureDateStr);
+    for (const categoryId of mappedCategoryIdsForInventory) {
+      for (const date of datesInWindowAiosell) {
+        if (tariffCategoryDateKeysAiosell.has(`${categoryId}|${date}`)) continue;
+
+        const rss = salesStatusByCategoryDate.get(`${categoryId}|${date}`) ?? null;
+        let agg: Record<string, unknown> | null = aiosellRestrictionShape(null, null, false, false, true, null, null);
+        if (isCategoryClosedForOtaChannel(rss)) {
+          const forced = aiosellRestrictionShape(null, null, false, false, true, null, null);
+          agg = agg ? mergeTwoInvRestrictions(agg, forced) : forced;
+        }
+
+        const listC = invCombinedByCategory.get(categoryId) || [];
+        listC.push({ date, available: 0, restrictions: agg });
+        invCombinedByCategory.set(categoryId, listC);
+      }
+    }
+  }
+
+  invCombinedByCategory.forEach((days) => {
+    days.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  });
+
   const buildInventoryCombinedUpdates = (
     days: InvDayCombined[],
     roomCode: string
@@ -1548,8 +1628,12 @@ serve(async (req) => {
   const inventoryCombinedUpdates: Record<string, unknown>[] = [];
 
   invCombinedByCategory.forEach((days, catId) => {
-    const sampleRate = rows.find((r) => r.category_id === catId)!;
-    const { roomCode } = resolveRoomAndRateplanCodes(sampleRate);
+    const sampleRate = rows.find((r) => r.category_id === catId);
+    const rateLike = (sampleRate ?? {
+      category_id: catId,
+      pricing_plan_id: null,
+    }) as Record<string, unknown>;
+    const { roomCode } = resolveRoomAndRateplanCodes(rateLike);
     if (!sanitizeAiosellCode(roomCode)) return;
     inventoryCombinedUpdates.push(...buildInventoryCombinedUpdates(days, roomCode));
   });

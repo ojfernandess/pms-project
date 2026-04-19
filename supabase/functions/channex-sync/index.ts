@@ -25,6 +25,54 @@ function addDays(date: Date, days: number): Date {
   return d;
 }
 
+function eachDateStringInRangeInclusive(startIso: string, endIso: string): string[] {
+  const out: string[] = [];
+  let cursor = new Date(`${startIso}T00:00:00.000Z`);
+  const end = new Date(`${endIso}T00:00:00.000Z`);
+  while (cursor.getTime() <= end.getTime()) {
+    out.push(toIsoDate(cursor));
+    cursor = addDays(cursor, 1);
+  }
+  return out;
+}
+
+function envFlagTrue(name: string): boolean {
+  const v = (Deno.env.get(name) ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+/** PostgREST limita a 1000 linhas por pedido; tarifários anuais com várias categorias/planos excedem e ficavam truncados no sync. */
+const RATE_CALENDAR_PAGE_SIZE = 1000;
+
+async function fetchAllRateCalendarRowsChannex(
+  supabase: ReturnType<typeof createClient>,
+  establishmentId: string,
+  today: string,
+  futureDate: string
+): Promise<{ data: AnyObj[] | null; error: { message: string } | null }> {
+  const select =
+    "date, category_id, pricing_plan_id, base_price, adult_price, child_price, min_stay, max_stay, closed_to_arrival, closed_to_departure, stop_sell_ota, stop_sell_booking_engine, min_advance_days, max_advance_days";
+  const all: AnyObj[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("rate_calendar")
+      .select(select)
+      .eq("establishment_id", establishmentId)
+      .gte("date", today)
+      .lte("date", futureDate)
+      .order("date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + RATE_CALENDAR_PAGE_SIZE - 1);
+    if (error) return { data: null, error };
+    const batch = (data ?? []) as AnyObj[];
+    all.push(...batch);
+    if (batch.length < RATE_CALENDAR_PAGE_SIZE) break;
+    offset += RATE_CALENDAR_PAGE_SIZE;
+  }
+  return { data: all, error: null };
+}
+
 async function postChannex(baseUrl: string, apiKey: string, path: string, payload: unknown) {
   return fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
     method: "POST",
@@ -230,22 +278,21 @@ serve(async (req) => {
     future.setDate(future.getDate() + 365);
     const futureDate = future.toISOString().slice(0, 10);
 
+    const { data: rateCalendar, error: rcErr } = await fetchAllRateCalendarRowsChannex(
+      supabase,
+      establishmentId,
+      today,
+      futureDate
+    );
+    if (rcErr) throw rcErr;
+
     const [
-      { data: rateCalendar, error: rcErr },
       { data: mappingRows, error: mapErr },
       { data: rooms, error: roomsErr },
       { data: roomCategories, error: categoriesErr },
       { data: reservations, error: reservationsErr },
       { data: hotelSettings },
     ] = await Promise.all([
-      supabase
-        .from("rate_calendar")
-        .select(
-          "date, category_id, pricing_plan_id, base_price, adult_price, child_price, min_stay, max_stay, closed_to_arrival, closed_to_departure, stop_sell_ota, stop_sell_booking_engine, min_advance_days, max_advance_days"
-        )
-        .eq("establishment_id", establishmentId)
-        .gte("date", today)
-        .lte("date", futureDate),
       supabase.from("channel_pricing").select("*").eq("ota_channel_id", channelId).eq("is_active", true),
       supabase
         .from("rooms")
@@ -263,11 +310,18 @@ serve(async (req) => {
         .lte("checkin_date", futureDate),
       supabase.from("hotel_settings").select("rate_system_settings").eq("establishment_id", establishmentId).maybeSingle(),
     ]);
-    if (rcErr) throw rcErr;
     if (mapErr) throw mapErr;
     if (roomsErr) throw roomsErr;
     if (categoriesErr) throw categoriesErr;
     if (reservationsErr) throw reservationsErr;
+
+    const tariffCategoryDateKeys = new Set<string>();
+    for (const row of rateCalendar ?? []) {
+      const r = row as AnyObj;
+      const cid = String(r.category_id ?? "").trim();
+      const d = String(r.date ?? "").slice(0, 10);
+      if (cid && d) tariffCategoryDateKeys.add(`${cid}::${d}`);
+    }
 
     const availabilityMap = new Map<string, AnyObj>();
     const availabilityValues: AnyObj[] = [];
@@ -371,6 +425,31 @@ serve(async (req) => {
     );
 
     const useRateCalendar = Array.isArray(rateCalendar) && rateCalendar.length > 0;
+    const allowBasePriceFallback = envFlagTrue("CHANNEX_ALLOW_BASE_PRICE_FALLBACK");
+    if (!useRateCalendar && !allowBasePriceFallback) {
+      const msg =
+        "Sem linhas no tarifário (rate_calendar) para o período. Crie o tarifário no calendário antes de sincronizar com o Channex. (Opcional: CHANNEX_ALLOW_BASE_PRICE_FALLBACK=true só em migração controlada.)";
+      await supabase.from("channex_sync_logs").insert({
+        ota_channel_id: channelId,
+        establishment_id: establishmentId,
+        direction: "push_ari",
+        status: "warning",
+        endpoint: "early_exit",
+        message: msg,
+      });
+      await supabase
+        .from("ota_channels")
+        .update({
+          channex_sync_status: "error",
+          sync_status: "error",
+          sync_error: msg,
+          channex_last_sync_at: new Date().toISOString(),
+          last_sync_at: new Date().toISOString(),
+        })
+        .eq("id", channelId);
+      return json({ success: false, error: msg }, 400);
+    }
+
     const categoryBasePriceMap = new Map<string, number>();
     for (const c of roomCategories ?? []) {
       const cc = c as AnyObj;
@@ -383,7 +462,8 @@ serve(async (req) => {
     if (useRateCalendar) {
       calendarLikeRows.push(...((rateCalendar ?? []) as AnyObj[]));
     } else {
-      // Fallback: gerar diário (365 dias) a partir dos mapeamentos ativos e base_price da categoria.
+      // Fallback opcional (só com CHANNEX_ALLOW_BASE_PRICE_FALLBACK): gerar diário a partir de Tarifas por canal + base_price.
+      // Por defeito desligado: inventava tarifas/dias sem linhas no PMS e o CM mostrava disponibilidade indevida.
       for (const m of mappingRows ?? []) {
         const mm = m as AnyObj;
         const categoryId = String(mm.category_id ?? "").trim();
@@ -579,6 +659,35 @@ serve(async (req) => {
         date,
         rate: cents,
       });
+    }
+
+    /**
+     * Segurança: (categoria, data) sem linha em rate_calendar → disponibilidade 0 no CM.
+     * Evita meses sem tarifário criado no PMS continuarem com stock/preço antigos no channel.
+     */
+    if (useRateCalendar) {
+      const mappedCategoryRoomTypes = new Map<string, string>();
+      for (const m of mappingRows ?? []) {
+        const mm = m as AnyObj;
+        const cid = String(mm.category_id ?? "").trim();
+        const roomTypeId = String(mm.channel_room_code ?? "").trim();
+        if (!cid || !roomTypeId) continue;
+        if (!mappedCategoryRoomTypes.has(cid)) mappedCategoryRoomTypes.set(cid, roomTypeId);
+      }
+      for (const [categoryId, roomTypeId] of mappedCategoryRoomTypes) {
+        for (const dateStr of eachDateStringInRangeInclusive(today, futureDate)) {
+          if (tariffCategoryDateKeys.has(`${categoryId}::${dateStr}`)) continue;
+          const availabilityKey = `${roomTypeId}::${dateStr}`;
+          if (!availabilityMap.has(availabilityKey)) {
+            availabilityMap.set(availabilityKey, {
+              property_id: propertyId,
+              room_type_id: roomTypeId,
+              date: dateStr,
+              availability: 0,
+            });
+          }
+        }
+      }
     }
 
     availabilityValues.push(...availabilityMap.values());

@@ -33,7 +33,10 @@ export const fetchWithRetry: typeof fetch = async (input, init) => {
     try {
       const response = await fetch(input, init);
       if (isRetryableHttpStatus(response.status) && attempt < MAX_ATTEMPTS) {
-        await new Promise((r) => setTimeout(r, BASE_DELAY_MS * Math.pow(2, attempt - 1)));
+        const jitter = 0.85 + Math.random() * 0.3;
+        await new Promise((r) =>
+          setTimeout(r, Math.floor(BASE_DELAY_MS * Math.pow(2, attempt - 1) * jitter))
+        );
         continue;
       }
       return response;
@@ -42,7 +45,10 @@ export const fetchWithRetry: typeof fetch = async (input, init) => {
       if (!isTransientNetworkError(e) || attempt === MAX_ATTEMPTS) {
         throw e;
       }
-      await new Promise((r) => setTimeout(r, BASE_DELAY_MS * Math.pow(2, attempt - 1)));
+      const jitter = 0.85 + Math.random() * 0.3;
+      await new Promise((r) =>
+        setTimeout(r, Math.floor(BASE_DELAY_MS * Math.pow(2, attempt - 1) * jitter))
+      );
     }
   }
   throw lastError;

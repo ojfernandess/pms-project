@@ -1,5 +1,43 @@
 import { supabase } from "@/integrations/supabase/client";
+import {
+  buildTariffCategoryDateKeySet,
+  eachDateInRangeInclusive,
+} from "@/lib/channelTariffAvailabilityGuard";
 import { toast } from "sonner";
+
+const RATE_CALENDAR_PAGE_SIZE = 1000;
+
+async function fetchAllRateCalendarForBukly(
+  establishmentId: string,
+  today: string,
+  futureDateStr: string
+) {
+  const select = `
+        *,
+        pricing_plans (*),
+        room_categories (*)
+      `;
+  const all: unknown[] = [];
+  let offset = 0;
+  for (;;) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tipagem gerada incompleta para rate_calendar
+    const { data, error } = await (supabase as any)
+      .from("rate_calendar")
+      .select(select)
+      .eq("establishment_id", establishmentId)
+      .gte("date", today)
+      .lte("date", futureDateStr)
+      .order("date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + RATE_CALENDAR_PAGE_SIZE - 1);
+    if (error) return { data: null as unknown[] | null, error };
+    const batch = data ?? [];
+    all.push(...batch);
+    if (batch.length < RATE_CALENDAR_PAGE_SIZE) break;
+    offset += RATE_CALENDAR_PAGE_SIZE;
+  }
+  return { data: all, error: null };
+}
 
 /** Sincronização Bukly (tarifas, disponibilidade, restrições) — extraído para reutilização. */
 export async function invokeBuklySync(
@@ -12,21 +50,19 @@ export async function invokeBuklySync(
   futureDate.setDate(futureDate.getDate() + 365);
   const futureDateStr = futureDate.toISOString().split("T")[0];
 
-  const { data: rateCalendar, error: rateError } = await supabase
-    .from("rate_calendar")
-    .select(
-      `
-        *,
-        pricing_plans (*),
-        room_categories (*)
-      `
-    )
-    .eq("establishment_id", establishmentId)
-    .gte("date", today)
-    .lte("date", futureDateStr)
-    .order("date", { ascending: true });
+  const { data: rateCalendar, error: rateError } = await fetchAllRateCalendarForBukly(
+    establishmentId,
+    today,
+    futureDateStr
+  );
 
   if (rateError) throw rateError;
+
+  const { data: channelPricingRows } = await supabase
+    .from("channel_pricing")
+    .select("category_id")
+    .eq("ota_channel_id", channelId)
+    .eq("is_active", true);
 
   const { data: rooms, error: roomsError } = await supabase
     .from("rooms")
@@ -68,6 +104,14 @@ export async function invokeBuklySync(
     ctd: boolean;
     maxLOS: unknown;
   }> = [];
+
+  const tariffCategoryDateKeys = buildTariffCategoryDateKeySet(
+    (rateCalendar || []) as Array<{ category_id: string; date: string }>
+  );
+  const mappedCategoryIds = [
+    ...new Set((channelPricingRows || []).map((r) => String(r.category_id ?? "").trim()).filter(Boolean)),
+  ];
+  const datesInWindow = eachDateInRangeInclusive(today, futureDateStr);
 
   const categoryDates = new Map<string, Set<string>>();
   (rateCalendar || []).forEach((rate: { category_id: string; date: string }) => {
@@ -115,6 +159,23 @@ export async function invokeBuklySync(
       });
     });
   });
+
+  /** Datas sem linha em rate_calendar: disponibilidade 0 (só com tarifário parcial na janela). */
+  if (tariffCategoryDateKeys.size > 0) {
+    for (const categoryId of mappedCategoryIds) {
+      const categoryRooms = rooms?.filter((r) => r.category_id === categoryId) || [];
+      const totalRooms = categoryRooms.length;
+      for (const date of datesInWindow) {
+        if (tariffCategoryDateKeys.has(`${categoryId}|${date}`)) continue;
+        availability.push({
+          categoryId,
+          date,
+          available: 0,
+          total: totalRooms,
+        });
+      }
+    }
+  }
 
   (rateCalendar || []).forEach((rate: Record<string, unknown>) => {
     const minLOS = rate.min_stay ?? rate.min_los;
