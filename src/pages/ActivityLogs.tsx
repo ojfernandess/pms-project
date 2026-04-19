@@ -23,15 +23,17 @@ import { ptBR } from "date-fns/locale";
 import {
   Activity,
   Search,
-  Filter,
   Loader2,
   Calendar,
-  User,
   FileText,
   RefreshCw,
 } from "lucide-react";
 import { useActivityLogs, ActivityLogsFilters, ActivityLog } from "@/hooks/useActivityLogs";
-import { formatDate } from "@/lib/reservationUtils";
+import {
+  activityUserKey,
+  formatActivityPayloadLines,
+} from "@/lib/activityLogDisplay";
+import { cn } from "@/lib/utils";
 import {
   Popover,
   PopoverContent,
@@ -89,6 +91,65 @@ const entityTypeLabels: Record<string, string> = {
   rate_calendar: "Tarifário",
   dynamic_pricing_rule: "Regra Dinâmica",
 };
+
+function ActivityValuesCard({
+  title,
+  tone,
+  lines,
+  raw,
+}: {
+  title: string;
+  tone: "red" | "green" | "muted";
+  lines: { label: string; value: string }[];
+  raw: Record<string, unknown>;
+}) {
+  const shell =
+    tone === "red"
+      ? "border-red-200 dark:border-red-900 bg-red-50/90 dark:bg-red-950/25"
+      : tone === "green"
+        ? "border-green-200 dark:border-green-900 bg-green-50/90 dark:bg-green-950/25"
+        : "border-border bg-muted/50";
+
+  return (
+    <div className="space-y-2">
+      <h3
+        className={cn(
+          "text-sm font-semibold",
+          tone === "red" && "text-red-700 dark:text-red-400",
+          tone === "green" && "text-green-700 dark:text-green-400",
+          tone === "muted" && "text-foreground",
+        )}
+      >
+        {title}
+      </h3>
+      <div className={cn("rounded-lg border p-3", shell)}>
+        {lines.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Nenhum campo em formato legível; use o JSON abaixo se necessário.
+          </p>
+        ) : (
+          <ul className="space-y-2.5">
+            {lines.map((line, i) => (
+              <li key={`${line.label}-${i}`} className="text-sm leading-snug">
+                <span className="font-medium text-muted-foreground">{line.label}</span>
+                <span className="mx-1.5 text-muted-foreground/50">:</span>
+                <span className="break-words text-foreground">{line.value}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <details className="mt-3 border-t border-black/5 pt-2 dark:border-white/10">
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+            Ver JSON técnico
+          </summary>
+          <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-black/[0.04] p-2 text-[11px] leading-relaxed dark:bg-white/[0.06]">
+            {JSON.stringify(raw, null, 2)}
+          </pre>
+        </details>
+      </div>
+    </div>
+  );
+}
 
 const actionTypeColors: Record<string, string> = {
   created: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
@@ -148,10 +209,6 @@ const ActivityLogs = () => {
     });
     
     return Array.from(usersMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [logs]);
-
-  const filteredLogs = useMemo(() => {
-    return logs;
   }, [logs]);
 
   return (
@@ -321,7 +378,7 @@ const ActivityLogs = () => {
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
-          ) : filteredLogs.length === 0 ? (
+          ) : logs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>Nenhum log encontrado</p>
@@ -331,6 +388,10 @@ const ActivityLogs = () => {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead
+                      className="w-10 min-w-[2.5rem] p-2"
+                      title="Mesmo usuário em ações consecutivas é ligado visualmente"
+                    />
                     <TableHead>Data/Hora</TableHead>
                     <TableHead>Usuário</TableHead>
                     <TableHead>Ação</TableHead>
@@ -341,8 +402,48 @@ const ActivityLogs = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredLogs.map((log) => (
-                    <TableRow key={log.id}>
+                  {logs.map((log, index) => {
+                    const uKey = activityUserKey(log);
+                    const prev = index > 0 ? logs[index - 1] : null;
+                    const next = index < logs.length - 1 ? logs[index + 1] : null;
+                    const prevSameUser = !!prev && activityUserKey(prev) === uKey;
+                    const nextSameUser = !!next && activityUserKey(next) === uKey;
+
+                    return (
+                    <TableRow
+                      key={log.id}
+                      className={cn(
+                        (prevSameUser || nextSameUser) &&
+                          "bg-slate-50/80 dark:bg-slate-900/35",
+                      )}
+                    >
+                      <TableCell className="relative w-10 min-w-[2.5rem] border-r-0 p-0 align-middle">
+                        <div
+                          className="relative mx-auto flex min-h-[52px] w-full flex-col items-center justify-center"
+                          aria-hidden
+                        >
+                          {prevSameUser && (
+                            <span
+                              className="absolute left-1/2 top-0 z-0 w-[3px] -translate-x-1/2 rounded-full bg-primary/40"
+                              style={{ height: "calc(50% - 7px)" }}
+                            />
+                          )}
+                          <span
+                            className={cn(
+                              "relative z-10 h-3 w-3 shrink-0 rounded-full border-2 border-primary bg-background shadow-sm",
+                              prevSameUser || nextSameUser
+                                ? "ring-2 ring-primary/15"
+                                : "",
+                            )}
+                          />
+                          {nextSameUser && (
+                            <span
+                              className="absolute bottom-0 left-1/2 z-0 w-[3px] -translate-x-1/2 rounded-full bg-primary/40"
+                              style={{ height: "calc(50% - 7px)" }}
+                            />
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {format(parseISO(log.created_at), "dd/MM/yyyy HH:mm:ss", {
                           locale: ptBR,
@@ -389,7 +490,8 @@ const ActivityLogs = () => {
                         )}
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -403,7 +505,8 @@ const ActivityLogs = () => {
           <DialogHeader>
             <DialogTitle>Detalhes da Atividade</DialogTitle>
             <DialogDescription>
-              Valores anteriores e novos da alteração
+              Resumo legível dos campos alterados. Use &quot;Ver JSON técnico&quot; se precisar do payload
+              original.
             </DialogDescription>
           </DialogHeader>
           
@@ -456,45 +559,33 @@ const ActivityLogs = () => {
               {/* Valores antigos e novos */}
               {(selectedLog.old_values || selectedLog.new_values) && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                  {/* Valores Anteriores */}
                   {selectedLog.old_values && (
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">
-                        Valores Anteriores
-                      </h3>
-                      <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-md p-4">
-                        <pre className="text-xs overflow-x-auto whitespace-pre-wrap">
-                          {JSON.stringify(selectedLog.old_values, null, 2)}
-                        </pre>
-                      </div>
-                    </div>
+                    <ActivityValuesCard
+                      title="Valores anteriores"
+                      tone="red"
+                      lines={formatActivityPayloadLines(selectedLog.old_values)}
+                      raw={selectedLog.old_values}
+                    />
                   )}
-
-                  {/* Valores Novos */}
                   {selectedLog.new_values && (
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-semibold text-green-600 dark:text-green-400">
-                        Valores Novos
-                      </h3>
-                      <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 rounded-md p-4">
-                        <pre className="text-xs overflow-x-auto whitespace-pre-wrap">
-                          {JSON.stringify(selectedLog.new_values, null, 2)}
-                        </pre>
-                      </div>
-                    </div>
+                    <ActivityValuesCard
+                      title="Valores novos"
+                      tone="green"
+                      lines={formatActivityPayloadLines(selectedLog.new_values)}
+                      raw={selectedLog.new_values}
+                    />
                   )}
                 </div>
               )}
 
-              {/* Metadados */}
-              {selectedLog.metadata && (
+              {selectedLog.metadata && Object.keys(selectedLog.metadata).length > 0 && (
                 <div className="mt-4">
-                  <h3 className="text-sm font-semibold mb-2">Metadados</h3>
-                  <div className="bg-muted border rounded-md p-4">
-                    <pre className="text-xs overflow-x-auto whitespace-pre-wrap">
-                      {JSON.stringify(selectedLog.metadata, null, 2)}
-                    </pre>
-                  </div>
+                  <ActivityValuesCard
+                    title="Metadados"
+                    tone="muted"
+                    lines={formatActivityPayloadLines(selectedLog.metadata)}
+                    raw={selectedLog.metadata as Record<string, unknown>}
+                  />
                 </div>
               )}
             </div>
