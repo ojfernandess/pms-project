@@ -294,10 +294,12 @@ export async function applyCancellation(
   }
 }
 
+/** FK reservations → pricing_plans é `pricing_plan_id`. Aninhar política via coluna do plano (como em usePricingPlans). */
 const RESERVATION_SELECT_WITH_PRICING = `
   *,
-  pricing_plans:cancellation_policy_id(
-    cancellation_policies(*)
+  pricing_plans(
+    *,
+    cancellation_policies:cancellation_policy_id(*)
   )
 `;
 
