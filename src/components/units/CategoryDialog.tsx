@@ -32,6 +32,13 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
   const [showRoomsTable, setShowRoomsTable] = useState(false);
   const [createdRooms, setCreatedRooms] = useState<any[]>([]);
   const [savedCategoryId, setSavedCategoryId] = useState<string | null>(null);
+  const [publicDisplayData, setPublicDisplayData] = useState<{
+    features: string[];
+    photos: string[];
+  }>({
+    features: [],
+    photos: [],
+  });
   const establishmentId = getSelectedEstablishmentId();
   const [formData, setFormData] = useState({
     name: "",
@@ -92,6 +99,7 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
       });
       setShowRoomsTable(false);
       setSavedCategoryId(null);
+      setPublicDisplayData({ features: [], photos: [] });
     }
   }, [open, categoryId]);
 
@@ -154,6 +162,10 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
           courtesy_limit: data.courtesy_limit?.toString() || "1",
           base_price: data.base_price ? (typeof data.base_price === 'number' ? data.base_price.toFixed(2).replace('.', ',') : data.base_price) : "0,00",
           rich_description: data.rich_description || data.display_description || "",
+        });
+        setPublicDisplayData({
+          features: Array.isArray(data.display_features) ? data.display_features : [],
+          photos: Array.isArray(data.display_photos) ? data.display_photos : [],
         });
 
         // Verificar se há quartos e carregá-los
@@ -952,17 +964,53 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
 
             <TabsContent value="facilities" className="space-y-4">
               <div className="p-4 border rounded-lg">
-                <p className="text-sm text-muted-foreground">
-                  As instalações serão configuradas em uma futura atualização.
-                </p>
+                {publicDisplayData.features.length > 0 ? (
+                  <>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      Instalações configuradas na seção "Configuração da Página Pública de Reservas":
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {publicDisplayData.features.map((feature, index) => (
+                        <span
+                          key={`${feature}-${index}`}
+                          className="inline-flex items-center rounded-md border px-2 py-1 text-xs text-slate-700 bg-slate-50"
+                        >
+                          {feature}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhuma instalação configurada para esta categoria na Página Pública de Reservas.
+                  </p>
+                )}
               </div>
             </TabsContent>
 
             <TabsContent value="images" className="space-y-4">
               <div className="p-4 border rounded-lg">
-                <p className="text-sm text-muted-foreground">
-                  As imagens podem ser gerenciadas na seção "Configuração da Página Pública de Reservas".
-                </p>
+                {publicDisplayData.photos.length > 0 ? (
+                  <>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      Imagens configuradas na seção "Configuração da Página Pública de Reservas":
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {publicDisplayData.photos.map((photoUrl, index) => (
+                        <img
+                          key={`${photoUrl}-${index}`}
+                          src={photoUrl}
+                          alt={`Imagem da categoria ${index + 1}`}
+                          className="w-full h-24 object-cover rounded-md border"
+                        />
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhuma imagem configurada para esta categoria na Página Pública de Reservas.
+                  </p>
+                )}
               </div>
             </TabsContent>
 
