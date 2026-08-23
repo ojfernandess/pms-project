@@ -2015,26 +2015,21 @@ const ReservationDetails = () => {
                       </div>
                 <h2 className="text-xl font-semibold text-slate-900">Detalhes da Reserva</h2>
                         </div>
-              <div
-                className={cn(
-                  "flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end",
-                  "rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/90 p-1.5 shadow-sm",
-                )}
-              >
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                 {activityLogs && activityLogs.length > 0 && (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
                     onClick={() => setLogsDialogOpen(true)}
                     className={cn(
-                      "h-9 gap-2 rounded-xl border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-sm",
-                      "transition-all hover:border-slate-300 hover:bg-slate-50 hover:shadow",
+                      "h-10 gap-2.5 rounded-2xl border-0 bg-slate-100 px-4 text-sm font-medium text-slate-700 shadow-none",
+                      "hover:bg-slate-200/80 hover:text-slate-800",
                     )}
                   >
-                    <Activity className="h-4 w-4 shrink-0 text-slate-500" />
+                    <Activity className="h-4 w-4 shrink-0 text-slate-600" />
                     <span className="whitespace-nowrap">Ver logs</span>
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 tabular-nums">
+                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-600 px-1.5 text-[11px] font-semibold leading-none text-white tabular-nums">
                       {activityLogs.length}
                     </span>
                   </Button>
@@ -2046,21 +2041,21 @@ const ReservationDetails = () => {
                       <DropdownMenuTrigger asChild>
                         <Button
                           type="button"
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
                           className={cn(
-                            "h-9 gap-2 rounded-xl border-sky-200 bg-gradient-to-b from-white to-sky-50/90 px-3.5 text-sm font-medium text-sky-900 shadow-sm",
-                            "transition-all hover:border-sky-300 hover:shadow-md",
+                            "h-10 gap-2.5 rounded-2xl border-0 bg-violet-100 px-4 text-sm font-medium text-violet-700 shadow-none",
+                            "hover:bg-violet-200/80 hover:text-violet-800",
                           )}
                         >
-                          <EyeIcon className="h-4 w-4 shrink-0 text-sky-600" />
+                          <EyeIcon className="h-4 w-4 shrink-0 text-violet-600" />
                           <span className="whitespace-nowrap">
                             {(reservation.web_checkin as { fnrh_registered_at?: string | null })
                               ?.fnrh_registered_at
                               ? "Ver check-in"
                               : "Ver pré check-in"}
                           </span>
-                          <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+                          <ChevronDown className="h-4 w-4 shrink-0 text-violet-500" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-56">
@@ -2131,15 +2126,15 @@ const ReservationDetails = () => {
                   !(reservation.web_checkin && reservation.web_checkin.status === "completed") && (
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
                       onClick={() => setManualCheckinDialogOpen(true)}
                       className={cn(
-                        "h-9 gap-2 rounded-xl border-emerald-600/25 bg-gradient-to-b from-emerald-600 to-emerald-700 px-3.5 text-sm font-semibold text-white shadow-md shadow-emerald-900/10",
-                        "transition-all hover:from-emerald-500 hover:to-emerald-600 hover:shadow-lg",
+                        "h-10 gap-2.5 rounded-2xl border-0 bg-emerald-100 px-4 text-sm font-medium text-emerald-800 shadow-none",
+                        "hover:bg-emerald-200/80 hover:text-emerald-900",
                       )}
                     >
-                      <CheckCircle2 className="h-4 w-4 shrink-0" />
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-700" />
                       <span className="whitespace-nowrap">Check-in manual</span>
                     </Button>
                   )}

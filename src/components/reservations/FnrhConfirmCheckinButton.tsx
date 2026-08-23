@@ -163,10 +163,12 @@ export function FnrhConfirmCheckinButton({
   return (
     <Button
       type="button"
-      variant="default"
+      variant="ghost"
       size="sm"
       className={cn(
-        "h-9 gap-2 rounded-xl border border-slate-800/20 bg-gradient-to-b from-slate-800 to-slate-900 px-3.5 text-sm font-semibold text-white shadow-md shadow-slate-900/15 transition-all hover:from-slate-700 hover:to-slate-800 hover:shadow-lg",
+        "h-10 gap-2.5 rounded-2xl border-0 bg-indigo-100 px-4 text-sm font-medium text-indigo-700 shadow-none",
+        "hover:bg-indigo-200/80 hover:text-indigo-800",
+        "disabled:opacity-60",
         className,
       )}
       disabled={disabled || loading}
@@ -174,11 +176,11 @@ export function FnrhConfirmCheckinButton({
       title="Registra o check-in presencial na Ficha Nacional (FNRH), após o pré-check-in online."
     >
       {loading ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-indigo-600" />
       ) : (
-        <ShieldCheck className="h-4 w-4" />
+        <ShieldCheck className="h-4 w-4 shrink-0 text-indigo-600" />
       )}
-      Confirmar check-in na FNRH
+      <span className="whitespace-nowrap">Confirmar check-in na FNRH</span>
     </Button>
   );
 }
