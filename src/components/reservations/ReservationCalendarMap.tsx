@@ -18,9 +18,11 @@ import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { logActivity, createMoveDescription, createSwapDescription } from "@/lib/activityLogger";
 import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useHotelSettings } from "@/hooks/useHotelSettings";
 import { QuickReservationDialog } from "./QuickReservationDialog";
 import { ReservationQuickViewModal } from "./ReservationQuickViewModal";
 import { ReservationTransferModal } from "./ReservationTransferModal";
+import { ReservationReallocationModal } from "./ReservationReallocationModal";
 import { ReservationPaymentModal } from "./ReservationPaymentModal";
 import { BlockViewDialog } from "./BlockViewDialog";
 import { RatePlansModal } from "./RatePlansModal";
@@ -45,6 +47,7 @@ interface ReservationCalendarMapProps {
     room_id?: string;
     action?: "confirmed" | "blocked" | "preregistration";
   }) => void;
+  onOpenMaintenance?: (data: { room_id: string }) => void;
   onReservationAction?: (action: "edit" | "checkin" | "checkout" | "cancel", reservationId: string) => void;
 }
 
@@ -56,39 +59,39 @@ const statusConfig: Record<string, {
   legendColor: string; // Cor sólida para a legenda
 }> = {
   pending: { 
-    bg: "bg-yellow-400", 
+    bg: "bg-amber-400", 
     text: "text-slate-900", 
-    label: "Pgt Pendente", 
-    border: "border-yellow-500", 
-    legendColor: "#facc15" // Amarelo para taxas/PDV pendentes
+    label: "Pagamento pendente", 
+    border: "border-amber-500", 
+    legendColor: "#f59e0b"
   },
   unpaid: { 
-    bg: "bg-red-600", 
+    bg: "bg-red-500", 
     text: "text-white", 
-    label: "Não Pago", 
-    border: "border-red-700", 
-    legendColor: "#dc2626" // Vermelho para não pago
+    label: "Não pago", 
+    border: "border-red-600", 
+    legendColor: "#ef4444"
   },
   confirmed: { 
-    bg: "bg-green-500", 
+    bg: "bg-emerald-500", 
     text: "text-white", 
     label: "Pago", 
-    border: "border-green-600", 
-    legendColor: "#22c55e" // Verde para pago
+    border: "border-emerald-600", 
+    legendColor: "#10b981"
   },
   checkedin: { 
-    bg: "bg-blue-500", 
+    bg: "bg-[#3B82F6]", 
     text: "text-white", 
     label: "Check-in", 
     border: "border-blue-600", 
-    legendColor: "#3b82f6" 
+    legendColor: "#3B82F6" 
   },
   checkedout: { 
-    bg: "bg-slate-200", 
+    bg: "bg-slate-300", 
     text: "text-slate-800", 
     label: "Check-out", 
-    border: "border-slate-300",
-    legendColor: "#e2e8f0" 
+    border: "border-slate-400",
+    legendColor: "#94a3b8" 
   },
   cancelled: { 
     bg: "bg-red-500", 
@@ -105,24 +108,25 @@ const statusConfig: Record<string, {
     legendColor: "#f43f5e" 
   },
   blocked: { 
-    bg: "bg-black", 
+    bg: "bg-slate-800", 
     text: "text-white", 
     label: "Bloqueada", 
     border: "border-slate-900", 
-    legendColor: "#000000" // Preto para bloqueada
+    legendColor: "#1e293b"
   },
   preregistration: { 
-    bg: "bg-purple-500", 
+    bg: "bg-violet-500", 
     text: "text-white", 
     label: "Pré-reserva", 
-    border: "border-purple-600", 
-    legendColor: "#a855f7" // Roxo para pré-reserva
+    border: "border-violet-600", 
+    legendColor: "#8b5cf6"
   },
 };
 
 export const ReservationCalendarMap = ({ 
   onSelectReservation,
-  onCreateReservation, 
+  onCreateReservation,
+  onOpenMaintenance,
   onReservationAction 
 }: ReservationCalendarMapProps) => {
   const queryClient = useQueryClient();
@@ -167,6 +171,9 @@ export const ReservationCalendarMap = ({
     }
     return null;
   }, [selectedEstablishment, establishmentIdFromParams, establishments, setSelectedEstablishment]);
+
+  const { settings: hotelSettings } = useHotelSettings(establishmentId || undefined);
+  const isHoverPreviewEnabled = (hotelSettings as any)?.map_reservation_hover_preview !== false;
   const [startDate, setStartDate] = useState(startOfDay(new Date()));
   const [viewDays, setViewDays] = useState(30);
 
@@ -201,6 +208,10 @@ export const ReservationCalendarMap = ({
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [reservationToTransfer, setReservationToTransfer] = useState<any | null>(null);
 
+  // Estados para modal de realocação entre estabelecimentos
+  const [reallocationModalOpen, setReallocationModalOpen] = useState(false);
+  const [reservationToReallocate, setReservationToReallocate] = useState<any | null>(null);
+
   // Estados para modal de pagamento
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [reservationForPayment, setReservationForPayment] = useState<any | null>(null);
@@ -217,6 +228,16 @@ export const ReservationCalendarMap = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ date: Date; categoryId?: string; roomId?: string } | null>(null);
   const [dragEnd, setDragEnd] = useState<Date | null>(null);
+
+  // Thumbnail ao passar o mouse sobre uma reserva (apenas visual)
+  const [hoveredReservationPreview, setHoveredReservationPreview] = useState<{
+    reservation: any;
+    roomLabel?: string | null;
+    statusLabel: string;
+    statusColor: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Estados para drag de reserva existente
   const [draggedReservation, setDraggedReservation] = useState<{
@@ -2409,6 +2430,26 @@ export const ReservationCalendarMap = ({
     return dateNormalized >= minDate && dateNormalized <= maxDate;
   };
 
+  /** Apenas visual: posição da célula no intervalo selecionado (não altera a lógica de seleção). */
+  const getSelectionEdge = (
+    date: Date,
+    categoryId?: string,
+    roomId?: string
+  ): "start" | "end" | "middle" | "single" | null => {
+    if (!isDateInSelection(date, categoryId, roomId) || !dragStart || !dragEnd) return null;
+
+    const dateNormalized = startOfDay(date);
+    const startNormalized = startOfDay(dragStart.date);
+    const endNormalized = startOfDay(dragEnd);
+    const minDate = startNormalized < endNormalized ? startNormalized : endNormalized;
+    const maxDate = startNormalized > endNormalized ? startNormalized : endNormalized;
+
+    if (isSameDay(minDate, maxDate)) return "single";
+    if (isSameDay(dateNormalized, minDate)) return "start";
+    if (isSameDay(dateNormalized, maxDate)) return "end";
+    return "middle";
+  };
+
   if (categoriesLoading) {
     return <div className="p-8 text-center">Carregando categorias e quartos...</div>;
   }
@@ -2430,38 +2471,39 @@ export const ReservationCalendarMap = ({
   }
 
   return (
-    <div className="space-y-3 sm:space-y-4">
-      {/* Legenda */}
-      <Card className="p-3 sm:p-4 bg-slate-50">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 md:gap-6">
-          <span className="text-xs sm:text-sm font-semibold text-slate-700 whitespace-nowrap">Legenda:</span>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3 md:gap-4">
-            {Object.entries(statusConfig)
-              .filter(([key]) => key !== "checkedout" && key !== "noshow")
-              .map(([key, config]) => (
-                <div key={key} className="flex items-center gap-1.5 sm:gap-2">
-                  <div 
-                    className="w-4 h-4 sm:w-5 sm:h-5 rounded border-2 flex-shrink-0"
-                    style={{ 
-                      backgroundColor: config.legendColor,
-                      borderColor: config.legendColor
-                    }}
-                  />
-                  <span className="text-[10px] sm:text-xs font-medium text-slate-600 whitespace-nowrap">{config.label}</span>
-                </div>
-              ))}
-          </div>
+    <div className="space-y-3 sm:space-y-3.5">
+      {/* Legenda + Controles */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-sm">
+          <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Status
+          </span>
+          {Object.entries(statusConfig)
+            .filter(([key]) => key !== "checkedout" && key !== "noshow")
+            .map(([key, config]) => (
+              <div key={key} className="flex items-center gap-1.5">
+                <span
+                  className="h-2 w-2 rounded-full flex-shrink-0 ring-2 ring-white shadow-sm"
+                  style={{ backgroundColor: config.legendColor }}
+                />
+                <span className="text-[10px] sm:text-[11px] text-slate-600 whitespace-nowrap">
+                  {config.label}
+                </span>
+              </div>
+            ))}
         </div>
-      </Card>
 
-      {/* Controles */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5">
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="outline" className="w-full sm:w-[200px] md:w-[240px] justify-start text-left font-normal h-10 sm:h-auto">
-                <CalendarIcon className="mr-2 h-4 w-4 flex-shrink-0" />
-                <span className="text-xs sm:text-sm truncate">{format(startDate, "dd 'de' MMMM", { locale: ptBR })}</span>
+              <Button
+                variant="outline"
+                className="w-full sm:w-[200px] md:w-[220px] justify-start text-left font-normal h-9 border-slate-200 bg-white shadow-sm hover:bg-slate-50"
+              >
+                <CalendarIcon className="mr-2 h-3.5 w-3.5 flex-shrink-0 text-slate-500" />
+                <span className="text-xs sm:text-sm truncate text-slate-700">
+                  {format(startDate, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                </span>
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
@@ -2474,11 +2516,19 @@ export const ReservationCalendarMap = ({
             </PopoverContent>
           </Popover>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 px-3 border-slate-200 bg-white shadow-sm text-xs font-medium text-slate-700 hover:bg-slate-50"
+              onClick={() => setStartDate(startOfDay(new Date()))}
+            >
+              Hoje
+            </Button>
             <Button
               variant="outline"
               size="icon"
-              className="h-10 w-10 sm:h-9 sm:w-9 flex-shrink-0"
+              className="h-9 w-9 flex-shrink-0 border-slate-200 bg-white shadow-sm"
               onClick={() => setStartDate(addDays(startDate, -viewDays))}
             >
               <ChevronLeft className="h-4 w-4" />
@@ -2486,14 +2536,14 @@ export const ReservationCalendarMap = ({
             <Button
               variant="outline"
               size="icon"
-              className="h-10 w-10 sm:h-9 sm:w-9 flex-shrink-0"
+              className="h-9 w-9 flex-shrink-0 border-slate-200 bg-white shadow-sm"
               onClick={() => setStartDate(addDays(startDate, viewDays))}
             >
               <ChevronRight className="h-4 w-4" />
             </Button>
 
             <Select value={viewDays.toString()} onValueChange={(v) => setViewDays(Number(v))}>
-              <SelectTrigger className="w-full sm:w-[120px] h-10 sm:h-auto">
+              <SelectTrigger className="w-full sm:w-[110px] h-9 border-slate-200 bg-white shadow-sm text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -2509,28 +2559,28 @@ export const ReservationCalendarMap = ({
       </div>
 
       {/* Grid */}
-      <Card className="p-0 overflow-x-auto -mx-4 sm:mx-0">
+      <Card className="p-0 overflow-x-auto -mx-4 sm:mx-0 border-slate-200/90 shadow-sm rounded-xl">
         <div className="min-w-full" style={{ 
           '--cell-width': viewDays <= 14 ? '90px' : viewDays <= 30 ? '70px' : viewDays <= 60 ? '50px' : '40px',
           minWidth: `${192 + (visibleDates.length * (viewDays <= 14 ? 90 : viewDays <= 30 ? 70 : viewDays <= 60 ? 50 : 40))}px`
         } as React.CSSProperties}>
-          {/* Cabeçalho com datas - Estilo Hospedin */}
-          <div className="bg-slate-100 border-b-2 border-slate-300">
+          {/* Cabeçalho com datas */}
+          <div className="bg-white border-b border-slate-200 sticky top-0 z-20">
             {/* Linha 0: Mês e Ano */}
-            <div className="flex border-b border-slate-200 bg-slate-50/50">
-              <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 p-1.5 sm:p-2 border-r border-slate-300 bg-slate-200"></div>
+            <div className="flex border-b border-slate-100 bg-slate-50/80">
+              <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 p-1.5 sm:p-2 border-r border-slate-200 bg-slate-50/80"></div>
               <div className="flex-1 flex" style={{ display: 'grid', gridTemplateColumns: `repeat(${visibleDates.length}, 1fr)`, width: '100%', minWidth: 'fit-content' }}>
                 {monthGroups.map((group) => {
                   const span = group.endIndex - group.startIndex + 1;
                   return (
                     <div
                       key={group.monthYear}
-                      className="px-2 py-1.5 text-center border-r border-slate-200 last:border-r-0"
+                      className="px-2 py-1 text-center border-r border-slate-100 last:border-r-0"
                       style={{
                         gridColumn: `${group.startIndex + 1} / span ${span}`,
                       }}
                     >
-                      <div className="text-slate-600 font-medium text-[10px] sm:text-[11px] uppercase tracking-wider">
+                      <div className="text-slate-500 font-medium text-[10px] sm:text-[11px] uppercase tracking-wider">
                         {group.month} {group.year}
                       </div>
                     </div>
@@ -2539,8 +2589,8 @@ export const ReservationCalendarMap = ({
               </div>
             </div>
             {/* Linha 1: Data e Dia */}
-            <div className="flex border-b border-slate-200">
-              <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 p-1.5 sm:p-2 border-r border-slate-300 bg-slate-200 font-semibold text-[10px] sm:text-xs flex items-center">
+            <div className="flex border-b border-slate-100">
+              <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 px-2.5 py-2 border-r border-slate-200 bg-white font-semibold text-[10px] sm:text-[11px] text-slate-500 flex items-center tracking-wide">
                 <span className="truncate">Categoria / Quarto</span>
               </div>
               <div className="flex-1 flex" style={{ display: 'grid', gridTemplateColumns: `repeat(${visibleDates.length}, 1fr)`, width: '100%', minWidth: 'fit-content' }}>
@@ -2553,11 +2603,11 @@ export const ReservationCalendarMap = ({
                     <div 
                       key={date.toISOString()} 
                       className={cn(
-                        "border-r border-slate-200 last:border-r-0 p-1 sm:p-1.5 text-center",
-                        isToday && "bg-blue-100",
-                        isPreviousDay && !isToday && "bg-amber-50/50",
-                        isWeekend && !isToday && !isPreviousDay && "bg-slate-50",
-                        !isToday && !isWeekend && !isPreviousDay && "bg-slate-100"
+                        "relative border-r border-slate-100 last:border-r-0 px-0.5 py-1.5 sm:py-2 text-center transition-colors duration-150",
+                        isToday && "bg-sky-50",
+                        isPreviousDay && !isToday && "bg-amber-50/40",
+                        isWeekend && !isToday && !isPreviousDay && "bg-slate-50/70",
+                        !isToday && !isWeekend && !isPreviousDay && "bg-white"
                       )}
                       style={{ 
                         minWidth: viewDays <= 14 ? '90px' : viewDays <= 30 ? '70px' : viewDays <= 60 ? '50px' : '40px',
@@ -2565,12 +2615,31 @@ export const ReservationCalendarMap = ({
                         width: '100%'
                       }}
                     >
-                      <div className="font-bold text-[10px] sm:text-[11px]" style={{ fontSize: viewDays <= 30 ? '11px' : '10px' }}>
+                      {isToday && (
+                        <span className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-sky-500" />
+                      )}
+                      <div
+                        className={cn(
+                          "uppercase tracking-wide text-[9px] sm:text-[10px] font-medium",
+                          isToday ? "text-sky-700" : "text-slate-400"
+                        )}
+                      >
                         {viewDays <= 30 ? format(date, "EEE", { locale: ptBR }) : format(date, "EEEEEE", { locale: ptBR })}
                       </div>
-                      <div className="text-slate-600 font-medium text-[9px] sm:text-[10px]">
-                        {viewDays <= 30 ? format(date, "dd/MM") : format(date, "dd")}
+                      <div
+                        className={cn(
+                          "mt-0.5 font-semibold tabular-nums",
+                          isToday ? "text-sky-900 text-[12px] sm:text-[13px]" : "text-slate-700 text-[11px] sm:text-[12px]"
+                        )}
+                      >
+                        {format(date, "dd")}
                       </div>
+                      {isToday && viewDays <= 30 && (
+                        <div className="mt-0.5 flex items-center justify-center gap-0.5 text-[8px] font-semibold uppercase tracking-wider text-sky-600">
+                          <span className="h-1 w-1 rounded-full bg-sky-500" />
+                          Hoje
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -2611,21 +2680,25 @@ export const ReservationCalendarMap = ({
                 return (
                 <div key={category.id}>
                   {/* Linha da categoria */}
-                  <div className="flex border-b border-slate-300 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 transition-all shadow-sm overflow-visible" style={{ minHeight: '40px', width: '100%' }}>
-                    <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 p-1.5 sm:p-2 border-r-2 border-blue-300 bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center gap-1.5 sm:gap-2 shadow-inner">
+                  <div className="flex border-b border-slate-200/80 bg-slate-50/90 hover:bg-slate-100/80 transition-colors duration-150 overflow-visible" style={{ minHeight: '40px', width: '100%' }}>
+                    <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 px-2 py-1.5 border-r border-slate-200 bg-slate-50/90 flex items-center gap-1.5 sm:gap-2">
                       <button
                         onClick={() => toggleCategory(category.id)}
-                        className="p-1 sm:p-1.5 hover:bg-blue-200 rounded transition-colors shadow-sm bg-white/60 hover:bg-white/80 flex-shrink-0 touch-manipulation"
+                        className="p-1 sm:p-1.5 hover:bg-white rounded-md transition-colors duration-150 border border-transparent hover:border-slate-200 flex-shrink-0 touch-manipulation"
                         aria-label={isExpanded ? "Recolher categoria" : "Expandir categoria"}
                       >
                         {isExpanded ? (
-                          <ChevronDown className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-700" />
+                          <ChevronDown className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-slate-600" />
                         ) : (
-                          <ChevronRight className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-700" />
+                          <ChevronRight className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-slate-600" />
                         )}
                       </button>
-                      <span className="font-bold text-[10px] sm:text-xs uppercase text-blue-900 tracking-wide drop-shadow-sm truncate">{category.name}</span>
-                      <span className="text-[9px] sm:text-[10px] text-blue-700 font-bold bg-blue-200/60 px-1 sm:px-1.5 py-0.5 rounded-full flex-shrink-0">({rooms.length})</span>
+                      <span className="font-semibold text-[10px] sm:text-[11px] uppercase text-slate-800 tracking-wide truncate">
+                        {category.name}
+                      </span>
+                      <span className="text-[9px] sm:text-[10px] text-slate-500 font-medium bg-white border border-slate-200 px-1.5 py-0.5 rounded-md flex-shrink-0">
+                        {rooms.length}
+                      </span>
                     </div>
                     <div className="flex-1 overflow-visible" style={{ 
                       display: 'grid', 
@@ -2638,6 +2711,7 @@ export const ReservationCalendarMap = ({
                         const normalizedDate = startOfDay(date);
                         const dateStr = format(normalizedDate, "yyyy-MM-dd");
                         const isSelected = isDateInSelection(date, category.id);
+                        const selectionEdge = getSelectionEdge(date, category.id);
                         const isOccupied = rooms.some((room: any) => isDateOccupied(date, room.id));
                         
                         // Buscar preço do rate_calendar (sistema tarifário)
@@ -2714,12 +2788,19 @@ export const ReservationCalendarMap = ({
                           <div
                             key={date.toISOString()}
                             className={cn(
-                              "border-r last:border-r-0 p-1.5 text-center transition-colors flex flex-col justify-center bg-gradient-to-r from-blue-50/80 to-indigo-50/80",
+                              "relative border-r border-slate-100 last:border-r-0 px-1 py-1 text-center transition-colors duration-150 flex flex-col justify-center",
+                              isSameDay(date, new Date()) && "bg-sky-50/40",
                               isOccupied
-                                ? "bg-red-50/50 opacity-60" 
+                                ? "bg-slate-100/60 opacity-70" 
                                 : isSelected 
-                                ? "bg-primary/10 ring-1 ring-primary/20" 
-                                : "hover:from-blue-100/80 hover:to-indigo-100/80"
+                                ? cn(
+                                    "bg-sky-100/70",
+                                    selectionEdge === "single" && "rounded-md ring-1 ring-sky-300/50",
+                                    selectionEdge === "start" && "rounded-l-md ring-1 ring-sky-300/50 ring-inset",
+                                    selectionEdge === "end" && "rounded-r-md ring-1 ring-sky-300/50 ring-inset",
+                                    selectionEdge === "middle" && "ring-1 ring-sky-200/40 ring-inset"
+                                  )
+                                : "bg-slate-50/50 hover:bg-sky-50/70"
                             )}
                             style={{ 
                               minWidth: viewDays <= 14 ? '90px' : viewDays <= 30 ? '70px' : viewDays <= 60 ? '50px' : '40px',
@@ -2780,14 +2861,14 @@ export const ReservationCalendarMap = ({
                             {totalRooms > 0 && (
                               <>
                                 <div 
-                                  className="font-semibold text-slate-700 mb-0.5" 
+                                  className="font-medium text-slate-500 mb-0.5" 
                                   style={{ fontSize: viewDays <= 30 ? '10px' : '9px' }}
                                 >
                                   {viewDays <= 60 ? `${availableRooms} disp.` : availableRooms}
                             </div>
                                 {price > 0 && (
                                   <div 
-                                    className="font-bold text-emerald-700 cursor-pointer hover:text-emerald-800 hover:underline transition-colors" 
+                                    className="font-semibold text-emerald-700 cursor-pointer hover:text-emerald-800 hover:underline transition-colors duration-150" 
                                     style={{ fontSize: viewDays <= 30 ? '9px' : '8px' }}
                                     title="Clique para ver tarifários"
                                     onClick={(e) => {
@@ -2832,21 +2913,21 @@ export const ReservationCalendarMap = ({
 
                     return (
                       <div key={room.id} className={cn(
-                        "flex transition-colors relative border-b border-slate-100",
+                        "flex transition-colors duration-150 relative border-b border-slate-100",
                         room.is_blocked === true 
-                          ? "bg-red-50/30 hover:bg-red-50/50" 
-                          : "hover:bg-slate-50/80"
+                          ? "bg-rose-50/40 hover:bg-rose-50/60" 
+                          : "bg-white hover:bg-slate-50/60"
                       )} style={{ minHeight: "40px" }}>
                         <div className={cn(
-                          "w-32 sm:w-48 md:w-56 flex-shrink-0 p-1.5 sm:p-2 pl-3 sm:pl-6 border-r border-slate-200 text-[10px] sm:text-xs flex items-center gap-1.5 sm:gap-2",
-                          room.is_blocked === true ? "bg-red-50/50" : "bg-white"
+                          "w-32 sm:w-48 md:w-56 flex-shrink-0 px-2 py-1.5 pl-4 sm:pl-7 border-r border-slate-100 text-[10px] sm:text-xs flex items-center gap-1.5 sm:gap-2",
+                          room.is_blocked === true ? "bg-rose-50/50" : "bg-white"
                         )}>
                           {room.is_blocked === true && (
-                            <Lock className="h-3.5 w-3.5 text-red-600 flex-shrink-0" />
+                            <Lock className="h-3.5 w-3.5 text-rose-500 flex-shrink-0" />
                           )}
                           <div className={cn(
-                            "text-xs font-medium",
-                            room.is_blocked === true ? "text-red-900" : "text-slate-900"
+                            "text-[11px] sm:text-xs font-medium truncate",
+                            room.is_blocked === true ? "text-rose-800" : "text-slate-700"
                           )}>
                             {room.name || room.room_number}
                           </div>
@@ -2864,11 +2945,13 @@ export const ReservationCalendarMap = ({
                           {/* Células de fundo */}
                           {visibleDates.map((date, dateIndex) => {
                             const isSelected = isDateInSelection(date, category.id, room.id);
+                            const selectionEdge = getSelectionEdge(date, category.id, room.id);
                             const isOccupied = isDateOccupied(date, room.id, draggedReservation?.reservation?.id);
                             const isHovered = hoveredCell?.roomId === room.id && hoveredCell?.dateIndex === dateIndex;
                             const isValidDrop = draggedReservation && hoveredCell?.roomId === room.id && 
                               !isDateOccupied(date, room.id, draggedReservation.reservation.id);
                             const isBlocked = room.is_blocked === true;
+                            const isToday = isSameDay(date, new Date());
                             
                             return (
                               <div
@@ -2876,18 +2959,25 @@ export const ReservationCalendarMap = ({
                                 data-room-id={room.id}
                                 data-date-index={dateIndex}
                                 className={cn(
-                                  "border-r border-slate-100 last:border-r-0 transition-all duration-100 relative flex items-center justify-center",
+                                  "relative border-r border-slate-100/90 last:border-r-0 transition-colors duration-150 flex items-center justify-center",
+                                  isToday && !isSelected && !isBlocked && !isOccupied && "bg-sky-50/30",
                                   isBlocked
-                                    ? "bg-red-50/30 cursor-not-allowed border-red-200"
+                                    ? "bg-rose-50/25 cursor-not-allowed"
                                     : isOccupied
-                                    ? "bg-red-50/40 cursor-not-allowed border-red-200"
+                                    ? "bg-slate-50/80 cursor-not-allowed"
                                     : isSelected 
-                                    ? "bg-blue-100/60 ring-2 ring-blue-300/50 cursor-pointer border-blue-200" 
+                                    ? cn(
+                                        "bg-sky-100/75 cursor-pointer z-[1]",
+                                        selectionEdge === "single" && "rounded-md shadow-[inset_0_0_0_1px_rgba(56,189,248,0.55)]",
+                                        selectionEdge === "start" && "rounded-l-md shadow-[inset_1px_0_0_0_rgba(56,189,248,0.55),inset_0_1px_0_0_rgba(56,189,248,0.45),inset_0_-1px_0_0_rgba(56,189,248,0.45)]",
+                                        selectionEdge === "end" && "rounded-r-md shadow-[inset_-1px_0_0_0_rgba(56,189,248,0.55),inset_0_1px_0_0_rgba(56,189,248,0.45),inset_0_-1px_0_0_rgba(56,189,248,0.45)]",
+                                        selectionEdge === "middle" && "shadow-[inset_0_1px_0_0_rgba(56,189,248,0.35),inset_0_-1px_0_0_rgba(56,189,248,0.35)]"
+                                      )
                                     : isHovered && draggedReservation && isValidDrop
-                                    ? "bg-emerald-100/70 ring-2 ring-emerald-400/60 cursor-move border-emerald-300 shadow-inner"
+                                    ? "bg-emerald-50/90 shadow-[inset_0_0_0_1px_rgba(52,211,153,0.55)] cursor-move"
                                     : isHovered && draggedReservation && !isValidDrop
-                                    ? "bg-red-100/60 ring-2 ring-red-400/60 cursor-not-allowed border-red-300 shadow-inner"
-                                    : "hover:bg-slate-50/80 cursor-pointer border-slate-100"
+                                    ? "bg-rose-50/80 shadow-[inset_0_0_0_1px_rgba(251,113,133,0.5)] cursor-not-allowed"
+                                    : "hover:bg-sky-50/50 cursor-pointer"
                                 )}
                                 style={{ 
                                   minHeight: "40px",
@@ -2929,7 +3019,14 @@ export const ReservationCalendarMap = ({
                                   }
                                 }}
                                 title={isOccupied ? "Data ocupada - não é possível criar reserva" : "Clique para criar reserva"}
-                              />
+                              >
+                                {isSelected && (selectionEdge === "start" || selectionEdge === "single") && (
+                                  <span className="pointer-events-none absolute left-0.5 top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border-2 border-white bg-sky-500 shadow-sm" />
+                                )}
+                                {isSelected && (selectionEdge === "end" || selectionEdge === "single") && (
+                                  <span className="pointer-events-none absolute right-0.5 top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border-2 border-white bg-sky-500 shadow-sm" />
+                                )}
+                              </div>
                             );
                           })}
 
@@ -2970,6 +3067,7 @@ export const ReservationCalendarMap = ({
                             // - Pendente (Pgt Pendente - amarelo): quando há taxas pendentes OU base não paga completamente
                             // - Não Pago (vermelho): quando não há pagamento (paid_amount === 0)
                             let statusColor;
+                            let showCheckinDot = false;
                             const paidAmount = Number(reservation.paid_amount || 0);
                             const baseTotalAmount = Number(reservation.total_amount || 0);
                             
@@ -2980,8 +3078,23 @@ export const ReservationCalendarMap = ({
                             
                             const totalWithFees = baseTotalAmount + serviceFeesTotal;
                             
-                            if (reservation.status === 'blocked' || reservation.status === 'cancelled' || reservation.status === 'preregistration') {
-                              // Bloqueada, cancelada ou pré-reserva: usar cor do status
+                            if (reservation.status === "checkedin") {
+                              // Check-in não pago: mantém vermelho + bolinha azul
+                              if (paidAmount === 0) {
+                                statusColor = statusConfig.unpaid;
+                                showCheckinDot = true;
+                              } else {
+                                // Check-in pago/parcial: cor de check-in (#E8F0FF)
+                                statusColor = statusConfig.checkedin;
+                              }
+                            } else if (
+                              reservation.status === "blocked" ||
+                              reservation.status === "cancelled" ||
+                              reservation.status === "preregistration" ||
+                              reservation.status === "checkedout" ||
+                              reservation.status === "noshow"
+                            ) {
+                              // Status especiais: usar cor da legenda
                               statusColor = statusConfig[reservation.status] || statusConfig.confirmed;
                             } else if (paidAmount === 0 || reservation.status === "unpaid") {
                               // Sem pagamento = Não Pago (vermelho)
@@ -3002,23 +3115,20 @@ export const ReservationCalendarMap = ({
                             
                             const isDraggingThis = draggedReservation?.reservation?.id === reservation.id;
                             const isSelectedForSwap = reservationForSwap?.id === reservation.id;
-
-                              // Verificar se o check-in foi realizado via web check-in
-                              const webCheckinCompleted = reservation.web_checkin?.status === "completed";
                               
                               return (
                                 <div
                                   key={reservation.id}
                                   className={cn(
-                                  "absolute rounded-sm border transition-all flex items-center gap-1.5 px-2 py-1 group",
+                                  "absolute rounded-md border transition-all duration-150 flex items-center gap-1.5 px-2 py-0.5 group shadow-sm",
                                     statusColor.bg,
                                     statusColor.text,
                                     statusColor.border,
                                   isDraggingThis
                                     ? "opacity-30 cursor-grabbing z-50"
                                     : isSelectedForSwap
-                                    ? "ring-4 ring-blue-500 ring-offset-2 cursor-pointer z-20 shadow-lg"
-                                    : "cursor-grab active:cursor-grabbing hover:shadow-md hover:scale-[1.01] z-10"
+                                    ? "ring-2 ring-sky-400 ring-offset-1 cursor-pointer z-20 shadow-md"
+                                    : "cursor-grab active:cursor-grabbing hover:shadow-md hover:brightness-[0.98] z-10"
                                   )}
                                   style={{
                                   left: `${(pos.startIndex / visibleDates.length) * 100 + leftOffset}%`,
@@ -3031,9 +3141,31 @@ export const ReservationCalendarMap = ({
                                   WebkitUserSelect: 'none',
                                   touchAction: 'none',
                                   }}
+                                  onMouseEnter={(e) => {
+                                    if (!isHoverPreviewEnabled || draggedReservation || isDragging) return;
+                                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                    setHoveredReservationPreview({
+                                      reservation,
+                                      roomLabel: room.name || room.room_number || null,
+                                      statusLabel: showCheckinDot
+                                        ? "Check-in · Não pago"
+                                        : statusColor.label,
+                                      statusColor: showCheckinDot
+                                        ? statusConfig.checkedin.legendColor
+                                        : statusColor.legendColor,
+                                      x: rect.left + rect.width / 2,
+                                      y: rect.top,
+                                    });
+                                  }}
+                                  onMouseLeave={() => {
+                                    setHoveredReservationPreview((prev) =>
+                                      prev?.reservation?.id === reservation.id ? null : prev
+                                    );
+                                  }}
                                   onContextMenu={(e) => handleReservationContextMenu(e, reservation)}
                                   onMouseDown={(e) => {
                                       e.stopPropagation();
+                                      setHoveredReservationPreview(null);
                                   handleReservationMouseDown(e, reservation);
                                 }}
                                 onClick={(e) => {
@@ -3070,19 +3202,18 @@ export const ReservationCalendarMap = ({
                                   }, 10);
                               }}
                               >
-                                {viewDays <= 30 && <GripVertical className="h-3 w-3 opacity-50" />}
+                                {viewDays <= 30 && <GripVertical className="h-3 w-3 opacity-50 flex-shrink-0" />}
                                 <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                                  {/* Bolinha indicando check-in realizado via web */}
-                                  {webCheckinCompleted && (
-                                    <div 
-                                      className="w-2 h-2 rounded-full flex-shrink-0"
+                                  {showCheckinDot && (
+                                    <span
+                                      className="h-2 w-2 rounded-full flex-shrink-0 ring-2 ring-white/70 shadow-sm"
                                       style={{ backgroundColor: statusConfig.checkedin.legendColor }}
-                                      title="Check-in realizado via web"
+                                      title="Check-in realizado"
                                     />
                                   )}
                                   <div className="flex-1 min-w-0">
                                     <div 
-                                      className="font-semibold truncate" 
+                                      className="font-semibold truncate leading-tight" 
                                       style={{ fontSize: viewDays <= 30 ? '10px' : '9px' }}
                                     >
                                       {reservation.status === "blocked" 
@@ -3092,9 +3223,12 @@ export const ReservationCalendarMap = ({
                                         : (reservation.guest_name?.split(' ')[0] || reservation.reservation_code?.substring(0, 8))
                                       }
                                     </div>
-                                    {reservation.guest_name && viewDays <= 30 && reservation.status !== "blocked" && (
-                                      <div className="text-[9px] opacity-80 truncate">
-                                        {reservation.reservation_code}
+                                    {viewDays <= 30 && reservation.status !== "blocked" && (
+                                      <div className="text-[8px] sm:text-[9px] opacity-80 truncate leading-tight">
+                                        {[
+                                          reservation.channel,
+                                          showCheckinDot ? "Check-in" : statusColor.label,
+                                        ].filter(Boolean).join(" · ")}
                                       </div>
                                     )}
                                   </div>
@@ -3130,20 +3264,23 @@ export const ReservationCalendarMap = ({
                   result.push(
                     <div key={`building-${buildingId}`}>
                       {/* Cabeçalho do prédio */}
-                      <div className="flex border-b border-slate-300 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 transition-all overflow-visible" style={{ minHeight: '32px', width: '100%' }}>
-                        <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 px-2 py-1 border-r-2 border-slate-500 bg-gradient-to-br from-slate-700 to-slate-800 flex items-center gap-1.5 shadow-inner">
+                      <div className="flex border-b border-slate-200 bg-slate-700 hover:bg-slate-800 transition-colors duration-150 overflow-visible" style={{ minHeight: '32px', width: '100%' }}>
+                        <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 px-2 py-1 border-r border-slate-600 bg-slate-700 flex items-center gap-1.5">
                           <button
                             onClick={() => toggleBuilding(buildingId)}
-                            className="p-0.5 hover:bg-slate-600 rounded transition-colors bg-white/10 hover:bg-white/20 flex-shrink-0 touch-manipulation"
+                            className="p-0.5 hover:bg-white/10 rounded transition-colors duration-150 flex-shrink-0 touch-manipulation"
                             aria-label={isBuildingExpanded ? "Recolher prédio" : "Expandir prédio"}
                           >
                             {isBuildingExpanded ? (
-                              <ChevronDown className="h-3 w-3 text-white" />
+                              <ChevronDown className="h-3 w-3 text-slate-200" />
                             ) : (
-                              <ChevronRight className="h-3 w-3 text-white" />
+                              <ChevronRight className="h-3 w-3 text-slate-200" />
                             )}
                           </button>
-                          <span className="font-semibold text-[10px] sm:text-[11px] uppercase text-white tracking-wide truncate">{buildingName}</span>
+                          <span className="font-semibold text-[10px] sm:text-[11px] uppercase text-slate-100 tracking-wide truncate">{buildingName}</span>
+                          <span className="text-[9px] text-slate-300 font-medium bg-white/10 px-1.5 py-0.5 rounded flex-shrink-0">
+                            {totalRoomsInBuilding}
+                          </span>
                         </div>
                         <div className="flex-1 overflow-visible" style={{ 
                           display: 'grid', 
@@ -3154,7 +3291,7 @@ export const ReservationCalendarMap = ({
                           {visibleDates.map((date) => (
                             <div
                               key={date.toISOString()}
-                              className="border-r last:border-r-0 bg-gradient-to-r from-slate-600/30 to-slate-700/30"
+                              className="border-r border-slate-600/40 last:border-r-0 bg-slate-700/80"
                               style={{ 
                                 minWidth: viewDays <= 14 ? '90px' : viewDays <= 30 ? '70px' : viewDays <= 60 ? '50px' : '40px',
                                 minHeight: '32px'
@@ -3214,10 +3351,131 @@ export const ReservationCalendarMap = ({
               }, 100);
             }
           }}
+          onOpenMaintenance={(data) => {
+            setQuickDialogOpen(false);
+            setQuickDialogData(null);
+            setTimeout(() => {
+              onOpenMaintenance?.(data);
+            }, 100);
+          }}
           initialData={quickDialogData}
           rateCalendar={rateCalendar}
         />
       )}
+
+      {/* Thumbnail ao passar o mouse sobre a reserva */}
+      {hoveredReservationPreview && isHoverPreviewEnabled && !draggedReservation && !isDragging && (() => {
+        const reservation = hoveredReservationPreview.reservation;
+        const category = reservation.room_categories;
+        const photos: string[] = Array.isArray(category?.display_photos) ? category.display_photos : [];
+        const thumbnail = photos[0];
+        const roomLabel = hoveredReservationPreview.roomLabel || null;
+        const baseTotalAmount = Number(reservation.total_amount || 0);
+        const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum: number, fee: any) => {
+          return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
+        }, 0);
+        const totalWithFees = baseTotalAmount + serviceFeesTotal;
+        const nights =
+          reservation.checkin_date && reservation.checkout_date
+            ? Math.max(0, differenceInDays(parseISO(reservation.checkout_date), parseISO(reservation.checkin_date)))
+            : 0;
+
+        const cardWidth = 280;
+        const left = Math.min(
+          Math.max(12, hoveredReservationPreview.x - cardWidth / 2),
+          (typeof window !== "undefined" ? window.innerWidth : 1200) - cardWidth - 12
+        );
+        const top = Math.max(12, hoveredReservationPreview.y - 8);
+
+        return (
+          <div
+            className="fixed z-[9998] pointer-events-none"
+            style={{
+              left: `${left}px`,
+              top: `${top}px`,
+              transform: "translateY(-100%)",
+              width: `${cardWidth}px`,
+            }}
+          >
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl ring-1 ring-black/5">
+              {thumbnail ? (
+                <div className="relative h-28 w-full bg-slate-100">
+                  <img
+                    src={thumbnail}
+                    alt={category?.name || "Categoria"}
+                    className="h-full w-full object-cover"
+                  />
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 to-transparent px-3 py-2">
+                    <div className="truncate text-xs font-semibold text-white">
+                      {reservation.guest_name || reservation.reservation_code || "Reserva"}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="border-b border-slate-100 bg-slate-50 px-3 py-2.5">
+                  <div className="truncate text-sm font-semibold text-slate-900">
+                    {reservation.status === "blocked"
+                      ? "Bloqueio"
+                      : reservation.guest_name || reservation.reservation_code || "Reserva"}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: hoveredReservationPreview.statusColor }}
+                    />
+                    {hoveredReservationPreview.statusLabel}
+                  </span>
+                  {reservation.reservation_code && (
+                    <span className="truncate font-mono text-[10px] text-slate-500">
+                      {reservation.reservation_code}
+                    </span>
+                  )}
+                </div>
+
+                {reservation.checkin_date && reservation.checkout_date && (
+                  <div className="text-[11px] text-slate-600">
+                    <span className="font-medium text-slate-800">
+                      {format(parseISO(reservation.checkin_date), "dd MMM", { locale: ptBR })}
+                    </span>
+                    {" → "}
+                    <span className="font-medium text-slate-800">
+                      {format(parseISO(reservation.checkout_date), "dd MMM", { locale: ptBR })}
+                    </span>
+                    {nights > 0 && (
+                      <span className="text-slate-400">
+                        {" · "}
+                        {nights} {nights === 1 ? "noite" : "noites"}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                  {(category?.name || roomLabel) && (
+                    <span className="truncate">
+                      {[category?.name, roomLabel].filter(Boolean).join(" · ")}
+                    </span>
+                  )}
+                  {reservation.channel && (
+                    <span className="truncate text-slate-500">{reservation.channel}</span>
+                  )}
+                </div>
+
+                {reservation.status !== "blocked" && totalWithFees > 0 && (
+                  <div className="text-[11px] font-semibold text-slate-800">
+                    R$ {totalWithFees.toFixed(2).replace(".", ",")}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Preview da reserva sendo arrastada - só mostrar se for drag real */}
       {draggedReservation && dragPosition && isActualDragRef.current && (
@@ -3249,8 +3507,19 @@ export const ReservationCalendarMap = ({
             
             const totalWithFees = baseTotalAmount + serviceFeesTotal;
             
-            if (reservation.status === 'blocked' || reservation.status === 'cancelled' || reservation.status === 'preregistration') {
-              // Bloqueada, cancelada ou pré-reserva: usar cor do status
+            if (reservation.status === "checkedin") {
+              // Check-in não pago: vermelho; demais: cor de check-in
+              previewColor = paidAmount === 0
+                ? statusConfig.unpaid
+                : statusConfig.checkedin;
+            } else if (
+              reservation.status === "blocked" ||
+              reservation.status === "cancelled" ||
+              reservation.status === "preregistration" ||
+              reservation.status === "checkedout" ||
+              reservation.status === "noshow"
+            ) {
+              // Status especiais: usar cor da legenda
               previewColor = statusConfig[reservation.status] || statusConfig.confirmed;
             } else if (paidAmount === 0 || reservation.status === "unpaid") {
               // Sem pagamento = Não Pago (vermelho)
@@ -3272,25 +3541,26 @@ export const ReservationCalendarMap = ({
             return (
               <div
                 className={cn(
-                  "rounded-sm p-1.5 sm:p-2 flex items-center gap-1.5 sm:gap-2 text-white text-[10px] sm:text-xs shadow-2xl border-2 touch-manipulation",
+                  "rounded-md px-2.5 py-1.5 flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs shadow-xl border touch-manipulation",
                   previewColor.bg,
+                  previewColor.text,
                   previewColor.border,
-                  "ring-4 ring-white/30"
+                  "ring-2 ring-white/40"
                 )}
                 style={{
                   minWidth: viewDays <= 14 ? '180px' : viewDays <= 30 ? '140px' : '100px',
                   minHeight: "32px"
                 }}
               >
-                <GripVertical className="h-3.5 w-3.5 sm:h-4 sm:w-4 opacity-70 flex-shrink-0" />
+                <GripVertical className="h-3.5 w-3.5 sm:h-4 sm:w-4 opacity-50 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="font-bold truncate text-xs sm:text-sm">
+                  <div className="font-semibold truncate text-xs sm:text-sm">
                     {draggedReservation.reservation.status === "blocked" 
                       ? "Bloqueado"
                       : (draggedReservation.reservation.guest_name || draggedReservation.reservation.reservation_code)
                     }
                   </div>
-                  <div className="text-[10px] opacity-90 flex items-center gap-1 mt-0.5">
+                  <div className="text-[10px] opacity-70 flex items-center gap-1 mt-0.5">
                     <CalendarIcon className="h-3 w-3" />
                     <span>
                       {format(parseISO(draggedReservation.reservation.checkin_date), "dd/MM")} - {format(parseISO(draggedReservation.reservation.checkout_date), "dd/MM")}
@@ -3340,6 +3610,16 @@ export const ReservationCalendarMap = ({
             setTransferModalOpen(true);
           }
         }}
+        onReallocate={
+          selectedReservation?.status !== "blocked" && selectedReservation?.status !== "cancelled"
+            ? () => {
+                if (selectedReservation) {
+                  setReservationToReallocate(selectedReservation);
+                  setReallocationModalOpen(true);
+                }
+              }
+            : undefined
+        }
         onCancel={canDelete("reservations") ? () => {
           if (selectedReservation) {
             onReservationAction?.("cancel", selectedReservation.id);
@@ -3359,6 +3639,26 @@ export const ReservationCalendarMap = ({
           queryClient.invalidateQueries({ queryKey: ["rooms"] });
           queryClient.invalidateQueries({ queryKey: ["web_checkin"] }); // Invalidar web_checkin para atualizar dados da acomodação
           setReservationToTransfer(null);
+        }}
+      />
+
+      {/* Modal de Realocação entre estabelecimentos */}
+      <ReservationReallocationModal
+        open={reallocationModalOpen}
+        onOpenChange={(open) => {
+          setReallocationModalOpen(open);
+          if (!open) setReservationToReallocate(null);
+        }}
+        reservation={reservationToReallocate}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["reservations"] });
+          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+          queryClient.invalidateQueries({ queryKey: ["rooms"] });
+          queryClient.invalidateQueries({ queryKey: ["accounts_receivable"] });
+          queryClient.invalidateQueries({ queryKey: ["financial"] });
+          setReservationToReallocate(null);
+          setQuickViewOpen(false);
+          setSelectedReservation(null);
         }}
       />
 

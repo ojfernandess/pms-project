@@ -100,6 +100,7 @@ const Settings = () => {
     auto_payment_channel_carrier_id: "",
     auto_payment_ota_channels: [] as string[],
     enable_cleaning_notifications: true,
+    map_reservation_hover_preview: true,
     fiscal_document_type: "both",
     invoice_email: "",
     establishment_cnpj: "",
@@ -158,6 +159,7 @@ const Settings = () => {
         auto_payment_channel_carrier_id: "",
         auto_payment_ota_channels: [] as string[],
         enable_cleaning_notifications: true,
+        map_reservation_hover_preview: true,
         fiscal_document_type: "both",
         invoice_email: "",
         establishment_cnpj: "",
@@ -217,6 +219,7 @@ const Settings = () => {
         auto_payment_channel_carrier_id: settings.auto_payment_channel_carrier_id || "",
         auto_payment_ota_channels: Array.isArray(settings.auto_payment_ota_channels) ? settings.auto_payment_ota_channels : [],
         enable_cleaning_notifications: settings.enable_cleaning_notifications !== undefined ? settings.enable_cleaning_notifications : true,
+        map_reservation_hover_preview: settings.map_reservation_hover_preview !== undefined ? settings.map_reservation_hover_preview : true,
         fiscal_document_type: settings.fiscal_document_type || "both",
         invoice_email: settings.invoice_email || "",
         establishment_cnpj: settings.establishment_cnpj || "",
@@ -714,6 +717,27 @@ const Settings = () => {
                         A assinatura será inserida automaticamente nos PDFs de recibo gerados
                       </p>
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-semibold mb-4">Mapa de Reservas</h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 p-4 bg-slate-50/60">
+                    <div>
+                      <Label htmlFor="map_reservation_hover_preview">Preview ao passar o mouse</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Quando ativado, ao passar o mouse sobre uma reserva no mapa, um thumbnail com as informações principais é exibido
+                      </p>
+                    </div>
+                    <Switch
+                      id="map_reservation_hover_preview"
+                      checked={formData.map_reservation_hover_preview}
+                      onCheckedChange={(checked) =>
+                        setFormData({ ...formData, map_reservation_hover_preview: checked })
+                      }
+                    />
                   </div>
                 </div>
               </div>

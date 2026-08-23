@@ -30,6 +30,7 @@ import { ReservationCalendarMap } from "@/components/reservations/ReservationCal
 import { BlockRoomDialog } from "@/components/reservations/BlockRoomDialog";
 import { BlockViewDialog } from "@/components/reservations/BlockViewDialog";
 import { CancelReservationDialog } from "@/components/reservations/CancelReservationDialog";
+import { MaintenanceTicketDialog } from "@/components/maintenance/MaintenanceTicketDialog";
 import PendingReservations from "@/pages/PendingReservations";
 import { formatCurrency, formatDate } from "@/lib/reservationUtils";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -72,6 +73,8 @@ const Reservations = () => {
   } | null>(null);
   const [blockViewDialogOpen, setBlockViewDialogOpen] = useState(false);
   const [selectedBlockId, setSelectedBlockId] = useState<string | undefined>();
+  const [maintenanceDialogOpen, setMaintenanceDialogOpen] = useState(false);
+  const [maintenanceRoomId, setMaintenanceRoomId] = useState<string | undefined>();
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [reservationToCancel, setReservationToCancel] = useState<{ 
     id: string; 
@@ -756,6 +759,10 @@ const Reservations = () => {
                 setDialogOpen(true);
               }
             }}
+            onOpenMaintenance={(data) => {
+              setMaintenanceRoomId(data.room_id);
+              setMaintenanceDialogOpen(true);
+            }}
             onReservationAction={(action, reservationId) => {
               if (action === "edit") {
                 setSelectedReservationId(reservationId);
@@ -823,6 +830,27 @@ const Reservations = () => {
           initialData={blockDialogData}
         />
       )}
+
+      {/* Modal Abrir Chamado (Manutenção) */}
+      <MaintenanceTicketDialog
+        open={maintenanceDialogOpen}
+        onOpenChange={(open) => {
+          setMaintenanceDialogOpen(open);
+          if (!open) {
+            setMaintenanceRoomId(undefined);
+          }
+        }}
+        initialRoomId={maintenanceRoomId}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["maintenance_tickets"] });
+          queryClient.invalidateQueries({ queryKey: ["rooms"] });
+          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+          queryClient.invalidateQueries({ queryKey: ["reservations"] });
+          refetch();
+          setMaintenanceDialogOpen(false);
+          setMaintenanceRoomId(undefined);
+        }}
+      />
 
       {/* Modal de Visualização de Bloqueio */}
       {selectedBlockId && (

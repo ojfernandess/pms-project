@@ -77,6 +77,7 @@ export const useHotelSettings = (establishmentId?: string) => {
       establishment_cnpj?: string;
       show_establishment_cnpj?: boolean;
       enable_cleaning_notifications?: boolean;
+      map_reservation_hover_preview?: boolean;
       timezone?: string;
       public_pricing_plan_id?: string | null;
       establishment_photos?: string[];

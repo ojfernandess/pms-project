@@ -17,7 +17,8 @@ import {
   Info,
   ArrowRightLeft,
   Ban,
-  CheckCircle2
+  CheckCircle2,
+  Building2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -31,6 +32,7 @@ interface ReservationQuickViewModalProps {
   onLaunchPayment?: () => void;
   onViewDetails?: () => void;
   onTransfer?: () => void;
+  onReallocate?: () => void;
   onCancel?: () => void;
   onConfirmPreregistration?: () => void;
 }
@@ -56,6 +58,7 @@ export function ReservationQuickViewModal({
   onLaunchPayment,
   onViewDetails,
   onTransfer,
+  onReallocate,
   onCancel,
   onConfirmPreregistration,
 }: ReservationQuickViewModalProps) {
@@ -110,9 +113,9 @@ export function ReservationQuickViewModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader className="space-y-2">
-          <DialogTitle className="text-xl font-bold text-slate-900">
+      <DialogContent className="max-w-md p-0 gap-0 overflow-hidden rounded-xl border-slate-200 shadow-xl">
+        <DialogHeader className="space-y-2 px-5 pt-5 pb-3 border-b border-slate-100 bg-slate-50/70">
+          <DialogTitle className="text-lg font-semibold text-slate-900">
             Reserva {reservation.reservation_code || reservation.id?.substring(0, 8)}
           </DialogTitle>
           <Badge variant={statusInfo.variant} className="w-fit">
@@ -120,7 +123,7 @@ export function ReservationQuickViewModal({
           </Badge>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="space-y-4 px-5 py-4">
           {/* Nome do Hóspede */}
           {reservation.guest_name && (
             <div className="space-y-1">
@@ -291,6 +294,19 @@ export function ReservationQuickViewModal({
                 >
                   <ArrowRightLeft className="h-4 w-4 mr-2" />
                   Transferir
+                </Button>
+              )}
+              {onReallocate && (
+                <Button
+                  variant="outline"
+                  className="w-full bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-900"
+                  onClick={() => {
+                    onReallocate();
+                    onOpenChange(false);
+                  }}
+                >
+                  <Building2 className="h-4 w-4 mr-2" />
+                  Realocar
                 </Button>
               )}
               {onCancel && reservation.status !== 'cancelled' && canDelete("reservations") && (

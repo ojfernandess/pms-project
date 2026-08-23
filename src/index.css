@@ -170,4 +170,9 @@ All colors MUST be HSL.
   .animate-blink {
     animation: blink 1.5s ease-in-out infinite;
   }
+
+  /* Mapa de Reservas — microinterações discretas (apenas visual) */
+  .drag-preview-temp {
+    filter: drop-shadow(0 8px 16px rgba(15, 23, 42, 0.18));
+  }
 }

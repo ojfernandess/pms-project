@@ -291,93 +291,76 @@ export const useFinancialReports = (period?: FinancialPeriod) => {
     },
   });
 
-  // Últimos pagamentos (apenas de reservas não canceladas)
+  // Últimos pagamentos (inclui registros de realocação por establishment_id)
   const recentPaymentsQuery = useQuery({
     queryKey: ["financial_recent_payments", selectedEstablishment?.id],
     queryFn: async () => {
       const establishmentId = getEstablishmentId();
-      
-      // Estratégia: Buscar pagamentos via reservas do estabelecimento para garantir que encontramos todos
-      // Primeiro, buscar reservas do estabelecimento
-      let reservationsQuery = supabase
-        .from("reservations")
-        .select("id")
-        .neq("status", "cancelled");
-      
-      if (establishmentId) {
-        reservationsQuery = reservationsQuery.eq("establishment_id", establishmentId);
-      }
-      
-      const { data: establishmentReservations, error: resError } = await reservationsQuery;
-      
-      if (resError) {
-        console.error("Erro ao buscar reservas:", resError);
-        throw resError;
-      }
-      
-      if (!establishmentReservations || establishmentReservations.length === 0) {
-        return [];
-      }
-      
-      const reservationIds = establishmentReservations.map(r => r.id);
-      
-      // Buscar pagamentos dessas reservas
+      if (!establishmentId) return [];
+
+      // Buscar pagamentos do estabelecimento (inclui auditoria de realocação com amount 0)
       const { data: allPayments, error: paymentsError } = await supabase
         .from("payments")
         .select("*")
-        .in("reservation_id", reservationIds)
+        .eq("establishment_id", establishmentId)
         .order("payment_date", { ascending: false })
         .limit(100);
-      
+
       if (paymentsError) {
         console.error("Erro ao buscar pagamentos:", paymentsError);
         throw paymentsError;
       }
-      
+
       if (!allPayments || allPayments.length === 0) {
         return [];
       }
-      
-      // Buscar informações completas das reservas relacionadas
-      const { data: reservationsData, error: reservationsDetailError } = await supabase
-        .from("reservations")
-        .select(`
-          id,
-          reservation_code,
-          status,
-          financial_responsible:clients!client_id(full_name),
-          guest:clients!guest_id(full_name)
-        `)
-        .in("id", reservationIds);
-      
-      if (reservationsDetailError) {
-        console.error("Erro ao buscar detalhes das reservas:", reservationsDetailError);
-        // Continuar mesmo com erro, usando dados básicos
+
+      const reservationIds = [
+        ...new Set(allPayments.map((p: any) => p.reservation_id).filter(Boolean)),
+      ];
+
+      let reservationsMap = new Map<string, any>();
+      if (reservationIds.length > 0) {
+        const { data: reservationsData, error: reservationsDetailError } = await supabase
+          .from("reservations")
+          .select(`
+            id,
+            reservation_code,
+            status,
+            financial_responsible:clients!client_id(full_name),
+            guest:clients!guest_id(full_name)
+          `)
+          .in("id", reservationIds);
+
+        if (reservationsDetailError) {
+          console.error("Erro ao buscar detalhes das reservas:", reservationsDetailError);
+        } else {
+          reservationsMap = new Map((reservationsData || []).map((r: any) => [r.id, r]));
+        }
       }
-      
-      // Criar mapa de reservas para acesso rápido
-      const reservationsMap = new Map((reservationsData || []).map((r: any) => [r.id, r]));
-      
-      // Enriquecer pagamentos com dados das reservas
+
       const enrichedPayments = allPayments
         .map((p: any) => {
           const reservation = p.reservation_id ? reservationsMap.get(p.reservation_id) : null;
-          
           return {
             ...p,
-            reservations: reservation || null
+            reservations: reservation || null,
           };
         })
         .filter((p: any) => {
-          // Garantir que a reserva existe e não está cancelada
+          // Manter pagamentos de auditoria de realocação mesmo se a reserva já saiu do hotel
+          if (typeof p.notes === "string" && p.notes.toUpperCase().includes("REALOCAÇÃO")) {
+            return true;
+          }
           if (!p.reservation_id) return false;
           const reservation = reservationsMap.get(p.reservation_id);
           return reservation && reservation.status !== "cancelled";
         })
-        .slice(0, 10); // Limitar a 10
-      
+        .slice(0, 10);
+
       return enrichedPayments;
     },
+    enabled: !!selectedEstablishment?.id,
   });
 
   // Comparação com período anterior (excluindo canceladas)

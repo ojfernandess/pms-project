@@ -12,8 +12,8 @@ import { useRateSystem } from "@/hooks/useRateSystem";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCurrentEmployeeRole } from "@/hooks/useEmployees";
 import { formatCurrency, validateRoomAvailability, validateCategoryAvailability } from "@/lib/reservationUtils";
-import { Loader2, Calendar, Edit2, AlertTriangle, Ban } from "lucide-react";
-import { format, addDays, startOfDay, isBefore, differenceInDays } from "date-fns";
+import { Loader2, Calendar, Edit2, AlertTriangle, Ban, Wrench } from "lucide-react";
+import { format, addDays, startOfDay, isBefore, differenceInDays, parseISO } from "date-fns";
 import type { RateCalendarEntry } from "@/hooks/useRateSystem";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -43,6 +43,8 @@ interface QuickReservationDialogProps {
     total_amount: number;
     action: "confirmed" | "blocked" | "preregistration";
   }) => void;
+  /** Abre o modal Abrir Chamado (manutenção) sem criar reserva */
+  onOpenMaintenance?: (data: { room_id: string }) => void;
   initialData: {
     checkin_date: string;
     checkout_date?: string;
@@ -85,6 +87,7 @@ export const QuickReservationDialog = ({
   open,
   onOpenChange,
   onProceed,
+  onOpenMaintenance,
   initialData,
   rateCalendar,
 }: QuickReservationDialogProps) => {
@@ -117,6 +120,23 @@ export const QuickReservationDialog = ({
   // Isso garante que os valores sejam recalculados quando as permissões mudarem
   const hasCreatePermission = useMemo(() => canCreate("reservations"), [canCreate, role, customPermissions]);
   const hasBlockPermission = useMemo(() => canAccess("reservations", "block"), [canAccess, role, customPermissions]);
+  const hasMaintenancePermission = useMemo(
+    () =>
+      canAccess("maintenance") ||
+      canCreate("maintenance") ||
+      canCreate("reservations") ||
+      canAccess("reservations", "block"),
+    [canAccess, canCreate, role, customPermissions]
+  );
+
+  const handleOpenMaintenance = () => {
+    if (!initialData.room_id) {
+      toast.error("Selecione um quarto específico para abrir um chamado de manutenção");
+      return;
+    }
+    onOpenChange(false);
+    onOpenMaintenance?.({ room_id: initialData.room_id });
+  };
 
   // Função auxiliar para obter o plano padrão
   const getDefaultPlanId = (plans: typeof ratePlans) => {
@@ -719,19 +739,31 @@ export const QuickReservationDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg p-0 gap-0">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b">
-          <DialogTitle className="text-lg font-semibold">
+      <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden rounded-xl border-slate-200 shadow-xl">
+        <DialogHeader className="px-5 pt-5 pb-3.5 border-b border-slate-100 bg-slate-50/60">
+          <DialogTitle className="text-base font-semibold text-slate-900">
             {canOnlyBlock 
               ? `Bloquear Quarto${room ? ` - ${room.room_number}` : category ? ` - ${category.name}` : ""}`
               : category?.name || "Categoria"
             }
             {!canOnlyBlock && room && (
-              <span className="text-sm text-muted-foreground font-normal ml-2">
-                - Quarto {room.room_number}
+              <span className="text-sm text-slate-500 font-normal ml-2">
+                · {room.name || room.room_number}
               </span>
             )}
           </DialogTitle>
+          {formData.checkin_date && formData.checkout_date && (
+            <p className="text-xs text-slate-500 mt-1.5 font-normal">
+              {format(parseISO(formData.checkin_date), "dd MMM", { locale: ptBR })}
+              {" → "}
+              {format(parseISO(formData.checkout_date), "dd MMM", { locale: ptBR })}
+              <span className="mx-1.5 text-slate-300">•</span>
+              {Math.max(0, differenceInDays(parseISO(formData.checkout_date), parseISO(formData.checkin_date)))}{" "}
+              {Math.max(0, differenceInDays(parseISO(formData.checkout_date), parseISO(formData.checkin_date))) === 1
+                ? "noite"
+                : "noites"}
+            </p>
+          )}
         </DialogHeader>
 
         <div className="px-6 py-4 space-y-4">
@@ -932,13 +964,13 @@ export const QuickReservationDialog = ({
         </div>
 
         {/* Botões de Ação */}
-        <div className="px-6 pb-6 pt-4 border-t">
+        <div className="px-5 pb-5 pt-3.5 border-t border-slate-100 bg-white">
           {canOnlyBlock ? (
             // Modo simplificado: apenas botão de bloquear (quando só pode bloquear)
             <Button
               onClick={() => handleProceed("blocked")}
               disabled={checkingAvailability || !formData.checkin_date || !formData.checkout_date}
-              className="w-full bg-red-500 hover:bg-red-600 text-white"
+              className="w-full h-10 bg-slate-800 hover:bg-slate-900 text-white shadow-sm"
             >
               {checkingAvailability ? (
                 <>
@@ -954,13 +986,13 @@ export const QuickReservationDialog = ({
             </Button>
           ) : (
             // Modo completo: mostrar botões de acordo com as permissões
-            <div className="flex gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {hasCreatePermission && (
                 <>
                   <Button
                     onClick={() => handleProceed("confirmed")}
                     disabled={calculatingPrice || checkingAvailability}
-                    className="flex-1 bg-blue-500 hover:bg-blue-600 text-white"
+                    className="w-full h-10 bg-sky-600 hover:bg-sky-700 text-white shadow-sm"
                   >
                     {checkingAvailability ? (
                       <>
@@ -968,14 +1000,14 @@ export const QuickReservationDialog = ({
                         Verificando...
                       </>
                     ) : (
-                      "Reservar"
+                      "+ Nova reserva"
                     )}
                   </Button>
                   <Button
                     onClick={() => handleProceed("preregistration")}
                     disabled={calculatingPrice || checkingAvailability}
                     variant="outline"
-                    className="flex-1 bg-orange-50 hover:bg-orange-100 text-orange-600 border-orange-200"
+                    className="w-full h-10 bg-violet-50 hover:bg-violet-100 text-violet-700 border-violet-200"
                   >
                     {checkingAvailability ? (
                       <>
@@ -983,7 +1015,7 @@ export const QuickReservationDialog = ({
                         Verificando...
                       </>
                     ) : (
-                      "Pré-reservar"
+                      "Pré-reserva"
                     )}
                   </Button>
                 </>
@@ -993,7 +1025,7 @@ export const QuickReservationDialog = ({
                   onClick={() => handleProceed("blocked")}
                   disabled={calculatingPrice || checkingAvailability}
                   variant="outline"
-                  className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 border-red-200"
+                  className="w-full h-10 bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
                 >
                   {checkingAvailability ? (
                     <>
@@ -1008,11 +1040,23 @@ export const QuickReservationDialog = ({
                   )}
                 </Button>
               )}
+              {hasMaintenancePermission && onOpenMaintenance && (
+                <Button
+                  type="button"
+                  onClick={handleOpenMaintenance}
+                  disabled={calculatingPrice || checkingAvailability}
+                  variant="outline"
+                  className="w-full h-10 bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200"
+                >
+                  <Wrench className="h-4 w-4 mr-2 shrink-0" />
+                  Manutenção
+                </Button>
+              )}
               {/* Se não tiver nenhuma permissão, mostrar mensagem */}
-              {!hasCreatePermission && !hasBlockPermission && (
-                <div className="w-full p-4 bg-muted rounded-lg text-center">
+              {!hasCreatePermission && !hasBlockPermission && !hasMaintenancePermission && (
+                <div className="col-span-full w-full p-4 bg-muted rounded-lg text-center">
                   <p className="text-sm text-muted-foreground">
-                    Você não tem permissão para criar reservas ou bloquear quartos.
+                    Você não tem permissão para criar reservas, bloquear quartos ou abrir manutenção.
                   </p>
                 </div>
               )}
