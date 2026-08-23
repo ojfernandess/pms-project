@@ -6,7 +6,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, addDays, eachDayOfInterval, parseISO, startOfDay, isSameDay, differenceInDays, isAfter, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock } from "lucide-react";
+import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock, User, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useReservations } from "@/hooks/useReservations";
 import { useRateSystem } from "@/hooks/useRateSystem";
@@ -289,6 +289,8 @@ export const ReservationCalendarMap = ({
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cellCacheRef = useRef<Map<string, HTMLElement>>(new Map());
   const lastHoveredCellRef = useRef<{ dateIndex: number; roomId: string } | null>(null);
+  /** Evita abrir o modal da reserva logo após um drag (mesmo sem mudança de célula). */
+  const suppressClickAfterDragRef = useRef(false);
 
   // Calcular datas visíveis (normalizadas para início do dia para evitar problemas de timezone)
   // Inclui o dia anterior ao startDate para mostrar reservas que começaram no dia anterior
@@ -1350,6 +1352,12 @@ export const ReservationCalendarMap = ({
       return;
     }
 
+    // Foi drag: impedir que o onClick abra o modal da reserva
+    suppressClickAfterDragRef.current = true;
+    window.setTimeout(() => {
+      suppressClickAfterDragRef.current = false;
+    }, 200);
+
     if (!draggedReservation || !hoveredCell) {
       setDraggedReservation(null);
       setDragPosition(null);
@@ -1426,6 +1434,24 @@ export const ReservationCalendarMap = ({
         return;
       }
 
+      const newCheckinStr = format(newCheckinDate, "yyyy-MM-dd");
+      const newCheckoutStr = format(newCheckoutDate, "yyyy-MM-dd");
+      const oldRoomId = draggedReservation.reservation.room_id;
+      const newRoomId = hoveredCell.roomId;
+
+      // Se soltou no mesmo quarto e mesmas datas, não abrir modal de movimentação
+      if (
+        oldRoomId === newRoomId &&
+        oldCheckinStr === newCheckinStr &&
+        oldCheckoutStr === newCheckoutStr
+      ) {
+        setDraggedReservation(null);
+        setDragPosition(null);
+        setHoveredCell(null);
+        cellCacheRef.current.clear();
+        return;
+      }
+
       // Verificar conflitos (excluindo o último dia que é checkout exclusivo)
       const datesInRange = eachDayOfInterval({ 
         start: newCheckinDate, 
@@ -1468,8 +1494,6 @@ export const ReservationCalendarMap = ({
       }
 
       // Buscar dados dos quartos (antigo e novo) para exibir no diálogo
-      const oldRoomId = draggedReservation.reservation.room_id;
-      const newRoomId = hoveredCell.roomId;
       
       // Buscar informações dos quartos
       const [oldRoomData, newRoomData] = await Promise.all([
@@ -1480,11 +1504,6 @@ export const ReservationCalendarMap = ({
       const oldRoomName = oldRoomData.data?.name || oldRoomData.data?.room_number || "N/A";
       const newRoomName = newRoomData.data?.name || newRoomData.data?.room_number || "N/A";
       const newCategoryId = newRoomData.data?.category_id || draggedReservation.reservation.category_id;
-
-      // Preparar dados para o diálogo de confirmação
-      const newCheckinStr = format(newCheckinDate, "yyyy-MM-dd");
-      const newCheckoutStr = format(newCheckoutDate, "yyyy-MM-dd");
-      // Reutilizar oldCheckinStr e oldCheckoutStr já declaradas acima
 
       // Formatar datas para exibição
       const formatDateForDisplay = (dateStr: string) => {
@@ -2710,8 +2729,6 @@ export const ReservationCalendarMap = ({
                         // Garantir que a data esteja normalizada antes de formatar
                         const normalizedDate = startOfDay(date);
                         const dateStr = format(normalizedDate, "yyyy-MM-dd");
-                        const isSelected = isDateInSelection(date, category.id);
-                        const selectionEdge = getSelectionEdge(date, category.id);
                         const isOccupied = rooms.some((room: any) => isDateOccupied(date, room.id));
                         
                         // Buscar preço do rate_calendar (sistema tarifário)
@@ -2788,74 +2805,18 @@ export const ReservationCalendarMap = ({
                           <div
                             key={date.toISOString()}
                             className={cn(
-                              "relative border-r border-slate-100 last:border-r-0 px-1 py-1 text-center transition-colors duration-150 flex flex-col justify-center",
+                              "relative border-r border-slate-100 last:border-r-0 px-1 py-1 text-center flex flex-col justify-center select-none",
                               isSameDay(date, new Date()) && "bg-sky-50/40",
                               isOccupied
-                                ? "bg-slate-100/60 opacity-70" 
-                                : isSelected 
-                                ? cn(
-                                    "bg-sky-100/70",
-                                    selectionEdge === "single" && "rounded-md ring-1 ring-sky-300/50",
-                                    selectionEdge === "start" && "rounded-l-md ring-1 ring-sky-300/50 ring-inset",
-                                    selectionEdge === "end" && "rounded-r-md ring-1 ring-sky-300/50 ring-inset",
-                                    selectionEdge === "middle" && "ring-1 ring-sky-200/40 ring-inset"
-                                  )
-                                : "bg-slate-50/50 hover:bg-sky-50/70"
+                                ? "bg-slate-100/60 opacity-70"
+                                : "bg-slate-50/50"
                             )}
                             style={{ 
                               minWidth: viewDays <= 14 ? '90px' : viewDays <= 30 ? '70px' : viewDays <= 60 ? '50px' : '40px',
-                              minHeight: '40px'
+                              minHeight: '40px',
+                              cursor: "default",
                             }}
-                            onMouseDown={(e) => {
-                              // Verificar se há quartos disponíveis não interditados
-                              const availableRooms = rooms.filter((room: any) => {
-                                if (room.is_blocked === true) return false;
-                                return !isDateOccupied(date, room.id);
-                              });
-                              
-                              if (availableRooms.length === 0) {
-                                const blockedRooms = rooms.filter((room: any) => room.is_blocked === true);
-                                if (blockedRooms.length > 0 && blockedRooms.length === rooms.length) {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  toast.error("Todos os quartos desta categoria estão interditados");
-                                  return;
-                                }
-                              }
-                              
-                              if (!draggedReservation && !isOccupied) {
-                                e.preventDefault();
-                                handleMouseDown(date, category.id);
-                              }
-                            }}
-                            onMouseEnter={() => {
-                              if (isDragging && !isOccupied) {
-                                handleMouseEnter(date, category.id);
-                              }
-                            }}
-                            onMouseUp={(e) => {
-                              // Verificar se há quartos disponíveis não interditados antes de abrir modal
-                              const availableRooms = rooms.filter((room: any) => {
-                                if (room.is_blocked === true) return false;
-                                return !isDateOccupied(date, room.id);
-                              });
-                              
-                              if (availableRooms.length === 0) {
-                                const blockedRooms = rooms.filter((room: any) => room.is_blocked === true);
-                                if (blockedRooms.length > 0 && blockedRooms.length === rooms.length) {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  toast.error("Todos os quartos desta categoria estão interditados");
-                                  return;
-                                }
-                              }
-                              
-                              if (!draggedReservation && !isOccupied) {
-                                e.preventDefault();
-                                handleMouseUp(category.id, undefined, date);
-                              }
-                            }}
-                            title={isOccupied ? "Data ocupada" : undefined}
+                            title="Disponibilidade e tarifário (somente visualização)"
                           >
                             {/* Exibir tarifário e disponibilidade */}
                             {totalRooms > 0 && (
@@ -3171,15 +3132,15 @@ export const ReservationCalendarMap = ({
                                 onClick={(e) => {
                                         e.stopPropagation();
                                   
-                                  // Se houve drag, não processar clique
-                                  if (isActualDragRef.current) {
+                                  // Se houve drag (ou acabou de soltar no mesmo lugar), não abrir modal
+                                  if (isActualDragRef.current || suppressClickAfterDragRef.current) {
                                     return;
                                   }
                                   
                                   // Usar timeout para garantir que o mouseUp foi processado primeiro
                                   clickTimeoutRef.current = setTimeout(() => {
                                     // Verificar novamente se não houve drag
-                                    if (isActualDragRef.current) {
+                                    if (isActualDragRef.current || suppressClickAfterDragRef.current) {
                                       return;
                                     }
                                   
@@ -3210,6 +3171,13 @@ export const ReservationCalendarMap = ({
                                       style={{ backgroundColor: statusConfig.checkedin.legendColor }}
                                       title="Check-in realizado"
                                     />
+                                  )}
+                                  {reservation.status === "blocked" ? (
+                                    <Lock className="h-3 w-3 opacity-70 flex-shrink-0" />
+                                  ) : (reservation.adults || 1) + (reservation.children || 0) >= 2 ? (
+                                    <Users className="h-3 w-3 opacity-70 flex-shrink-0" aria-hidden title="2 ou mais hóspedes" />
+                                  ) : (
+                                    <User className="h-3 w-3 opacity-70 flex-shrink-0" aria-hidden />
                                   )}
                                   <div className="flex-1 min-w-0">
                                     <div 
@@ -3553,6 +3521,13 @@ export const ReservationCalendarMap = ({
                 }}
               >
                 <GripVertical className="h-3.5 w-3.5 sm:h-4 sm:w-4 opacity-50 flex-shrink-0" />
+                {draggedReservation.reservation.status === "blocked" ? (
+                  <Lock className="h-3.5 w-3.5 opacity-70 flex-shrink-0" />
+                ) : (draggedReservation.reservation.adults || 1) + (draggedReservation.reservation.children || 0) >= 2 ? (
+                  <Users className="h-3.5 w-3.5 opacity-70 flex-shrink-0" aria-hidden />
+                ) : (
+                  <User className="h-3.5 w-3.5 opacity-70 flex-shrink-0" aria-hidden />
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold truncate text-xs sm:text-sm">
                     {draggedReservation.reservation.status === "blocked" 
