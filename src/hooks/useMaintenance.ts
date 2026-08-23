@@ -184,7 +184,7 @@ export const useMaintenance = () => {
         await supabase.from("rooms").update({ status: "maintenance" }).eq("id", before.room_id);
       }
 
-      // Se o ticket foi completado, atualizar status do quarto
+      // Se o ticket foi completado, atualizar status do quarto só se não houver outros abertos
       if (updates.status === "completed") {
         const { data: ticket } = await supabase
           .from("maintenance_tickets")
@@ -193,24 +193,33 @@ export const useMaintenance = () => {
           .single();
 
         if (ticket?.room_id) {
-          // Verificar se há reservas futuras para o quarto
-          const { data: futureReservations } = await supabase
-            .from("reservations")
+          const { data: otherTickets } = await supabase
+            .from("maintenance_tickets")
             .select("id")
             .eq("room_id", ticket.room_id)
-            .in("status", ["pending", "confirmed"])
-            .gte("checkin_date", new Date().toISOString().split("T")[0])
+            .in("status", ["open", "in_progress"])
+            .neq("id", id)
             .limit(1);
 
-          // Se não houver reservas futuras, colocar como available, senão cleaning
-          const newRoomStatus = futureReservations && futureReservations.length > 0 
-            ? "cleaning" 
-            : "available";
+          if (!otherTickets || otherTickets.length === 0) {
+            // Verificar se há reservas futuras para o quarto
+            const { data: futureReservations } = await supabase
+              .from("reservations")
+              .select("id")
+              .eq("room_id", ticket.room_id)
+              .in("status", ["pending", "confirmed"])
+              .gte("checkin_date", new Date().toISOString().split("T")[0])
+              .limit(1);
 
-          await supabase
-            .from("rooms")
-            .update({ status: newRoomStatus })
-            .eq("id", ticket.room_id);
+            const newRoomStatus = futureReservations && futureReservations.length > 0
+              ? "cleaning"
+              : "available";
+
+            await supabase
+              .from("rooms")
+              .update({ status: newRoomStatus })
+              .eq("id", ticket.room_id);
+          }
         }
       }
 
@@ -306,10 +315,23 @@ export const useMaintenance = () => {
         .single();
 
       if (error) throw error;
+
+      // Garantir que o quarto fique indisponível enquanto a manutenção estiver ativa
+      if (data.room_id) {
+        await supabase
+          .from("rooms")
+          .update({ status: "maintenance" })
+          .eq("id", data.room_id);
+      }
+
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["maintenance_tickets", selectedEstablishment?.id] });
+      queryClient.invalidateQueries({ queryKey: ["rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      scheduleChannelSyncAfterInventoryChange(getEstablishmentId());
       toast.success("Manutenção iniciada!");
     },
     onError: (error: any) => {
@@ -335,24 +357,34 @@ export const useMaintenance = () => {
 
       if (error) throw error;
 
-      // Atualizar status do quarto
+      // Liberar quarto apenas se não houver outros tickets abertos/em progresso
       if (data.room_id) {
-        const { data: futureReservations } = await supabase
-          .from("reservations")
+        const { data: otherTickets } = await supabase
+          .from("maintenance_tickets")
           .select("id")
           .eq("room_id", data.room_id)
-          .in("status", ["pending", "confirmed"])
-          .gte("checkin_date", new Date().toISOString().split("T")[0])
+          .in("status", ["open", "in_progress"])
+          .neq("id", id)
           .limit(1);
 
-        const newRoomStatus = futureReservations && futureReservations.length > 0 
-          ? "cleaning" 
-          : "available";
+        if (!otherTickets || otherTickets.length === 0) {
+          const { data: futureReservations } = await supabase
+            .from("reservations")
+            .select("id")
+            .eq("room_id", data.room_id)
+            .in("status", ["pending", "confirmed"])
+            .gte("checkin_date", new Date().toISOString().split("T")[0])
+            .limit(1);
 
-        await supabase
-          .from("rooms")
-          .update({ status: newRoomStatus })
-          .eq("id", data.room_id);
+          const newRoomStatus = futureReservations && futureReservations.length > 0
+            ? "cleaning"
+            : "available";
+
+          await supabase
+            .from("rooms")
+            .update({ status: newRoomStatus })
+            .eq("id", data.room_id);
+        }
       }
 
       return data;

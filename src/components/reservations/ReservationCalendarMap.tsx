@@ -6,7 +6,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, addDays, eachDayOfInterval, parseISO, startOfDay, isSameDay, differenceInDays, isAfter, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock, User, Users } from "lucide-react";
+import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock, User, Users, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useReservations } from "@/hooks/useReservations";
 import { useRateSystem } from "@/hooks/useRateSystem";
@@ -37,6 +37,23 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+/** Quarto interditado manualmente ou em manutenção ativa. */
+const isRoomUnavailableForBooking = (room: { is_blocked?: boolean | null; status?: string | null } | null | undefined) =>
+  room?.is_blocked === true || room?.status === "maintenance";
+
+const isRoomInMaintenance = (room: { status?: string | null } | null | undefined) =>
+  room?.status === "maintenance";
+
+const getRoomUnavailableMessage = (room: { is_blocked?: boolean | null; status?: string | null } | null | undefined) => {
+  if (room?.status === "maintenance") {
+    return "Este quarto está em manutenção e não pode receber reservas";
+  }
+  if (room?.is_blocked === true) {
+    return "Este quarto está interditado e não pode receber reservas";
+  }
+  return "Este quarto não está disponível";
+};
 
 interface ReservationCalendarMapProps {
   onSelectReservation?: (id: string) => void;
@@ -896,33 +913,31 @@ export const ReservationCalendarMap = ({
     if (draggedReservation) return;
     if (roomId && isDateOccupied(date, roomId)) return;
     
-    // Verificar se o quarto está interditado
+    // Verificar se o quarto está interditado ou em manutenção
     if (roomId) {
       const room = categories
         .flatMap((cat: any) => cat.rooms || [])
         .find((r: any) => r.id === roomId);
       
-      if (room?.is_blocked === true) {
-        toast.error("Este quarto está interditado e não pode receber reservas");
+      if (isRoomUnavailableForBooking(room)) {
+        toast.error(getRoomUnavailableMessage(room));
         return;
       }
     }
     
-    // Se for categoria (sem quarto específico), verificar se há quartos disponíveis não interditados
+    // Se for categoria (sem quarto específico), verificar se há quartos disponíveis
     if (categoryId && !roomId) {
       const category = categories.find((cat: any) => cat.id === categoryId);
       if (category) {
         const availableRooms = (category.rooms || []).filter((room: any) => {
-          // Verificar se o quarto não está interditado
-          if (room.is_blocked === true) return false;
-          // Verificar se o quarto não está ocupado nesta data
+          if (isRoomUnavailableForBooking(room)) return false;
           return !isDateOccupied(date, room.id);
         });
         
         if (availableRooms.length === 0) {
-          const blockedRooms = (category.rooms || []).filter((room: any) => room.is_blocked === true);
-          if (blockedRooms.length > 0) {
-            toast.error("Todos os quartos desta categoria estão interditados ou ocupados");
+          const unavailableRooms = (category.rooms || []).filter((room: any) => isRoomUnavailableForBooking(room));
+          if (unavailableRooms.length > 0) {
+            toast.error("Todos os quartos desta categoria estão indisponíveis (interditados, em manutenção ou ocupados)");
           } else {
             toast.error("Nenhum quarto disponível nesta categoria para esta data");
           }
@@ -944,14 +959,14 @@ export const ReservationCalendarMap = ({
     if (dragStart.categoryId && categoryId !== dragStart.categoryId) return;
     if (dragStart.roomId && roomId !== dragStart.roomId) return;
     
-    // Verificar se o quarto está interditado
+    // Verificar se o quarto está interditado ou em manutenção
     if (roomId) {
       const room = categories
         .flatMap((cat: any) => cat.rooms || [])
         .find((r: any) => r.id === roomId);
       
-      if (room?.is_blocked === true) {
-        return; // Não permitir arrastar para quarto interditado
+      if (isRoomUnavailableForBooking(room)) {
+        return; // Não permitir arrastar para quarto indisponível
       }
     }
     
@@ -1017,13 +1032,13 @@ export const ReservationCalendarMap = ({
     if (!isDragging || !dragStart || !dragEnd) {
       // Clique direto sem drag
       if (date && roomId && !isDateOccupied(date, roomId)) {
-        // Verificar se o quarto está interditado
+        // Verificar se o quarto está interditado ou em manutenção
         const room = categories
           .flatMap((cat: any) => cat.rooms || [])
           .find((r: any) => r.id === roomId);
         
-        if (room?.is_blocked === true) {
-          toast.error("Este quarto está interditado e não pode receber reservas");
+        if (isRoomUnavailableForBooking(room)) {
+          toast.error(getRoomUnavailableMessage(room));
           setIsDragging(false);
           setDragStart(null);
           setDragEnd(null);
@@ -1039,20 +1054,18 @@ export const ReservationCalendarMap = ({
         });
         setQuickDialogOpen(true);
       } else if (date && categoryId && !roomId) {
-        // Clique em categoria (sem quarto específico) - verificar se há quartos disponíveis não interditados
+        // Clique em categoria (sem quarto específico) - verificar disponibilidade
         const category = categories.find((cat: any) => cat.id === categoryId);
         if (category) {
           const availableRooms = (category.rooms || []).filter((room: any) => {
-            // Verificar se o quarto não está interditado
-            if (room.is_blocked === true) return false;
-            // Verificar se o quarto não está ocupado nesta data
+            if (isRoomUnavailableForBooking(room)) return false;
             return !isDateOccupied(date, room.id);
           });
           
           if (availableRooms.length === 0) {
-            const blockedRooms = (category.rooms || []).filter((room: any) => room.is_blocked === true);
-            if (blockedRooms.length > 0 && blockedRooms.length === (category.rooms || []).length) {
-              toast.error("Todos os quartos desta categoria estão interditados");
+            const unavailableRooms = (category.rooms || []).filter((room: any) => isRoomUnavailableForBooking(room));
+            if (unavailableRooms.length > 0 && unavailableRooms.length === (category.rooms || []).length) {
+              toast.error("Todos os quartos desta categoria estão interditados ou em manutenção");
             } else {
               toast.error("Nenhum quarto disponível nesta categoria para esta data");
             }
@@ -1092,8 +1105,8 @@ export const ReservationCalendarMap = ({
         .flatMap((cat: any) => cat.rooms || [])
         .find((r: any) => r.id === roomId);
       
-      if (room?.is_blocked === true) {
-        toast.error("Este quarto está interditado e não pode receber reservas");
+      if (isRoomUnavailableForBooking(room)) {
+        toast.error(getRoomUnavailableMessage(room));
         setIsDragging(false);
         setDragStart(null);
         setDragEnd(null);
@@ -1109,22 +1122,20 @@ export const ReservationCalendarMap = ({
         return;
       }
     } else if (categoryId || dragStart.categoryId) {
-      // Verificar se há quartos disponíveis não interditados na categoria
+      // Verificar se há quartos disponíveis na categoria
       const finalCategoryId = categoryId || dragStart.categoryId;
       const category = categories.find((cat: any) => cat.id === finalCategoryId);
       if (category) {
         const datesInRange = eachDayOfInterval({ start: minDate, end: maxDate });
         const availableRooms = (category.rooms || []).filter((room: any) => {
-          // Verificar se o quarto não está interditado
-          if (room.is_blocked === true) return false;
-          // Verificar se o quarto não está ocupado em nenhuma data do intervalo
+          if (isRoomUnavailableForBooking(room)) return false;
           return !datesInRange.some((d) => isDateOccupied(d, room.id));
         });
         
         if (availableRooms.length === 0) {
-          const blockedRooms = (category.rooms || []).filter((room: any) => room.is_blocked === true);
-          if (blockedRooms.length > 0 && blockedRooms.length === (category.rooms || []).length) {
-            toast.error("Todos os quartos desta categoria estão interditados");
+          const unavailableRooms = (category.rooms || []).filter((room: any) => isRoomUnavailableForBooking(room));
+          if (unavailableRooms.length > 0 && unavailableRooms.length === (category.rooms || []).length) {
+            toast.error("Todos os quartos desta categoria estão interditados ou em manutenção");
           } else {
             toast.error("Nenhum quarto disponível nesta categoria para este período");
           }
@@ -2796,10 +2807,12 @@ export const ReservationCalendarMap = ({
                           });
                         }
                         
-                        // Calcular disponibilidade da categoria
+                        // Calcular disponibilidade da categoria (ocupados + interditados + manutenção)
                         const totalRooms = rooms.length;
-                        const occupiedRooms = rooms.filter((room: any) => isDateOccupied(date, room.id)).length;
-                        const availableRooms = totalRooms - occupiedRooms;
+                        const unavailableCount = rooms.filter(
+                          (room: any) => isDateOccupied(date, room.id) || isRoomUnavailableForBooking(room)
+                        ).length;
+                        const availableRooms = Math.max(0, totalRooms - unavailableCount);
                         
                         return (
                           <div
@@ -2872,25 +2885,46 @@ export const ReservationCalendarMap = ({
                       return pos.isVisible;
                     });
 
+                    const isMaintenance = isRoomInMaintenance(room);
+                    const isInterdicted = room.is_blocked === true;
+                    const isUnavailable = isRoomUnavailableForBooking(room);
+
                     return (
                       <div key={room.id} className={cn(
                         "flex transition-colors duration-150 relative border-b border-slate-100",
-                        room.is_blocked === true 
-                          ? "bg-rose-50/40 hover:bg-rose-50/60" 
+                        isInterdicted
+                          ? "bg-rose-50/40 hover:bg-rose-50/60"
+                          : isMaintenance
+                          ? "bg-amber-50/40 hover:bg-amber-50/60"
                           : "bg-white hover:bg-slate-50/60"
                       )} style={{ minHeight: "40px" }}>
                         <div className={cn(
                           "w-32 sm:w-48 md:w-56 flex-shrink-0 px-2 py-1.5 pl-4 sm:pl-7 border-r border-slate-100 text-[10px] sm:text-xs flex items-center gap-1.5 sm:gap-2",
-                          room.is_blocked === true ? "bg-rose-50/50" : "bg-white"
+                          isInterdicted ? "bg-rose-50/50" : isMaintenance ? "bg-amber-50/50" : "bg-white"
                         )}>
-                          {room.is_blocked === true && (
+                          {isInterdicted && (
                             <Lock className="h-3.5 w-3.5 text-rose-500 flex-shrink-0" />
                           )}
-                          <div className={cn(
-                            "text-[11px] sm:text-xs font-medium truncate",
-                            room.is_blocked === true ? "text-rose-800" : "text-slate-700"
-                          )}>
-                            {room.name || room.room_number}
+                          {isMaintenance && !isInterdicted && (
+                            <Wrench className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className={cn(
+                              "text-[11px] sm:text-xs font-medium truncate",
+                              isInterdicted ? "text-rose-800" : isMaintenance ? "text-amber-900" : "text-slate-700"
+                            )}>
+                              {room.name || room.room_number}
+                            </div>
+                            {isMaintenance && (
+                              <div className="text-[9px] sm:text-[10px] font-medium text-amber-700 truncate leading-tight">
+                                Em manutenção
+                              </div>
+                            )}
+                            {isInterdicted && !isMaintenance && (
+                              <div className="text-[9px] sm:text-[10px] font-medium text-rose-600 truncate leading-tight">
+                                Interditado
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div 
@@ -2910,8 +2944,9 @@ export const ReservationCalendarMap = ({
                             const isOccupied = isDateOccupied(date, room.id, draggedReservation?.reservation?.id);
                             const isHovered = hoveredCell?.roomId === room.id && hoveredCell?.dateIndex === dateIndex;
                             const isValidDrop = draggedReservation && hoveredCell?.roomId === room.id && 
+                              !isUnavailable &&
                               !isDateOccupied(date, room.id, draggedReservation.reservation.id);
-                            const isBlocked = room.is_blocked === true;
+                            const isBlocked = isUnavailable;
                             const isToday = isSameDay(date, new Date());
                             
                             return (
@@ -2922,8 +2957,10 @@ export const ReservationCalendarMap = ({
                                 className={cn(
                                   "relative border-r border-slate-100/90 last:border-r-0 transition-colors duration-150 flex items-center justify-center",
                                   isToday && !isSelected && !isBlocked && !isOccupied && "bg-sky-50/30",
-                                  isBlocked
+                                  isInterdicted
                                     ? "bg-rose-50/25 cursor-not-allowed"
+                                    : isMaintenance
+                                    ? "bg-amber-50/30 cursor-not-allowed"
                                     : isOccupied
                                     ? "bg-slate-50/80 cursor-not-allowed"
                                     : isSelected 
@@ -2952,7 +2989,7 @@ export const ReservationCalendarMap = ({
                                   if (isBlocked) {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    toast.error("Este quarto está interditado e não pode receber reservas");
+                                    toast.error(getRoomUnavailableMessage(room));
                                     return;
                                   }
                                   if (!draggedReservation && !isOccupied) {
@@ -2969,7 +3006,7 @@ export const ReservationCalendarMap = ({
                                   if (isBlocked) {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    toast.error("Este quarto está interditado e não pode receber reservas");
+                                    toast.error(getRoomUnavailableMessage(room));
                                     return;
                                   }
                                 }}
@@ -2979,7 +3016,15 @@ export const ReservationCalendarMap = ({
                                     handleMouseUp(category.id, room.id, date);
                                   }
                                 }}
-                                title={isOccupied ? "Data ocupada - não é possível criar reserva" : "Clique para criar reserva"}
+                                title={
+                                  isMaintenance
+                                    ? "Quarto em manutenção — indisponível até a conclusão"
+                                    : isInterdicted
+                                    ? "Quarto interditado — não é possível criar reserva"
+                                    : isOccupied
+                                    ? "Data ocupada - não é possível criar reserva"
+                                    : "Clique para criar reserva"
+                                }
                               >
                                 {isSelected && (selectionEdge === "start" || selectionEdge === "single") && (
                                   <span className="pointer-events-none absolute left-0.5 top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border-2 border-white bg-sky-500 shadow-sm" />
@@ -3338,6 +3383,13 @@ export const ReservationCalendarMap = ({
         const photos: string[] = Array.isArray(category?.display_photos) ? category.display_photos : [];
         const thumbnail = photos[0];
         const roomLabel = hoveredReservationPreview.roomLabel || null;
+        const isBlocked = reservation.status === "blocked";
+        const blockReason = isBlocked
+          ? (reservation.notes?.replace(/^Bloqueio:\s*/i, "")?.trim() || "Não informado")
+          : null;
+        const previewTitle = isBlocked
+          ? "Bloqueio"
+          : reservation.guest_name || reservation.reservation_code || "Reserva";
         const baseTotalAmount = Number(reservation.total_amount || 0);
         const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum: number, fee: any) => {
           return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
@@ -3366,7 +3418,7 @@ export const ReservationCalendarMap = ({
             }}
           >
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl ring-1 ring-black/5">
-              {thumbnail ? (
+              {thumbnail && !isBlocked ? (
                 <div className="relative h-28 w-full bg-slate-100">
                   <img
                     src={thumbnail}
@@ -3375,16 +3427,14 @@ export const ReservationCalendarMap = ({
                   />
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 to-transparent px-3 py-2">
                     <div className="truncate text-xs font-semibold text-white">
-                      {reservation.guest_name || reservation.reservation_code || "Reserva"}
+                      {previewTitle}
                     </div>
                   </div>
                 </div>
               ) : (
                 <div className="border-b border-slate-100 bg-slate-50 px-3 py-2.5">
                   <div className="truncate text-sm font-semibold text-slate-900">
-                    {reservation.status === "blocked"
-                      ? "Bloqueio"
-                      : reservation.guest_name || reservation.reservation_code || "Reserva"}
+                    {previewTitle}
                   </div>
                 </div>
               )}
@@ -3398,12 +3448,19 @@ export const ReservationCalendarMap = ({
                     />
                     {hoveredReservationPreview.statusLabel}
                   </span>
-                  {reservation.reservation_code && (
+                  {!isBlocked && reservation.reservation_code && (
                     <span className="truncate font-mono text-[10px] text-slate-500">
                       {reservation.reservation_code}
                     </span>
                   )}
                 </div>
+
+                {isBlocked && (
+                  <div className="rounded-md bg-slate-50 px-2 py-1.5 text-[11px] text-slate-700">
+                    <span className="font-medium text-slate-500">Motivo: </span>
+                    <span className="text-slate-800">{blockReason}</span>
+                  </div>
+                )}
 
                 {reservation.checkin_date && reservation.checkout_date && (
                   <div className="text-[11px] text-slate-600">
@@ -3429,12 +3486,12 @@ export const ReservationCalendarMap = ({
                       {[category?.name, roomLabel].filter(Boolean).join(" · ")}
                     </span>
                   )}
-                  {reservation.channel && (
+                  {!isBlocked && reservation.channel && (
                     <span className="truncate text-slate-500">{reservation.channel}</span>
                   )}
                 </div>
 
-                {reservation.status !== "blocked" && totalWithFees > 0 && (
+                {!isBlocked && totalWithFees > 0 && (
                   <div className="text-[11px] font-semibold text-slate-800">
                     R$ {totalWithFees.toFixed(2).replace(".", ",")}
                   </div>
