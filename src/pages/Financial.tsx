@@ -46,6 +46,7 @@ import { PaymentTypeDialog } from "@/components/financial/PaymentTypeDialog";
 import { useServiceFees } from "@/hooks/useServiceFees";
 import { ServiceFeeDialog } from "@/components/financial/ServiceFeeDialog";
 import { ClosingReport } from "@/components/financial/ClosingReport";
+import { OperatingFinancialReport } from "@/components/financial/OperatingFinancialReport";
 import { AccountsReceivableList } from "@/components/financial/AccountsReceivableList";
 import { AccountsPayableList } from "@/components/financial/AccountsPayableList";
 import { BankReconciliationDashboard } from "@/components/financial/BankReconciliationDashboard";
@@ -593,8 +594,9 @@ const Financial = () => {
             </Card>
           </div>
 
-          <Tabs defaultValue="overview" className="space-y-4">
-            <TabsList>
+          <Tabs defaultValue="operacao" className="space-y-4">
+            <TabsList className="h-auto flex-wrap">
+              <TabsTrigger value="operacao">Operação</TabsTrigger>
               <TabsTrigger value="overview">Visão Geral</TabsTrigger>
               <TabsTrigger value="receivables">Contas a Receber</TabsTrigger>
               <TabsTrigger value="payables">Contas a Pagar</TabsTrigger>
@@ -606,6 +608,10 @@ const Financial = () => {
               <TabsTrigger value="service_fees">Taxas</TabsTrigger>
               <TabsTrigger value="reports">Relatórios</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="operacao" className="space-y-4">
+              <OperatingFinancialReport />
+            </TabsContent>
 
             <TabsContent value="overview" className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">

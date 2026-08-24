@@ -6,7 +6,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, addDays, eachDayOfInterval, parseISO, startOfDay, isSameDay, differenceInDays, isAfter, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock, User, Users, Wrench } from "lucide-react";
+import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock, User, Users, Wrench, LogIn, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useReservations } from "@/hooks/useReservations";
 import { useRateSystem } from "@/hooks/useRateSystem";
@@ -3027,10 +3027,22 @@ export const ReservationCalendarMap = ({
                                 }
                               >
                                 {isSelected && (selectionEdge === "start" || selectionEdge === "single") && (
-                                  <span className="pointer-events-none absolute left-0.5 top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border-2 border-white bg-sky-500 shadow-sm" />
+                                  <span
+                                    className="pointer-events-none absolute left-0.5 top-1/2 z-[2] flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md bg-sky-500 text-white shadow-sm ring-2 ring-white"
+                                    title="Check-in"
+                                    aria-hidden
+                                  >
+                                    <LogIn className="h-3 w-3" strokeWidth={2.5} />
+                                  </span>
                                 )}
                                 {isSelected && (selectionEdge === "end" || selectionEdge === "single") && (
-                                  <span className="pointer-events-none absolute right-0.5 top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border-2 border-white bg-sky-500 shadow-sm" />
+                                  <span
+                                    className="pointer-events-none absolute right-0.5 top-1/2 z-[2] flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md bg-amber-500 text-white shadow-sm ring-2 ring-white"
+                                    title="Check-out"
+                                    aria-hidden
+                                  >
+                                    <LogOut className="h-3 w-3" strokeWidth={2.5} />
+                                  </span>
                                 )}
                               </div>
                             );
