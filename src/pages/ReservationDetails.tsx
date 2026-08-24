@@ -93,11 +93,23 @@ function fnrhDomainLabel(
   return list.find((o) => o.id === id)?.label ?? id;
 }
 
-/** Bloco motivo da viagem + meio de transporte (dados FNRH / meio de hospedagem) por hóspede */
+/** Bloco motivo/transporte + origem/destino (dados FNRH / meio de hospedagem) por hóspede */
 function FnrhMeioHospedagemGuestBlock({ guest }: { guest: Record<string, unknown> }) {
+  const asText = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const motivoId = guest.fnrh_motivo_viagem_id as string | undefined;
   const meioId = guest.fnrh_meio_transporte_id as string | undefined;
-  if (!motivoId?.trim() && !meioId?.trim()) return null;
+  const paisOrigem = asText(guest.fnrh_pais_origem);
+  const cidadeOrigem = asText(guest.fnrh_cidade_origem);
+  const paisDestino = asText(guest.fnrh_pais_destino);
+  const cidadeDestino = asText(guest.fnrh_cidade_destino);
+  const hasAny =
+    !!motivoId?.trim() ||
+    !!meioId?.trim() ||
+    !!paisOrigem ||
+    !!cidadeOrigem ||
+    !!paisDestino ||
+    !!cidadeDestino;
+  if (!hasAny) return null;
   const motivo = fnrhDomainLabel(FNRH_MOTIVOS_VIAGEM, motivoId);
   const meio = fnrhDomainLabel(FNRH_MEIOS_TRANSPORTE, meioId);
   return (
@@ -116,6 +128,30 @@ function FnrhMeioHospedagemGuestBlock({ guest }: { guest: Record<string, unknown
           <div>
             <Label className="text-xs text-slate-500">Meio de transporte</Label>
             <div className="mt-1 text-sm font-medium text-slate-800">{meio ?? meioId}</div>
+          </div>
+        ) : null}
+        {paisOrigem ? (
+          <div>
+            <Label className="text-xs text-slate-500">País de origem</Label>
+            <div className="mt-1 text-sm font-medium text-slate-800">{paisOrigem}</div>
+          </div>
+        ) : null}
+        {paisDestino ? (
+          <div>
+            <Label className="text-xs text-slate-500">País de destino</Label>
+            <div className="mt-1 text-sm font-medium text-slate-800">{paisDestino}</div>
+          </div>
+        ) : null}
+        {cidadeOrigem ? (
+          <div>
+            <Label className="text-xs text-slate-500">Cidade de origem</Label>
+            <div className="mt-1 text-sm font-medium text-slate-800">{cidadeOrigem}</div>
+          </div>
+        ) : null}
+        {cidadeDestino ? (
+          <div>
+            <Label className="text-xs text-slate-500">Cidade de destino</Label>
+            <div className="mt-1 text-sm font-medium text-slate-800">{cidadeDestino}</div>
           </div>
         ) : null}
       </div>

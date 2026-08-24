@@ -19,14 +19,13 @@ import { ptBR } from "date-fns/locale";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReuseDataDialog } from "@/components/webcheckin/ReuseDataDialog";
 import {
-  FNRH_DEFICIENCIA,
-  FNRH_GENEROS,
   FNRH_MEIOS_TRANSPORTE,
   FNRH_MOTIVOS_VIAGEM,
-  FNRH_RACAS,
   FNRH_SELECT_PLACEHOLDER,
-  FNRH_TIPOS_DEFICIENCIA,
 } from "@/lib/fnrh/domainOptions";
+import { FNRH_PAISES } from "@/lib/fnrh/geoOptions";
+import { FnrhSuggestInput } from "@/components/fnrh/FnrhSuggestInput";
+import { useIbgeMunicipios } from "@/hooks/useIbgeMunicipios";
 
 /**
  * Tipo de fluxo deste diálogo: check-in manual na recepção.
@@ -36,9 +35,14 @@ import {
 const CHECKIN_FLOW_TYPE = "manual" as const;
 
 const DEFAULT_FNRH_GUEST_FIELDS = {
-  fnrh_genero_id: "",
   fnrh_motivo_viagem_id: "",
   fnrh_meio_transporte_id: "",
+  fnrh_pais_origem: "",
+  fnrh_cidade_origem: "",
+  fnrh_pais_destino: "",
+  fnrh_cidade_destino: "",
+  /** Mantidos no payload para defaults da API (não exibidos no formulário). */
+  fnrh_genero_id: "",
   fnrh_raca_id: "",
   fnrh_deficiencia_id: "",
   fnrh_tipo_deficiencia_id: "",
@@ -127,6 +131,8 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
     reservation?.establishment_id,
   );
   const showFnrhGuestFields = shouldShowFnrhGuestFields(fnrhSettings, reservation?.category_id);
+  const { data: municipiosIbge = [], isFetching: loadingMunicipios } =
+    useIbgeMunicipios(open && showFnrhGuestFields);
   const queryClient = useQueryClient();
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -859,22 +865,6 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
       }
 
       if (showFnrhGuestFields) {
-        if (!guest.fnrh_genero_id?.trim()) {
-          toast.error(`Informe o gênero (FNRH) de ${guestLabel}.`);
-          return;
-        }
-        if (!guest.fnrh_raca_id?.trim()) {
-          toast.error(`Informe a raça/cor (FNRH) de ${guestLabel}.`);
-          return;
-        }
-        if (!guest.fnrh_deficiencia_id?.trim()) {
-          toast.error(`Informe se possui deficiência (FNRH) — ${guestLabel}.`);
-          return;
-        }
-        if (guest.fnrh_deficiencia_id === "SIM" && !guest.fnrh_tipo_deficiencia_id?.trim()) {
-          toast.error(`Informe o tipo de deficiência (FNRH) de ${guestLabel}.`);
-          return;
-        }
         if (!guest.fnrh_motivo_viagem_id?.trim()) {
           toast.error(`Informe o motivo da viagem (FNRH) de ${guestLabel}.`);
           return;
@@ -883,8 +873,20 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
           toast.error(`Informe o meio de transporte (FNRH) de ${guestLabel}.`);
           return;
         }
-        if (guest.fnrh_genero_id === "OUTRO" && !(guest.fnrh_genero_descricao || "").trim()) {
-          toast.error(`Descreva o gênero (FNRH, opção "Outros") para ${guestLabel}.`);
+        if (!guest.fnrh_pais_origem?.trim()) {
+          toast.error(`Informe o país de origem (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (!guest.fnrh_cidade_origem?.trim()) {
+          toast.error(`Informe a cidade de origem (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (!guest.fnrh_pais_destino?.trim()) {
+          toast.error(`Informe o país de destino (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (!guest.fnrh_cidade_destino?.trim()) {
+          toast.error(`Informe a cidade de destino (FNRH) de ${guestLabel}.`);
           return;
         }
         if (guestIsMinor(guest)) {
@@ -1685,152 +1687,10 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
                       Meio de hospedagem (FNRH)
                     </h4>
                     <p className="text-xs text-muted-foreground mb-4">
-                      Obrigatório para envio à Ficha Nacional: gênero, raça/cor, deficiência, motivo da viagem e
-                      meio de transporte.
+                      Informe motivo da viagem, meio de transporte e origem/destino. Gênero, raça/cor e
+                      deficiência usam os padrões da configuração FNRH do estabelecimento no envio à API.
                     </p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor={`fnrh_genero-${index}`}>
-                          Gênero <span className="text-red-500">*</span>
-                        </Label>
-                        <Select
-                          value={
-                            guest.fnrh_genero_id?.trim()
-                              ? guest.fnrh_genero_id
-                              : FNRH_SELECT_PLACEHOLDER
-                          }
-                          onValueChange={(v) =>
-                            handleGuestChange(
-                              index,
-                              "fnrh_genero_id",
-                              v === FNRH_SELECT_PLACEHOLDER ? "" : v,
-                            )
-                          }
-                        >
-                          <SelectTrigger id={`fnrh_genero-${index}`}>
-                            <SelectValue placeholder="Selecione" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
-                            {FNRH_GENEROS.map((o) => (
-                              <SelectItem key={o.id} value={o.id}>
-                                {o.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {guest.fnrh_genero_id === "OUTRO" && (
-                        <div className="md:col-span-2">
-                          <Label htmlFor={`fnrh_genero_desc-${index}`}>
-                            Descreva o gênero (obrigatório para &quot;Outros&quot;){" "}
-                            <span className="text-red-500">*</span>
-                          </Label>
-                          <Input
-                            id={`fnrh_genero_desc-${index}`}
-                            value={guest.fnrh_genero_descricao || ""}
-                            onChange={(e) =>
-                              handleGuestChange(index, "fnrh_genero_descricao", e.target.value)
-                            }
-                            maxLength={200}
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <Label htmlFor={`fnrh_raca-${index}`}>
-                          Raça/cor <span className="text-red-500">*</span>
-                        </Label>
-                        <Select
-                          value={
-                            guest.fnrh_raca_id?.trim()
-                              ? guest.fnrh_raca_id
-                              : FNRH_SELECT_PLACEHOLDER
-                          }
-                          onValueChange={(v) =>
-                            handleGuestChange(
-                              index,
-                              "fnrh_raca_id",
-                              v === FNRH_SELECT_PLACEHOLDER ? "" : v,
-                            )
-                          }
-                        >
-                          <SelectTrigger id={`fnrh_raca-${index}`}>
-                            <SelectValue placeholder="Selecione" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
-                            {FNRH_RACAS.map((o) => (
-                              <SelectItem key={o.id} value={o.id}>
-                                {o.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor={`fnrh_def-${index}`}>
-                          Possui deficiência? <span className="text-red-500">*</span>
-                        </Label>
-                        <Select
-                          value={
-                            guest.fnrh_deficiencia_id?.trim()
-                              ? guest.fnrh_deficiencia_id
-                              : FNRH_SELECT_PLACEHOLDER
-                          }
-                          onValueChange={(v) =>
-                            handleGuestChange(
-                              index,
-                              "fnrh_deficiencia_id",
-                              v === FNRH_SELECT_PLACEHOLDER ? "" : v,
-                            )
-                          }
-                        >
-                          <SelectTrigger id={`fnrh_def-${index}`}>
-                            <SelectValue placeholder="Selecione" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
-                            {FNRH_DEFICIENCIA.map((o) => (
-                              <SelectItem key={o.id} value={o.id}>
-                                {o.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {guest.fnrh_deficiencia_id === "SIM" && (
-                        <div>
-                          <Label htmlFor={`fnrh_tipo_def-${index}`}>
-                            Tipo de deficiência <span className="text-red-500">*</span>
-                          </Label>
-                          <Select
-                            value={
-                              guest.fnrh_tipo_deficiencia_id?.trim()
-                                ? guest.fnrh_tipo_deficiencia_id
-                                : FNRH_SELECT_PLACEHOLDER
-                            }
-                            onValueChange={(v) =>
-                              handleGuestChange(
-                                index,
-                                "fnrh_tipo_deficiencia_id",
-                                v === FNRH_SELECT_PLACEHOLDER ? "" : v,
-                              )
-                            }
-                          >
-                            <SelectTrigger id={`fnrh_tipo_def-${index}`}>
-                              <SelectValue placeholder="Selecione" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
-                              {FNRH_TIPOS_DEFICIENCIA.map((o) => (
-                                <SelectItem key={o.id} value={o.id}>
-                                  {o.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
                       <div>
                         <Label htmlFor={`fnrh_motivo-${index}`}>
                           Motivo da viagem <span className="text-red-500">*</span>
@@ -1892,6 +1752,56 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
                             ))}
                           </SelectContent>
                         </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor={`fnrh_pais_origem-${index}`}>
+                          País de origem <span className="text-red-500">*</span>
+                        </Label>
+                        <FnrhSuggestInput
+                          id={`fnrh_pais_origem-${index}`}
+                          value={guest.fnrh_pais_origem || ""}
+                          onChange={(v) => handleGuestChange(index, "fnrh_pais_origem", v)}
+                          options={FNRH_PAISES}
+                          placeholder="Selecione"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`fnrh_pais_destino-${index}`}>
+                          País de destino <span className="text-red-500">*</span>
+                        </Label>
+                        <FnrhSuggestInput
+                          id={`fnrh_pais_destino-${index}`}
+                          value={guest.fnrh_pais_destino || ""}
+                          onChange={(v) => handleGuestChange(index, "fnrh_pais_destino", v)}
+                          options={FNRH_PAISES}
+                          placeholder="Selecione"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`fnrh_cidade_origem-${index}`}>
+                          Cidade de origem <span className="text-red-500">*</span>
+                        </Label>
+                        <FnrhSuggestInput
+                          id={`fnrh_cidade_origem-${index}`}
+                          value={guest.fnrh_cidade_origem || ""}
+                          onChange={(v) => handleGuestChange(index, "fnrh_cidade_origem", v)}
+                          options={municipiosIbge}
+                          loading={loadingMunicipios}
+                          placeholder="Selecione"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`fnrh_cidade_destino-${index}`}>
+                          Cidade de destino <span className="text-red-500">*</span>
+                        </Label>
+                        <FnrhSuggestInput
+                          id={`fnrh_cidade_destino-${index}`}
+                          value={guest.fnrh_cidade_destino || ""}
+                          onChange={(v) => handleGuestChange(index, "fnrh_cidade_destino", v)}
+                          options={municipiosIbge}
+                          loading={loadingMunicipios}
+                          placeholder="Selecione"
+                        />
                       </div>
                     </div>
                     {guestIsMinor(guest) && (

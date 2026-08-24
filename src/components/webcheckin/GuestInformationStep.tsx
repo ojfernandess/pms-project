@@ -12,14 +12,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import {
-  FNRH_DEFICIENCIA,
-  FNRH_GENEROS,
   FNRH_MEIOS_TRANSPORTE,
   FNRH_MOTIVOS_VIAGEM,
-  FNRH_RACAS,
   FNRH_SELECT_PLACEHOLDER,
-  FNRH_TIPOS_DEFICIENCIA,
 } from "@/lib/fnrh/domainOptions";
+import { FNRH_PAISES } from "@/lib/fnrh/geoOptions";
+import { FnrhSuggestInput } from "@/components/fnrh/FnrhSuggestInput";
+import { useIbgeMunicipios } from "@/hooks/useIbgeMunicipios";
 
 function useFnrhGuestFormVisibility(
   establishmentId: string | null | undefined,
@@ -70,6 +69,8 @@ export function GuestInformationStep({
   const showFnrhGuestFields = fnrhGuestFormVisible === true;
   const fnrhVisibilityGate =
     !!establishmentId && !!categoryId ? !fnrhVisibilityLoading : true;
+  const { data: municipiosIbge = [], isFetching: loadingMunicipios } =
+    useIbgeMunicipios(showFnrhGuestFields);
 
   // Obter capacidade da categoria
   const maxCapacity = reservation?.room_categories?.capacity_adults !== undefined && reservation?.room_categories?.capacity_adults !== null
@@ -103,9 +104,13 @@ export function GuestInformationStep({
       state: "",
       is_main_guest: true,
       use_main_guest_address: false,
-      fnrh_genero_id: "",
       fnrh_motivo_viagem_id: "",
       fnrh_meio_transporte_id: "",
+      fnrh_pais_origem: "",
+      fnrh_cidade_origem: "",
+      fnrh_pais_destino: "",
+      fnrh_cidade_destino: "",
+      fnrh_genero_id: "",
       fnrh_raca_id: "",
       fnrh_deficiencia_id: "",
       cidade_ibge_id: "",
@@ -130,6 +135,10 @@ export function GuestInformationStep({
       const cleared = webCheckin.guest_data.guests.map((g: any) => ({
         ...g,
         cidade_ibge_id: "",
+        fnrh_pais_origem: g.fnrh_pais_origem || "",
+        fnrh_cidade_origem: g.fnrh_cidade_origem || g.city || "",
+        fnrh_pais_destino: g.fnrh_pais_destino || "",
+        fnrh_cidade_destino: g.fnrh_cidade_destino || "",
       }));
       setGuests(cleared);
       hasLoadedData = true;
@@ -157,9 +166,13 @@ export function GuestInformationStep({
         city: g.city || "",
         state: g.state || "",
         is_main_guest: g.is_main_guest || false,
-        fnrh_genero_id: g.fnrh_genero_id || "",
         fnrh_motivo_viagem_id: g.fnrh_motivo_viagem_id || "",
         fnrh_meio_transporte_id: g.fnrh_meio_transporte_id || "",
+        fnrh_pais_origem: g.fnrh_pais_origem || "",
+        fnrh_cidade_origem: g.fnrh_cidade_origem || g.city || "",
+        fnrh_pais_destino: g.fnrh_pais_destino || "",
+        fnrh_cidade_destino: g.fnrh_cidade_destino || "",
+        fnrh_genero_id: g.fnrh_genero_id || "",
         fnrh_raca_id: g.fnrh_raca_id || "",
         fnrh_deficiencia_id: g.fnrh_deficiencia_id || "",
         cidade_ibge_id: "",
@@ -177,6 +190,10 @@ export function GuestInformationStep({
       const cleared = data.guests.map((g: any) => ({
         ...g,
         cidade_ibge_id: "",
+        fnrh_pais_origem: g.fnrh_pais_origem || "",
+        fnrh_cidade_origem: g.fnrh_cidade_origem || g.city || "",
+        fnrh_pais_destino: g.fnrh_pais_destino || "",
+        fnrh_cidade_destino: g.fnrh_cidade_destino || "",
       }));
       setGuests(cleared);
       hasLoadedData = true;
@@ -214,9 +231,13 @@ export function GuestInformationStep({
         state: "",
         is_main_guest: false,
         use_main_guest_address: false,
-        fnrh_genero_id: "",
         fnrh_motivo_viagem_id: "",
         fnrh_meio_transporte_id: "",
+        fnrh_pais_origem: "",
+        fnrh_cidade_origem: "",
+        fnrh_pais_destino: "",
+        fnrh_cidade_destino: "",
+        fnrh_genero_id: "",
         fnrh_raca_id: "",
         fnrh_deficiencia_id: "",
         cidade_ibge_id: "",
@@ -275,6 +296,10 @@ export function GuestInformationStep({
         city: data.localidade || "",
         state: data.uf || "",
         cidade_ibge_id: "",
+        fnrh_cidade_origem:
+          currentGuest.fnrh_cidade_origem?.trim()
+            ? currentGuest.fnrh_cidade_origem
+            : data.localidade || "",
       };
       
       // Se for hóspede principal e houver acompanhantes usando seu endereço, sincronizar
@@ -453,6 +478,20 @@ export function GuestInformationStep({
         city: "",
         state: "",
         is_main_guest: false,
+        fnrh_motivo_viagem_id: "",
+        fnrh_meio_transporte_id: "",
+        fnrh_pais_origem: "",
+        fnrh_cidade_origem: "",
+        fnrh_pais_destino: "",
+        fnrh_cidade_destino: "",
+        fnrh_genero_id: "",
+        fnrh_raca_id: "",
+        fnrh_deficiencia_id: "",
+        cidade_ibge_id: "",
+        responsavel_numero_documento: "",
+        responsavel_tipo_documento_id: "CPF",
+        fnrh_tipo_deficiencia_id: "",
+        fnrh_genero_descricao: "",
       },
     ]);
   };
@@ -662,22 +701,6 @@ export function GuestInformationStep({
 
       // FNRH — apenas quando integração + categoria no escopo
       if (showFnrhGuestFields) {
-        if (!guest.fnrh_genero_id?.trim()) {
-          alert(`Informe o gênero (Ficha Nacional / FNRH) de ${guestLabel}.`);
-          return;
-        }
-        if (!guest.fnrh_raca_id?.trim()) {
-          alert(`Informe a raça/cor (FNRH) de ${guestLabel}.`);
-          return;
-        }
-        if (!guest.fnrh_deficiencia_id?.trim()) {
-          alert(`Informe a deficiência (FNRH) de ${guestLabel}.`);
-          return;
-        }
-        if (guest.fnrh_deficiencia_id === "SIM" && !guest.fnrh_tipo_deficiencia_id?.trim()) {
-          alert(`Informe o tipo de deficiência (FNRH) de ${guestLabel}.`);
-          return;
-        }
         if (!guest.fnrh_motivo_viagem_id?.trim()) {
           alert(`Informe o motivo da viagem (FNRH) de ${guestLabel}.`);
           return;
@@ -686,8 +709,20 @@ export function GuestInformationStep({
           alert(`Informe o meio de transporte (FNRH) de ${guestLabel}.`);
           return;
         }
-        if (guest.fnrh_genero_id === "OUTRO" && !(guest.fnrh_genero_descricao || "").trim()) {
-          alert(`Descreva o gênero (campo exigido quando a opção é "Outros") para ${guestLabel}.`);
+        if (!guest.fnrh_pais_origem?.trim()) {
+          alert(`Informe o país de origem (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (!guest.fnrh_cidade_origem?.trim()) {
+          alert(`Informe a cidade de origem (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (!guest.fnrh_pais_destino?.trim()) {
+          alert(`Informe o país de destino (FNRH) de ${guestLabel}.`);
+          return;
+        }
+        if (!guest.fnrh_cidade_destino?.trim()) {
+          alert(`Informe a cidade de destino (FNRH) de ${guestLabel}.`);
           return;
         }
         if (guestIsMinor(guest)) {
@@ -1152,153 +1187,14 @@ export function GuestInformationStep({
 
             {showFnrhGuestFields && (
             <div className="mt-6 pt-6 border-t border-slate-200">
-              <h4 className="font-semibold text-slate-900 mb-1">Ficha Nacional de Registro de Hóspedes (FNRH)</h4>
+              <h4 className="font-semibold text-slate-900 mb-1">Meio de hospedagem (FNRH)</h4>
               <p className="text-xs text-muted-foreground mb-4">
-                Preencha com sua própria declaração. Estes campos são exigidos pela legislação e pela API
-                FNRH (gênero, raça/cor, deficiência, motivo da viagem e meio de transporte). Com residência
-                no Brasil, informe o CEP no endereço acima: o município (IBGE) é obtido a partir do CEP no
-                envio. Para outras nacionalidades, use cidade e país no endereço; não há campo de código
-                IBGE neste formulário.
+                Informe motivo da viagem, meio de transporte e origem/destino (padrão da ficha de
+                hospedagem). Gênero, raça/cor e deficiência são enviados à API FNRH com os valores
+                padrão da configuração do estabelecimento. Com residência no Brasil, o município
+                (IBGE) é obtido a partir do CEP no envio.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor={`fnrh_genero-${index}`}>
-                    Gênero <span className="text-red-500">*</span>
-                  </Label>
-                  <Select
-                    value={guest.fnrh_genero_id?.trim() ? guest.fnrh_genero_id : FNRH_SELECT_PLACEHOLDER}
-                    onValueChange={(v) =>
-                      handleGuestChange(
-                        index,
-                        "fnrh_genero_id",
-                        v === FNRH_SELECT_PLACEHOLDER ? "" : v,
-                      )
-                    }
-                  >
-                    <SelectTrigger id={`fnrh_genero-${index}`}>
-                      <SelectValue placeholder="Selecione" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
-                      {FNRH_GENEROS.map((o) => (
-                        <SelectItem key={o.id} value={o.id}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {guest.fnrh_genero_id === "OUTRO" && (
-                  <div className="md:col-span-2">
-                    <Label htmlFor={`fnrh_genero_desc-${index}`}>
-                      Descreva o gênero (obrigatório para &quot;Outros&quot;) <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id={`fnrh_genero_desc-${index}`}
-                      value={guest.fnrh_genero_descricao || ""}
-                      onChange={(e) =>
-                        handleGuestChange(index, "fnrh_genero_descricao", e.target.value)
-                      }
-                      maxLength={200}
-                    />
-                  </div>
-                )}
-                <div>
-                  <Label htmlFor={`fnrh_raca-${index}`}>
-                    Raça/cor <span className="text-red-500">*</span>
-                  </Label>
-                  <Select
-                    value={guest.fnrh_raca_id?.trim() ? guest.fnrh_raca_id : FNRH_SELECT_PLACEHOLDER}
-                    onValueChange={(v) =>
-                      handleGuestChange(
-                        index,
-                        "fnrh_raca_id",
-                        v === FNRH_SELECT_PLACEHOLDER ? "" : v,
-                      )
-                    }
-                  >
-                    <SelectTrigger id={`fnrh_raca-${index}`}>
-                      <SelectValue placeholder="Selecione" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
-                      {FNRH_RACAS.map((o) => (
-                        <SelectItem key={o.id} value={o.id}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor={`fnrh_def-${index}`}>
-                    {`Possui deficiência? `}<span className="text-red-500">*</span>
-                  </Label>
-                  <Select
-                    value={
-                      guest.fnrh_deficiencia_id?.trim()
-                        ? guest.fnrh_deficiencia_id
-                        : FNRH_SELECT_PLACEHOLDER
-                    }
-                    onValueChange={(v) => {
-                      const id = v === FNRH_SELECT_PLACEHOLDER ? "" : v;
-                      const next = [...guests];
-                      next[index] = {
-                        ...next[index],
-                        fnrh_deficiencia_id: id,
-                        fnrh_tipo_deficiencia_id: id === "SIM"
-                          ? next[index].fnrh_tipo_deficiencia_id
-                          : "",
-                      };
-                      setGuests(next);
-                    }}
-                  >
-                    <SelectTrigger id={`fnrh_def-${index}`}>
-                      <SelectValue placeholder="Selecione" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
-                      {FNRH_DEFICIENCIA.map((o) => (
-                        <SelectItem key={o.id} value={o.id}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {guest.fnrh_deficiencia_id === "SIM" && (
-                  <div>
-                    <Label htmlFor={`fnrh_tipo_def-${index}`}>
-                      Tipo de deficiência <span className="text-red-500">*</span>
-                    </Label>
-                    <Select
-                      value={
-                        guest.fnrh_tipo_deficiencia_id?.trim()
-                          ? guest.fnrh_tipo_deficiencia_id
-                          : FNRH_SELECT_PLACEHOLDER
-                      }
-                      onValueChange={(v) =>
-                        handleGuestChange(
-                          index,
-                          "fnrh_tipo_deficiencia_id",
-                          v === FNRH_SELECT_PLACEHOLDER ? "" : v,
-                        )
-                      }
-                    >
-                      <SelectTrigger id={`fnrh_tipo_def-${index}`}>
-                        <SelectValue placeholder="Selecione" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={FNRH_SELECT_PLACEHOLDER}>Selecione</SelectItem>
-                        {FNRH_TIPOS_DEFICIENCIA.map((o) => (
-                          <SelectItem key={o.id} value={o.id}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
                 <div>
                   <Label htmlFor={`fnrh_motivo-${index}`}>
                     Motivo da viagem <span className="text-red-500">*</span>
@@ -1332,7 +1228,7 @@ export function GuestInformationStep({
                 </div>
                 <div>
                   <Label htmlFor={`fnrh_meio-${index}`}>
-                    Meio de transporte utilizado para chegar ao hotel <span className="text-red-500">*</span>
+                    Meio de transporte <span className="text-red-500">*</span>
                   </Label>
                   <Select
                     value={
@@ -1360,6 +1256,56 @@ export function GuestInformationStep({
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+                <div>
+                  <Label htmlFor={`fnrh_pais_origem-${index}`}>
+                    País de origem <span className="text-red-500">*</span>
+                  </Label>
+                  <FnrhSuggestInput
+                    id={`fnrh_pais_origem-${index}`}
+                    value={guest.fnrh_pais_origem || ""}
+                    onChange={(v) => handleGuestChange(index, "fnrh_pais_origem", v)}
+                    options={FNRH_PAISES}
+                    placeholder="Selecione"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor={`fnrh_pais_destino-${index}`}>
+                    País de destino <span className="text-red-500">*</span>
+                  </Label>
+                  <FnrhSuggestInput
+                    id={`fnrh_pais_destino-${index}`}
+                    value={guest.fnrh_pais_destino || ""}
+                    onChange={(v) => handleGuestChange(index, "fnrh_pais_destino", v)}
+                    options={FNRH_PAISES}
+                    placeholder="Selecione"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor={`fnrh_cidade_origem-${index}`}>
+                    Cidade de origem <span className="text-red-500">*</span>
+                  </Label>
+                  <FnrhSuggestInput
+                    id={`fnrh_cidade_origem-${index}`}
+                    value={guest.fnrh_cidade_origem || ""}
+                    onChange={(v) => handleGuestChange(index, "fnrh_cidade_origem", v)}
+                    options={municipiosIbge}
+                    loading={loadingMunicipios}
+                    placeholder="Selecione"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor={`fnrh_cidade_destino-${index}`}>
+                    Cidade de destino <span className="text-red-500">*</span>
+                  </Label>
+                  <FnrhSuggestInput
+                    id={`fnrh_cidade_destino-${index}`}
+                    value={guest.fnrh_cidade_destino || ""}
+                    onChange={(v) => handleGuestChange(index, "fnrh_cidade_destino", v)}
+                    options={municipiosIbge}
+                    loading={loadingMunicipios}
+                    placeholder="Selecione"
+                  />
                 </div>
               </div>
               {guestIsMinor(guest) && (
