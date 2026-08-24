@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +51,17 @@ const ChannelManager = () => {
     syncChannexReservations,
     isSyncingChannexReservations,
   } = useChannelManager();
+
+  /** Canais ativos — inativos não aparecem em «Canais OTA Configurados». */
+  const activeChannels = useMemo(
+    () => (channels || []).filter((c: { is_active?: boolean | null }) => c.is_active !== false),
+    [channels]
+  );
+
+  const inactiveChannels = useMemo(
+    () => (channels || []).filter((c: { is_active?: boolean | null }) => c.is_active === false),
+    [channels]
+  );
 
   const [otaDialogOpen, setOtaDialogOpen] = useState(false);
   const [pricingDialogOpen, setPricingDialogOpen] = useState(false);
@@ -130,13 +141,19 @@ const ChannelManager = () => {
         <TabsList>
           <TabsTrigger value="channels">Canais</TabsTrigger>
           <TabsTrigger value="pricing">Tarifas por Canal</TabsTrigger>
-          {channels.some((c: { channel_manager_type?: string }) => c.channel_manager_type === "aiosell") && (
+          {channels.some(
+            (c: { channel_manager_type?: string; is_active?: boolean | null }) =>
+              c.channel_manager_type === "aiosell" && c.is_active !== false
+          ) && (
             <TabsTrigger value="aiosell-mapping" className="flex items-center gap-1.5">
               <img src="/channel/Aiosell.jpeg" alt="Aiosell" className="h-4 w-auto rounded object-contain" />
               Mapeamento Aiosell
             </TabsTrigger>
           )}
-          {channels.some((c: { channel_manager_type?: string }) => c.channel_manager_type === "channex") && (
+          {channels.some(
+            (c: { channel_manager_type?: string; is_active?: boolean | null }) =>
+              c.channel_manager_type === "channex" && c.is_active !== false
+          ) && (
             <TabsTrigger value="channex-mapping" className="flex items-center gap-1.5">
               <img src="/channel/logo_small.svg" alt="Channex" className="h-4 w-auto object-contain" />
               Mapeamento Channex
@@ -168,14 +185,16 @@ const ChannelManager = () => {
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
-          ) : channels.length === 0 ? (
+          ) : activeChannels.length === 0 ? (
             <Card className="p-8 text-center text-muted-foreground">
-              Nenhum canal OTA configurado
+              {inactiveChannels.length > 0
+                ? "Nenhum canal OTA ativo. Reative um canal inativo abaixo ou crie um novo."
+                : "Nenhum canal OTA configurado"}
             </Card>
           ) : (
             <>
               <div className="grid gap-4 md:grid-cols-2">
-                {channels.map((channel: any) => (
+                {activeChannels.map((channel: any) => (
                   <SyncStatusCard
                     key={channel.id}
                     channel={channel}
@@ -188,13 +207,20 @@ const ChannelManager = () => {
               </div>
               
               {/* Informações sobre Bukly Channel Manager */}
-              {channels.some((c: any) => c.channel_manager_type === "bukly") && (
+              {activeChannels.some((c: any) => c.channel_manager_type === "bukly") && (
                 <Card className="p-4 bg-blue-50 border-blue-200">
-                  <div className="flex items-start gap-3">
-                    <div className="flex-1">
+                  <div className="flex items-start gap-4">
+                    <img
+                      src="/channel/Logotipo-Bukly.png"
+                      alt="Bukly Channel Manager"
+                      className="h-12 w-auto rounded-lg object-contain shrink-0 border border-blue-200 bg-white p-1"
+                    />
+                    <div className="flex-1 min-w-0">
                       <h4 className="font-semibold text-blue-900 mb-2">Bukly Channel Manager</h4>
                       <p className="text-sm text-blue-800 mb-2">
-                        O Bukly conecta automaticamente seu PMS com múltiplas OTAs, incluindo:
+                        Integração OTA oficial (<code className="text-xs">https://pms.bukly.com</code>):
+                        push de tarifas e disponibilidade em XML. Configure HotelCode, Basic Auth e os
+                        códigos InvTypeCode / RatePlanCode em Tarifas por canal.
                       </p>
                       <ul className="text-sm text-blue-700 list-disc list-inside space-y-1 mb-2">
                         <li>Booking.com</li>
@@ -203,14 +229,22 @@ const ChannelManager = () => {
                         <li>Airbnb e VRBO (configurável)</li>
                       </ul>
                       <p className="text-xs text-blue-600">
-                        Mais informações: <a href="https://www.bukly.com.br" target="_blank" rel="noopener noreferrer" className="underline">www.bukly.com.br</a>
+                        Documentação:{" "}
+                        <a
+                          href="https://bukly.com/pmsapidoc/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline"
+                        >
+                          bukly.com/pmsapidoc
+                        </a>
                       </p>
                     </div>
                   </div>
                 </Card>
               )}
 
-              {channels.some((c: any) => c.channel_manager_type === "aiosell") && (
+              {activeChannels.some((c: any) => c.channel_manager_type === "aiosell") && (
                 <Card className="p-4 bg-slate-50 border-slate-200">
                   <div className="flex items-start gap-4">
                     <img
@@ -241,7 +275,7 @@ const ChannelManager = () => {
                 </Card>
               )}
 
-              {channels.some((c: any) => c.channel_manager_type === "channex") && (
+              {activeChannels.some((c: any) => c.channel_manager_type === "channex") && (
                 <Card className="p-4 bg-violet-50 border-violet-200">
                   <div className="flex items-start gap-4">
                     <img
@@ -273,7 +307,7 @@ const ChannelManager = () => {
             </>
           )}
 
-          {channels.length > 0 && (
+          {activeChannels.length > 0 && (
             <Card>
               <Table>
                 <TableHeader>
@@ -286,13 +320,11 @@ const ChannelManager = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {channels.map((channel: any) => (
+                  {activeChannels.map((channel: any) => (
                     <TableRow key={channel.id}>
                       <TableCell className="font-medium">{channel.name}</TableCell>
                       <TableCell>
-                        <Badge variant={channel.is_active ? "default" : "secondary"}>
-                          {channel.is_active ? "Ativo" : "Inativo"}
-                        </Badge>
+                        <Badge variant="default">Ativo</Badge>
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -306,6 +338,59 @@ const ChannelManager = () => {
                         </Badge>
                       </TableCell>
                       <TableCell>{channel.commission_rate}%</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedChannelId(channel.id);
+                              setOtaDialogOpen(true);
+                            }}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openDeleteDialog("channel", channel.id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          )}
+
+          {inactiveChannels.length > 0 && (
+            <Card className="border-dashed">
+              <div className="px-4 py-3 border-b">
+                <h4 className="text-sm font-semibold text-muted-foreground">
+                  Canais inativos ({inactiveChannels.length})
+                </h4>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Não aparecem na lista principal. Edite para reativar.
+                </p>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nome</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {inactiveChannels.map((channel: any) => (
+                    <TableRow key={channel.id} className="opacity-80">
+                      <TableCell className="font-medium text-muted-foreground">{channel.name}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">Inativo</Badge>
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Button

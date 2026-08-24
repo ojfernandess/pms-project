@@ -111,9 +111,15 @@ export const useChannelManager = () => {
   const createChannel = useMutation({
     mutationFn: async (channel: any) => {
       const establishmentId = getSelectedEstablishmentId();
+      const payload = {
+        ...channel,
+        establishment_id: establishmentId || undefined,
+        channex_property_id:
+          channel?.channex_property_id === "" ? null : channel?.channex_property_id,
+      };
       const { data, error } = await supabase
         .from("ota_channels")
-        .insert([{ ...channel, establishment_id: establishmentId || undefined }])
+        .insert([payload])
         .select()
         .single();
 
@@ -132,9 +138,14 @@ export const useChannelManager = () => {
   // Atualizar canal OTA
   const updateChannel = useMutation({
     mutationFn: async ({ id, ...updates }: { id: string } & any) => {
+      // Evitar "" em colunas UUID (ex.: channex_property_id)
+      const sanitized = { ...updates };
+      if (sanitized.channex_property_id === "") {
+        sanitized.channex_property_id = null;
+      }
       const { data, error } = await supabase
         .from("ota_channels")
-        .update(updates)
+        .update(sanitized)
         .eq("id", id)
         .select()
         .single();

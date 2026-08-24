@@ -272,6 +272,8 @@ export const ChannelPricingDialog = ({
                     ? "Room Code (Aiosell)"
                     : selectedChannel?.channel_manager_type === "channex"
                       ? "Room Type ID (Channex)"
+                      : selectedChannel?.channel_manager_type === "bukly"
+                        ? "Room Type Code (InvTypeCode)"
                     : "Código externo do quarto"}
                 </Label>
                 <Input
@@ -281,6 +283,8 @@ export const ChannelPricingDialog = ({
                   placeholder={
                     selectedChannel?.channel_manager_type === "channex"
                       ? "UUID do room_type no Channex"
+                      : selectedChannel?.channel_manager_type === "bukly"
+                        ? "Ex.: DELUXE"
                       : "Ex.: EXECUTIVE"
                   }
                 />
@@ -291,6 +295,8 @@ export const ChannelPricingDialog = ({
                     ? "Rate Plan Code (Aiosell)"
                     : selectedChannel?.channel_manager_type === "channex"
                       ? "Rate Plan ID (Channex)"
+                      : selectedChannel?.channel_manager_type === "bukly"
+                        ? "Rate Plan Code"
                     : "Código externo do plano"}
                 </Label>
                 <Input
@@ -302,6 +308,8 @@ export const ChannelPricingDialog = ({
                   placeholder={
                     selectedChannel?.channel_manager_type === "channex"
                       ? "UUID do rate_plan no Channex"
+                      : selectedChannel?.channel_manager_type === "bukly"
+                        ? "Ex.: BAR"
                       : "Ex.: EXECUTIVE-BAR"
                   }
                 />
@@ -322,6 +330,13 @@ export const ChannelPricingDialog = ({
             <p className="text-xs text-muted-foreground">
               Para Channex, use os IDs remotos (UUID) de <code>room_type</code> e <code>rate_plan</code>. Esses
               valores serão usados no push ARI e no vínculo das revisões de reserva.
+            </p>
+          )}
+
+          {selectedChannel?.channel_manager_type === "bukly" && (
+            <p className="text-xs text-muted-foreground">
+              Obrigatório para o push OTA Bukly: <code>InvTypeCode</code> (quarto) e <code>RatePlanCode</code>{" "}
+              (plano) exatamente como no mapeamento Bukly. Sem esses códigos a sincronização é rejeitada.
             </p>
           )}
 

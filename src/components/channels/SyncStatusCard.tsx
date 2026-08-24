@@ -71,10 +71,20 @@ export const SyncStatusCard = ({
 
       {channel.channel_manager_type === "bukly" && (
         <div className="mb-3 p-2 bg-blue-50 rounded text-xs text-blue-800">
-          <p className="font-semibold">Bukly Channel Manager</p>
-          <p>Conecta com Booking.com, Expedia, Decolar.com e outras OTAs</p>
-          {channel.bukly_sync_enabled && (
-            <p className="mt-1">Sincronização bidirecional ativa</p>
+          <div className="flex items-center gap-2 mb-1">
+            <img
+              src="/channel/Logotipo-Bukly.png"
+              alt="Bukly"
+              className="h-6 w-auto rounded object-contain"
+            />
+            <p className="font-semibold">Bukly Channel Manager</p>
+          </div>
+          <p>
+            Push OTA XML (tarifas + disponibilidade) via <code className="text-[10px]">bukly-sync</code>.
+            Mapeie InvTypeCode / RatePlanCode em Tarifas por canal.
+          </p>
+          {channel.bukly_last_sync_at && (
+            <p className="mt-1">Último sync: {formatDate(channel.bukly_last_sync_at)}</p>
           )}
         </div>
       )}

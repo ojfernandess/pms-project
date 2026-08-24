@@ -119,7 +119,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
     commission_rate: "0",
     channel_type: "ota" as "ota" | "channel_manager",
     channel_manager_type: null as string | null,
-    bukly_api_url: "https://api.bukly.com.br",
+    bukly_api_url: "https://pms.bukly.com",
     bukly_hotel_id: "",
     bukly_webhook_secret: "",
     bukly_sync_enabled: false,
@@ -151,7 +151,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
           commission_rate: String(channel.commission_rate || 0),
           channel_type: channel.channel_type || "ota",
           channel_manager_type: channel.channel_manager_type || null,
-          bukly_api_url: channel.bukly_api_url || "https://api.bukly.com.br",
+          bukly_api_url: channel.bukly_api_url || "https://pms.bukly.com",
           bukly_hotel_id: channel.bukly_hotel_id || "",
           bukly_webhook_secret: channel.bukly_webhook_secret || "",
           bukly_sync_enabled: channel.bukly_sync_enabled ?? false,
@@ -189,7 +189,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
         commission_rate: "0",
         channel_type: "ota",
         channel_manager_type: null,
-        bukly_api_url: "https://api.bukly.com.br",
+        bukly_api_url: "https://pms.bukly.com",
         bukly_hotel_id: "",
         bukly_webhook_secret: "",
         bukly_sync_enabled: false,
@@ -215,6 +215,12 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
     setLoading(true);
 
     try {
+      const emptyToNull = (value: string | null | undefined) => {
+        if (value == null) return null;
+        const trimmed = String(value).trim();
+        return trimmed.length > 0 ? trimmed : null;
+      };
+
       const data = {
         ...formData,
         commission_rate: parseFloat(formData.commission_rate) || 0,
@@ -222,6 +228,17 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
           4,
           Math.max(1, Math.floor(Number(formData.aiosell_list_rate_occupancy)) || 2)
         ),
+        channel_manager_type: formData.channel_manager_type || null,
+        // UUID: Postgres rejeita "" — usar null quando vazio (ex.: canal Aiosell/Bukly)
+        channex_property_id: emptyToNull(formData.channex_property_id),
+        channex_base_url: emptyToNull(formData.channex_base_url),
+        channex_api_key: emptyToNull(formData.channex_api_key),
+        aiosell_bookings_list_path: emptyToNull(formData.aiosell_bookings_list_path),
+        aiosell_webhook_secret: emptyToNull(formData.aiosell_webhook_secret),
+        bukly_webhook_secret: emptyToNull(formData.bukly_webhook_secret),
+        bukly_hotel_id: emptyToNull(formData.bukly_hotel_id),
+        api_key: emptyToNull(formData.api_key) ?? "",
+        api_secret: emptyToNull(formData.api_secret) ?? "",
       };
 
       if (!channelId) {
@@ -444,85 +461,76 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
           {formData.channel_manager_type === "bukly" && (
             <>
                 <FormSection
-                  title="Integração Bukly"
-                  description="URL da API e identificador do hotel no Bukly."
+                  title="Integração Bukly (OTA XML)"
+                  description="API oficial em https://pms.bukly.com — HTTP Basic Auth e mensagens OTA 2013A."
                   icon={Globe}
                 >
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2 sm:col-span-2">
                       <Label htmlFor="bukly_api_url" className={labelClass}>
-                        URL da API
+                        URL base da API
                       </Label>
                 <Input
                   id="bukly_api_url"
                   value={formData.bukly_api_url}
                   onChange={(e) => setFormData({ ...formData, bukly_api_url: e.target.value })}
-                  placeholder="https://api.bukly.com.br"
+                  placeholder="https://pms.bukly.com"
                         className="font-mono text-sm"
                 />
+                      <FieldHint>
+                        Endpoint OTA oficial. O sync envia XML (<code className="text-xs">OTA_HotelRateAmountNotifRQ</code>{" "}
+                        e <code className="text-xs">OTA_HotelAvailNotifRQ</code>).
+                      </FieldHint>
               </div>
                     <div className="space-y-2 sm:col-span-2">
                       <Label htmlFor="bukly_hotel_id" className={labelClass}>
-                        ID do hotel no Bukly *
+                        HotelCode *
                       </Label>
                 <Input
                   id="bukly_hotel_id"
                   value={formData.bukly_hotel_id}
                   onChange={(e) => setFormData({ ...formData, bukly_hotel_id: e.target.value })}
-                        placeholder="ID fornecido pelo Bukly"
+                        placeholder="Código do hotel no Bukly (HotelCode)"
                   required={formData.channel_manager_type === "bukly"}
                 />
               </div>
                   </div>
                 </FormSection>
 
-                <FormSection title="Credenciais da API" description="Chave e secret fornecidos pelo Bukly." icon={KeyRound}>
+                <FormSection
+                  title="Autenticação HTTP Basic"
+                  description="Usuário e senha fornecidos pela Bukly (api_user:api_pass)."
+                  icon={KeyRound}
+                >
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="api_key" className={labelClass}>
-                        API Key *
+                        Usuário (api_user) *
                       </Label>
             <Input
               id="api_key"
               type="password"
               value={formData.api_key}
               onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                        placeholder="Chave da API"
+                        placeholder="Usuário Basic Auth"
                         required
                         autoComplete="off"
             />
           </div>
                     <div className="space-y-2">
                       <Label htmlFor="api_secret" className={labelClass}>
-                        API Secret *
+                        Senha (api_pass) *
                       </Label>
             <Input
               id="api_secret"
               type="password"
               value={formData.api_secret}
               onChange={(e) => setFormData({ ...formData, api_secret: e.target.value })}
-                        placeholder="Secret da API"
+                        placeholder="Senha Basic Auth"
                         required
                         autoComplete="off"
             />
           </div>
-                  </div>
-                </FormSection>
-
-                <FormSection title="Webhook" description="Validação opcional de chamadas recebidas do Bukly." icon={Webhook}>
-                  <div className="space-y-2">
-                    <Label htmlFor="bukly_webhook_secret" className={labelClass}>
-                      Webhook secret
-                    </Label>
-              <Input
-                id="bukly_webhook_secret"
-                type="password"
-                value={formData.bukly_webhook_secret}
-                onChange={(e) => setFormData({ ...formData, bukly_webhook_secret: e.target.value })}
-                      placeholder="Secret configurado no painel Bukly"
-                      autoComplete="off"
-                    />
-                    <FieldHint>Configure o mesmo valor no painel do Bukly para validar webhooks recebidos.</FieldHint>
                   </div>
                 </FormSection>
 
@@ -533,16 +541,20 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
                       <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">Sobre o Bukly</p>
                       <ul className="text-xs sm:text-sm text-blue-800/90 dark:text-blue-200/90 space-y-1.5 list-disc list-inside leading-relaxed">
                         <li>Conecta Booking.com, Expedia, Decolar e outras OTAs</li>
-                        <li>Sincronização bidirecional de tarifas, disponibilidade e restrições</li>
-                        <li>Reservas via webhooks</li>
+                        <li>
+                          Configure Room Code (InvTypeCode) e Rate Plan Code em <strong>Tarifas por canal</strong> —
+                          obrigatório para o push ARI/tarifas
+                        </li>
+                        <li>Push de tarifas e disponibilidade via Edge Function <code className="text-xs">bukly-sync</code></li>
+                        <li>Reservas: pull OTA (fase seguinte) — não depende de webhook PMS</li>
                       </ul>
                       <a
-                        href="https://www.bukly.com.br"
+                        href="https://bukly.com/pmsapidoc/"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs sm:text-sm font-medium text-blue-700 dark:text-blue-300 underline underline-offset-2 inline-block pt-1"
                       >
-                        www.bukly.com.br
+                        Documentação PMS API Bukly
                       </a>
                     </div>
                   </div>
@@ -1061,7 +1073,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
           {formData.channel_manager_type === "bukly" && (
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3 sm:px-4">
                     <Label htmlFor="bukly_sync_enabled" className="text-sm font-normal cursor-pointer leading-snug sm:max-w-[70%]">
-                      Sincronização bidirecional Bukly
+                      Flag Bukly sync (legado; use «Sincronização automática» acima)
                     </Label>
               <Switch
                 id="bukly_sync_enabled"

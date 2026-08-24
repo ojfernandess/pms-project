@@ -33,6 +33,9 @@ verify_jwt = true
 [functions.channex-mapping-options]
 verify_jwt = true
 
+[functions.bukly-sync]
+verify_jwt = true
+
 [functions.fnrh-submit]
 verify_jwt = false
 
