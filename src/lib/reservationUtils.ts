@@ -359,6 +359,42 @@ export const validateRoomCapacity = (
   return { valid: true };
 };
 
+/** Lançamento de estorno na lista de pagamentos da reserva. */
+export function isPaymentRefundRecord(payment: {
+  amount?: number | null;
+  notes?: string | null;
+  is_refund?: boolean | null;
+}): boolean {
+  if (payment?.is_refund === true) return true;
+  const notes = payment?.notes || "";
+  if (/\[REFUND/i.test(notes)) return true;
+  return Number(payment?.amount || 0) < 0;
+}
+
+export function paymentSignedAmount(payment: {
+  amount?: number | null;
+  notes?: string | null;
+  is_refund?: boolean | null;
+}): number {
+  const amt = Number(payment?.amount || 0);
+  if (isPaymentRefundRecord(payment)) return -Math.abs(amt);
+  return amt;
+}
+
+export function getRefundedPaymentId(payment: { notes?: string | null }): string | null {
+  const match = (payment?.notes || "").match(
+    /\[REFUND:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/i,
+  );
+  return match?.[1] || null;
+}
+
+export function netPaymentsTotal(
+  payments: Array<{ amount?: number | null; notes?: string | null; is_refund?: boolean | null }> | null | undefined,
+): number {
+  const total = (payments || []).reduce((sum, p) => sum + paymentSignedAmount(p), 0);
+  return Math.round(total * 100) / 100;
+}
+
 /**
  * Formata valor monetário
  */

@@ -6,9 +6,12 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, addDays, eachDayOfInterval, parseISO, startOfDay, isSameDay, differenceInDays, isAfter, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock, User, Users, Wrench, LogIn, LogOut } from "lucide-react";
+import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock, User, Users, Wrench, LogIn, LogOut, DollarSign } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useReservations } from "@/hooks/useReservations";
+import { usePricing } from "@/hooks/usePricing";
+import { validateRoomAvailability, formatCurrency, isPaymentRefundRecord, getRefundedPaymentId } from "@/lib/reservationUtils";
+import { recordProcessedRefund } from "@/services/financial/refundService";
 import { useRateSystem } from "@/hooks/useRateSystem";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
@@ -37,6 +40,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 /** Quarto interditado manualmente ou em manutenção ativa. */
 const isRoomUnavailableForBooking = (room: { is_blocked?: boolean | null; status?: string | null } | null | undefined) =>
@@ -201,6 +214,7 @@ export const ReservationCalendarMap = ({
   }), [startDate, viewDays]);
 
   const { rateCalendar, ratePlans, calculateRatePrice } = useRateSystem({ dateRange: rateCalendarDateRange });
+  const { calculatePrice } = usePricing();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedBuildings, setExpandedBuildings] = useState<Set<string>>(new Set());
   const [quickDialogOpen, setQuickDialogOpen] = useState(false);
@@ -265,6 +279,29 @@ export const ReservationCalendarMap = ({
   } | null>(null);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const [hoveredCell, setHoveredCell] = useState<{ dateIndex: number; roomId: string } | null>(null);
+
+  const [resizingReservation, setResizingReservation] = useState<{
+    reservation: any;
+    roomId: string;
+    originalCheckout: string;
+    previewCheckout: string;
+    minCheckout: string;
+    nightDelta: number;
+    conflict: boolean;
+  } | null>(null);
+  const [isExtendingStay, setIsExtendingStay] = useState(false);
+  const isActualResizeRef = useRef(false);
+  const [pendingShorten, setPendingShorten] = useState<{
+    reservation: any;
+    oldCheckout: string;
+    newCheckout: string;
+    removedNights: number;
+    removedAmount: number;
+    newTotal: number;
+    paidAmount: number;
+    refundableAmount: number;
+  } | null>(null);
+  const [refundShortenedNights, setRefundShortenedNights] = useState(false);
   
   // Estado para diálogo de confirmação de movimentação
   const [moveConfirmOpen, setMoveConfirmOpen] = useState(false);
@@ -2401,6 +2438,466 @@ export const ReservationCalendarMap = ({
     };
   }, [draggedReservation, handleReservationMouseMove, handleReservationMouseUp]);
 
+  const handleStayResizeMouseDown = useCallback((e: React.MouseEvent, reservation: any) => {
+    if (e.button === 2) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setHoveredReservationPreview(null);
+
+    if (!canUpdate("reservations")) {
+      toast.error("Você não tem permissão para alterar reservas");
+      return;
+    }
+    if (["blocked", "cancelled", "checkedout", "noshow"].includes(reservation.status)) return;
+    if (!reservation.room_id) {
+      toast.error("Selecione um quarto antes de alterar as diárias");
+      return;
+    }
+
+    const originalCheckout = normalizeDate(reservation.checkout_date);
+    const checkin = normalizeDate(reservation.checkin_date);
+    if (!originalCheckout || !checkin) return;
+
+    let minCheckoutDate = addDays(parseISO(checkin), 1);
+    if (reservation.status === "checkedin") {
+      const tomorrow = addDays(startOfDay(new Date()), 1);
+      if (tomorrow > minCheckoutDate) minCheckoutDate = tomorrow;
+    }
+    const minCheckout = format(minCheckoutDate, "yyyy-MM-dd");
+
+    isActualResizeRef.current = false;
+    mouseDownPositionRef.current = { x: e.clientX, y: e.clientY };
+    setResizingReservation({
+      reservation,
+      roomId: reservation.room_id,
+      originalCheckout,
+      previewCheckout: originalCheckout,
+      minCheckout,
+      nightDelta: 0,
+      conflict: false,
+    });
+  }, [canUpdate, normalizeDate]);
+
+  const handleStayResizeMouseMove = useCallback((e: MouseEvent) => {
+    if (!resizingReservation || !mouseDownPositionRef.current) return;
+
+    const deltaX = Math.abs(e.clientX - mouseDownPositionRef.current.x);
+    const deltaY = Math.abs(e.clientY - mouseDownPositionRef.current.y);
+    if (Math.sqrt(deltaX * deltaX + deltaY * deltaY) >= 4) {
+      isActualResizeRef.current = true;
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+        clickTimeoutRef.current = null;
+      }
+    }
+
+    const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
+    const cellElement = elementUnderMouse?.closest("[data-room-id]") as HTMLElement | null;
+    if (!cellElement) return;
+
+    const dateIndexStr = cellElement.getAttribute("data-date-index");
+    if (dateIndexStr === null) return;
+    const dateIndex = parseInt(dateIndexStr, 10);
+    const lastNight = visibleDates[dateIndex];
+    if (!lastNight) return;
+
+    let previewCheckout = format(addDays(startOfDay(lastNight), 1), "yyyy-MM-dd");
+    if (previewCheckout < resizingReservation.minCheckout) {
+      previewCheckout = resizingReservation.minCheckout;
+    }
+
+    const nightDelta = differenceInDays(
+      parseISO(previewCheckout),
+      parseISO(resizingReservation.originalCheckout),
+    );
+
+    let conflict = false;
+    if (nightDelta > 0) {
+      for (let i = 0; i < nightDelta; i++) {
+        const night = addDays(parseISO(resizingReservation.originalCheckout), i);
+        if (isDateOccupied(night, resizingReservation.roomId, resizingReservation.reservation.id)) {
+          conflict = true;
+          break;
+        }
+      }
+    }
+
+    setResizingReservation((prev) => {
+      if (!prev) return prev;
+      if (
+        prev.previewCheckout === previewCheckout &&
+        prev.nightDelta === nightDelta &&
+        prev.conflict === conflict
+      ) {
+        return prev;
+      }
+      return { ...prev, previewCheckout, nightDelta, conflict };
+    });
+  }, [resizingReservation, visibleDates, isDateOccupied]);
+
+  const refundPaymentsForAmount = useCallback(async (
+    reservation: any,
+    refundAmount: number,
+    reason: string,
+  ) => {
+    if (refundAmount <= 0) return;
+
+    const estId = reservation.establishment_id || establishmentId;
+    if (!estId) {
+      console.warn("establishment_id ausente ao registrar estorno de encurtamento");
+      return;
+    }
+
+    const { data: payments, error } = await supabase
+      .from("payments")
+      .select("id, amount, created_at, payment_method, carrier_id, payment_type_id, notes")
+      .eq("reservation_id", reservation.id)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Erro ao buscar pagamentos para estorno:", error);
+      return;
+    }
+
+    let remaining = Math.round(refundAmount * 100) / 100;
+    const originals = (payments || []).filter((p: any) => !isPaymentRefundRecord(p) && Number(p.amount || 0) > 0);
+
+    for (const payment of originals) {
+      if (remaining <= 0.009) break;
+      const amt = Number(payment.amount || 0);
+      if (!payment.id || amt <= 0) continue;
+
+      const alreadyRefunded = (payments || [])
+        .filter((p: any) => getRefundedPaymentId(p) === payment.id)
+        .reduce((sum: number, p: any) => sum + Math.abs(Number(p.amount || 0)), 0);
+      const refundable = Math.round((amt - alreadyRefunded) * 100) / 100;
+      if (refundable <= 0.009) continue;
+
+      const slice = Math.round(Math.min(refundable, remaining) * 100) / 100;
+      const refundResult = await recordProcessedRefund({
+        establishment_id: estId,
+        payment_id: payment.id,
+        reservation_id: reservation.id,
+        amount: slice,
+        reason,
+        metadata: {
+          source: "map_shorten_stay",
+          reservation_code: reservation.reservation_code,
+        },
+      });
+
+      if (!refundResult.success) {
+        console.error("Erro ao registrar estorno:", refundResult.error);
+      }
+
+      const { error: insertError } = await supabase.from("payments").insert({
+        reservation_id: reservation.id,
+        amount: -slice,
+        payment_method: payment.payment_method || "other",
+        payment_date: new Date().toISOString(),
+        notes: `[REFUND:${payment.id}] ${reason}`,
+        carrier_id: payment.carrier_id || null,
+        payment_type_id: payment.payment_type_id || null,
+      });
+
+      if (insertError) {
+        console.error("Erro ao lançar registro de estorno:", insertError);
+      }
+
+      remaining = Math.round((remaining - slice) * 100) / 100;
+    }
+  }, [establishmentId]);
+
+  const applyStayCheckoutUpdate = useCallback(async ({
+    reservation,
+    oldCheckout,
+    newCheckout,
+    newTotal,
+    newPaid,
+    paymentStatus,
+    activityDescription,
+    oldValues,
+    newValues,
+  }: {
+    reservation: any;
+    oldCheckout: string;
+    newCheckout: string;
+    newTotal: number;
+    newPaid: number;
+    paymentStatus: string;
+    activityDescription: string;
+    oldValues: Record<string, any>;
+    newValues: Record<string, any>;
+  }) => {
+    const { error } = await supabase
+      .from("reservations")
+      .update({
+        checkout_date: newCheckout,
+        total_amount: newTotal,
+        paid_amount: newPaid,
+        payment_status: paymentStatus,
+      })
+      .eq("id", reservation.id);
+
+    if (error) throw error;
+
+    await supabase
+      .from("accounts_receivable")
+      .update({
+        amount: newTotal,
+        paid_amount: newPaid,
+        status:
+          newPaid >= newTotal && newTotal > 0
+            ? "paid"
+            : newPaid > 0
+              ? "partial"
+              : "pending",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("reservation_id", reservation.id)
+      .eq("origin", "reservation")
+      .neq("status", "cancelled");
+
+    queryClient.invalidateQueries({ queryKey: ["reservations"] });
+    queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+    queryClient.invalidateQueries({ queryKey: ["financial"] });
+    queryClient.invalidateQueries({ queryKey: ["accounts_receivable"] });
+    queryClient.invalidateQueries({ queryKey: ["refunds"] });
+    queryClient.invalidateQueries({ queryKey: ["payments"] });
+
+    scheduleChannelSyncAfterInventoryChange(establishmentId || null);
+
+    void logActivity({
+      actionType: "dates_changed",
+      entityType: "reservation",
+      entityId: reservation.id,
+      entityCode: reservation.reservation_code,
+      description: activityDescription,
+      oldValues: { ...oldValues, checkout_date: oldCheckout },
+      newValues: {
+        ...newValues,
+        checkout_date: newCheckout,
+        total_amount: newTotal,
+        paid_amount: newPaid,
+        payment_status: paymentStatus,
+      },
+    });
+  }, [queryClient, establishmentId]);
+
+  const handleStayResizeMouseUp = useCallback(async () => {
+    const resize = resizingReservation;
+    const wasResize = isActualResizeRef.current;
+    isActualResizeRef.current = false;
+    mouseDownPositionRef.current = null;
+    setResizingReservation(null);
+
+    if (!wasResize || !resize || resize.nightDelta === 0) return;
+
+    suppressClickAfterDragRef.current = true;
+    window.setTimeout(() => {
+      suppressClickAfterDragRef.current = false;
+    }, 250);
+
+    if (resize.nightDelta > 0 && resize.conflict) {
+      toast.error("Não é possível acrescentar diárias: o período seguinte está ocupado");
+      return;
+    }
+
+    const reservation = resize.reservation;
+    const oldCheckout = resize.originalCheckout;
+    const newCheckout = resize.previewCheckout;
+    const nightDelta = resize.nightDelta;
+    const checkin = normalizeDate(reservation.checkin_date) || reservation.checkin_date;
+    const originalNights = Math.max(1, differenceInDays(parseISO(oldCheckout), parseISO(checkin)));
+    const currentTotal = Number(reservation.total_amount || 0);
+    const paidAmount = Number(reservation.paid_amount || 0);
+    const categoryId = reservation.category_id || reservation.room_categories?.id;
+    const pricingPlanId = reservation.pricing_plan_id || reservation.pricing_plans?.id || undefined;
+
+    const calcRangeAmount = async (from: string, to: string, nights: number) => {
+      let amount = 0;
+      if (categoryId) {
+        amount = await calculatePrice(
+          categoryId,
+          from,
+          to,
+          undefined,
+          pricingPlanId,
+          undefined,
+          reservation.adults || 1,
+          reservation.children || 0,
+        );
+      }
+      if (!amount || amount <= 0) {
+        amount = (currentTotal / originalNights) * nights;
+      }
+      return Math.round(amount * 100) / 100;
+    };
+
+    // Extensão: aplica direto
+    if (nightDelta > 0) {
+      setIsExtendingStay(true);
+      try {
+        const availability = await validateRoomAvailability(
+          resize.roomId,
+          checkin,
+          newCheckout,
+          reservation.id,
+        );
+        if (!availability.available) {
+          toast.error(availability.reason || "Quarto não está disponível para a extensão");
+          return;
+        }
+
+        const extraAmount = await calcRangeAmount(oldCheckout, newCheckout, nightDelta);
+        const newTotal = Math.round((currentTotal + extraAmount) * 100) / 100;
+        const pendingAmount = Math.max(0, Math.round((newTotal - paidAmount) * 100) / 100);
+        const paymentStatus =
+          paidAmount <= 0 ? "pending" : paidAmount >= newTotal && newTotal > 0 ? "paid" : "partial";
+
+        await applyStayCheckoutUpdate({
+          reservation,
+          oldCheckout,
+          newCheckout,
+          newTotal,
+          newPaid: paidAmount,
+          paymentStatus,
+          activityDescription: `Estadia estendida em ${nightDelta} diária(s): checkout ${oldCheckout} → ${newCheckout}. Valor adicional ${formatCurrency(extraAmount)}.`,
+          oldValues: { total_amount: currentTotal, paid_amount: paidAmount },
+          newValues: {},
+        });
+
+        toast.success(
+          nightDelta === 1
+            ? `1 diária acrescentada. Adicional ${formatCurrency(extraAmount)} · pendente ${formatCurrency(pendingAmount)}`
+            : `${nightDelta} diárias acrescentadas. Adicional ${formatCurrency(extraAmount)} · pendente ${formatCurrency(pendingAmount)}`,
+        );
+      } catch (err: any) {
+        console.error("Erro ao estender reserva:", err);
+        toast.error(err?.message || "Não foi possível acrescentar as diárias");
+      } finally {
+        setIsExtendingStay(false);
+      }
+      return;
+    }
+
+    // Encurtamento: abrir diálogo com opção de estorno
+    const removedNights = Math.abs(nightDelta);
+    try {
+      setIsExtendingStay(true);
+      const removedAmount = await calcRangeAmount(newCheckout, oldCheckout, removedNights);
+      const newTotal = Math.max(0, Math.round((currentTotal - removedAmount) * 100) / 100);
+      const refundableAmount = Math.min(paidAmount, removedAmount);
+      setPendingShorten({
+        reservation,
+        oldCheckout,
+        newCheckout,
+        removedNights,
+        removedAmount,
+        newTotal,
+        paidAmount,
+        refundableAmount,
+      });
+      setRefundShortenedNights(paidAmount >= newTotal && refundableAmount > 0);
+    } catch (err: any) {
+      console.error("Erro ao calcular encurtamento:", err);
+      toast.error(err?.message || "Não foi possível calcular o encurtamento");
+    } finally {
+      setIsExtendingStay(false);
+    }
+  }, [
+    resizingReservation,
+    calculatePrice,
+    normalizeDate,
+    applyStayCheckoutUpdate,
+  ]);
+
+  const confirmShortenStay = useCallback(async () => {
+    if (!pendingShorten) return;
+    const {
+      reservation,
+      oldCheckout,
+      newCheckout,
+      removedNights,
+      removedAmount,
+      newTotal,
+      paidAmount,
+      refundableAmount,
+    } = pendingShorten;
+
+    const shouldRefund = refundShortenedNights && refundableAmount > 0;
+    const refundAmount = shouldRefund ? refundableAmount : 0;
+    const newPaid = Math.max(0, Math.round((paidAmount - refundAmount) * 100) / 100);
+    const paymentStatus =
+      newPaid <= 0 ? "pending" : newPaid >= newTotal && newTotal > 0 ? "paid" : "partial";
+    const pendingAmount = Math.max(0, Math.round((newTotal - newPaid) * 100) / 100);
+
+    setIsExtendingStay(true);
+    try {
+      if (refundAmount > 0) {
+        await refundPaymentsForAmount(
+          reservation,
+          refundAmount,
+          `Estorno por encurtamento da reserva ${reservation.reservation_code}: ${removedNights} diária(s) removida(s)`,
+        );
+        void logActivity({
+          actionType: "payment_refunded",
+          entityType: "reservation",
+          entityId: reservation.id,
+          entityCode: reservation.reservation_code,
+          description: `Estorno de ${formatCurrency(refundAmount)} por redução de ${removedNights} diária(s).`,
+          oldValues: { paid_amount: paidAmount },
+          newValues: { paid_amount: newPaid, refund_amount: refundAmount },
+        });
+      }
+
+      await applyStayCheckoutUpdate({
+        reservation,
+        oldCheckout,
+        newCheckout,
+        newTotal,
+        newPaid,
+        paymentStatus,
+        activityDescription: `Estadia encurtada em ${removedNights} diária(s): checkout ${oldCheckout} → ${newCheckout}. Valor reduzido ${formatCurrency(removedAmount)}${refundAmount > 0 ? `. Estorno ${formatCurrency(refundAmount)}` : ""}.`,
+        oldValues: { total_amount: Number(reservation.total_amount || 0), paid_amount: paidAmount },
+        newValues: { refund_amount: refundAmount },
+      });
+
+      setPendingShorten(null);
+      setRefundShortenedNights(false);
+
+      toast.success(
+        refundAmount > 0
+          ? `${removedNights} diária(s) removida(s). Redução ${formatCurrency(removedAmount)} · estorno ${formatCurrency(refundAmount)} · pendente ${formatCurrency(pendingAmount)}`
+          : `${removedNights} diária(s) removida(s). Redução ${formatCurrency(removedAmount)} · pendente ${formatCurrency(pendingAmount)}`,
+      );
+    } catch (err: any) {
+      console.error("Erro ao encurtar reserva:", err);
+      toast.error(err?.message || "Não foi possível encurtar as diárias");
+    } finally {
+      setIsExtendingStay(false);
+    }
+  }, [
+    pendingShorten,
+    refundShortenedNights,
+    refundPaymentsForAmount,
+    applyStayCheckoutUpdate,
+  ]);
+
+  useEffect(() => {
+    if (!resizingReservation) return;
+    document.addEventListener("mousemove", handleStayResizeMouseMove);
+    document.addEventListener("mouseup", handleStayResizeMouseUp);
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      document.removeEventListener("mousemove", handleStayResizeMouseMove);
+      document.removeEventListener("mouseup", handleStayResizeMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [resizingReservation, handleStayResizeMouseMove, handleStayResizeMouseUp]);
+
   // Listener global para drag de criação
   useEffect(() => {
     if (!isDragging) return;
@@ -3011,6 +3508,7 @@ export const ReservationCalendarMap = ({
                                   }
                                 }}
                                 onMouseUp={(e) => {
+                                  if (resizingReservation || isExtendingStay) return;
                                   if (!draggedReservation && !isOccupied) {
                                     e.preventDefault();
                                     handleMouseUp(category.id, room.id, date);
@@ -3097,13 +3595,20 @@ export const ReservationCalendarMap = ({
                             const totalWithFees = baseTotalAmount + serviceFeesTotal;
                             
                             if (reservation.status === "checkedin") {
-                              // Check-in não pago: mantém vermelho + bolinha azul
+                              // Bolinha azul só quando há pendência; quitada = só a cor de check-in
+                              const isFullyPaid =
+                                (paidAmount >= totalWithFees && totalWithFees > 0) ||
+                                (paidAmount >= baseTotalAmount && baseTotalAmount > 0 && serviceFeesTotal <= 0);
+
                               if (paidAmount === 0) {
                                 statusColor = statusConfig.unpaid;
                                 showCheckinDot = true;
-                              } else {
-                                // Check-in pago/parcial: cor de check-in (#E8F0FF)
+                              } else if (isFullyPaid) {
                                 statusColor = statusConfig.checkedin;
+                                showCheckinDot = false;
+                              } else {
+                                statusColor = statusConfig.pending;
+                                showCheckinDot = true;
                               }
                             } else if (
                               reservation.status === "blocked" ||
@@ -3133,6 +3638,10 @@ export const ReservationCalendarMap = ({
                             
                             const isDraggingThis = draggedReservation?.reservation?.id === reservation.id;
                             const isSelectedForSwap = reservationForSwap?.id === reservation.id;
+                            const isResizingThis = resizingReservation?.reservation?.id === reservation.id;
+                            const previewNightDelta = isResizingThis ? resizingReservation.nightDelta : 0;
+                            const previewDuration = Math.max(1, pos.duration + previewNightDelta);
+                            const canExtendStay = !["blocked", "cancelled", "checkedout", "noshow"].includes(reservation.status);
                               
                               return (
                                 <div
@@ -3142,6 +3651,9 @@ export const ReservationCalendarMap = ({
                                     statusColor.bg,
                                     statusColor.text,
                                     statusColor.border,
+                                  isResizingThis && resizingReservation.conflict && "ring-2 ring-rose-400",
+                                  isResizingThis && !resizingReservation.conflict && previewNightDelta > 0 && "ring-2 ring-amber-400",
+                                  isResizingThis && previewNightDelta < 0 && "ring-2 ring-sky-400",
                                   isDraggingThis
                                     ? "opacity-30 cursor-grabbing z-50"
                                     : isSelectedForSwap
@@ -3150,11 +3662,11 @@ export const ReservationCalendarMap = ({
                                   )}
                                   style={{
                                   left: `${(pos.startIndex / visibleDates.length) * 100 + leftOffset}%`,
-                                  width: `${Math.min((pos.duration / visibleDates.length) * 100 - leftOffset, 100 - ((pos.startIndex / visibleDates.length) * 100 + leftOffset))}%`,
+                                  width: `${Math.min((previewDuration / visibleDates.length) * 100 - leftOffset, 100 - ((pos.startIndex / visibleDates.length) * 100 + leftOffset))}%`,
                                   height: "28px",
                                   top: "6px",
                                   margin: "0 2px",
-                                  pointerEvents: 'auto',
+                                  pointerEvents: resizingReservation ? 'none' : 'auto',
                                   userSelect: 'none',
                                   WebkitUserSelect: 'none',
                                   touchAction: 'none',
@@ -3166,11 +3678,9 @@ export const ReservationCalendarMap = ({
                                       reservation,
                                       roomLabel: room.name || room.room_number || null,
                                       statusLabel: showCheckinDot
-                                        ? "Check-in · Não pago"
+                                        ? `Check-in · ${statusColor.label}`
                                         : statusColor.label,
-                                      statusColor: showCheckinDot
-                                        ? statusConfig.checkedin.legendColor
-                                        : statusColor.legendColor,
+                                      statusColor: statusColor.legendColor,
                                       x: rect.left + rect.width / 2,
                                       y: rect.top,
                                     });
@@ -3258,6 +3768,47 @@ export const ReservationCalendarMap = ({
                                     )}
                                   </div>
                                 </div>
+                                {canExtendStay && (
+                                  <div
+                                    className="absolute right-0 top-0 bottom-0 z-[4] w-7 cursor-ew-resize group/extend"
+                                    onMouseDown={(e) => {
+                                      e.stopPropagation();
+                                      handleStayResizeMouseDown(e, reservation);
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    title="Arraste para acrescentar ou reduzir diárias"
+                                  >
+                                    <button
+                                      type="button"
+                                      tabIndex={-1}
+                                      title="Arraste para acrescentar ou reduzir diárias"
+                                      className={cn(
+                                        "absolute right-0.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md bg-amber-500 text-white shadow-sm ring-2 ring-white cursor-ew-resize pointer-events-none transition-opacity",
+                                        isResizingThis ? "opacity-100" : "opacity-0 group-hover/extend:opacity-100",
+                                      )}
+                                    >
+                                      <LogOut className="h-3 w-3" strokeWidth={2.5} />
+                                    </button>
+                                  </div>
+                                )}
+                                {isResizingThis && previewNightDelta !== 0 && (
+                                  <span
+                                    className={cn(
+                                      "pointer-events-none absolute -top-5 right-0 rounded px-1.5 py-0.5 text-[9px] font-semibold text-white shadow",
+                                      resizingReservation.conflict
+                                        ? "bg-rose-600"
+                                        : previewNightDelta < 0
+                                          ? "bg-sky-600"
+                                          : "bg-amber-600",
+                                    )}
+                                  >
+                                    {resizingReservation.conflict
+                                      ? "Indisponível"
+                                      : previewNightDelta > 0
+                                        ? `+${previewNightDelta} diária${previewNightDelta > 1 ? "s" : ""}`
+                                        : `${previewNightDelta} diária${previewNightDelta < -1 ? "s" : ""}`}
+                                  </span>
+                                )}
                               </div>
                               );
                             })}
@@ -3545,10 +4096,16 @@ export const ReservationCalendarMap = ({
             const totalWithFees = baseTotalAmount + serviceFeesTotal;
             
             if (reservation.status === "checkedin") {
-              // Check-in não pago: vermelho; demais: cor de check-in
-              previewColor = paidAmount === 0
-                ? statusConfig.unpaid
-                : statusConfig.checkedin;
+              // Check-in: cor segue o pagamento (pendência após extensão = amarelo)
+              if (paidAmount === 0) {
+                previewColor = statusConfig.unpaid;
+              } else if (paidAmount >= totalWithFees && totalWithFees > 0) {
+                previewColor = statusConfig.checkedin;
+              } else if (paidAmount >= baseTotalAmount && baseTotalAmount > 0 && serviceFeesTotal <= 0) {
+                previewColor = statusConfig.checkedin;
+              } else {
+                previewColor = statusConfig.pending;
+              }
             } else if (
               reservation.status === "blocked" ||
               reservation.status === "cancelled" ||
@@ -3804,6 +4361,135 @@ export const ReservationCalendarMap = ({
           }}
         />
       )}
+
+      {/* Diálogo de confirmação de encurtamento de estadia */}
+      <Dialog
+        open={!!pendingShorten}
+        onOpenChange={(open) => {
+          if (!open && !isExtendingStay) {
+            setPendingShorten(null);
+            setRefundShortenedNights(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Encurtar diárias</DialogTitle>
+            <DialogDescription>
+              Confirme a redução da estadia
+              {pendingShorten?.reservation?.reservation_code
+                ? ` da reserva ${pendingShorten.reservation.reservation_code}`
+                : ""}
+              .
+            </DialogDescription>
+          </DialogHeader>
+
+          {pendingShorten && (
+            <div className="space-y-4 text-sm">
+              <div className="rounded-lg border p-3 space-y-1.5">
+                <p>
+                  <span className="text-muted-foreground">Checkout:</span>{" "}
+                  <span className="font-medium">
+                    {format(parseISO(pendingShorten.oldCheckout), "dd/MM/yyyy")} →{" "}
+                    {format(parseISO(pendingShorten.newCheckout), "dd/MM/yyyy")}
+                  </span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Diárias removidas:</span>{" "}
+                  <span className="font-medium">{pendingShorten.removedNights}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Valor das diárias:</span>{" "}
+                  <span className="font-medium text-rose-600">
+                    −{formatCurrency(pendingShorten.removedAmount)}
+                  </span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Novo total:</span>{" "}
+                  <span className="font-medium">{formatCurrency(pendingShorten.newTotal)}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Valor pago:</span>{" "}
+                  <span className="font-medium">{formatCurrency(pendingShorten.paidAmount)}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">
+                    Pendente {refundShortenedNights && pendingShorten.refundableAmount > 0 ? "com estorno" : "sem estorno"}:
+                  </span>{" "}
+                  <span className="font-medium">
+                    {formatCurrency(
+                      Math.max(
+                        0,
+                        pendingShorten.newTotal -
+                          (pendingShorten.paidAmount -
+                            (refundShortenedNights ? pendingShorten.refundableAmount : 0)),
+                      ),
+                    )}
+                  </span>
+                </p>
+              </div>
+
+              {pendingShorten.refundableAmount > 0 ? (
+                <div className="space-y-3 rounded-lg border bg-muted/50 p-4">
+                  <div className="flex items-start space-x-3">
+                    <Checkbox
+                      id="refund_shortened_nights"
+                      checked={refundShortenedNights}
+                      onCheckedChange={(checked) => setRefundShortenedNights(checked === true)}
+                      disabled={isExtendingStay}
+                    />
+                    <div className="flex-1 space-y-1">
+                      <Label
+                        htmlFor="refund_shortened_nights"
+                        className="flex cursor-pointer items-center gap-2 text-sm font-medium"
+                      >
+                        <DollarSign className="h-4 w-4 text-emerald-600" />
+                        Estornar valor das diárias
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Remove o valor correspondente dos pagamentos da reserva.
+                      </p>
+                      <p className="text-xs font-semibold text-emerald-600">
+                        Valor a estornar: {formatCurrency(pendingShorten.refundableAmount)}
+                      </p>
+                      {!refundShortenedNights && pendingShorten.paidAmount > pendingShorten.newTotal && (
+                        <p className="text-xs text-amber-600">
+                          Sem estorno, o valor pago ficará acima do novo total (crédito na reserva).
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Não há pagamentos suficientes para estorno nesta redução.
+                </p>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isExtendingStay}
+              onClick={() => {
+                setPendingShorten(null);
+                setRefundShortenedNights(false);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              disabled={isExtendingStay || !pendingShorten}
+              onClick={() => void confirmShortenStay()}
+            >
+              {isExtendingStay ? "Salvando..." : "Confirmar encurtamento"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Diálogo de Confirmação de Movimentação */}
       <AlertDialog open={moveConfirmOpen} onOpenChange={(open) => !isMoving && setMoveConfirmOpen(open)}>

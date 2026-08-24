@@ -43,7 +43,7 @@ import {
 } from "lucide-react";
 import { format, parseISO, differenceInDays, addDays, isAfter, isBefore, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { formatCurrency, validateRoomAvailability, validateCategoryAvailability } from "@/lib/reservationUtils";
+import { formatCurrency, validateRoomAvailability, validateCategoryAvailability, isPaymentRefundRecord, getRefundedPaymentId, netPaymentsTotal } from "@/lib/reservationUtils";
 import { useServiceFees } from "@/hooks/useServiceFees";
 import { useReservationServiceFees } from "@/hooks/useReservationServiceFees";
 import { AddServiceFeeDialog } from "@/components/reservations/AddServiceFeeDialog";
@@ -786,16 +786,13 @@ const ReservationDetails = () => {
           console.log("💳 Mudança detectada nos pagamentos:", payload.eventType);
           
           // Se for INSERT ou UPDATE, recalcular paid_amount da reserva
-          if (payload.eventType === "INSERT" || payload.eventType === "UPDATE") {
-            const { data: payments } = await supabase
+          if (payload.eventType === "INSERT" || payload.eventType === "UPDATE" || payload.eventType === "DELETE") {
+            const { data: paymentsRows } = await supabase
               .from("payments")
-              .select("amount")
-              .eq("reservation_id", reservation.id)
-              .eq("status", "completed");
+              .select("amount, notes")
+              .eq("reservation_id", reservation.id);
 
-            const totalPaid = (payments || []).reduce((sum: number, p: any) => {
-              return sum + Number(p.amount || 0);
-            }, 0);
+            const totalPaid = Math.max(0, netPaymentsTotal(paymentsRows || []));
 
             // Atualizar paid_amount da reserva
             await supabase
@@ -963,6 +960,8 @@ const ReservationDetails = () => {
     const feesPaid: Record<string, number> = {}; // Rastrear quanto foi pago de cada taxa
     
     sortedPayments.forEach((payment: any) => {
+      if (isPaymentRefundRecord(payment)) return;
+
       const paymentAmount = Number(payment.amount || 0);
       const paymentDate = payment.created_at ? new Date(payment.created_at) : (payment.payment_date ? new Date(payment.payment_date) : null);
       
@@ -1127,6 +1126,11 @@ const ReservationDetails = () => {
       return;
     }
 
+    if (isPaymentRefundRecord(paymentToRefund)) {
+      toast.error("Este lançamento já é um estorno");
+      return;
+    }
+
     setIsRefunding(true);
     try {
       const paymentAmount = Number(paymentToRefund.amount || 0);
@@ -1147,8 +1151,7 @@ const ReservationDetails = () => {
         newPaymentStatus = "partial";
       }
 
-      // Registrar em financial_refunds ANTES de deletar o pagamento (para exibir na aba Estornos)
-      // Usar sempre UUID: reservation.establishment_id, contexto ou localStorage (a URL tem numeric_id, não UUID)
+      // Registrar em financial_refunds (Financeiro → Estornos)
       const establishmentId = reservation.establishment_id ?? selectedEstablishment?.id ?? getSelectedEstablishmentId();
       if (establishmentId) {
         const refundResult = await recordProcessedRefund({
@@ -1173,13 +1176,19 @@ const ReservationDetails = () => {
         toast.error("Estorno realizado, mas não foi possível registrar no Financeiro: establishment não identificado.");
       }
 
-      // Remover o pagamento
-      const { error: deleteError } = await supabase
-        .from("payments")
-        .delete()
-        .eq("id", paymentToRefund.id);
+      // Manter o pagamento original e lançar o estorno como registro visível
+      const refundNotes = `[REFUND:${paymentToRefund.id}] Estorno imediato - reserva ${reservation.reservation_code || reservation.id.substring(0, 8)}`;
+      const { error: insertError } = await supabase.from("payments").insert({
+        reservation_id: reservation.id,
+        amount: -Math.abs(paymentAmount),
+        payment_method: paymentToRefund.payment_method || "other",
+        payment_date: new Date().toISOString(),
+        notes: refundNotes,
+        carrier_id: paymentToRefund.carrier_id || null,
+        payment_type_id: paymentToRefund.payment_type_id || null,
+      });
 
-      if (deleteError) throw deleteError;
+      if (insertError) throw insertError;
 
       // Atualizar a reserva
       const { error: updateError } = await supabase
@@ -2961,16 +2970,43 @@ const ReservationDetails = () => {
             {/* Lista de pagamentos */}
             {payments && payments.length > 0 ? (
               <div className="space-y-2">
-                {payments.map((payment: any, index: number) => (
+                {payments.map((payment: any, index: number) => {
+                  const isRefund = isPaymentRefundRecord(payment);
+                  const refundedOfThis = (payments || [])
+                    .filter((p: any) => getRefundedPaymentId(p) === payment.id)
+                    .reduce((sum: number, p: any) => sum + Math.abs(Number(p.amount || 0)), 0);
+                  const alreadyRefunded = !isRefund && refundedOfThis >= Number(payment.amount || 0) - 0.009;
+                  const displayAmount = Math.abs(Number(payment.amount || 0));
+
+                  return (
                   <div
                     key={payment.id || `payment-${index}`}
-                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors group"
+                    className={cn(
+                      "flex items-center justify-between p-3 border rounded-lg transition-colors group",
+                      isRefund
+                        ? "border-rose-200 bg-rose-50 hover:bg-rose-100/80"
+                        : alreadyRefunded
+                          ? "border-slate-200 bg-slate-50 opacity-80 hover:bg-slate-100"
+                          : "hover:bg-muted/50",
+                    )}
                   >
                     <div className="flex-1">
-                      <div className="font-medium text-sm">
-                        {payment.payment_carriers?.description || payment.payment_carriers?.code || "Sem portador"}
+                      <div className="font-medium text-sm flex items-center gap-2">
+                        {isRefund && (
+                          <Badge className="bg-rose-600 hover:bg-rose-600 text-white text-[10px] px-1.5 py-0">
+                            Estorno
+                          </Badge>
+                        )}
+                        {!isRefund && alreadyRefunded && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-slate-500 border-slate-300">
+                            Estornado
+                          </Badge>
+                        )}
+                        <span className={cn(isRefund && "text-rose-800")}>
+                          {payment.payment_carriers?.description || payment.payment_carriers?.code || (isRefund ? "Estorno" : "Sem portador")}
+                        </span>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-1">
+                      <div className={cn("text-xs mt-1", isRefund ? "text-rose-700/80" : "text-muted-foreground")}>
                         {payment.payment_types?.name || payment.payment_method} - 
                         {payment.payment_date ? (() => {
                           const paymentDate = parseISO(payment.payment_date);
@@ -2978,15 +3014,15 @@ const ReservationDetails = () => {
                         })() : "Data não informada"}
                       </div>
                       {payment.notes && (
-                        <div className="text-xs text-slate-600 mt-1 italic">
-                          📝 {payment.notes}
+                        <div className={cn("text-xs mt-1 italic", isRefund ? "text-rose-700" : "text-slate-600")}>
+                          📝 {String(payment.notes).replace(/\[REFUND:[0-9a-f-]+\]\s*/i, "")}
                     </div>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
                     <div className="text-right min-w-[100px]">
-                      <div className="font-semibold">
-                        {formatCurrency(payment.amount || 0)}
+                      <div className={cn("font-semibold", isRefund && "text-rose-700")}>
+                        {isRefund ? `−${formatCurrency(displayAmount)}` : formatCurrency(displayAmount)}
                       </div>
                       </div>
                       <Button
@@ -3002,6 +3038,7 @@ const ReservationDetails = () => {
                       >
                         <Edit2 className="h-4 w-4" />
                       </Button>
+                      {!isRefund && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -3014,15 +3051,17 @@ const ReservationDetails = () => {
                           setPaymentToRefund(payment);
                           setRefundDialogOpen(true);
                         }}
-                        disabled={!payment.id}
+                        disabled={!payment.id || alreadyRefunded}
                         className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive disabled:opacity-50"
-                        title={payment.id ? "Estornar pagamento" : "Pagamento sem ID válido"}
+                        title={alreadyRefunded ? "Pagamento já estornado" : payment.id ? "Estornar pagamento" : "Pagamento sem ID válido"}
                       >
                         <RotateCcw className="h-4 w-4" />
                       </Button>
+                      )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="text-sm text-muted-foreground text-center py-4">

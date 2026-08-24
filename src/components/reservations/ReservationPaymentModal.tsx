@@ -19,7 +19,7 @@ import { logActivity } from "@/lib/activityLogger";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePricing } from "@/hooks/usePricing";
 import { useActivityLogs } from "@/hooks/useActivityLogs";
-import { formatCurrency } from "@/lib/reservationUtils";
+import { formatCurrency, isPaymentRefundRecord } from "@/lib/reservationUtils";
 
 interface ReservationPaymentModalProps {
   open: boolean;
@@ -452,6 +452,8 @@ export function ReservationPaymentModal({
     const feesPaid: Record<string, number> = {}; // Rastrear quanto foi pago de cada taxa
     
     sortedPayments.forEach((payment: any) => {
+      if (isPaymentRefundRecord(payment)) return;
+
       const paymentAmount = Number(payment.amount || 0);
       const paymentDate = payment.created_at ? new Date(payment.created_at) : (payment.payment_date ? new Date(payment.payment_date) : null);
       

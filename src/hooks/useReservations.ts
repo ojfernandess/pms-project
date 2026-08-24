@@ -1725,13 +1725,17 @@ export const useReservations = () => {
               // Recalcular paid_amount da reserva
               const { data: payments } = await supabase
                 .from("payments")
-                .select("amount")
-                .eq("reservation_id", payment.reservation_id)
-                .eq("status", "completed");
+                .select("amount, notes")
+                .eq("reservation_id", payment.reservation_id);
 
-              const totalPaid = (payments || []).reduce((sum: number, p: any) => {
-                return sum + Number(p.amount || 0);
-              }, 0);
+              const totalPaid = Math.max(
+                0,
+                (payments || []).reduce((sum: number, p: any) => {
+                  const amt = Number(p.amount || 0);
+                  const isRefund = /\[REFUND/i.test(p.notes || "") || amt < 0;
+                  return sum + (isRefund ? -Math.abs(amt) : amt);
+                }, 0),
+              );
 
               // Atualizar paid_amount da reserva
               await supabase
