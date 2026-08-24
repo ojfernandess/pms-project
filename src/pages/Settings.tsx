@@ -30,6 +30,8 @@ import { CompanyApiCredentialsCard } from "@/components/settings/CompanyApiCrede
 import { PmsWebhooksReference } from "@/components/settings/PmsWebhooksReference";
 import { CompanyApiRequestLogsPanel } from "@/components/settings/CompanyApiRequestLogsPanel";
 import { FnrhSettingsCard } from "@/components/settings/FnrhSettingsCard";
+import { EstablishmentEmailTemplatesManager } from "@/components/settings/EstablishmentEmailTemplatesManager";
+import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import {
   Table,
   TableBody,
@@ -62,6 +64,12 @@ const Settings = () => {
     if (!Array.isArray(cfg.establishment_ids)) return false;
     return cfg.establishment_ids.includes(selectedEstablishment.id);
   }, [apiIntegrationsConfig, selectedEstablishment?.id]);
+
+  const emailSystemConfig = (siteSettings?.features_enabled as Record<string, unknown> | undefined)?.email;
+  const isEmailSystemEnabled = useMemo(() => {
+    if (!selectedEstablishment?.id) return false;
+    return isFeatureEnabledForEstablishment(emailSystemConfig, selectedEstablishment.id);
+  }, [emailSystemConfig, selectedEstablishment?.id]);
 
   // Ler parâmetro da URL para determinar a aba inicial
   const tabFromUrl = searchParams.get("tab");
@@ -438,6 +446,9 @@ const Settings = () => {
           <TabsTrigger value="room-display">Exibição de Quartos</TabsTrigger>
           <TabsTrigger value="discounts">Descontos</TabsTrigger>
           <TabsTrigger value="fnrh">FNRH</TabsTrigger>
+          {isEmailSystemEnabled && (
+            <TabsTrigger value="email-templates">Templates de E-mail</TabsTrigger>
+          )}
           {isApiIntegrationsEnabled && (
             <TabsTrigger value="integration">Integrações</TabsTrigger>
           )}
@@ -1074,6 +1085,14 @@ const Settings = () => {
         <TabsContent value="fnrh">
           <FnrhSettingsCard establishmentId={selectedEstablishment?.id} />
         </TabsContent>
+
+        {isEmailSystemEnabled && selectedEstablishment?.id && (
+          <TabsContent value="email-templates">
+            <Card className="p-6">
+              <EstablishmentEmailTemplatesManager establishmentId={selectedEstablishment.id} />
+            </Card>
+          </TabsContent>
+        )}
 
         {isApiIntegrationsEnabled && (
           <TabsContent value="integration">

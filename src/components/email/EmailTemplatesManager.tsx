@@ -406,7 +406,8 @@ export function EmailTemplatesManager() {
         <div>
           <h2 className="text-2xl font-bold">Templates de E-mail</h2>
           <p className="text-muted-foreground">
-            Gerencie os templates de e-mail automáticos
+            Gerencie os templates padrão do sistema. Estabelecimentos com Sistema de E-mail
+            habilitado podem personalizar individualmente cada template em Configurações.
           </p>
         </div>
         <Button onClick={() => handleOpenDialog()}>

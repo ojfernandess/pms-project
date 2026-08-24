@@ -1359,13 +1359,24 @@ async function notifyGuestAfterOtaReservationBooked(
         Number(reservation.total_amount || 0) > 0);
     const eventType = paid ? "payment.confirmed" : "reservation.created";
 
-    const { data: templates } = await supabase
-      .from("email_templates")
-      .select("*")
-      .eq("event_type", eventType)
-      .eq("is_active", true);
-
-    const template = pickEmailTemplateForEstablishment(templates || [], establishmentId);
+    let template: Record<string, unknown> | null = null;
+    const { data: resolvedTemplate, error: resolveError } = await supabase.rpc(
+      "get_resolved_email_template",
+      {
+        p_event_type: eventType,
+        p_establishment_id: establishmentId,
+      },
+    );
+    if (!resolveError && resolvedTemplate) {
+      template = resolvedTemplate as Record<string, unknown>;
+    } else {
+      const { data: templates } = await supabase
+        .from("email_templates")
+        .select("*")
+        .eq("event_type", eventType)
+        .eq("is_active", true);
+      template = pickEmailTemplateForEstablishment(templates || [], establishmentId);
+    }
     if (!template) {
       console.warn(`${logPrefix}: sem template ativo para ${eventType}`);
       return;

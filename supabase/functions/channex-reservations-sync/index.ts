@@ -344,13 +344,29 @@ async function queueChannelReservationEmail(
     return;
   }
 
-  const { data: templates } = await supabase
-    .from("email_templates")
-    .select("*")
-    .eq("event_type", args.paidAmount >= args.totalAmount && args.totalAmount > 0 ? "payment.confirmed" : "reservation.created")
-    .eq("is_active", true);
+  const eventType =
+    args.paidAmount >= args.totalAmount && args.totalAmount > 0
+      ? "payment.confirmed"
+      : "reservation.created";
 
-  const template = pickEmailTemplateForEstablishment((templates || []) as AnyObj[], args.establishmentId);
+  let template: AnyObj | null = null;
+  const { data: resolvedTemplate, error: resolveError } = await supabase.rpc(
+    "get_resolved_email_template",
+    {
+      p_event_type: eventType,
+      p_establishment_id: args.establishmentId,
+    },
+  );
+  if (!resolveError && resolvedTemplate) {
+    template = resolvedTemplate as AnyObj;
+  } else {
+    const { data: templates } = await supabase
+      .from("email_templates")
+      .select("*")
+      .eq("event_type", eventType)
+      .eq("is_active", true);
+    template = pickEmailTemplateForEstablishment((templates || []) as AnyObj[], args.establishmentId);
+  }
   if (!template) return;
 
   const vars: Record<string, string> = {
