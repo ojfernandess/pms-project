@@ -67,7 +67,7 @@ node deploy/easypanel-template/scripts/validate-template-json.mjs deploy/easypan
 ## 3. Ordem de deploy sugerida
 
 1. **Redis** — Start; aguarde healthy.
-2. **Backend** — primeiro build (5–15 min). Logs esperados:
+2. **Backend** — primeiro build (5–15 min). **Subir o backend antes do frontend** evita erro nginx `host not found in upstream` em versões antigas da imagem (versões recentes usam `resolver 127.0.0.11` + proxy dinâmico).
    - `Skipping prisma migrate deploy` ou migrate OK
    - `PostgreSQL connected` / `Redis connected`
    - `API listening on :3000`
