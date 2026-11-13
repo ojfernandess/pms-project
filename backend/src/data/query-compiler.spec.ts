@@ -19,6 +19,11 @@ const catalog: Catalog = {
 };
 
 describe("query compiler", () => {
+  it("parses embeds with whitespace before parentheses (Supabase JS style)", () => {
+    const parsed = parseSelect("*,\n          buildings (*)\n        ");
+    expect(parsed[1]).toMatchObject({ kind: "embed", target: "buildings", key: "buildings" });
+  });
+
   it("reads embedded resources and keeps filters as parameters", () => {
     const parsed = parseSelect("*, buildings(*)");
     expect(parsed).toEqual([

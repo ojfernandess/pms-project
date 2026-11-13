@@ -357,7 +357,7 @@ function parseField(token: string): SelectField {
     return { kind: "column", name: token };
   }
   if (!token.endsWith(")")) throw new Error(`Seleção inválida: ${token}`);
-  const head = token.slice(0, paren);
+  const head = token.slice(0, paren).trim();
   const match = head.match(/^(?:([A-Za-z_][\w]*):)?([A-Za-z_][\w]*)(?:!([A-Za-z_][\w]*))?$/);
   if (!match) throw new Error(`Seleção inválida: ${head}`);
   return {
