@@ -1,0 +1,15 @@
+{
+  "_comment": "Só enquanto o Postgres Easypanel ainda não recebeu o restore. Não usar como alvo final.",
+  "githubOwner": "ojfernandess",
+  "githubRepo": "pms-project",
+  "githubRef": "PMS-Backend",
+  "useInternalPostgres": false,
+  "prismaMigrateOnStart": false,
+  "exposeApiDomain": true,
+  "externalDatabaseUrl": "postgresql://USER:PASSWORD@HOST.pooler.supabase.com:5432/postgres",
+  "frontendServiceName": "pms-frontend",
+  "backendServiceName": "pms-backend",
+  "workerServiceName": "pms-worker",
+  "databaseServiceName": "pms-postgres",
+  "redisServiceName": "pms-redis"
+}

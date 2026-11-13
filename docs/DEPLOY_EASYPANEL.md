@@ -1,5 +1,26 @@
 # Deploy no Easypanel (PMS Nest + React)
 
+## Template One-Click (como Chatwoot)
+
+Instala automaticamente os 5 serviços via `generate()` do Easypanel:
+
+- [deploy/easypanel-template/README.md](../deploy/easypanel-template/README.md)
+- `node deploy/easypanel-template/scripts/export-template-json.mjs` → JSON para testes no painel
+
+## Serviços independentes (recomendado em produção)
+
+Para gerir **backend**, **frontend**, **worker**, **Redis** e **Postgres** cada um com env, logs e restart próprios no Easypanel, use:
+
+- [deploy/README.md](../deploy/README.md) — diagnóstico e visão geral  
+- [deploy/easypanel/SERVICES.md](../deploy/easypanel/SERVICES.md) — passo a passo por serviço  
+- [deploy/easypanel/MIGRATION.md](../deploy/easypanel/MIGRATION.md) — migrar da stack Compose  
+- [deploy/easypanel/CHECKLIST.md](../deploy/easypanel/CHECKLIST.md) — validação  
+- [deploy/env/](../deploy/env/) — `.env.example` por componente  
+
+O frontend usa `BACKEND_UPSTREAM` em **runtime** (proxy nginx) — ver `deploy/frontend/nginx.conf.template`.
+
+---
+
 ## Docker Compose no Easypanel (stack `pms-stayos`)
 
 Se usas **um projeto Compose** com o `docker-compose.yml` da raiz:

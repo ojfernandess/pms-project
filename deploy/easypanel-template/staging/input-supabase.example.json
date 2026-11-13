@@ -1,0 +1,13 @@
+{
+  "githubOwner": "ojfernandess",
+  "githubRepo": "pms-project",
+  "githubRef": "PMS-Backend",
+  "useInternalPostgres": false,
+  "prismaMigrateOnStart": false,
+  "externalDatabaseUrl": "postgresql://USER:PASSWORD@HOST.pooler.supabase.com:5432/postgres",
+  "frontendServiceName": "pms-frontend",
+  "backendServiceName": "pms-backend",
+  "workerServiceName": "pms-worker",
+  "databaseServiceName": "pms-postgres",
+  "redisServiceName": "pms-redis"
+}

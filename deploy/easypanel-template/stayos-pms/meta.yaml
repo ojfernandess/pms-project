@@ -1,0 +1,112 @@
+name: StayOS PMS
+description:
+  Property Management System (PMS) com frontend React, API NestJS, worker BullMQ,
+  Redis e PostgreSQL. Instala cada componente como serviço independente no Easypanel
+  (mesmo padrão do template Chatwoot). Ideal para hotéis e apartamentos — reservas,
+  tarifário, channel manager, webcheck-in e integrações (Stripe, Channex, etc.).
+instructions: |
+  1. Instalação padrão StayOS: **PostgreSQL próprio** (pms-postgres) + Redis + API + worker + frontend.
+  2. Defina repositório Git (owner, repo, branch). Push do código antes do primeiro build.
+  3. Domínio principal → **frontend** (:80). API no mesmo host via proxy (VITE_PMS_API_URL = URL do SPA).
+  4. Opcional: «Expor domínio da API» para webhooks (Stripe, Channex) em subdomínio :3000.
+  5. Após criar Postgres vazio: aplique schema (supabase/migrations ou pg_dump schema) antes de restaurar dados.
+     `PRISMA_MIGRATE_ON_START`: false se a base já tiver schema Supabase restaurado.
+  6. Migração desde Supabase: ver docs/migration/easypanel-postgres-cutover.md — **não** desligar Supabase até checklist.
+  7. Backups no volume pms-postgres: deploy/easypanel/BACKUP-RESTORE.md
+changeLog:
+  - date: 2026-03-25
+    description: Template inicial — frontend, backend, worker, Redis, PostgreSQL
+links:
+  - label: Deploy manual (serviços)
+    url: https://github.com/ojfernandess/pms-project/blob/main/deploy/easypanel/SERVICES.md
+  - label: Repositório
+    url: https://github.com/ojfernandess/pms-project
+contributors:
+  - name: StayOS
+    url: https://github.com/ojfernandess/pms-project
+schema:
+  type: object
+  required:
+    - githubOwner
+    - githubRepo
+    - githubRef
+    - frontendServiceName
+    - backendServiceName
+    - workerServiceName
+    - databaseServiceName
+    - redisServiceName
+  properties:
+    githubOwner:
+      type: string
+      title: GitHub owner
+      default: ojfernandess
+    githubRepo:
+      type: string
+      title: GitHub repository
+      default: pms-project
+    githubRef:
+      type: string
+      title: Branch ou tag
+      default: PMS-Backend
+    useInternalPostgres:
+      type: boolean
+      title: Usar PostgreSQL interno Easypanel (recomendado)
+      default: true
+    externalDatabaseUrl:
+      type: string
+      title: DATABASE_URL externa (só fase transitória Supabase; deixe vazio no alvo final)
+      default: ""
+    prismaMigrateOnStart:
+      type: boolean
+      title: Executar Prisma migrate no arranque da API
+      description: false após restore Supabase; true só em BD vazio com estratégia Prisma definida
+      default: false
+    exposeApiDomain:
+      type: boolean
+      title: Expor domínio HTTPS na API (webhooks)
+      default: false
+    frontendServiceName:
+      type: string
+      title: Nome do serviço Frontend
+      default: pms-frontend
+    backendServiceName:
+      type: string
+      title: Nome do serviço Backend (API)
+      default: pms-backend
+    workerServiceName:
+      type: string
+      title: Nome do serviço Worker
+      default: pms-worker
+    databaseServiceName:
+      type: string
+      title: Nome do serviço PostgreSQL
+      default: pms-postgres
+    redisServiceName:
+      type: string
+      title: Nome do serviço Redis
+      default: pms-redis
+    postgresImage:
+      type: string
+      title: Imagem PostgreSQL
+      default: postgres:16-alpine
+benefits:
+  - title: Serviços independentes
+    description:
+      Backend, worker, frontend, Redis e Postgres com env, logs e restart separados —
+      como no template oficial Chatwoot.
+  - title: Instalação guiada
+    description:
+      Credenciais geradas automaticamente; rede interna e URLs pré-configuradas.
+features:
+  - title: API NestJS
+    description: Auth JWT, PostgREST compatível, edge functions e WebSocket.
+  - title: Worker BullMQ
+    description: Digest diário, lembretes de checkout e filas de integração.
+  - title: Frontend Vite
+    description: SPA com proxy nginx configurável para a API no mesmo domínio.
+tags:
+  - PMS
+  - Hospitality
+  - NestJS
+  - React
+  - PostgreSQL

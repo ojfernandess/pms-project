@@ -1,0 +1,15 @@
+{
+  "githubOwner": "ojfernandess",
+  "githubRepo": "pms-project",
+  "githubRef": "PMS-Backend",
+  "useInternalPostgres": true,
+  "prismaMigrateOnStart": false,
+  "exposeApiDomain": false,
+  "externalDatabaseUrl": "",
+  "frontendServiceName": "pms-frontend",
+  "backendServiceName": "pms-backend",
+  "workerServiceName": "pms-worker",
+  "databaseServiceName": "pms-postgres",
+  "redisServiceName": "pms-redis",
+  "postgresImage": "postgres:16-alpine"
+}

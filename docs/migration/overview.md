@@ -17,6 +17,8 @@ Estes documentos apoiam uma saída gradual do Supabase (Postgres + Auth + Edge F
 | [drift-log.template.md](./drift-log.template.md) | Template para registar divergências cloud vs repo |
 | [implementation-progress.md](./implementation-progress.md) | Estado real da implementação NestJS (não é o plano) |
 | [postgres-dump-auth-config.md](./postgres-dump-auth-config.md) | Dump pacote core (auth, admin, estabelecimentos, settings) |
+| [supabase-decommission-audit.md](./supabase-decommission-audit.md) | Auditoria Supabase + plano Postgres Easypanel (sem cutover) |
+| [easypanel-postgres-cutover.md](./easypanel-postgres-cutover.md) | Procedimento operacional de migração e rollback |
 
 Configuração relacionada: `supabase/config.toml` (`verify_jwt` por função).
 

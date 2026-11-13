@@ -26,10 +26,13 @@ ENV VITE_USE_RATE_CALENDAR_SUMMARY=$VITE_USE_RATE_CALENDAR_SUMMARY
 
 RUN npm run build
 
-# Servir com nginx (SPA: fallback para index.html)
+# Servir com nginx (SPA + proxy API opcional via BACKEND_UPSTREAM em runtime)
 FROM nginx:1.27-alpine
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+ENV BACKEND_UPSTREAM=http://backend:3000
+COPY deploy/frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1/ || exit 1

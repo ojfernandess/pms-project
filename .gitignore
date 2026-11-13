@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 !backend/.env.example
+deploy/easypanel-template/staging/*.local.json
+deploy/easypanel-template/output/*.json
 
 # Logs
 logs

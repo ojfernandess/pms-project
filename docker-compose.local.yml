@@ -8,6 +8,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    ports:
+      - "3000:3000"
   worker:
     depends_on:
       postgres:
@@ -15,9 +17,6 @@ services:
   redis:
     ports:
       - "6379:6379"
-  backend:
-    ports:
-      - "3000:3000"
   frontend:
     ports:
       - "8080:80"

@@ -1,7 +1,8 @@
-# Stack PMS. Sem portas publicadas no host — adequado ao Easypanel (proxy por serviço).
-# Local: docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+# Stack PMS — desenvolvimento local e testes integrados.
+# Produção no Easypanel: serviços independentes (ver deploy/README.md e deploy/easypanel/).
 #
-# Variáveis: ficheiro .env na raiz (ver .env.example). No Easypanel: aba Environment do projeto Compose.
+# Local: docker compose --profile local-db -f docker-compose.yml -f docker-compose.local.yml up --build
+# Variáveis: .env na raiz (ver .env.example).
 
 services:
   postgres:
@@ -36,6 +37,12 @@ services:
       context: ./backend
     expose:
       - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://pms:pms@postgres:5432/pms}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
@@ -85,10 +92,18 @@ services:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
         VITE_APP_URL: ${VITE_APP_URL:-http://localhost}
+    environment:
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:3000}
     expose:
       - "80"
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   pms_postgres:
