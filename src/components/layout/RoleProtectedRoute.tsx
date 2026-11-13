@@ -17,7 +17,7 @@ interface RoleProtectedRouteProps {
 export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
   const { user, loading: authLoading } = useAuth();
   const { role, customPermissions, isLoading: roleLoading } = useCurrentEmployeeRole();
-  const { isSuperAdmin } = useIsSuperAdmin();
+  const { isSuperAdmin, isLoading: superAdminLoading } = useIsSuperAdmin();
   const navigate = useNavigate();
   const location = useLocation();
   const [hasChecked, setHasChecked] = useState(false);
@@ -60,7 +60,7 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
   const effectiveRoleLoading = roleLoading || (isCompanyLevelRoute && isLoadingFallbackRole);
 
   useEffect(() => {
-    if (authLoading || effectiveRoleLoading) return;
+    if (authLoading || effectiveRoleLoading || superAdminLoading) return;
 
     // Se não estiver autenticado, redirecionar para login
     if (!user) {
@@ -168,9 +168,9 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
         navigate("/user-dashboard", { replace: true });
       }, 2000);
     }
-  }, [user, authLoading, effectiveRoleLoading, effectiveRole, effectiveCustomPermissions, isSuperAdmin, location.pathname, navigate]);
+  }, [user, authLoading, effectiveRoleLoading, superAdminLoading, effectiveRole, effectiveCustomPermissions, isSuperAdmin, location.pathname, navigate]);
 
-  if (authLoading || effectiveRoleLoading || !hasChecked) {
+  if (authLoading || effectiveRoleLoading || superAdminLoading || !hasChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">

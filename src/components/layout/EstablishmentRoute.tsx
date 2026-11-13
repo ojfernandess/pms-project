@@ -59,7 +59,14 @@ export const EstablishmentRoute = ({ children }: EstablishmentRouteProps) => {
     return null;
   }
 
-  // Se ainda está carregando, mostrar loading
+  const numericId = parseInt(establishmentId || "0", 10);
+
+  // Já selecionado (ex.: clique no UserDashboard) — não bloquear à espera da lista completa
+  if (selectedEstablishment?.numeric_id === numericId) {
+    return <>{children}</>;
+  }
+
+  // Se ainda está carregando a lista, mostrar loading
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -72,7 +79,6 @@ export const EstablishmentRoute = ({ children }: EstablishmentRouteProps) => {
   }
 
   // Se não encontrou o estabelecimento, não renderizar (será redirecionado)
-  const numericId = parseInt(establishmentId || "0", 10);
   if (!selectedEstablishment || selectedEstablishment.numeric_id !== numericId) {
     return null;
   }

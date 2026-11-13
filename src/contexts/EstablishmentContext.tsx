@@ -134,6 +134,23 @@ export const EstablishmentProvider = ({ children }: { children: ReactNode }) => 
 
       const user = session.user;
 
+      const { data: adminUser } = await supabase
+        .from("admin_users")
+        .select("is_super_admin")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (adminUser?.is_super_admin === true) {
+        const { data, error } = await supabase
+          .from("establishments")
+          .select("*")
+          .eq("is_active", true)
+          .order("name");
+
+        if (error) throw error;
+        return data || [];
+      }
+
       // Primeiro, verificar se o usuário é funcionário (tem registros em employees)
       const { data: employees, error: employeesError } = await supabase
         .from("employees")

@@ -255,6 +255,16 @@ export const useCurrentEmployeeRole = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return null;
 
+      const { data: adminUser } = await supabase
+        .from("admin_users")
+        .select("is_super_admin")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (adminUser?.is_super_admin === true) {
+        return null;
+      }
+
       const { data: employee, error } = await supabase
         .from("employees")
         .select(`

@@ -102,16 +102,7 @@ Variáveis **opcionais** (lidas de `process.env`, não estão todas no `validate
 - `STORAGE_DIR` — diretório para ficheiros (`backend/storage`). Monta **volume persistente** no Easypanel se não quiseres perder uploads ao redeploy.
 - `SUPABASE_SERVICE_ROLE_KEY` — só para jobs que comparam bearer interno (ex. ack worker); **não** expor no frontend.
 
-4. **Arranque / Prisma:** com `DATABASE_URL` no **Supabase**, no Environment do Compose:
-
-```env
-PRISMA_MIGRATE_ON_START=false
-SKIP_PRISMA_MIGRATE=true
-```
-
-Se nos logs aparecer `Running prisma migrate deploy...`, o **`PRISMA_MIGRATE_ON_START` está `true`** (remove ou põe `false`) e faz rebuild do `backend`. Sem isso o contentor morre com **P3005** e a API devolve **502**. Corre uma vez o SQL em [scripts/migration/prisma-nest-tables.sql](../scripts/migration/prisma-nest-tables.sql) no Supabase. Postgres vazio local: `SKIP_PRISMA_MIGRATE=false` e `PRISMA_MIGRATE_ON_START=true`.
-
-**Não uses** o profile `local-db` no Easypanel (não subir contentor `postgres` interno). `DATABASE_URL` deve ser **sempre** o pooler Supabase em **backend**, **worker** e qualquer job.
+4. **Arranque / Prisma:** com `DATABASE_URL` no **Supabase** (base já cheia), define `PRISMA_MIGRATE_ON_START=false` — senão o contentor morre com **P3005** e o domínio da API devolve **502**. Corre uma vez o SQL em [scripts/migration/prisma-nest-tables.sql](../scripts/migration/prisma-nest-tables.sql) no SQL Editor do Supabase (tabelas de refresh token e reset de password). Postgres **vazio** no compose (`local-db`): `PRISMA_MIGRATE_ON_START=true`.
 
 5. **Domínio:** ex. `https://api.seudominio.com` → apontar ao serviço na porta 3000.
 
