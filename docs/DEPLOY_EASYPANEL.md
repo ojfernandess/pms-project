@@ -1,6 +1,45 @@
 # Deploy no Easypanel (PMS Nest + React)
 
-Depois da migração, o PMS **não** é só o frontend: o browser fala com o **NestJS** (`VITE_PMS_API_URL`). O Postgres pode continuar remoto (ex. pooler Supabase em `DATABASE_URL`); no Easypanel costumas criar **vários serviços** num projeto.
+## Docker Compose no Easypanel (stack `pms-stayos`)
+
+Se usas **um projeto Compose** com o `docker-compose.yml` da raiz:
+
+### Erro «port is already allocated» (3000, 5432, …)
+
+O Compose **não publica mais portas no host** (`0.0.0.0:3000`). O proxy do Easypanel encaminha por **domínio → porta interna do contentor** (`backend:3000`, `frontend:80`). Atualiza o repo (branch `PMS-Backend`) e faz redeploy.
+
+### Variáveis de ambiente (um painel para o stack)
+
+O Easypanel Compose costuma ter **uma** lista **Environment** do projeto — não por serviço. Isso basta: o `docker-compose.yml` usa `${DATABASE_URL}`, `${JWT_SECRET}`, etc. no `backend` e no `worker`, e `${VITE_*}` no **build** do `frontend`.
+
+1. Copia o modelo [`.env.example`](../.env.example) para o Environment do projeto (ou ficheiro `.env` no servidor, conforme o painel).
+2. **Obrigatório em produção com Supabase:**
+   - `DATABASE_URL` — pooler Postgres (`:5432`)
+   - `JWT_SECRET` — ≥ 32 caracteres
+   - `REDIS_URL` — `redis://redis:6379` se usas o Redis do mesmo compose
+   - `VITE_PMS_API_URL` — URL pública da API (domínio que apontas ao serviço **backend**)
+   - `VITE_APP_URL` — URL pública do **frontend**
+   - `PUBLIC_APP_URL` — igual ao front, para links no servidor
+3. **Rebuild** após mudar `VITE_*` (são embutidas no build do frontend).
+
+O serviço **postgres** do compose só arranca com o profile `local-db` (desenvolvimento local). No Easypanel **não** uses esse profile — só Redis interno + API + worker + front; dados em `DATABASE_URL` externo.
+
+### Domínios no Easypanel
+
+| Serviço Compose | Porta interna | Exemplo de domínio |
+| --- | --- | --- |
+| `frontend` | **80** | `app.seudominio.com` |
+| `backend` | **3000** | `api.seudominio.com` |
+
+O `worker` não precisa de domínio nem porta publicada.
+
+### Aviso «problemas na configuração do Docker Compose»
+
+Clica **Visualizar**: muitas vezes faltam variáveis obrigatórias (`DATABASE_URL`, `JWT_SECRET`, `VITE_PMS_API_URL`, …) ou o override antigo ainda mapeava a porta 3000 no host.
+
+---
+
+Depois da migração, o PMS **não** é só o frontend: o browser fala com o **NestJS** (`VITE_PMS_API_URL`). O Postgres pode continuar remoto (ex. pooler Supabase em `DATABASE_URL`); também podes usar **vários serviços** separados no Easypanel (sem Compose) — secções abaixo.
 
 ## Arquitetura recomendada
 
@@ -105,8 +144,8 @@ O worker agenda `send-daily-digest` e `send-checkout-reminders` via BullMQ (subs
 
 ```powershell
 Set-Location "caminho\para\pms-project-main"
-docker compose build
-docker compose up
+Copy-Item .env.example .env   # ajuste DATABASE_URL se usar Postgres do compose
+docker compose --profile local-db -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
 - Frontend: `http://localhost:8080`

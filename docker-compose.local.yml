@@ -1,0 +1,23 @@
+# Desenvolvimento local: Postgres interno + portas no host.
+# Uso: docker compose --profile local-db -f docker-compose.yml -f docker-compose.local.yml up --build
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+  backend:
+    depends_on:
+      postgres:
+        condition: service_healthy
+  worker:
+    depends_on:
+      postgres:
+        condition: service_healthy
+  redis:
+    ports:
+      - "6379:6379"
+  backend:
+    ports:
+      - "3000:3000"
+  frontend:
+    ports:
+      - "8080:80"
