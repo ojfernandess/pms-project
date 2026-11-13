@@ -240,6 +240,85 @@ export const useEmployees = () => {
   };
 };
 
+type StaffRoleRow = Employee & { employee_roles: EmployeeRole; custom_permissions?: unknown };
+
+async function resolveStaffRoleForEstablishment(
+  userId: string,
+  establishmentId: string,
+): Promise<StaffRoleRow | null> {
+  const { data: employee, error } = await supabase
+    .from("employees")
+    .select("id, user_id, establishment_id, role_id, full_name, cpf, phone, email, is_active, custom_permissions, created_at, updated_at")
+    .eq("user_id", userId)
+    .eq("establishment_id", establishmentId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Erro ao buscar funcionário:", error);
+    return null;
+  }
+
+  if (employee?.role_id) {
+    const { data: role, error: roleError } = await supabase
+      .from("employee_roles")
+      .select("*")
+      .eq("id", employee.role_id)
+      .maybeSingle();
+    if (roleError || !role) return null;
+    return { ...(employee as Employee), employee_roles: role as EmployeeRole };
+  }
+
+  const { data: establishment } = await supabase
+    .from("establishments")
+    .select("company_id")
+    .eq("id", establishmentId)
+    .maybeSingle();
+
+  if (!establishment?.company_id) return null;
+
+  const { data: membership } = await supabase
+    .from("user_companies")
+    .select("role, is_active")
+    .eq("user_id", userId)
+    .eq("company_id", establishment.company_id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!membership) return null;
+
+  const roleCode =
+    membership.role === "owner" ? "owner" : membership.role === "admin" ? "manager" : "manager";
+
+  const { data: role } = await supabase
+    .from("employee_roles")
+    .select("*")
+    .eq("code", roleCode)
+    .maybeSingle();
+
+  const fallbackRole =
+    role ??
+    (await supabase.from("employee_roles").select("*").eq("code", "manager").maybeSingle()).data;
+
+  if (!fallbackRole) return null;
+
+  return {
+    id: `company-member-${establishmentId}`,
+    user_id: userId,
+    establishment_id: establishmentId,
+    role_id: fallbackRole.id,
+    full_name: "",
+    cpf: null,
+    phone: null,
+    email: null,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    employee_roles: fallbackRole as EmployeeRole,
+    custom_permissions: null,
+  };
+}
+
 // Hook para obter o role do usuário atual no estabelecimento
 export const useCurrentEmployeeRole = () => {
   // Usar o contexto do estabelecimento em vez de ler do localStorage diretamente
@@ -265,26 +344,10 @@ export const useCurrentEmployeeRole = () => {
         return null;
       }
 
-      const { data: employee, error } = await supabase
-        .from("employees")
-        .select(`
-          *,
-          employee_roles (*)
-        `)
-        .eq("user_id", user.id)
-        .eq("establishment_id", establishmentId)
-        .eq("is_active", true)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Erro ao buscar role do funcionário:", error);
-        return null;
-      }
-
-      return employee as (Employee & { employee_roles: EmployeeRole; custom_permissions?: any }) | null;
+      return resolveStaffRoleForEstablishment(user.id, establishmentId);
     },
     enabled: !!establishmentId,
-    // Refetch quando o estabelecimento mudar para garantir que o role seja atualizado
+    retry: 1,
     refetchOnMount: true,
     refetchOnWindowFocus: false,
   });

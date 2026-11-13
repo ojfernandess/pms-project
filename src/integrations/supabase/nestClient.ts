@@ -21,10 +21,24 @@ type ChangeHandler = {
   callback: (payload: { eventType: string; table: string; new: Record<string, unknown> | null; old: Record<string, unknown> | null }) => void;
 };
 
+const DEFAULT_FETCH_TIMEOUT_MS = 25_000;
+
 function apiBase(): string {
   const base = import.meta.env.VITE_PMS_API_URL;
   if (!base) throw new Error("VITE_PMS_API_URL não está configurada");
   return String(base).replace(/\/$/, "");
+}
+
+function fetchSignal(external?: AbortSignal): { signal: AbortSignal; cancel: () => void } {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), DEFAULT_FETCH_TIMEOUT_MS);
+  if (!external) {
+    return { signal: timeout.signal, cancel: () => clearTimeout(timer) };
+  }
+  if (typeof AbortSignal.any === "function") {
+    return { signal: AbortSignal.any([external, timeout.signal]), cancel: () => clearTimeout(timer) };
+  }
+  return { signal: external, cancel: () => clearTimeout(timer) };
 }
 
 function readSession(): StoredSession | null {
@@ -246,11 +260,12 @@ export function createNestSupabase(): SupabaseClient<Database> {
     }
 
     private async execute() {
+      const { signal, cancel } = fetchSignal(this.signal);
       try {
         const response = await fetch(`${apiBase()}/rest/v1/query`, {
           method: "POST",
           headers: await authHeaders(),
-          signal: this.signal,
+          signal,
           body: JSON.stringify({
             action: this.action,
             table: this.table,
@@ -273,6 +288,8 @@ export function createNestSupabase(): SupabaseClient<Database> {
         return { data: body.data ?? null, error: body.error ?? null, count: body.count ?? null };
       } catch (error) {
         return { data: null, error: { message: error instanceof Error ? error.message : "Erro de conexão" }, count: null };
+      } finally {
+        cancel();
       }
     }
   }

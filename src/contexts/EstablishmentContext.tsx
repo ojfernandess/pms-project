@@ -125,7 +125,7 @@ export const EstablishmentProvider = ({ children }: { children: ReactNode }) => 
     };
   }, []); // Executar apenas uma vez na montagem
 
-  const { data: establishments = [], isLoading, refetch } = useQuery({
+  const { data: establishments = [], isLoading: establishmentsQueryLoading, refetch } = useQuery({
     queryKey: ["establishments", currentUserId],
     queryFn: async () => {
       // Buscar sessão primeiro (mais seguro que getUser direto)
@@ -202,7 +202,11 @@ export const EstablishmentProvider = ({ children }: { children: ReactNode }) => 
       return data || [];
     },
     enabled: !!currentUserId, // Só executar se houver um usuário logado
+    retry: 1,
   });
+
+  const isLoading =
+    establishmentsQueryLoading && !directlySelectedEstablishment && establishments.length === 0;
 
   // Verificar se o estabelecimento selecionado pertence ao usuário atual
   useEffect(() => {

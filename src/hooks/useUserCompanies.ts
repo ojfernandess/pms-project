@@ -22,19 +22,37 @@ export const useUserCompanies = (userId?: string) => {
 
       console.log("Buscando empresas para userId:", targetUserId);
 
-      const { data, error } = await supabase
+      const { data: links, error: linksError } = await supabase
         .from("user_companies")
-        .select("*, companies(*)")
+        .select("*")
         .eq("user_id", targetUserId);
 
-      if (error) {
-        console.error("Erro ao buscar empresas:", error);
+      if (linksError) {
+        console.error("Erro ao buscar empresas:", linksError);
         toast.error("Erro ao carregar empresas do usuário");
-        throw error;
+        throw linksError;
       }
 
-      console.log("Empresas encontradas:", data);
-      return data || [];
+      if (!links?.length) return [];
+
+      const companyIds = [...new Set(links.map((row) => row.company_id).filter(Boolean))];
+      const { data: companies, error: companiesError } = await supabase
+        .from("companies")
+        .select("*")
+        .in("id", companyIds);
+
+      if (companiesError) {
+        console.error("Erro ao buscar dados das empresas:", companiesError);
+        throw companiesError;
+      }
+
+      const companyById = new Map((companies ?? []).map((company) => [company.id, company]));
+      const data = links.map((link) => ({
+        ...link,
+        companies: companyById.get(link.company_id) ?? null,
+      }));
+
+      return data;
     },
     // Sempre habilitado - se não tiver userId, busca do auth
     enabled: true,
