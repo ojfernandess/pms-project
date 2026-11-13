@@ -78,5 +78,5 @@ Este ficheiro regista o que foi **executado no código**, não o plano. Status s
 - As telas deixam de chamar `supabase.co`. A sessão fica no Redis e só aceita o JWT do Nest. As consultas correm com o papel `authenticated` ou `anon`. Ficheiros novos e o health-check de storage usam `backend/storage`.
 - O Postgres continua a ser o que estiver em `DATABASE_URL`. Se essa URL ainda for o pooler do Supabase, os dados continuam nesse servidor até um restauro noutro Postgres. Não foi feito dump nem `migrate`.
 - Aiosell e Channex respondem no Nest. Não houve chamada real a esses canais. O worker agenda o resumo do dia e o lembrete de checkout. A migração `20261107090000_unschedule_supabase_edge_crons.sql` remove os crons antigos e não foi executada na base.
-- Não migra dados.
+- Migração de dados: pacote **core** documentado em `docs/migration/postgres-dump-auth-config.md` (`scripts/migration/dump-supabase-core.*`). Não foi executado dump neste ambiente. Reservas/tarifário ficam fora do pacote core.
 - Não marca nenhuma funcionalidade de negócio como validada.

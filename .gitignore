@@ -16,6 +16,7 @@ lerna-debug.log*
 node_modules
 dist
 backend/storage/
+postgres-dumps/
 dist-ssr
 *.local
 

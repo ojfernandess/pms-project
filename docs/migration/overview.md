@@ -16,6 +16,7 @@ Estes documentos apoiam uma saída gradual do Supabase (Postgres + Auth + Edge F
 | [pg-cron-inventory.md](./pg-cron-inventory.md) | Jobs `pg_cron` / referências nas migrações + checklist |
 | [drift-log.template.md](./drift-log.template.md) | Template para registar divergências cloud vs repo |
 | [implementation-progress.md](./implementation-progress.md) | Estado real da implementação NestJS (não é o plano) |
+| [postgres-dump-auth-config.md](./postgres-dump-auth-config.md) | Dump pacote core (auth, admin, estabelecimentos, settings) |
 
 Configuração relacionada: `supabase/config.toml` (`verify_jwt` por função).
 

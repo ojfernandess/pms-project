@@ -1,0 +1,22 @@
+# Tabelas do pacote “core”: login, super admin, empresas, estabelecimentos e configurações.
+# Uma tabela por linha; linhas vazias e # são ignoradas.
+
+# Auth (senhas em auth.users — não reescrever no login Nest)
+auth.users
+auth.identities
+
+# Perfis e acesso staff
+public.users
+public.admin_users
+public.user_companies
+public.companies
+public.establishments
+
+# Funcionários e papéis (RLS nas telas; acesso Nest usa user_companies + super admin)
+public.employee_roles
+public.employees
+
+# Configurações globais e por estabelecimento
+public.site_settings
+public.hotel_settings
+public.api_settings
