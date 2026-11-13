@@ -37,12 +37,12 @@ services:
     expose:
       - "3000"
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL no .env ou no Environment do Easypanel}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://pms:pms@postgres:5432/pms}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PORT: "3000"
       SOCKET_AUTH_TOKEN: ${SOCKET_AUTH_TOKEN:-}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
-      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET no .env (mín. 32 caracteres)}
+      JWT_SECRET: ${JWT_SECRET:-local-development-jwt-secret-32chars}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-7}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
@@ -79,10 +79,10 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        VITE_PMS_API_URL: ${VITE_PMS_API_URL:?Defina VITE_PMS_API_URL no build}
+        VITE_PMS_API_URL: ${VITE_PMS_API_URL:-http://localhost:3000}
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
-        VITE_APP_URL: ${VITE_APP_URL:?Defina VITE_APP_URL no build}
+        VITE_APP_URL: ${VITE_APP_URL:-http://localhost}
     expose:
       - "80"
     depends_on:

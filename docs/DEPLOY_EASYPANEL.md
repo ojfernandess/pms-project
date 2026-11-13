@@ -13,9 +13,9 @@ O Compose **não publica mais portas no host** (`0.0.0.0:3000`). O proxy do Easy
 O Easypanel Compose costuma ter **uma** lista **Environment** do projeto — não por serviço. Isso basta: o `docker-compose.yml` usa `${DATABASE_URL}`, `${JWT_SECRET}`, etc. no `backend` e no `worker`, e `${VITE_*}` no **build** do `frontend`.
 
 1. Copia o modelo [`.env.example`](../.env.example) para o Environment do projeto (ou ficheiro `.env` no servidor, conforme o painel).
-2. **Obrigatório em produção com Supabase:**
+2. **Defina no Environment antes do primeiro deploy estável** (o compose aceita defaults só para o build passar; em produção **tem** de preencher):
    - `DATABASE_URL` — pooler Postgres (`:5432`)
-   - `JWT_SECRET` — ≥ 32 caracteres
+   - `JWT_SECRET` — ≥ 32 caracteres (não use o default de desenvolvimento)
    - `REDIS_URL` — `redis://redis:6379` se usas o Redis do mesmo compose
    - `VITE_PMS_API_URL` — URL pública da API (domínio que apontas ao serviço **backend**)
    - `VITE_APP_URL` — URL pública do **frontend**
