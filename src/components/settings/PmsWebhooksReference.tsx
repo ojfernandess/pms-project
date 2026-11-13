@@ -47,7 +47,7 @@ const PMS_INBOUND_WEBHOOKS: WebhookRow[] = [
 ];
 
 export function PmsWebhooksReference() {
-  const base = String(import.meta.env.VITE_SUPABASE_URL ?? "").replace(/\/$/, "");
+  const base = String(import.meta.env.VITE_PMS_API_URL ?? "").replace(/\/$/, "");
 
   const copy = async (fullUrl: string) => {
     try {
@@ -61,7 +61,7 @@ export function PmsWebhooksReference() {
   if (!base) {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        Defina <code className="rounded bg-amber-100 px-1">VITE_SUPABASE_URL</code> no ambiente para
+        Defina <code className="rounded bg-amber-100 px-1">VITE_PMS_API_URL</code> no ambiente para
         mostrar as URLs completas.
       </div>
     );

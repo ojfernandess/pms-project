@@ -981,11 +981,10 @@ export async function generateReservationVariables(
 
       // Criar Payment Intent
       // Usar fetch direto para evitar problemas com autenticação automática do cliente Supabase
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const apiUrl = import.meta.env.VITE_PMS_API_URL;
       
-      if (!supabaseUrl || !supabaseAnonKey) {
-        console.error('[Stripe] ❌ Variáveis de ambiente do Supabase não encontradas');
+      if (!apiUrl) {
+        console.error("[Stripe] VITE_PMS_API_URL não está configurada");
         return '';
       }
 
@@ -1002,7 +1001,7 @@ export async function generateReservationVariables(
       console.log('[Stripe] Chamando Edge Function stripe-payment com:', requestBody);
       
       // Fazer chamada direta via fetch sem headers de autorização
-      const response = await fetch(`${supabaseUrl}/functions/v1/stripe-payment`, {
+      const response = await fetch(`${String(apiUrl).replace(/\/$/, "")}/functions/v1/stripe-payment`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

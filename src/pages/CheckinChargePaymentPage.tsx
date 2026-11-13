@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -40,7 +41,7 @@ export default function CheckinChargePaymentPage() {
           return;
         }
 
-        const { data: result, error: invokeError } = await supabase.functions.invoke("stripe-payment", {
+        const { data: result, error: invokeError } = await invokePmsFunction("stripe-payment", {
           body: {
             establishment_id: charge.establishment_id,
             amount: Number(charge.amount),

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFnrhSettings } from "@/hooks/useFnrhSettings";
 import { shouldShowFnrhGuestFields } from "@/lib/fnrh/fnrhCategoryScope";
@@ -97,7 +98,7 @@ export function FnrhConfirmCheckinButton({
         toast.error("Sessão expirada. Faça login novamente.");
         return;
       }
-      const { data, error } = await supabase.functions.invoke("fnrh-submit", {
+      const { data, error } = await invokePmsFunction("fnrh-submit", {
         body: {
           reservation_id: reservationId,
           source: "staff",

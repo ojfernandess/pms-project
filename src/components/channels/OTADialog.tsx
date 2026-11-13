@@ -99,8 +99,8 @@ function FieldHint({ children }: { children: React.ReactNode }) {
 }
 
 const aiosellReservationWebhookBase =
-  typeof import.meta.env.VITE_SUPABASE_URL === "string" && import.meta.env.VITE_SUPABASE_URL
-    ? `${String(import.meta.env.VITE_SUPABASE_URL).replace(/\/$/, "")}/functions/v1/aiosell-reservation-webhook`
+  typeof import.meta.env.VITE_PMS_API_URL === "string" && import.meta.env.VITE_PMS_API_URL
+    ? `${String(import.meta.env.VITE_PMS_API_URL).replace(/\/$/, "")}/functions/v1/aiosell-reservation-webhook`
     : null;
 
 export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialogProps) => {

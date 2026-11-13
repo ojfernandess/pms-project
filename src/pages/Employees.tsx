@@ -7,6 +7,7 @@ import { useEmployees, useEmployeeRoles, useCurrentEmployeeRole } from "@/hooks/
 import { usePermissions } from "@/hooks/usePermissions";
 import { useUserLimits } from "@/hooks/useUserLimits";
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Edit, Trash2, Loader2, Users, Shield, AlertCircle, Key, UserPlus, User, Briefcase, Mail, Phone, FileText, MapPin, Building2, Calendar, Lock, CheckCircle2, XCircle, Sparkles, Send } from "lucide-react";
 import {
@@ -115,7 +116,7 @@ const Employees = () => {
       const user_ids = employeeUserIdsKey.split(",").filter(Boolean);
       if (user_ids.length === 0) return {};
 
-      const { data, error } = await supabase.functions.invoke("employee-auth-admin", {
+      const { data, error } = await invokePmsFunction("employee-auth-admin", {
         body: {
           action: "auth_status_batch",
           establishment_id: establishmentIdForAuth,
@@ -332,7 +333,7 @@ const Employees = () => {
 
           try {
             // Edge Function: createUser com confirmação de e-mail (template Confirm sign up).
-            const { data: fnData, error: fnError } = await supabase.functions.invoke(
+            const { data: fnData, error: fnError } = await invokePmsFunction(
               "create-employee-auth",
               {
                 body: {
@@ -703,7 +704,7 @@ const Employees = () => {
     }
     setResendingUserId(employee.user_id);
     try {
-      const { data, error } = await supabase.functions.invoke("employee-auth-admin", {
+      const { data, error } = await invokePmsFunction("employee-auth-admin", {
         body: {
           action: "resend_confirmation",
           establishment_id: est,

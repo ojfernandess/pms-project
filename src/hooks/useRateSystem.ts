@@ -1350,14 +1350,14 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       throw new Error("Establishment ID não encontrado");
     }
 
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const apiUrl = import.meta.env.VITE_PMS_API_URL;
     const { data: { session } } = await supabase.auth.getSession();
     
-    if (!supabaseUrl) {
-      throw new Error("VITE_SUPABASE_URL não configurado");
+    if (!apiUrl) {
+      throw new Error("VITE_PMS_API_URL não configurado");
     }
 
-    const functionUrl = `${supabaseUrl}/functions/v1/apply-dynamic-pricing-rules`;
+    const functionUrl = `${String(apiUrl).replace(/\/$/, "")}/functions/v1/apply-dynamic-pricing-rules`;
     const response = await fetch(functionUrl, {
       method: "POST",
       headers: {

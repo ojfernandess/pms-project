@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { useStripe, useElements, PaymentElement, Elements } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -236,8 +237,8 @@ export const PaymentDialog = ({
       }
 
       // Buscar o client_secret do Payment Intent existente via Edge Function
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const response = await fetch(`${supabaseUrl}/functions/v1/stripe-payment-status`, {
+      const apiUrl = String(import.meta.env.VITE_PMS_API_URL || "").replace(/\/$/, "");
+      const response = await fetch(`${apiUrl}/functions/v1/stripe-payment-status`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -300,7 +301,7 @@ export const PaymentDialog = ({
       }
 
       // Chamar a Edge Function sem autenticação (acesso anônimo permitido)
-      const { data, error } = await supabase.functions.invoke("stripe-payment", {
+      const { data, error } = await invokePmsFunction("stripe-payment", {
         body: {
           establishment_id: establishmentId,
           amount,

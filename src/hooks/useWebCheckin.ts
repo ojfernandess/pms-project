@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { toast } from "sonner";
 import { triggerEmail } from "@/lib/emailService";
 import { logActivity } from "@/lib/activityLogger";
@@ -1115,7 +1116,7 @@ export const useWebCheckin = () => {
       // Check-in manual na recepção usa skipFnrhInvoke e dispara fnrh-submit com source staff depois.
       try {
         if (reservationId && !skipFnrhInvoke) {
-          const { error: fnrhInvokeErr } = await supabase.functions.invoke(
+          const { error: fnrhInvokeErr } = await invokePmsFunction(
             "fnrh-submit",
             {
               body: {

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { toast } from "sonner";
@@ -379,7 +380,7 @@ export const useStripe = () => {
       if (!establishmentId) throw new Error("Establishment ID não encontrado");
 
       // Chamar edge function para processar reembolso
-      const { data, error } = await supabase.functions.invoke("stripe-refund", {
+      const { data, error } = await invokePmsFunction("stripe-refund", {
         body: {
           payment_id: paymentId,
           amount,

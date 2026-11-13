@@ -97,7 +97,8 @@ This project is built with:
 
 ## How can I deploy this project?
 
-Simply open [Lovable](https://lovable.dev/projects/4a6a91fc-f4c7-4731-a631-3f86bb404698) and click on Share -> Publish.
+- **Lovable:** open [Lovable](https://lovable.dev/projects/4a6a91fc-f4c7-4731-a631-3f86bb404698) and click Share → Publish.
+- **Easypanel (Docker):** três serviços típicos — **web** (`Dockerfile` na raiz, porta 80, build com `VITE_PMS_API_URL` + `VITE_APP_URL`), **API** (`backend/Dockerfile`, porta 3000), **worker** (mesma imagem, `node dist/worker.js`) — mais **Redis** e Postgres remoto (`DATABASE_URL`). Ver [docs/DEPLOY_EASYPANEL.md](./docs/DEPLOY_EASYPANEL.md).
 
 ## Can I connect a custom domain to my Lovable project?
 

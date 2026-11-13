@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mockup fiel — Sistema Tarifário (PMS)</title>
+  <style>
+    :root {
+      --bg: #f9fafb;
+      --surface: #ffffff;
+      --border: #e5e7eb;
+      --border-slate: #e2e8f0;
+      --text: #111827;
+      --muted: #6b7280;
+      --muted-fg: #64748b;
+      --primary: #2563eb;
+      --success: #16a34a;
+      --warning: #ca8a04;
+      --destructive: #dc2626;
+      --purple: #9333ea;
+      --purple-600: #7c3aed;
+      --radius: 8px;
+      --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.5; }
+    .doc-banner {
+      background: linear-gradient(135deg, #eef2ff, #f0fdf4);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .doc-banner strong { color: var(--text); }
+    .app { max-width: 1400px; margin: 0 auto; padding: 0 16px 48px; }
+    .main-nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 0; }
+    .main-nav button {
+      border: none; background: transparent; padding: 8px 14px; border-radius: 6px;
+      font-size: 0.875rem; font-weight: 500; color: var(--muted); cursor: pointer;
+    }
+    .main-nav button:hover { background: #f3f4f6; color: var(--text); }
+    .main-nav button.active { background: var(--primary); color: #fff; }
+    .main-nav button.guide.active { background: var(--purple-600); }
+    .section { display: none; }
+    .section.active { display: block; }
+
+    /* —— Compartilhado —— */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 16px; }
+    .card.compact { padding: 16px; }
+    .card h3 { margin: 0 0 4px; font-size: 1.125rem; font-weight: 600; }
+    .card .hint { margin: 0 0 16px; font-size: 0.75rem; color: var(--muted-fg); }
+    input, select {
+      width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.875rem;
+    }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border); background: #fff;
+      font-size: 0.875rem; font-weight: 500; cursor: pointer;
+    }
+    .btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .btn.sm { padding: 6px 12px; font-size: 0.8125rem; }
+    .chart-ph {
+      height: 220px; border-radius: var(--radius); background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+      display: flex; align-items: center; justify-content: center; color: var(--muted-fg); font-size: 0.875rem;
+    }
+
+    /* —— Sistema Tarifário (PMSRateSystem + grids) —— */
+    .rate-shell { background: #f9fafb; margin: 0 -16px; padding-bottom: 32px; }
+    .rate-header { background: #fff; border-bottom: 1px solid var(--border); box-shadow: 0 1px 2px rgb(0 0 0 / 4%); }
+    .rate-header-inner { max-width: 1400px; margin: 0 auto; padding: 16px 16px 0; }
+    .rate-title-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding-bottom: 16px; }
+    .rate-title-row h1 { margin: 0; font-size: 1.5rem; font-weight: 700; }
+    .rate-title-row p { margin: 4px 0 0; font-size: 0.875rem; color: var(--muted); }
+    .rate-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .rate-tabs-wrap { padding: 0 0 12px; }
+    .rate-tabs {
+      display: flex; flex-wrap: wrap; gap: 4px; padding: 6px;
+      background: rgb(243 244 246 / 60%); border-radius: var(--radius); width: 100%; justify-content: flex-start;
+    }
+    .rate-tabs button {
+      border: none; background: transparent; padding: 8px 12px; border-radius: 6px;
+      font-size: 0.875rem; font-weight: 500; cursor: pointer; color: var(--muted);
+    }
+    .rate-tabs button:hover { background: rgb(243 244 246 / 80%); color: var(--text); }
+    .rate-tabs button.active { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 6%); }
+    .rate-tabs button.dash.active { background: var(--purple-600); color: #fff; box-shadow: 0 1px 3px rgb(124 58 237 / 35%); }
+    .rate-content { max-width: 1400px; margin: 0 auto; padding: 24px 16px; }
+    .rate-panel { display: none; }
+    .rate-panel.active { display: block; }
+    .space-y-4 > * + * { margin-top: 16px; }
+
+    /* RateCalendarGrid — filtros */
+    .map-filters { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; padding: 16px; }
+    .map-filters .col { flex: 1; min-width: 200px; }
+    .map-filters .col-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+    .field-label { font-size: 0.875rem; font-weight: 500; margin-bottom: 6px; display: block; }
+    .field-label.subtle { font-size: 0.75rem; color: #6b7280; font-weight: 400; margin-bottom: 4px; }
+    .select-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .plan-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 500; border: 1px solid #e5e7eb; background: #f9fafb; color: #374151; }
+    .plan-chip.purple { background: #faf5ff; border-color: #e9d5ff; color: #6b21a8; }
+    .plan-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .btn-icon { width: 36px; height: 36px; padding: 0; }
+    .btn-purple { background: #9333ea; color: #fff; border: none; box-shadow: 0 1px 2px rgb(0 0 0 / 8%); }
+    .btn-purple:hover { background: #7e22ce; }
+
+    /* Mapa — card grid slate */
+    .map-grid-card { padding: 0; overflow-x: auto; overflow-y: visible; max-width: 100%; border-radius: var(--radius); border: 1px solid var(--border); background: #fff; }
+    .map-plan-strip { padding: 10px 16px; border-bottom: 1px solid #e5e7eb; font-size: 0.8125rem; background: #fff; }
+    .map-plan-strip.all { background: linear-gradient(90deg, #faf5ff, #eef2ff); border-color: #e9d5ff; }
+    .map-slate-band { background: #f1f5f9; border-bottom: 2px solid #cbd5e1; }
+    .grid-row { display: flex; border-bottom: 1px solid #e2e8f0; }
+    .grid-row:hover { background: #f9fafb; }
+    .grid-label {
+      width: 224px; flex-shrink: 0; padding: 12px; border-right: 1px solid #e2e8f0;
+      font-size: 0.875rem; background: #fff;
+    }
+    .grid-label.head { background: #e2e8f0; font-weight: 600; font-size: 0.75rem; padding: 8px 12px; }
+    .grid-days { display: flex; flex: 1; min-width: 0; }
+    .grid-day {
+      min-width: 90px; flex: 1; border-right: 1px solid #e2e8f0; text-align: center; padding: 6px 4px;
+      font-size: 10px;
+    }
+    .grid-day:last-child { border-right: none; }
+    .grid-day.today { background: #dbeafe; }
+    .grid-day.weekend { background: #f8fafc; }
+    .grid-day .dow { font-weight: 700; font-size: 11px; }
+    .grid-day .dat { color: #475569; font-weight: 500; }
+    .map-cell {
+      min-width: 90px; flex: 1; min-height: 60px; border-right: 1px solid #e2e8f0;
+      display: flex; align-items: center; justify-content: center; padding: 4px; position: relative; cursor: pointer;
+    }
+    .map-cell:last-child { border-right: none; }
+    .map-cell.today { background: #eff6ff; }
+    .map-cell-inner {
+      width: 100%; border-radius: 8px; padding: 8px 4px; text-align: center;
+      font-size: 0.875rem; font-weight: 600; transition: background 0.2s;
+    }
+    /* getOccupancyColor → bg-* at 10% opacity */
+    .tint-blue { background: rgb(59 130 246 / 0.1); }
+    .tint-green { background: rgb(34 197 94 / 0.1); }
+    .tint-yellow { background: rgb(234 179 8 / 0.1); }
+    .tint-orange { background: rgb(249 115 22 / 0.1); }
+    .tint-red { background: rgb(239 68 68 / 0.1); }
+    .map-cell-inner.dynamic { box-shadow: 0 0 0 2px rgb(192 132 252 / 0.55); background: rgb(250 245 255 / 0.9); color: #6b21a8; }
+    .map-cell-sub { font-size: 9px; color: #64748b; font-weight: 400; margin-top: 2px; line-height: 1.2; }
+    .map-cell-sub.pickup { color: #2563eb; }
+    .cat-banner {
+      margin: 0 0 16px; padding: 16px 20px; border-radius: 12px; border: 1px solid #e2e8f0;
+      background: linear-gradient(90deg, #fff, rgb(248 250 252 / 80%), #fff);
+      box-shadow: 0 1px 3px rgb(0 0 0 / 6%); position: relative; overflow: hidden;
+    }
+    .cat-banner::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; opacity: 0.35; background: var(--cat-color, #3b82f6); }
+    .cat-banner h4 { margin: 0; font-size: 1.125rem; }
+    .cat-banner .meta { font-size: 0.75rem; color: #6b7280; margin-top: 4px; }
+    .plan-line { border-left: 4px solid var(--plan-color, #6366f1); margin-left: 4px; border-radius: 0 8px 8px 0; box-shadow: 0 1px 2px rgb(0 0 0 / 4%); }
+
+    .metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 16px; }
+    @media (max-width: 900px) { .metrics-row { grid-template-columns: 1fr 1fr; } }
+    .metric-card { padding: 16px; background: #fff; border: 1px solid var(--border); border-radius: var(--radius); }
+    .metric-card .top { display: flex; justify-content: space-between; align-items: flex-start; }
+    .metric-card .title { font-size: 0.875rem; color: #4b5563; }
+    .metric-card .num { font-size: 1.5rem; font-weight: 700; margin-top: 4px; color: #111827; }
+    .metric-card .foot { font-size: 0.75rem; color: #6b7280; margin-top: 8px; }
+    .metric-icon { width: 48px; height: 48px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; }
+
+    /* ARIGrid — toolbar (justify-between) */
+    .ari-toolbar {
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; padding: 16px;
+    }
+    .ari-toolbar-left { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; flex: 1; }
+    .ari-toolbar-left .cat-field { min-width: 200px; }
+    .btn-outline { background: #fff; border: 1px solid #e5e7eb; }
+    .date-range-btn { min-width: 280px; justify-content: flex-start; text-align: left; font-weight: 400; }
+    .legend { display: flex; flex-wrap: wrap; gap: 24px; font-size: 0.75rem; color: #4b5563; padding: 16px; }
+    .legend i { display: inline-block; width: 16px; height: 16px; border-radius: 4px; vertical-align: middle; margin-right: 6px; }
+
+    .ari-card { padding: 0; overflow: hidden; margin-bottom: 16px; }
+    .ari-cat-head { background: #f9fafb; padding: 16px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+    .ari-cat-head h3 { margin: 0; font-size: 1rem; font-weight: 600; display: flex; align-items: center; gap: 12px; }
+    .ari-cat-head .swatch { width: 16px; height: 16px; border-radius: 4px; }
+    .ari-scroll { overflow-x: auto; }
+    .ari-table { min-width: max-content; }
+    .ari-head { display: flex; border-bottom: 1px solid #e5e7eb; background: #fff; position: sticky; top: 0; z-index: 2; }
+    .ari-label-col {
+      width: 256px; flex-shrink: 0; padding: 16px; border-right: 1px solid #e5e7eb;
+      background: #f9fafb; font-weight: 600; font-size: 0.875rem;
+    }
+    .ari-data-cols { display: flex; }
+    .ari-day-head {
+      width: 80px; flex-shrink: 0; padding: 8px; text-align: center; border-right: 1px solid #e5e7eb; font-size: 0.75rem;
+    }
+    .ari-day-head .dow { font-weight: 600; color: #4b5563; text-transform: capitalize; }
+    .ari-day-head .dat { color: #6b7280; }
+    .ari-row { display: flex; border-bottom: 1px solid #f3f4f6; }
+    .ari-row .ari-label-col { font-weight: 500; background: #f9fafb; padding: 12px 16px; }
+    .ari-row .ari-label-col.sub { padding-left: 32px; font-size: 0.75rem; font-weight: 400; color: #4b5563; }
+    .ari-row .ari-label-col.plan-toggle {
+      cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.875rem;
+    }
+    .ari-row .ari-label-col.plan-toggle:hover { background: #f3f4f6; }
+    .ari-row .ari-label-col.x2 { background: #dbeafe; color: #1e3a8a; font-weight: 600; border-color: #bfdbfe; }
+    .ari-cell {
+      width: 80px; flex-shrink: 0; min-height: 44px; border-right: 1px solid #f3f4f6;
+      display: flex; align-items: center; justify-content: center; padding: 4px; font-size: 0.875rem;
+    }
+    .ari-cell.past { opacity: 0.5; }
+    .ari-cell.center { text-align: center; }
+    .ari-cell.semibold { font-weight: 600; color: #374151; }
+    .ari-cell.muted { color: #4b5563; }
+    .status-chip {
+      margin: 4px; padding: 8px 4px; font-size: 0.75rem; font-weight: 500; text-align: center;
+      border-radius: 4px; border: 1px solid; cursor: pointer; width: calc(100% - 8px);
+    }
+    .st-open { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .st-closed { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+    .st-noprice { background: #ffedd5; color: #9a3412; border-color: #fdba74; }
+    .st-restrict { background: #f3f4f6; color: #1f2937; border-color: #d1d5db; }
+    .avail-bar { width: calc(100% - 8px); height: 16px; border-radius: 4px; margin: 4px; }
+    .avail-bar.open { background: #22c55e; }
+    .avail-bar.closed { background: #ef4444; }
+    .avail-bar.noprice { background: #f97316; }
+    .avail-bar.past { background: #e5e7eb; }
+    .ari-plan-detail { display: none; }
+    .ari-plan-block.expanded .ari-plan-detail { display: flex; flex-direction: column; }
+    .ari-plan-block.expanded .chev::before { content: "▾"; }
+    .ari-plan-block:not(.expanded) .chev::before { content: "▸"; }
+    .link-action { color: #2563eb; font-size: 0.75rem; text-decoration: none; margin-left: 6px; }
+    .link-action.amber { color: #d97706; }
+    .cb { width: 16px; height: 16px; accent-color: #2563eb; }
+    .logic-note { font-size: 0.75rem; color: #6b7280; padding: 8px 16px 16px; border-top: 1px solid #f3f4f6; background: #fafafa; }
+    .guide { padding-top: 24px; }
+    .guide h2 { font-size: 1.25rem; margin-top: 24px; }
+    .guide code { font-size: 0.8rem; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
+    .guide ul { line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <div class="doc-banner">
+    <strong>Mockup estático — espelho visual do PMS</strong> · Dados ilustrativos (Hotel Vista Mar) · Referência:
+    <code>PMSRateSystem.tsx</code>,
+    <code>RateCalendarGrid.tsx</code>, <code>ARIGrid.tsx</code>
+  </div>
+
+  <div class="app">
+    <nav class="main-nav" id="mainNav">
+      <button type="button" class="active" data-main="rate">Sistema Tarifário</button>
+      <button type="button" class="guide" data-main="guide">Guia de funções</button>
+    </nav>
+
+    <!-- ========== SISTEMA TARIFÁRIO ========== -->
+    <section id="sec-rate" class="section active rate-shell">
+      <div class="rate-header">
+        <div class="rate-header-inner">
+          <div class="rate-title-row">
+            <div>
+              <h1>Sistema Tarifário - PMS</h1>
+              <p>Gestão completa de tarifas e revenue management</p>
+            </div>
+            <div class="rate-actions">
+              <button type="button" class="btn sm">↻ Recalcular Agora</button>
+              <button type="button" class="btn sm">↻ Sincronizar Canais</button>
+              <button type="button" class="btn sm">⚙ Configurações</button>
+            </div>
+          </div>
+          <div class="rate-tabs-wrap">
+            <div class="rate-tabs" id="rateSubTabs">
+              <button type="button" class="dash" data-rate="pricing-dashboard">Dashboard</button>
+              <button type="button" class="active" data-rate="calendar">Mapa de Tarifas</button>
+              <button type="button" data-rate="ari-grid">Grade ARI</button>
+              <button type="button" data-rate="rateplans">Planos</button>
+              <button type="button" data-rate="config">Configuração ▾</button>
+              <button type="button" data-rate="restrictions">Restrições</button>
+              <button type="button" data-rate="analytics">Analytics</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rate-content space-y-4">
+        <div class="rate-panel" data-rate-panel="pricing-dashboard">
+          <div class="card"><h3>Dashboard tarifário</h3><p class="hint">PriceDashboardView — ADR, pickup, alertas de paridade.</p><div class="chart-ph">Métricas e alertas</div></div>
+        </div>
+
+        <!-- Mapa de Tarifas (RateCalendarGrid) -->
+        <div class="rate-panel active" data-rate-panel="calendar">
+          <div class="card" style="padding:0;margin-bottom:16px">
+            <div class="map-filters">
+              <div class="col">
+                <label class="field-label">Plano Tarifário</label>
+                <div class="select-row">
+                  <select id="mapPlanMode" style="flex:1;min-width:160px">
+                    <option value="single">BAR (Best Available Rate)</option>
+                    <option value="all">Todos os Planos</option>
+                  </select>
+                  <span class="plan-chip" id="mapPlanChip"><span class="plan-dot" style="background:#6366f1"></span> BAR (BAR)</span>
+                </div>
+              </div>
+              <div class="col">
+                <label class="field-label">Categoria</label>
+                <select><option>Todas Categorias</option><option>Standard</option><option>Deluxe</option></select>
+              </div>
+              <div class="col col-actions">
+                <button type="button" class="btn btn-outline date-range-btn">24 de agosto</button>
+                <button type="button" class="btn btn-outline btn-icon" title="Período anterior">‹</button>
+                <button type="button" class="btn btn-outline btn-icon" title="Próximo período">›</button>
+                <select style="width:120px"><option>14 dias</option><option>7 dias</option><option>30 dias</option><option>60 dias</option><option>90 dias</option></select>
+                <button type="button" class="btn btn-outline btn-icon" title="Filtros">⌕</button>
+                <button type="button" class="btn btn-outline btn-icon" title="Exportar">↓</button>
+                <button type="button" class="btn sm btn-purple">Criar Tarifário</button>
+                <button type="button" class="btn sm primary">Edição em Lote</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="map-grid-card" id="mapGridSingle">
+            <div class="map-plan-strip">
+              <span class="plan-dot" style="background:#6366f1;display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle"></span>
+              <span style="color:#6b7280;font-size:0.75rem;font-weight:500"> Visualizando plano:</span>
+              <strong> BAR</strong>
+              <span style="font-size:0.75rem;background:#f9fafb;border:1px solid #e5e7eb;padding:2px 6px;border-radius:4px;margin-left:6px">BAR</span>
+            </div>
+            <div class="map-slate-band">
+              <div class="grid-row">
+                <div class="grid-label head">Categoria</div>
+                <div class="grid-days">
+                  <div class="grid-day weekend"><div class="dow">dom</div><div class="dat">24/08</div></div>
+                  <div class="grid-day today"><div class="dow">seg</div><div class="dat">25/08</div></div>
+                  <div class="grid-day"><div class="dow">ter</div><div class="dat">26/08</div></div>
+                  <div class="grid-day"><div class="dow">qua</div><div class="dat">27/08</div></div>
+                  <div class="grid-day"><div class="dow">qui</div><div class="dat">28/08</div></div>
+                  <div class="grid-day"><div class="dow">sex</div><div class="dat">29/08</div></div>
+                  <div class="grid-day weekend"><div class="dow">sáb</div><div class="dat">30/08</div></div>
+                </div>
+              </div>
+            </div>
+            <div class="grid-row">
+              <div class="grid-label"><span class="plan-dot" style="background:#3b82f6;display:inline-block;vertical-align:middle;margin-right:8px"></span><strong>Standard</strong><br /><span style="font-size:0.75rem;color:#6b7280">12 quartos</span></div>
+              <div class="grid-days">
+                <div class="map-cell"><div class="map-cell-inner tint-yellow">289<div class="map-cell-sub">72% occ</div><div class="map-cell-sub pickup">1,2/dia</div></div></div>
+                <div class="map-cell today"><div class="map-cell-inner tint-orange dynamic">312<div class="map-cell-sub">81% occ</div></div></div>
+                <div class="map-cell"><div class="map-cell-inner tint-yellow">295<div class="map-cell-sub">68% occ</div></div></div>
+                <div class="map-cell"><div class="map-cell-inner tint-green">275<div class="map-cell-sub">58% occ</div></div></div>
+                <div class="map-cell"><div class="map-cell-inner tint-yellow">289</div></div>
+                <div class="map-cell"><div class="map-cell-inner tint-red">329<div class="map-cell-sub">92% occ</div></div></div>
+                <div class="map-cell"><div class="map-cell-inner tint-red">349</div></div>
+              </div>
+            </div>
+            <div class="grid-row">
+              <div class="grid-label"><span class="plan-dot" style="background:#8b5cf6;display:inline-block;vertical-align:middle;margin-right:8px"></span><strong>Deluxe</strong><br /><span style="font-size:0.75rem;color:#6b7280">8 quartos</span></div>
+              <div class="grid-days">
+                <div class="map-cell"><div class="map-cell-inner tint-green">389</div></div>
+                <div class="map-cell today"><div class="map-cell-inner tint-yellow">412<div class="map-cell-sub">65% occ</div></div></div>
+                <div class="map-cell"><div class="map-cell-inner tint-yellow">405</div></div>
+                <div class="map-cell"><div class="map-cell-inner tint-green">398</div></div>
+                <div class="map-cell"><div class="map-cell-inner tint-orange">420</div></div>
+                <div class="map-cell"><div class="map-cell-inner tint-red">445</div></div>
+                <div class="map-cell"><div class="map-cell-inner tint-red">459</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="map-grid-card" id="mapGridAll" style="display:none;margin-top:16px">
+            <div class="map-plan-strip all">
+              <span class="plan-dot" style="background:#9333ea"></span>
+              <span style="font-size:0.75rem;font-weight:500;color:#6b21a8"> Visualizando todos os planos:</span>
+              <span class="plan-chip purple" style="margin-left:8px"><span class="plan-dot" style="background:#6366f1"></span> BAR</span>
+              <span class="plan-chip purple"><span class="plan-dot" style="background:#0ea5e9"></span> Booking.com (BKG)</span>
+            </div>
+            <div class="map-slate-band">
+              <div class="grid-row">
+                <div class="grid-label head">Categoria</div>
+                <div class="grid-days">
+                  <div class="grid-day today"><div class="dow">seg</div><div class="dat">25/08</div></div>
+                  <div class="grid-day"><div class="dow">ter</div><div class="dat">26/08</div></div>
+                  <div class="grid-day"><div class="dow">qua</div><div class="dat">27/08</div></div>
+                </div>
+              </div>
+            </div>
+            <div class="cat-banner" style="--cat-color:#3b82f6;margin:16px">
+              <h4>Standard</h4>
+              <div class="meta">12 quartos disponíveis · <strong>2 planos</strong></div>
+            </div>
+            <div class="plan-line" style="--plan-color:#6366f1">
+              <div class="grid-row">
+                <div class="grid-label"><span class="plan-dot" style="background:#6366f1;margin-right:8px"></span><strong>BAR</strong><br /><span style="font-size:0.75rem;color:#6b7280">BAR</span></div>
+                <div class="grid-days">
+                  <div class="map-cell today"><div class="map-cell-inner tint-orange dynamic">312</div></div>
+                  <div class="map-cell"><div class="map-cell-inner tint-yellow">295</div></div>
+                  <div class="map-cell"><div class="map-cell-inner tint-green">275</div></div>
+                </div>
+              </div>
+            </div>
+            <div class="plan-line" style="--plan-color:#0ea5e9;margin-top:8px;margin-bottom:16px">
+              <div class="grid-row">
+                <div class="grid-label"><span class="plan-dot" style="background:#0ea5e9;margin-right:8px"></span><strong>Booking.com</strong><br /><span style="font-size:0.75rem;color:#6b7280">BKG</span></div>
+                <div class="grid-days">
+                  <div class="map-cell today"><div class="map-cell-inner tint-yellow">298</div></div>
+                  <div class="map-cell"><div class="map-cell-inner tint-yellow">285</div></div>
+                  <div class="map-cell"><div class="map-cell-inner tint-green">268</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="hint" style="margin-top:8px">Clique na célula abre edição de tarifa · Faixa colorida = ocupação (azul &lt;40% … vermelho ≥90%) · Anel roxo = preço dinâmico aplicado.</p>
+
+          <div class="metrics-row">
+            <div class="metric-card">
+              <div class="top"><div><div class="title">ADR Médio</div><div class="num">R$&nbsp;318,40</div></div><div class="metric-icon" style="background:#dbeafe;color:#2563eb">$</div></div>
+              <div class="foot">142 reservas</div>
+            </div>
+            <div class="metric-card">
+              <div class="top"><div><div class="title">RevPAR</div><div class="num">R$&nbsp;228,15</div></div><div class="metric-icon" style="background:#dcfce7;color:#16a34a">↗</div></div>
+              <div class="foot">Receita por quarto disponível</div>
+            </div>
+            <div class="metric-card">
+              <div class="top"><div><div class="title">Ocupação</div><div class="num">71,6%</div></div><div class="metric-icon" style="background:#f3e8ff;color:#9333ea">◉</div></div>
+              <div class="foot">Proj: 78,2% · Ocupação atual vs. projetada</div>
+            </div>
+            <div class="metric-card">
+              <div class="top"><div><div class="title">Pickup Rate</div><div class="num">2,14/dia</div></div><div class="metric-icon" style="background:#ffedd5;color:#ea580c">⚡</div></div>
+              <div class="foot">Velocidade de reservas (últimos 7 dias)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Grade ARI (ARIGrid) -->
+        <div class="rate-panel" data-rate-panel="ari-grid">
+          <div class="card" style="padding:0">
+            <div class="ari-toolbar">
+              <div class="ari-toolbar-left">
+                <div class="cat-field">
+                  <label class="field-label subtle">Categoria</label>
+                  <select><option>Todas as categorias</option><option>■ Standard (x12)</option><option>■ Deluxe (x8)</option></select>
+                </div>
+                <button type="button" class="btn btn-outline date-range-btn">24 Aug 2026 - 06 Sep 2026</button>
+                <select style="width:120px"><option>14 dias</option><option>7 dias</option><option>30 dias</option></select>
+                <button type="button" class="btn btn-outline">Edição em massa</button>
+                <button type="button" class="btn btn-outline">↻ Sincronizar Inventário</button>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button type="button" class="btn btn-outline sm">‹</button>
+                <button type="button" class="btn btn-outline sm">›</button>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="padding:0">
+            <div class="legend">
+              <span><i style="background:#e5e7eb"></i> Datas passadas (somente leitura)</span>
+              <span><i style="background:#dcfce7;border:1px solid #86efac"></i> Reservável — status <em>open</em></span>
+              <span><i style="background:#ffedd5;border:1px solid #fdba74"></i> Sem Preço</span>
+              <span><i style="background:#fee2e2;border:1px solid #fca5a5"></i> Fechado / Tarifa fechada</span>
+              <span><i style="background:#f3f4f6;border:1px solid #d1d5db"></i> Restrições OTA / motor</span>
+            </div>
+          </div>
+
+          <div class="card ari-card">
+            <div class="ari-cat-head">
+              <div>
+                <h3><span class="swatch" style="background:#3b82f6"></span> Standard</h3>
+                <p class="hint" style="margin:4px 0 0">12 quartos · ID do quarto: a3f2</p>
+              </div>
+              <button type="button" class="btn btn-outline sm">Edição da categoria</button>
+            </div>
+            <div class="ari-scroll">
+              <div class="ari-table">
+                <div class="ari-head">
+                  <div class="ari-label-col">Standard</div>
+                  <div class="ari-data-cols">
+                    <div class="ari-day-head past"><div class="dow">dom</div><div class="dat">24/08</div></div>
+                    <div class="ari-day-head"><div class="dow">seg</div><div class="dat">25/08</div></div>
+                    <div class="ari-day-head"><div class="dow">ter</div><div class="dat">26/08</div></div>
+                    <div class="ari-day-head"><div class="dow">qua</div><div class="dat">27/08</div></div>
+                    <div class="ari-day-head"><div class="dow">qui</div><div class="dat">28/08</div></div>
+                  </div>
+                </div>
+                <div class="ari-row">
+                  <div class="ari-label-col">Status do quarto</div>
+                  <div class="ari-data-cols">
+                    <div class="ari-cell past"><span class="status-chip st-open">Disponível</span></div>
+                    <div class="ari-cell"><span class="status-chip st-open" title="Clique — Alterar Status de Venda">Disponível</span></div>
+                    <div class="ari-cell"><span class="status-chip st-restrict">Restrito OTA</span></div>
+                    <div class="ari-cell"><span class="status-chip st-noprice">Sem Preço</span></div>
+                    <div class="ari-cell"><span class="status-chip st-closed">Tarifa Fechada</span></div>
+                  </div>
+                </div>
+                <div class="ari-row">
+                  <div class="ari-label-col">Quartos à venda</div>
+                  <div class="ari-data-cols">
+                    <div class="ari-cell past semibold">10</div>
+                    <div class="ari-cell semibold">9</div>
+                    <div class="ari-cell semibold">8</div>
+                    <div class="ari-cell semibold">10</div>
+                    <div class="ari-cell semibold">0</div>
+                  </div>
+                </div>
+                <div class="ari-row">
+                  <div class="ari-label-col">Reservas Efetivas</div>
+                  <div class="ari-data-cols">
+                    <div class="ari-cell past muted">2</div>
+                    <div class="ari-cell muted">3</div>
+                    <div class="ari-cell muted">4</div>
+                    <div class="ari-cell muted">2</div>
+                    <div class="ari-cell muted">12</div>
+                  </div>
+                </div>
+                <div class="ari-row">
+                  <div class="ari-label-col">Ocupação</div>
+                  <div class="ari-data-cols">
+                    <div class="ari-cell past semibold">17%</div>
+                    <div class="ari-cell semibold">25%</div>
+                    <div class="ari-cell semibold">33%</div>
+                    <div class="ari-cell semibold">17%</div>
+                    <div class="ari-cell semibold">100%</div>
+                  </div>
+                </div>
+
+                <div class="ari-plan-block expanded" data-ari-plan>
+                  <div class="ari-row">
+                    <div class="ari-label-col plan-toggle" data-toggle-plan><span class="chev"></span> BAR</div>
+                    <div class="ari-data-cols">
+                      <div class="ari-cell past">R$&nbsp;298,00</div>
+                      <div class="ari-cell">R$&nbsp;312,00</div>
+                      <div class="ari-cell">R$&nbsp;295,00</div>
+                      <div class="ari-cell" style="background:#fff7ed;color:#9a3412">—</div>
+                      <div class="ari-cell">—</div>
+                    </div>
+                  </div>
+                  <div class="ari-plan-detail">
+                    <div class="ari-row">
+                      <div class="ari-label-col sub">Disponibilidade</div>
+                      <div class="ari-data-cols">
+                        <div class="ari-cell past"><div class="avail-bar past"></div></div>
+                        <div class="ari-cell"><div class="avail-bar open"></div></div>
+                        <div class="ari-cell"><div class="avail-bar open"></div></div>
+                        <div class="ari-cell"><div class="avail-bar noprice"></div></div>
+                        <div class="ari-cell"><div class="avail-bar closed"></div></div>
+                      </div>
+                    </div>
+                    <div class="ari-row">
+                      <div class="ari-label-col sub x2">Preço padrão x2</div>
+                      <div class="ari-data-cols">
+                        <div class="ari-cell past" style="background:#eff6ff">R$&nbsp;298,00</div>
+                        <div class="ari-cell" style="background:#eff6ff;cursor:pointer" title="Edição inline (Enter salva)">R$&nbsp;312,00</div>
+                        <div class="ari-cell" style="background:#eff6ff">R$&nbsp;295,00</div>
+                        <div class="ari-cell" style="background:#eff6ff">—</div>
+                        <div class="ari-cell" style="background:#eff6ff">—</div>
+                      </div>
+                    </div>
+                    <div class="ari-row">
+                      <div class="ari-label-col sub">Preço x1<a class="link-action" href="#">Editar</a><a class="link-action amber" href="#">Resetar</a></div>
+                      <div class="ari-data-cols">
+                        <div class="ari-cell past">R$&nbsp;253,00</div>
+                        <div class="ari-cell">R$&nbsp;265,00</div>
+                        <div class="ari-cell">R$&nbsp;251,00</div>
+                        <div class="ari-cell">—</div>
+                        <div class="ari-cell">—</div>
+                      </div>
+                    </div>
+                    <div class="ari-row">
+                      <div class="ari-label-col sub">Preço x3<a class="link-action" href="#">Editar</a><a class="link-action amber" href="#">Resetar</a></div>
+                      <div class="ari-data-cols">
+                        <div class="ari-cell past">R$&nbsp;331,00</div>
+                        <div class="ari-cell">R$&nbsp;348,00</div>
+                        <div class="ari-cell">R$&nbsp;329,00</div>
+                        <div class="ari-cell">—</div>
+                        <div class="ari-cell">—</div>
+                      </div>
+                    </div>
+                    <div class="ari-row">
+                      <div class="ari-label-col sub">Duração mínima da estadia</div>
+                      <div class="ari-data-cols">
+                        <div class="ari-cell past">1</div><div class="ari-cell">1</div><div class="ari-cell">2</div><div class="ari-cell">0</div><div class="ari-cell">0</div>
+                      </div>
+                    </div>
+                    <div class="ari-row">
+                      <div class="ari-label-col sub">Duração máxima da estadia</div>
+                      <div class="ari-data-cols">
+                        <div class="ari-cell past">0</div><div class="ari-cell">0</div><div class="ari-cell">0</div><div class="ari-cell">0</div><div class="ari-cell">0</div>
+                      </div>
+                    </div>
+                    <div class="ari-row">
+                      <div class="ari-label-col sub">Fechado para check-in</div>
+                      <div class="ari-data-cols">
+                        <div class="ari-cell past"><input type="checkbox" class="cb" disabled /></div>
+                        <div class="ari-cell"><input type="checkbox" class="cb" /></div>
+                        <div class="ari-cell"><input type="checkbox" class="cb" /></div>
+                        <div class="ari-cell"><input type="checkbox" class="cb" /></div>
+                        <div class="ari-cell"><input type="checkbox" class="cb" checked /></div>
+                      </div>
+                    </div>
+                    <div class="ari-row">
+                      <div class="ari-label-col sub">Fechado para checkout</div>
+                      <div class="ari-data-cols">
+                        <div class="ari-cell past"><input type="checkbox" class="cb" disabled /></div>
+                        <div class="ari-cell"><input type="checkbox" class="cb" /></div>
+                        <div class="ari-cell"><input type="checkbox" class="cb" /></div>
+                        <div class="ari-cell"><input type="checkbox" class="cb" /></div>
+                        <div class="ari-cell"><input type="checkbox" class="cb" /></div>
+                      </div>
+                    </div>
+                    <div class="ari-row">
+                      <div class="ari-label-col sub">Antecedência Mínima</div>
+                      <div class="ari-data-cols">
+                        <div class="ari-cell past">0</div><div class="ari-cell">0</div><div class="ari-cell">0</div><div class="ari-cell">0</div><div class="ari-cell">0</div>
+                      </div>
+                    </div>
+                    <div class="ari-row">
+                      <div class="ari-label-col sub">Antecedência Máxima</div>
+                      <div class="ari-data-cols">
+                        <div class="ari-cell past">0</div><div class="ari-cell">0</div><div class="ari-cell">0</div><div class="ari-cell">0</div><div class="ari-cell">0</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="ari-plan-block" data-ari-plan>
+                  <div class="ari-row">
+                    <div class="ari-label-col plan-toggle" data-toggle-plan><span class="chev"></span> Booking.com</div>
+                    <div class="ari-data-cols">
+                      <div class="ari-cell past">R$&nbsp;285,00</div>
+                      <div class="ari-cell">R$&nbsp;298,00</div>
+                      <div class="ari-cell">R$&nbsp;288,00</div>
+                      <div class="ari-cell">—</div>
+                      <div class="ari-cell">—</div>
+                    </div>
+                  </div>
+                  <div class="ari-plan-detail">
+                    <div class="ari-row"><div class="ari-label-col sub">Disponibilidade</div><div class="ari-data-cols"><div class="ari-cell past"><div class="avail-bar past"></div></div><div class="ari-cell"><div class="avail-bar open"></div></div><div class="ari-cell"><div class="avail-bar open"></div></div><div class="ari-cell"><div class="avail-bar noprice"></div></div><div class="ari-cell"><div class="avail-bar closed"></div></div></div></div>
+                    <div class="ari-row"><div class="ari-label-col sub x2">Preço padrão x2</div><div class="ari-data-cols"><div class="ari-cell past" style="background:#eff6ff">R$&nbsp;285,00</div><div class="ari-cell" style="background:#eff6ff">R$&nbsp;298,00</div><div class="ari-cell" style="background:#eff6ff">R$&nbsp;288,00</div><div class="ari-cell" style="background:#eff6ff">—</div><div class="ari-cell" style="background:#eff6ff">—</div></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="logic-note">
+              <strong>Lógica PMS:</strong> inventário (<code>rate_inventory</code>) alimenta quartos à venda e reservas; status de venda é por categoria/dia; cada plano tarifário expande restrições e preços por ocupação (x2 = <code>base_price</code>, demais = flutuação). Barras de disponibilidade do plano refletem status + estoque, não substituem o chip de status.
+            </div>
+          </div>
+        </div>
+
+        <div class="rate-panel" data-rate-panel="rateplans"><div class="card"><h3>Planos tarifários</h3><p class="hint">RatePlansManager — BAR, OTA, pacotes, cores e códigos CM.</p></div></div>
+        <div class="rate-panel" data-rate-panel="config"><div class="card"><h3>Configuração</h3><ul><li>Tipos de Planos</li><li>Políticas de Cancelamento</li><li>Regras Dinâmicas (tarifa calculada — anel roxo no mapa)</li></ul></div></div>
+        <div class="rate-panel" data-rate-panel="restrictions"><div class="card"><h3>Restrições globais</h3><p class="hint">RestrictionsManager — CTA/CTD em lote.</p></div></div>
+        <div class="rate-panel" data-rate-panel="analytics"><div class="card"><h3>Analytics</h3><div class="chart-ph">Paridade, histórico ADR</div></div></div>
+      </div>
+    </section>
+
+    <!-- ========== GUIA ========== -->
+    <section id="sec-guide" class="section guide">
+      <div class="card">
+        <h1 style="margin-top:0;font-size:1.5rem">Guia — o que replicar em outro PMS</h1>
+        <p class="hint">Cada bloco abaixo mapeia componentes e regras de negócio do repositório atual.</p>
+<h2>Mapa de Tarifas</h2>
+        <ul>
+          <li>Filtros em linha: plano + chip, categoria, <strong>data início</strong> (não intervalo) + ± + 7–90 dias + ícones filtro/export + “Criar Tarifário” (roxo) e “Edição em Lote”.</li>
+          <li>Modo um plano: faixa “Visualizando plano”, header slate “Categoria”, linhas com nome + quartos; modo “Todos”: card por categoria e linhas por plano com borda lateral colorida.</li>
+          <li>Célula: preço, % occ, pickup; tint por ocupação; anel roxo = dinâmico; clique edita — <code>RateCalendarGrid.tsx</code> + <code>RateMetricsSummary.tsx</code>.</li>
+        </ul>
+
+        <h2>Grade ARI</h2>
+        <ul>
+          <li><strong>Toolbar</strong>: categoria (multi-card se “todas”), intervalo <em>de–até</em>, dias visíveis, edição em massa e sync inventário à esquerda; navegação ± só à direita — <code>ARIGrid.tsx</code>.</li>
+          <li><strong>Ordem por categoria</strong>: datas → Status (clicável) → Quartos à venda → Reservas → Ocupação → planos expansíveis (resumo x2) → disponibilidade → preços x2/x1/x3 → restrições.</li>
+          <li>Recolhido = só linha do plano; expandido = sub-linhas indentadas. x2 inline; x1/x3 “Editar”/“Resetar”. Barras ≠ chips de status.</li>
+          <li><code>ARIBulkEditDialog</code>, <code>sync_rate_inventory_from_reservations</code>, “Alterar Status de Venda”.</li>
+        </ul>
+
+        <h2>Integrações</h2>
+        <ul>
+          <li>Channel manager: push tarifas/disponibilidade após alterações (<code>buklySyncInvoke</code>, dialogs de sync).</li>
+          <li>Reservas no mapa de ocupação (fora deste mockup): extensão/encurtamento de estadia, estorno opcional, cores por pagamento — <code>ReservationCalendarMap.tsx</code>.</li>
+        </ul>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    function bindTabs(navId, btnAttr, panelAttr, activeClass) {
+      const nav = document.getElementById(navId);
+      if (!nav) return;
+      nav.addEventListener("click", (e) => {
+        const btn = e.target.closest("button[" + btnAttr + "]");
+        if (!btn) return;
+        const key = btn.getAttribute(btnAttr);
+        nav.querySelectorAll("button").forEach((b) => b.classList.remove("active", "dash"));
+        btn.classList.add(activeClass || "active");
+        if (btn.classList.contains("dash")) btn.classList.add("dash");
+        document.querySelectorAll("[" + panelAttr + "]").forEach((p) => {
+          p.classList.toggle("active", p.getAttribute(panelAttr) === key);
+        });
+      });
+    }
+    document.getElementById("mainNav").addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-main]");
+      if (!btn) return;
+      document.querySelectorAll("#mainNav button").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const key = btn.getAttribute("data-main");
+      document.querySelectorAll(".section").forEach((s) => s.classList.remove("active"));
+      document.getElementById("sec-" + (key === "guide" ? "guide" : key)).classList.add("active");
+    });
+    document.getElementById("rateSubTabs").addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-rate]");
+      if (!btn) return;
+      document.querySelectorAll("#rateSubTabs button").forEach((b) => {
+        b.classList.remove("active", "dash");
+      });
+      btn.classList.add(btn.getAttribute("data-rate") === "pricing-dashboard" ? "dash" : "active");
+      const key = btn.getAttribute("data-rate");
+      document.querySelectorAll("[data-rate-panel]").forEach((p) => {
+        p.classList.toggle("active", p.getAttribute("data-rate-panel") === key);
+      });
+    });
+
+    const mapPlanMode = document.getElementById("mapPlanMode");
+    const mapGridSingle = document.getElementById("mapGridSingle");
+    const mapGridAll = document.getElementById("mapGridAll");
+    const mapPlanChip = document.getElementById("mapPlanChip");
+    if (mapPlanMode) {
+      mapPlanMode.addEventListener("change", () => {
+        const all = mapPlanMode.value === "all";
+        mapGridSingle.style.display = all ? "none" : "block";
+        mapGridAll.style.display = all ? "block" : "none";
+        if (mapPlanChip) {
+          mapPlanChip.className = all ? "plan-chip purple" : "plan-chip";
+          mapPlanChip.innerHTML = all
+            ? '<span class="plan-dot" style="background:#9333ea"></span> Todos os Planos (2)'
+            : '<span class="plan-dot" style="background:#6366f1"></span> BAR (BAR)';
+        }
+      });
+    }
+
+    document.querySelectorAll("[data-toggle-plan]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const block = el.closest("[data-ari-plan]");
+        if (block) block.classList.toggle("expanded");
+      });
+    });
+  </script>
+</body>
+</html>

@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, CheckCircle2, MapPin, Phone, Mail, Wifi, Car, UtensilsCrossed, Waves, Wind, Tv, Coffee, Bed, Users, Calendar, DollarSign, AlertCircle, MessageCircle, Star, ChevronRight, Sparkles, ChevronLeft, X, ImageIcon, Home, Clock, Plus, Minus, ChevronDown, XCircle, FileText, Info, Instagram, Facebook, Twitter, Youtube, Globe2, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -2823,17 +2824,21 @@ const PublicReservation = () => {
           };
 
           // Criar reserva usando a função RPC
-          const { data: reservationResult, error: reservationError } = await supabase.rpc(
-            "create_reservation_with_lock",
-            {
+          const { createReservationWithLock } = await import("@/lib/pmsApi");
+          let reservationResult: { success?: boolean; error?: string; reservation_id?: string } | null = null;
+          let reservationError: { message?: string } | null = null;
+          try {
+            reservationResult = await createReservationWithLock({
               p_reservation_data: reservationData,
               p_checkin_date: formData.checkinDate,
               p_checkout_date: formData.checkoutDate,
               p_establishment_id: establishment.id,
               p_room_id: roomId,
               p_category_id: cat.categoryId,
-            }
-          );
+            });
+          } catch (error) {
+            reservationError = { message: error instanceof Error ? error.message : "Erro ao criar reserva" };
+          }
 
           if (reservationError || !reservationResult?.success) {
             throw new Error(
@@ -2889,7 +2894,7 @@ const PublicReservation = () => {
       }
 
       // Gerar link de pagamento
-      const { data: paymentData, error: paymentError } = await supabase.functions.invoke("stripe-payment", {
+      const { data: paymentData, error: paymentError } = await invokePmsFunction("stripe-payment", {
         body: {
           establishment_id: establishment.id,
           amount: totalAmount * 100, // Converter para centavos

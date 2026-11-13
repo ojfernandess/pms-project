@@ -5,6 +5,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Building2, Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+
+async function resetWithToken(token: string, password: string): Promise<{ error: { message: string } | null }> {
+  const base = String(import.meta.env.VITE_PMS_API_URL || "").replace(/\/$/, "");
+  const response = await fetch(`${base}/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  });
+  if (response.ok) return { error: null };
+  const body = await response.json().catch(() => ({} as { message?: string }));
+  return { error: { message: body.message || "Link inválido ou expirado" } };
+}
 import { toast } from "sonner";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 
@@ -35,6 +47,13 @@ const ResetPassword = () => {
         const queryToken = searchParams.get("token");
 
         // Se houver tipo de recuperação na URL ou hash
+        if ((type === "recovery" || queryType === "recovery") && queryToken && !accessToken) {
+          sessionStorage.setItem("pms.resetToken", queryToken);
+          setStep("reset");
+          setIsCheckingSession(false);
+          return;
+        }
+
         if ((type === "recovery" || queryType === "recovery") && (accessToken || queryToken)) {
           // Tentar estabelecer sessão com o token
           if (accessToken) {
@@ -115,7 +134,7 @@ const ResetPassword = () => {
 
       if (error) throw error;
 
-      toast.success("Email de recuperação enviado! Verifique sua caixa de entrada.");
+      toast.success("Pedido registado. O envio do e-mail depende do transporte configurado no servidor.");
       setEmail("");
     } catch (error: any) {
       console.error("Erro ao solicitar reset de senha:", error);
@@ -148,9 +167,11 @@ const ResetPassword = () => {
         return;
       }
 
-      const { error } = await supabase.auth.updateUser({
-        password: password,
-      });
+      const resetToken = sessionStorage.getItem("pms.resetToken");
+      const { error } = resetToken
+        ? await resetWithToken(resetToken, password)
+        : await supabase.auth.updateUser({ password });
+      if (!error) sessionStorage.removeItem("pms.resetToken");
 
       if (error) throw error;
 

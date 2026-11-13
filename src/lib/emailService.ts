@@ -4,6 +4,7 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import { invokePmsFunction } from '@/lib/pmsApi';
 import { processTemplate, generateReservationVariables, type TemplateVariables } from './emailTemplateEngine';
 import { reservationGuestContactFields, reservationGuestDisplayName } from './reservationChannelDisplay';
 import { shouldBlockGuestConfirmationEmail } from './overbookingEmailGuards';
@@ -778,7 +779,7 @@ async function sendViaSMTP(queueItem: any, settings: EmailSettings, hotelName?: 
     
     // Chamar Edge Function do Supabase para enviar via SMTP
     try {
-      const result = await supabase.functions.invoke('send-email-smtp', {
+      const result = await invokePmsFunction('send-email-smtp', {
         body: smtpPayload,
       });
       
@@ -903,7 +904,7 @@ async function sendViaSendGrid(queueItem: any, settings: EmailSettings, hotelNam
     const senderName = settings.sender_name?.trim() || hotelName || 'PMS System';
 
     // Chamar Edge Function para enviar e-mail (evita CORS)
-    const result = await supabase.functions.invoke('send-email-sendgrid', {
+    const result = await invokePmsFunction('send-email-sendgrid', {
       body: {
         to: queueItem.recipient_email,
         to_name: queueItem.recipient_name || undefined,
@@ -1147,7 +1148,7 @@ async function sendViaResend(queueItem: any, settings: EmailSettings, hotelName?
     });
     
     // Usar Edge Function para evitar problemas de CORS
-    const result = await supabase.functions.invoke('send-email-resend', {
+    const result = await invokePmsFunction('send-email-resend', {
       body: {
         to: queueItem.recipient_email,
         to_name: queueItem.recipient_name || undefined,

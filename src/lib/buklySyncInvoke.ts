@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { toast } from "sonner";
 
 export type BuklySyncPayload = {
@@ -28,25 +28,14 @@ export async function invokeBuklySync(
   establishmentId: string,
   opts?: { silent?: boolean }
 ): Promise<BuklySyncPayload> {
-  const { data, error, response } = await supabase.functions.invoke("bukly-sync", {
+  const { data, error } = await invokePmsFunction<BuklySyncPayload>("bukly-sync", {
     body: {
       channel_id: channelId,
       establishment_id: establishmentId,
     },
   });
 
-  let payload = data as BuklySyncPayload | null;
-
-  if (error && response) {
-    try {
-      const parsed = await response.clone().json();
-      if (parsed && typeof parsed === "object") {
-        payload = parsed as BuklySyncPayload;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
+  const payload = data;
 
   const errMsg =
     payload?.error || (error as { message?: string } | null)?.message || null;

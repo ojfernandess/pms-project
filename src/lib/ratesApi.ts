@@ -7,7 +7,7 @@
 import { supabase } from "@/integrations/supabase/client";
 
 const getFunctionUrl = (path: string) => {
-  const base = import.meta.env.VITE_SUPABASE_URL;
+  const base = import.meta.env.VITE_PMS_API_URL;
   if (!base) return null;
   return `${base}/functions/v1/${path}`;
 };

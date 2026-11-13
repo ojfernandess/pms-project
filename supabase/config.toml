@@ -41,3 +41,83 @@ verify_jwt = false
 
 [functions.fnrh-lifecycle]
 verify_jwt = false
+
+# Funções abaixo: verify_jwt explícito (antes: default da plataforma, normalmente true).
+# - false: assinatura ou segredo noutro cabeçalho/corpo; ou invocação interna só com service_role; ou endpoint público de leitura (SEO/health).
+# - true: espera utilizador autenticado (JWT) ou o código valida o JWT no handler; evita chamadas anónimas à função.
+
+[functions.call-company-webhook]
+verify_jwt = true
+
+[functions.channex-booking-crs-update]
+verify_jwt = true
+
+[functions.get-reservation]
+verify_jwt = true
+
+[functions.get-site-settings]
+verify_jwt = true
+
+[functions.health-check]
+verify_jwt = false
+
+[functions.list-channel-templates]
+verify_jwt = true
+
+[functions.process-no-shows]
+verify_jwt = false
+
+[functions.rates-dashboard]
+verify_jwt = true
+
+[functions.rates-map]
+verify_jwt = true
+
+[functions.recalc-rates]
+verify_jwt = true
+
+[functions.render-html]
+verify_jwt = true
+
+[functions.robots]
+verify_jwt = false
+
+[functions.send-checkin-charge]
+verify_jwt = false
+
+[functions.send-checkin-charge-schedule]
+verify_jwt = false
+
+[functions.send-checkout-reminders]
+verify_jwt = false
+
+[functions.send-daily-digest]
+verify_jwt = false
+
+[functions.send-daily-digest-schedule]
+verify_jwt = false
+
+[functions.send-email-resend]
+verify_jwt = true
+
+[functions.send-email-sendgrid]
+verify_jwt = true
+
+[functions.send-email-smtp]
+verify_jwt = true
+
+[functions.sitemap]
+verify_jwt = false
+
+[functions.stripe-payment]
+verify_jwt = false
+
+[functions.stripe-payment-status]
+verify_jwt = false
+
+# Staff only (invoke with user session); uses service role internally — do not allow anonymous.
+[functions.stripe-refund]
+verify_jwt = true
+
+[functions.stripe-webhook]
+verify_jwt = false

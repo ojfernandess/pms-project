@@ -331,18 +331,21 @@ export const useQuotes = () => {
         channel: quote.channel || "direct",
       };
 
-      const { data: reservationResult, error: reservationError } = await supabase.rpc(
-        "create_reservation_with_lock",
-        {
+      const { createReservationWithLock } = await import("@/lib/pmsApi");
+      let reservationResult: { success?: boolean; error?: string; reservation_id?: string } | null = null;
+      let reservationError: { message?: string } | null = null;
+      try {
+        reservationResult = await createReservationWithLock({
           p_reservation_data: reservationData,
           p_checkin_date: quote.checkin_date,
           p_checkout_date: quote.checkout_date,
           p_establishment_id: quote.establishment_id,
           p_room_id: quote.room_id || null,
           p_category_id: quote.category_id,
-          p_channel: quote.channel || "direct",
-        }
-      );
+        });
+      } catch (error) {
+        reservationError = { message: error instanceof Error ? error.message : "Erro ao criar reserva" };
+      }
 
       if (reservationError || !reservationResult?.success) {
         throw new Error(reservationError?.message || "Erro ao criar reserva");
@@ -395,7 +398,8 @@ export const useQuotes = () => {
       }
 
       // Criar Payment Intent via Edge Function
-      const { data: paymentData, error: paymentError } = await supabase.functions.invoke(
+      const { invokePmsFunction } = await import("@/lib/pmsApi");
+      const { data: paymentData, error: paymentError } = await invokePmsFunction(
         "stripe-payment",
         {
           body: {

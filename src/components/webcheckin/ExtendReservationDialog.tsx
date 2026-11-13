@@ -816,10 +816,9 @@ export function ExtendReservationDialog({
                     occupied: "!bg-red-100 !text-red-700 !border-red-300",
                   }}
                   classNames={{
-                    day_disabled: "!bg-red-100 !text-red-700 !border-red-300 opacity-75",
-                  }}
-                  classNames={{
                     day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100",
+                    day_disabled:
+                      "!bg-red-100 !text-red-700 !border-red-300 opacity-75",
                   }}
                   defaultMonth={originalCheckout || new Date()}
                   initialFocus

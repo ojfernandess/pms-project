@@ -6,6 +6,7 @@ import { Loader2, FileText, Phone, Mail, MapPin, Info, MessageCircle, CreditCard
 import { StripeProvider } from "@/components/stripe/StripeProvider";
 import { PaymentDialog } from "@/components/stripe/PaymentDialog";
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -58,7 +59,7 @@ const PaymentPage = () => {
       console.log("[PaymentPage] Verificando status do pagamento:", paymentIntentId);
       
       // Verificar o status do pagamento no Stripe e atualizar se necessário
-      const { data, error } = await supabase.functions.invoke("stripe-payment-status", {
+      const { data, error } = await invokePmsFunction("stripe-payment-status", {
         body: {
           payment_intent_id: paymentIntentId,
         },
@@ -81,8 +82,8 @@ const PaymentPage = () => {
 
   const checkPaymentStatusFallback = async (paymentIntentId: string) => {
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const response = await fetch(`${supabaseUrl}/functions/v1/stripe-payment-status`, {
+      const apiUrl = String(import.meta.env.VITE_PMS_API_URL || "").replace(/\/$/, "");
+      const response = await fetch(`${apiUrl}/functions/v1/stripe-payment-status`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

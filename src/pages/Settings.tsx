@@ -1911,7 +1911,7 @@ const ApiSettingsManager = ({ isApiIntegrationsEnabled }: { isApiIntegrationsEna
         <TabsContent value="api" className="space-y-6 mt-0">
         <CompanyApiCredentialsCard
           companyId={selectedEstablishment?.company_id}
-          supabaseProjectUrl={import.meta.env.VITE_SUPABASE_URL ?? null}
+          supabaseProjectUrl={import.meta.env.VITE_PMS_API_URL ?? null}
           isFeatureEnabled={isApiIntegrationsEnabled}
         />
 

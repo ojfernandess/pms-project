@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 
 /**
  * Notifica a API FNRH (check-out, cancelamento de reserva ou no-show) após a ação no PMS.
@@ -32,7 +33,7 @@ export async function invokeFnrhLifecycle(
       invokeOpts.headers = { Authorization: `Bearer ${access}` };
     }
 
-    const { data, error } = await supabase.functions.invoke(
+    const { data, error } = await invokePmsFunction(
       "fnrh-lifecycle",
       invokeOpts,
     );

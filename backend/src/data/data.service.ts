@@ -1,0 +1,249 @@
+import { Injectable, Logger } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { SessionUser } from "../auth/auth.service";
+import { PrismaService } from "../prisma/prisma.service";
+import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { Catalog, QueryRequest, SqlType, compileQuery, parseSelect } from "./query-compiler";
+
+const RPCS = new Set([
+  "apply_recommendation_price",
+  "calculate_category_availability",
+  "calculate_rate_price",
+  "cancel_expired_preregistrations",
+  "cancel_expired_quote",
+  "company_has_feature_access",
+  "create_guest_account",
+  "create_notification",
+  "create_notification_for_establishment",
+  "create_reservation_with_lock",
+  "deactivate_guest_account",
+  "debug_expired_preregistrations",
+  "generate_rate_recommendations",
+  "get_checkin_charge_by_payment_token",
+  "get_company_api_credentials_status",
+  "get_company_api_request_logs",
+  "get_fnrh_guest_form_visibility",
+  "get_fnrh_settings_public",
+  "get_resolved_email_template",
+  "insert_email_queue",
+  "is_date_available_for_sale",
+  "log_activity",
+  "merge_duplicate_clients_into_primary",
+  "process_no_shows",
+  "reallocate_reservation",
+  "request_guest_password_reset",
+  "reset_guest_password",
+  "rotate_company_api_credentials",
+  "set_company_api_credentials_active",
+  "sync_rate_inventory_from_reservations",
+  "test_expired_preregistrations",
+  "update_guest_password",
+  "update_reservation_notes_for_guest",
+  "upsert_fnrh_settings",
+  "validate_and_apply_discount",
+  "verify_guest_password",
+]);
+
+type QueryResult = { data: unknown; error: { message: string; code?: string } | null; count: number | null };
+
+@Injectable()
+export class DataService {
+  private readonly logger = new Logger(DataService.name);
+  private catalog: Promise<Catalog> | null = null;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeGateway,
+  ) {}
+
+  async query(request: QueryRequest, user: SessionUser | null): Promise<QueryResult> {
+    try {
+      const catalog = await this.loadCatalog();
+      const compiled = compileQuery(request, catalog);
+      const rows = await this.withRole(user, async (tx) => {
+        if (request.head) {
+          const countRows = await tx.$queryRawUnsafe<{ count: number }[]>(compiled.sql, ...compiled.values);
+          return { data: null, count: Number(countRows[0]?.count ?? 0), records: [] as Record<string, unknown>[] };
+        }
+        const records = unwrap(await tx.$queryRawUnsafe<{ row: Record<string, unknown> }[]>(compiled.sql, ...compiled.values));
+        let count: number | null = null;
+        if (compiled.countSql) {
+          const countRows = await tx.$queryRawUnsafe<{ count: number }[]>(compiled.countSql, ...compiled.values);
+          count = Number(countRows[0]?.count ?? 0);
+        }
+        return { data: records, count, records };
+      });
+      if (request.head) return { data: null, error: null, count: rows.count };
+      let records = rows.records;
+      if (request.action !== "select" && request.select && parseSelect(request.select).some((field) => field.kind === "embed")) {
+        const ids = records.map((row) => row.id).filter((id): id is string => typeof id === "string");
+        if (ids.length > 0) {
+          const again = await this.query({ action: "select", table: request.table, select: request.select, filters: [{ column: "id", op: "in", value: ids }] }, user);
+          if (again.error) return again;
+          records = Array.isArray(again.data) ? again.data as Record<string, unknown>[] : [];
+        }
+      } else if (request.action !== "select") {
+        records = shapeMutation(records, request.select);
+      }
+      if (request.action !== "select") {
+        const event = request.action === "delete" ? "DELETE" : request.action === "update" ? "UPDATE" : "INSERT";
+        for (const row of records) this.realtime.publish({ table: request.table, event, row });
+      }
+      if (request.single) {
+        if (records.length !== 1) return { data: null, error: { message: "JSON object requested, multiple (or no) rows returned", code: "PGRST116" }, count: rows.count };
+        return { data: records[0], error: null, count: rows.count };
+      }
+      if (request.maybeSingle) {
+        if (records.length > 1) return { data: null, error: { message: "JSON object requested, multiple (or no) rows returned", code: "PGRST116" }, count: rows.count };
+        return { data: records[0] ?? null, error: null, count: rows.count };
+      }
+      return { data: request.head ? null : records, error: null, count: rows.count };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erro na consulta";
+      this.logger.warn(message);
+      return { data: null, error: { message }, count: null };
+    }
+  }
+
+  async rpc(name: string, args: Record<string, unknown> | null, user: SessionUser | null): Promise<QueryResult> {
+    if (!RPCS.has(name)) return { data: null, error: { message: `Função não disponível: ${name}` }, count: null };
+    try {
+      const data = await this.withRole(user, async (tx) => {
+        const signatures = await tx.$queryRaw<{ args: string; retset: boolean; ret: string }[]>`
+          SELECT pg_get_function_identity_arguments(p.oid) AS args,
+                 p.proretset AS retset,
+                 t.typname AS ret
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          JOIN pg_type t ON t.oid = p.prorettype
+          WHERE n.nspname = 'public' AND p.proname = ${name}
+        `;
+        if (signatures.length === 0) throw new Error(`Função não encontrada: ${name}`);
+        const input = args ?? {};
+        const signature = signatures.find((item) => Object.keys(input).every((key) => argNames(item.args).includes(key))) ?? signatures[0];
+        const known = argNames(signature.args);
+        for (const key of Object.keys(input)) {
+          if (!known.includes(key)) throw new Error(`Argumento desconhecido: ${key}`);
+        }
+        const entries = known.filter((key) => Object.prototype.hasOwnProperty.call(input, key));
+        const values = entries.map((key) => input[key]);
+        const callArgs = entries.map((key, index) => `${quoteArg(key)} := $${index + 1}`).join(", ");
+        const call = `public.${quoteArg(name)}(${callArgs})`;
+        if (signature.ret === "void") {
+          await tx.$queryRawUnsafe(`SELECT ${call}`, ...values);
+          return null;
+        }
+        if (signature.retset) {
+          const rows = await tx.$queryRawUnsafe<{ data: unknown }[]>(`SELECT COALESCE(jsonb_agg(to_jsonb(t)), '[]'::jsonb) AS data FROM ${call} t`, ...values);
+          return rows[0]?.data ?? [];
+        }
+        const rows = await tx.$queryRawUnsafe<{ data: unknown }[]>(`SELECT to_jsonb(${call}) AS data`, ...values);
+        return rows[0]?.data ?? null;
+      });
+      return { data, error: null, count: null };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erro na função";
+      this.logger.warn(message);
+      return { data: null, error: { message }, count: null };
+    }
+  }
+
+  private async withRole<T>(user: SessionUser | null, run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    const role = user ? "authenticated" : "anon";
+    const claims = JSON.stringify({ sub: user?.id, email: user?.email, role, aud: role });
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('request.jwt.claims', ${claims}, true)`;
+      await tx.$executeRaw`SELECT set_config('request.jwt.claim.sub', ${user?.id ?? ""}, true)`;
+      await tx.$executeRaw`SELECT set_config('request.jwt.claim.role', ${role}, true)`;
+      await tx.$executeRawUnsafe(`SET LOCAL ROLE ${role}`);
+      return run(tx);
+    }, { timeout: 20000 });
+  }
+
+  private loadCatalog(): Promise<Catalog> {
+    if (!this.catalog) {
+      this.catalog = this.readCatalog().catch((error) => {
+        this.catalog = null;
+        throw error;
+      });
+    }
+    return this.catalog;
+  }
+
+  private async readCatalog(): Promise<Catalog> {
+    const [types, fks] = await Promise.all([
+      this.prisma.$queryRaw<{ table_name: string; column_name: string; udt_name: string }[]>`
+        SELECT table_name, column_name, udt_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+      `,
+      this.prisma.$queryRaw<{ constraint: string; table_name: string; column_name: string; foreign_table: string; foreign_column: string; singular: boolean }[]>`
+        SELECT c.conname AS constraint,
+               src.relname AS table_name,
+               src_att.attname AS column_name,
+               dst.relname AS foreign_table,
+               dst_att.attname AS foreign_column,
+               EXISTS (
+                 SELECT 1 FROM pg_index i
+                 WHERE i.indrelid = c.conrelid AND i.indisunique AND i.indnkeyatts = 1 AND i.indkey[0] = c.conkey[1]
+               ) AS singular
+        FROM pg_constraint c
+        JOIN pg_class src ON src.oid = c.conrelid
+        JOIN pg_namespace ns ON ns.oid = src.relnamespace
+        JOIN pg_class dst ON dst.oid = c.confrelid
+        JOIN pg_attribute src_att ON src_att.attrelid = c.conrelid AND src_att.attnum = c.conkey[1]
+        JOIN pg_attribute dst_att ON dst_att.attrelid = c.confrelid AND dst_att.attnum = c.confkey[1]
+        WHERE c.contype = 'f' AND ns.nspname = 'public' AND array_length(c.conkey, 1) = 1
+      `,
+    ]);
+    const mapped: Catalog["types"] = {};
+    for (const column of types) {
+      mapped[column.table_name] ??= {};
+      mapped[column.table_name][column.column_name] = mapType(column.udt_name);
+    }
+    return {
+      types: mapped,
+      fks: fks.map((fk) => ({
+        constraint: fk.constraint,
+        table: fk.table_name,
+        column: fk.column_name,
+        foreignTable: fk.foreign_table,
+        foreignColumn: fk.foreign_column,
+        singular: fk.singular,
+      })),
+    };
+  }
+}
+
+const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function argNames(args: string): string[] {
+  return args.split(",").map((part) => part.trim().split(/\s+/)[0]).filter((part) => IDENT.test(part));
+}
+
+function quoteArg(name: string): string {
+  if (!IDENT.test(name)) throw new Error(`Identificador inválido: ${name}`);
+  return `"${name}"`;
+}
+
+function mapType(udt: string): SqlType {
+  if (udt === "uuid") return "uuid";
+  if (udt === "bool") return "boolean";
+  if (udt === "date") return "date";
+  if (udt === "json" || udt === "jsonb") return "json";
+  if (udt === "timestamp" || udt === "timestamptz") return "time";
+  if (["int2", "int4", "int8", "numeric", "float4", "float8"].includes(udt)) return "number";
+  return "text";
+}
+
+function unwrap(rows: { row: Record<string, unknown> }[]): Record<string, unknown>[] {
+  return rows.map((row) => row.row).filter((row) => row && typeof row === "object");
+}
+
+function shapeMutation(rows: Record<string, unknown>[], select: string | null | undefined): Record<string, unknown>[] {
+  if (!select) return rows;
+  const fields = parseSelect(select);
+  if (fields.some((field) => field.kind === "star" || field.kind === "embed")) return rows;
+  const names = fields.filter((field): field is { kind: "column"; name: string } => field.kind === "column").map((field) => field.name);
+  return rows.map((row) => Object.fromEntries(names.map((name) => [name, row[name]])));
+}

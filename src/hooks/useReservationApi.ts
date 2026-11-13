@@ -109,8 +109,7 @@ export const useReservationApi = () => {
         }
 
         // Obter URL da função edge
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const functionUrl = `${supabaseUrl}/functions/v1/get-reservation`;
+        const functionUrl = `${String(import.meta.env.VITE_PMS_API_URL || "").replace(/\/$/, "")}/functions/v1/get-reservation`;
 
         // Preparar headers
         const headers: HeadersInit = {
@@ -127,7 +126,7 @@ export const useReservationApi = () => {
         } else if (guestAccountId) {
           // Para guest_account, não precisamos de token (a função verificará guest_account_id)
           // Mas ainda precisamos do header Authorization com anon key para passar pela validação básica
-          headers["Authorization"] = `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`;
+          headers["x-guest-account"] = guestAccountId;
         } else {
           throw new Error("Autenticação necessária. Faça login ou forneça guest_account_id");
         }
@@ -194,8 +193,7 @@ export const useReservationApi = () => {
       }
 
       // Obter URL da função edge
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const functionUrl = `${supabaseUrl}/functions/v1/get-reservation`;
+      const functionUrl = `${String(import.meta.env.VITE_PMS_API_URL || "").replace(/\/$/, "")}/functions/v1/get-reservation`;
 
       // Preparar headers
       const headers: HeadersInit = {
@@ -209,7 +207,7 @@ export const useReservationApi = () => {
       } else if (guestAccountId) {
         // Para guest_account, não precisamos de token (a função verificará guest_account_id)
         // Mas ainda precisamos do header Authorization com anon key para passar pela validação básica
-        headers["Authorization"] = `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`;
+        headers["x-guest-account"] = guestAccountId;
       } else {
         throw new Error("Autenticação necessária. Faça login ou forneça guest_account_id");
       }

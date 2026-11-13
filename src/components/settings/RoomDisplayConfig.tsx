@@ -100,7 +100,6 @@ const RoomDisplayConfig = () => {
     }
     const appUrl =
       (import.meta as any).env?.VITE_APP_URL ||
-      (import.meta as any).env?.VITE_SUPABASE_URL ||
       "";
     try {
       if (appUrl) {

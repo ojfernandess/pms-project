@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import type { Locale } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1083,7 +1084,7 @@ export default function CheckinChargeSettings() {
   const { data: channelTemplates, isLoading: channelTemplatesLoading, isFetching: channelTemplatesFetching, refetch: refetchChannelTemplates } = useQuery({
     queryKey: ["list-channel-templates", establishmentUuid, channel],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("list-channel-templates", {
+      const { data, error } = await invokePmsFunction("list-channel-templates", {
         body: { establishment_id: establishmentUuid },
       });
       if (error) throw error;
@@ -1338,7 +1339,7 @@ export default function CheckinChargeSettings() {
       if (intent) body.intent = intent;
       if (options?.template_id_override) body.template_id_override = options.template_id_override;
       if (options?.phone_overrides && Object.keys(options.phone_overrides).length > 0) body.phone_overrides = options.phone_overrides;
-      const { data, error } = await supabase.functions.invoke("send-checkin-charge", {
+      const { data, error } = await invokePmsFunction("send-checkin-charge", {
         body,
       });
       if (error) throw error;
@@ -2573,7 +2574,7 @@ export default function CheckinChargeSettings() {
                   if (!establishmentUuid) return;
                   setSendingDigest(true);
                   try {
-                    const { data, error } = await supabase.functions.invoke("send-daily-digest", {
+                    const { data, error } = await invokePmsFunction("send-daily-digest", {
                       body: { establishment_id: establishmentUuid, date: digestDate },
                     });
                     if (error) {

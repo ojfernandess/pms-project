@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { useWebCheckin } from "@/hooks/useWebCheckin";
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { toast } from "sonner";
 import { useReservations } from "@/hooks/useReservations";
 import { useFnrhSettings } from "@/hooks/useFnrhSettings";
@@ -998,7 +999,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
           const { data: sess } = await supabase.auth.getSession();
           const access = sess?.session?.access_token;
           if (access) {
-            const { error: fnrhInvokeErr } = await supabase.functions.invoke(
+            const { error: fnrhInvokeErr } = await invokePmsFunction(
               "fnrh-submit",
               {
                 body: {

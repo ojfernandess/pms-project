@@ -67,6 +67,7 @@ Bem-vindo à documentação completa do sistema PMS. Este índice organiza todos
 
 ## 🚢 Deploy e Verificação
 
+- [Deploy no Easypanel (Docker)](./DEPLOY_EASYPANEL.md)
 - [Verificar Deploy](../VERIFICAR_DEPLOY.md)
 - [Verificar Status Pagamento](../VERIFICAR_STATUS_PAGAMENTO.md)
 

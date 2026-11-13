@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { invokePmsFunction } from "@/lib/pmsApi";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 
 /**
@@ -26,7 +27,7 @@ export const generatePaymentLink = async (
   }
 
   // Criar Payment Intent
-  const { data, error } = await supabase.functions.invoke("stripe-payment", {
+  const { data, error } = await invokePmsFunction("stripe-payment", {
     body: {
       establishment_id: establishmentId,
       amount,

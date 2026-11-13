@@ -240,24 +240,16 @@ export const useUsers = () => {
 
           // Usar a API Admin do Supabase para atualizar a senha
           // Chamar a API Admin através de uma requisição HTTP
-          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-          const supabaseServiceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-          
-          if (!supabaseServiceKey) {
-            throw new Error("Service Role Key não configurada. A atualização de senha requer uma Edge Function ou Service Role Key configurada.");
-          }
-
-          // Fazer requisição para a API Admin do Supabase
-          const response = await fetch(`${supabaseUrl}/auth/v1/admin/users/${id}`, {
-            method: 'PUT',
+          const { data: sessionData } = await supabase.auth.getSession();
+          const accessToken = sessionData.session?.access_token;
+          if (!accessToken) throw new Error("Sessão expirada. Entre novamente para alterar a senha.");
+          const response = await fetch(`${String(import.meta.env.VITE_PMS_API_URL || "").replace(/\/$/, "")}/auth/users/${id}/password`, {
+            method: "POST",
             headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${supabaseServiceKey}`,
-              'apikey': supabaseServiceKey,
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
             },
-            body: JSON.stringify({
-              password: password,
-            }),
+            body: JSON.stringify({ password }),
           });
 
           if (!response.ok) {

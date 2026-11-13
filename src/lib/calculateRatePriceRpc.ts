@@ -227,14 +227,14 @@ async function executeRpcOnce(
     return { data: null, error: { message: "Aborted", code: "ABORT" } };
   }
   metrics.rpcCalls++;
-  return supabase.rpc("calculate_rate_price", {
-    p_establishment_id: params.p_establishment_id,
-    p_category_id: params.p_category_id,
-    p_pricing_plan_id: params.p_pricing_plan_id,
-    p_date: params.p_date,
-    p_adults: params.p_adults,
-    p_children: params.p_children,
-  });
+  void supabase;
+  try {
+    const { quoteRate } = await import("@/lib/pmsApi");
+    const result = await quoteRate(params);
+    return { data: result.data, error: null };
+  } catch (error) {
+    return { data: null, error: { message: error instanceof Error ? error.message : "Erro ao calcular tarifa", code: "PMS_API" } };
+  }
 }
 
 async function executeRpcWithRetries(

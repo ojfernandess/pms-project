@@ -290,17 +290,21 @@ export const useReservations = () => {
         };
 
         // Chamar função com lock (ordem: obrigatórios primeiro, opcionais depois)
-        const { data: lockResult, error: lockError } = await supabase.rpc(
-          "create_reservation_with_lock",
-          {
+        const { createReservationWithLock } = await import("@/lib/pmsApi");
+        let lockResult: { success?: boolean; error?: string; reservation_id?: string } | null = null;
+        let lockError: { message?: string } | null = null;
+        try {
+          lockResult = await createReservationWithLock({
             p_reservation_data: reservationData,
             p_checkin_date: reservation.checkin_date,
             p_checkout_date: reservation.checkout_date,
             p_establishment_id: establishmentId,
             p_room_id: reservation.room_id || null,
             p_category_id: reservation.category_id || null,
-          }
-        );
+          });
+        } catch (error) {
+          lockError = { message: error instanceof Error ? error.message : "Erro ao criar reserva com lock" };
+        }
 
         if (lockError) {
           await logError({
@@ -527,7 +531,7 @@ export const useReservations = () => {
                     guest_name: newReservation.guest?.full_name ?? newReservation.financial_responsible?.full_name ?? null,
                     guest_email: newReservation.guest?.email ?? newReservation.financial_responsible?.email ?? null,
                   };
-                  await supabase.functions.invoke("call-company-webhook", {
+                  await (await import("@/lib/pmsApi")).invokePmsFunction("call-company-webhook", {
                     body: {
                       establishment_id: newReservation.establishment_id,
                       event: "reservation.created",
@@ -554,7 +558,7 @@ export const useReservations = () => {
                 .eq("enabled", true)
                 .maybeSingle();
               if (ccConfig?.send_timing === "after_confirmation") {
-                await supabase.functions.invoke("send-checkin-charge", {
+                await (await import("@/lib/pmsApi")).invokePmsFunction("send-checkin-charge", {
                   body: { reservation_id: newReservation.id, intent: "checkin_reminder" },
                 });
               }
@@ -575,7 +579,7 @@ export const useReservations = () => {
                 .eq("enabled", true)
                 .maybeSingle();
               if (ccConfig) {
-                await supabase.functions.invoke("send-checkin-charge", {
+                await (await import("@/lib/pmsApi")).invokePmsFunction("send-checkin-charge", {
                   body: { reservation_id: newReservation.id, intent: "payment_pending" },
                 });
               }
@@ -711,7 +715,7 @@ export const useReservations = () => {
             .eq("enabled", true)
             .maybeSingle();
           if (ccConfig?.send_timing === "after_confirmation") {
-            await supabase.functions.invoke("send-checkin-charge", {
+            await (await import("@/lib/pmsApi")).invokePmsFunction("send-checkin-charge", {
               body: { reservation_id: id, intent: "checkin_reminder" },
             });
           }
@@ -1244,27 +1248,8 @@ export const useReservations = () => {
   // Check-in
   const checkIn = useMutation({
     mutationFn: async ({ id, roomId, skipEmail }: { id: string; roomId?: string; skipEmail?: boolean }) => {
-      const updates: ReservationUpdate = {
-        status: "checkedin",
-      };
-
-      if (roomId) {
-        updates.room_id = roomId;
-        // Atualizar status do quarto para occupied
-        await supabase
-          .from("rooms")
-          .update({ status: "occupied" })
-          .eq("id", roomId);
-      }
-
-      const { data, error } = await supabase
-        .from("reservations")
-        .update(updates)
-        .eq("id", id)
-        .select(RESERVATION_RELATIONS_ROOMS_CATEGORIES_SELECT)
-        .single();
-
-      if (error) throw error;
+      const { checkInReservation } = await import("@/lib/pmsApi");
+      const data = await checkInReservation(id, roomId);
       return { ...data, _skipEmail: skipEmail };
     },
         onSuccess: async (updatedReservation) => {
@@ -1319,37 +1304,14 @@ export const useReservations = () => {
   // Check-out
   const checkOut = useMutation({
     mutationFn: async (id: string) => {
-      // Buscar reserva para pegar room_id
-      const { data: reservation } = await supabase
-        .from("reservations")
-        .select("room_id")
-        .eq("id", id)
-        .single();
-
-      const { data, error } = await supabase
-        .from("reservations")
-        .update({ status: "checkedout" })
-        .eq("id", id)
-        .select(RESERVATION_RELATIONS_ROOMS_CATEGORIES_SELECT)
-        .single();
-
-      if (error) throw error;
-
+      const { checkOutReservation } = await import("@/lib/pmsApi");
+      const data = await checkOutReservation(id);
       try {
         const { invokeFnrhLifecycle } = await import("@/lib/fnrh/invokeFnrhLifecycle");
         void invokeFnrhLifecycle(id, "checkout");
       } catch {
         /* FNRH opcional */
       }
-
-      // Atualizar status do quarto para cleaning
-      if (reservation?.room_id) {
-        await supabase
-          .from("rooms")
-          .update({ status: "cleaning" })
-          .eq("id", reservation.room_id);
-      }
-
       return data;
     },
         onSuccess: async (updatedReservation) => {
