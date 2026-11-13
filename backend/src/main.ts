@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
+import { buildCorsOptions } from "./config/cors-options";
 import { RedisIoAdapter } from "./realtime/redis-io.adapter";
 
 async function bootstrap() {
@@ -19,7 +20,7 @@ async function bootstrap() {
     }),
   );
   app.enableShutdownHooks();
-  app.enableCors({ origin: true, credentials: true });
+  app.enableCors(buildCorsOptions(config));
 
   const redisUrl = config.getOrThrow<string>("REDIS_URL");
   const redisAdapter = new RedisIoAdapter(app);

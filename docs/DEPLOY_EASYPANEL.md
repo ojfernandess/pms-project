@@ -29,9 +29,13 @@ O serviço **postgres** do compose só arranca com o profile `local-db` (desenvo
 | Serviço Compose | Porta interna | Exemplo de domínio |
 | --- | --- | --- |
 | `frontend` | **80** | `app.seudominio.com` |
-| `backend` | **3000** | `api.seudominio.com` |
+| `backend` | **3000** | `api.seudominio.com` (webhooks / integrações; opcional para o browser) |
 
 O `worker` não precisa de domínio nem porta publicada.
+
+**Browser sem CORS (recomendado no Compose):** o `nginx.conf` do frontend faz proxy de `/rest`, `/auth`, `/functions`, `/storage` e `/socket.io` para `backend:3000`. Defina no build `VITE_PMS_API_URL` **igual** a `VITE_APP_URL` (ex. `https://sandbox.stayos.com.br`). Mantém `api.seudominio.com` só para webhooks externos.
+
+**Erro «blocked by CORS» com `VITE_PMS_API_URL` noutro domínio:** no DevTools, abra o pedido **OPTIONS** — se o status for **502** ou HTML do Easypanel, o proxy não está a chegar ao Nest (não é falta de header). Corrija o domínio da API → serviço `backend:3000`. Se for **200/204** sem `Access-Control-Allow-Origin`, no backend defina `PUBLIC_APP_URL` e `CORS_ORIGINS=https://sandbox.stayos.com.br` e faça redeploy da API.
 
 ### Aviso «problemas na configuração do Docker Compose»
 
@@ -98,7 +102,7 @@ Variáveis **opcionais** (lidas de `process.env`, não estão todas no `validate
 - `STORAGE_DIR` — diretório para ficheiros (`backend/storage`). Monta **volume persistente** no Easypanel se não quiseres perder uploads ao redeploy.
 - `SUPABASE_SERVICE_ROLE_KEY` — só para jobs que comparam bearer interno (ex. ack worker); **não** expor no frontend.
 
-4. **Arranque:** o `backend/Dockerfile` corre `npx prisma migrate deploy` antes de `node dist/main.js`. Só use contra a base que pretende migrar; em produção Supabase, confirma que as migrações do repo são compatíveis com o que já está aplicado.
+4. **Arranque / Prisma:** com `DATABASE_URL` no **Supabase** (base já cheia), define `PRISMA_MIGRATE_ON_START=false` — senão o contentor morre com **P3005** e o domínio da API devolve **502**. Corre uma vez o SQL em [scripts/migration/prisma-nest-tables.sql](../scripts/migration/prisma-nest-tables.sql) no SQL Editor do Supabase (tabelas de refresh token e reset de password). Postgres **vazio** no compose (`local-db`): `PRISMA_MIGRATE_ON_START=true`.
 
 5. **Domínio:** ex. `https://api.seudominio.com` → apontar ao serviço na porta 3000.
 
