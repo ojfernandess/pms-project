@@ -36,6 +36,17 @@
 
 ### Opção B1 — Só env no Easypanel (sem comandos manuais)
 
+**Logs `Tabela não encontrada: reservations` (e stripe_*, notifications, RPCs):** o import *core* só criou ~12 tabelas. É preciso **schema completo** (`APP_IMPORT_SUPABASE_SCHEMA=once`) e depois **dados** (`APP_IMPORT_DISCOVER_TABLES=public,auth`).
+
+Sequência típica no **pms-backend** (volume `/app/storage` montado):
+
+| Passo | Variáveis | Notas |
+|-------|-----------|--------|
+| 1 Schema | `APP_IMPORT_SUPABASE_SCHEMA=once` + URLs Supabase/destino | `pg_dump --schema-only` → destino; marcador `.supabase-schema-imported` |
+| 2 Dados | `APP_IMPORT_SUPABASE_DATA=force`, `APP_IMPORT_SCHEMA=skip`, `APP_IMPORT_DISCOVER_TABLES=public,auth` | Copia todas as tabelas (pode demorar) |
+| 3 Permissões | `APP_RUN_DB_GRANTS=true` (um restart) | Corrige 42501 |
+| 4 Cutover | Remover `SUPABASE_*` e `APP_IMPORT_*`; manter `PMS_DB_QUERY_ROLE=service_role` até RLS | Rebuild se alterou imagem |
+
 No serviço **pms-backend** (não no worker), na **primeira** migração para `pms-postgres`:
 
 | Variável | Valor |

@@ -30,6 +30,20 @@ function loadTables(filePath) {
     .filter((line) => line && !line.startsWith("#"));
 }
 
+async function discoverTables(client, schemaList) {
+  const { rows } = await client.query(
+    `SELECT n.nspname AS schema, c.relname AS table
+     FROM pg_class c
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relkind = 'r'
+       AND n.nspname = ANY($1::text[])
+       AND NOT (n.nspname = 'auth' AND c.relname LIKE 'schema_%')
+     ORDER BY n.nspname, c.relname`,
+    [schemaList],
+  );
+  return rows.map((r) => `${r.schema}.${r.table}`);
+}
+
 function fqTable(name) {
   const parts = name.split(".");
   if (parts.length !== 2) throw new Error(`Tabela inválida (use schema.tabela): ${name}`);
@@ -359,15 +373,24 @@ async function main() {
     return;
   }
 
-  const tables = loadTables(TABLES_FILE);
-  if (tables.length === 0) throw new Error(`Nenhuma tabela em ${TABLES_FILE}`);
+  const discover = process.env.APP_IMPORT_DISCOVER_TABLES?.trim();
+  let tables = loadTables(TABLES_FILE);
 
   const source = new pg.Client(clientConfig(sourceUrl));
   const target = new pg.Client(clientConfig(targetUrl));
 
-  console.log(`Import Supabase → destino (${tables.length} tabelas, modo=${MODE}, COPY_MODE=node)`);
   await source.connect();
   await target.connect();
+
+  if (discover) {
+    const schemas = discover.split(",").map((s) => s.trim()).filter(Boolean);
+    if (schemas.length === 0) throw new Error("APP_IMPORT_DISCOVER_TABLES vazio");
+    tables = await discoverTables(source, schemas);
+    console.log(`APP_IMPORT_DISCOVER_TABLES: ${tables.length} tabelas em [${schemas.join(", ")}]`);
+  }
+  if (tables.length === 0) throw new Error(`Nenhuma tabela (manifesto ou discover)`);
+
+  console.log(`Import Supabase → destino (${tables.length} tabelas, modo=${MODE}, COPY_MODE=node)`);
 
   await target.query("SELECT pg_advisory_lock($1)", [IMPORT_LOCK_KEY]);
 
@@ -394,6 +417,8 @@ async function main() {
 
   if (IMPORT_SCHEMA === "from_supabase") {
     await syncSchemasFromSource(source, target, tables);
+  } else if (IMPORT_SCHEMA !== "skip" && IMPORT_SCHEMA !== "none") {
+    console.log(`APP_IMPORT_SCHEMA=${IMPORT_SCHEMA}: não sincroniza DDL mínimo (use from_supabase ou pg_dump schema).`);
   }
 
   if (MODE === "force") {

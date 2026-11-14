@@ -14,7 +14,12 @@ else
   echo "Skipping prisma migrate deploy (set PRISMA_MIGRATE_ON_START=true for empty Postgres or after baseline)."
 fi
 
-# Migração Supabase → Postgres interno (Easypanel): APP_IMPORT_SUPABASE_DATA=once|force + SUPABASE_DATABASE_URL
+# DDL completo (tabelas + RPCs): APP_IMPORT_SUPABASE_SCHEMA=once|force (antes dos dados)
+if [ -f ./scripts/import-supabase-schema.sh ]; then
+  ./scripts/import-supabase-schema.sh
+fi
+
+# Dados: APP_IMPORT_SUPABASE_DATA=once|force (+ APP_IMPORT_DISCOVER_TABLES=public,auth após schema)
 if [ -f ./scripts/import-supabase-data.sh ]; then
   ./scripts/import-supabase-data.sh
 fi

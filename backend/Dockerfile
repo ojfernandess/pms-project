@@ -24,7 +24,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && apt-get install -y --no-install-recommends ca-certificates openssl postgresql-client \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/package.json ./
@@ -34,10 +34,11 @@ COPY --from=build /app/prisma ./prisma
 COPY scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
 COPY scripts/docker-entrypoint-worker.sh ./scripts/docker-entrypoint-worker.sh
 COPY scripts/import-supabase-data.sh ./scripts/import-supabase-data.sh
+COPY scripts/import-supabase-schema.sh ./scripts/import-supabase-schema.sh
 COPY scripts/import-supabase-data.mjs ./scripts/import-supabase-data.mjs
 COPY scripts/migration ./scripts/migration
 COPY scripts/apply-db-grants.mjs ./scripts/apply-db-grants.mjs
-RUN chmod +x ./scripts/docker-entrypoint.sh ./scripts/docker-entrypoint-worker.sh ./scripts/import-supabase-data.sh
+RUN chmod +x ./scripts/docker-entrypoint.sh ./scripts/docker-entrypoint-worker.sh ./scripts/import-supabase-data.sh ./scripts/import-supabase-schema.sh
 
 EXPOSE 3000
 
