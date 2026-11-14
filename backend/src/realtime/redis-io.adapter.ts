@@ -3,6 +3,7 @@ import { IoAdapter } from "@nestjs/platform-socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import Redis from "ioredis";
 import { ServerOptions } from "socket.io";
+import { safeRedisClose } from "../redis/safe-redis-close";
 
 export class RedisIoAdapter extends IoAdapter {
   private adapterConstructor: ReturnType<typeof createAdapter> | null = null;
@@ -29,7 +30,10 @@ export class RedisIoAdapter extends IoAdapter {
   }
 
   async close(): Promise<void> {
-    await this.pub?.quit();
-    await this.sub?.quit();
+    await safeRedisClose(this.sub);
+    await safeRedisClose(this.pub);
+    this.sub = null;
+    this.pub = null;
+    this.adapterConstructor = null;
   }
 }

@@ -4,6 +4,7 @@ import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { buildCorsOptions } from "./config/cors-options";
+import { registerSocketRedisAdapter } from "./realtime/redis-adapter.shutdown";
 import { RedisIoAdapter } from "./realtime/redis-io.adapter";
 
 async function bootstrap() {
@@ -25,6 +26,7 @@ async function bootstrap() {
   const redisUrl = config.getOrThrow<string>("REDIS_URL");
   const redisAdapter = new RedisIoAdapter(app);
   await redisAdapter.connectToRedis(redisUrl);
+  registerSocketRedisAdapter(redisAdapter);
   app.useWebSocketAdapter(redisAdapter);
 
   const port = Number(config.get("PORT") ?? 3000);

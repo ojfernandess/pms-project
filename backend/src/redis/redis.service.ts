@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import Redis from "ioredis";
+import { safeRedisClose } from "./safe-redis-close";
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -20,13 +21,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    try {
-      if (this.client.status === "ready" || this.client.status === "connect") {
-        await this.client.quit();
-      }
-    } catch {
-      this.client.disconnect();
-    }
+    await safeRedisClose(this.client);
   }
 
   async ping(): Promise<void> {

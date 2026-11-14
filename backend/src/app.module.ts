@@ -8,6 +8,7 @@ import { PmsModule } from "./pms/pms.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { QueuesModule } from "./queues/queues.module";
 import { RealtimeModule } from "./realtime/realtime.module";
+import { SocketRedisAdapterShutdown } from "./realtime/redis-adapter.shutdown";
 import { RedisModule } from "./redis/redis.module";
 import { validateEnv } from "./config/env.validation";
 
@@ -27,5 +28,6 @@ import { validateEnv } from "./config/env.validation";
     RealtimeModule,
     HealthModule,
   ],
+  providers: [SocketRedisAdapterShutdown],
 })
 export class AppModule {}
