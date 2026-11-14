@@ -108,7 +108,7 @@ function generate(input) {
     type: "app",
     data: {
       serviceName: input.workerServiceName,
-      env: backendEnv,
+      env: `${backendEnv}\nPMS_RUN_MODE=worker`,
       source: {
         type: "github",
         owner: input.githubOwner,

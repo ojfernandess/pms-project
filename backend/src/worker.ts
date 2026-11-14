@@ -3,11 +3,13 @@ import { NestFactory } from "@nestjs/core";
 import { WorkerModule } from "./worker.module";
 
 async function bootstrap() {
+  // Stdout imediato (antes do Nest) — visível no Easypanel mesmo com bufferLogs.
+  console.log("[Worker] bootstrapping BullMQ...");
   const app = await NestFactory.createApplicationContext(WorkerModule, {
-    bufferLogs: true,
+    bufferLogs: false,
   });
   app.enableShutdownHooks();
-  new Logger("Worker").log("BullMQ worker running");
+  new Logger("Worker").log("BullMQ worker running — jobs: send-daily-digest, send-checkout-reminders");
 }
 
 bootstrap().catch((error: unknown) => {

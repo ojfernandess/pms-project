@@ -68,17 +68,13 @@ Modelo: [../env/postgres.env.example](../env/postgres.env.example).
 2. Nome: `worker`.
 3. **Mesmo repositório** e **mesmo** `backend/Dockerfile` (pode reutilizar imagem do backend se o Easypanel permitir).
 4. **Sem domínio** e **sem porta publicada**.
-5. **Start command (override)** — não use o entrypoint da API (`docker-entrypoint.sh` chama `main.js`):
+5. **Environment obrigatória:** `PMS_RUN_MODE=worker` (o CMD default da imagem continua a ser o entrypoint da API; esta variável muda para `worker.js`).
 
-```sh
-./scripts/docker-entrypoint-worker.sh
-```
+   Opcional: comando `./scripts/docker-entrypoint-worker.sh` ou `node dist/worker.js`.
 
-Ou: `node dist/worker.js`
+   Sem `PMS_RUN_MODE=worker` existem **duas APIs**, vários `Skipping prisma migrate` nos logs e erro `EMAXCONNSESSION` no Supabase.
 
-Se o worker arrancar com o mesmo comando da API, existem **duas APIs** e o pool Supabase (15 sessões) esgota rápido.
-
-6. **Environment:** igual ao backend (ver [../env/worker.env.example](../env/worker.env.example)), especialmente `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, tokens internos.
+6. **Environment:** igual ao backend (ver [../env/worker.env.example](../env/worker.env.example)) + `PMS_RUN_MODE=worker`; `DATABASE_URL` em **6543** com `pgbouncer=true&connection_limit=2`.
 
 Reinicie o worker sem afetar a API.
 
