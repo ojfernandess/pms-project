@@ -29,4 +29,9 @@ if [ "${APP_RUN_DB_GRANTS:-false}" = "true" ] && [ -f ./scripts/apply-db-grants.
   node ./scripts/apply-db-grants.mjs || echo "WARN: apply-db-grants falhou" >&2
 fi
 
+# FKs (embeds reservations->rooms): cópia a partir da origem se o schema veio sem constraints
+if [ "${APP_IMPORT_SYNC_FKS:-false}" = "true" ] && [ -f ./scripts/sync-foreign-keys-from-supabase.mjs ]; then
+  node ./scripts/sync-foreign-keys-from-supabase.mjs || echo "WARN: sync FKs falhou" >&2
+fi
+
 exec node dist/main.js

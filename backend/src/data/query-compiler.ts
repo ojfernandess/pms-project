@@ -185,7 +185,7 @@ function projection(alias: string, table: string, fields: SelectField[], catalog
 }
 
 function embedExpression(parentAlias: string, parentTable: string, field: Extract<SelectField, { kind: "embed" }>, catalog: Catalog, values: unknown[]): { sql: string; exists: string | null } {
-  const link = resolveLink(parentTable, field.target, field.hint, catalog.fks);
+  const link = resolveLink(parentTable, field.target, field.hint, catalog.fks, catalog.types);
   const childAlias = `e${values.length}_${parentAlias.replace(/\W/g, "")}`;
   const projected = projection(childAlias, link.childTable, field.fields, catalog, values);
   const where = `${link.where(parentAlias, childAlias)}${projected.extraWhere.length ? ` AND ${projected.extraWhere.join(" AND ")}` : ""}`;
@@ -203,7 +203,48 @@ type Link = {
   where: (parentAlias: string, childAlias: string) => string;
 };
 
-export function resolveLink(parentTable: string, target: string, hint: string | undefined, fks: ForeignKey[]): Link {
+/** Colunas FK mais usadas nos selects do front (quando pg_constraint ainda não foi restaurado). */
+const EMBED_COLUMN_BY_TARGET: Record<string, string[]> = {
+  room_categories: ["category_id"],
+  pricing_plans: ["pricing_plan_id"],
+  rooms: ["room_id"],
+  clients: ["client_id", "guest_id"],
+  pricing_seasons: ["season_id"],
+};
+
+function singularLink(childTable: string, parentColumn: string, childColumn = "id"): Link {
+  return {
+    childTable,
+    singular: true,
+    where: (parent, child) => `${parent}.${quoteIdent(parentColumn)} = ${child}.${quoteIdent(childColumn)}`,
+  };
+}
+
+function inferLinkFromColumns(
+  parentTable: string,
+  target: string,
+  hint: string | undefined,
+  types: Record<string, Record<string, ColumnType>> | undefined,
+): Link | null {
+  const cols = types?.[parentTable];
+  if (!cols) return null;
+  if (hint && cols[hint]) return singularLink(target, hint);
+  const guessed = [
+    ...(EMBED_COLUMN_BY_TARGET[target] ?? []),
+    target.endsWith("s") && !target.endsWith("ss") ? `${target.slice(0, -1)}_id` : `${target}_id`,
+  ];
+  const matches = [...new Set(guessed)].filter((col) => cols[col]);
+  if (matches.length === 1) return singularLink(target, matches[0]);
+  return null;
+}
+
+export function resolveLink(
+  parentTable: string,
+  target: string,
+  hint: string | undefined,
+  fks: ForeignKey[],
+  types?: Record<string, Record<string, ColumnType>>,
+): Link {
   const hinted = (fk: ForeignKey) => !hint || fk.constraint === hint || fk.column === hint;
   const fromParent = fks.filter((fk) => fk.table === parentTable && hinted(fk) && (fk.foreignTable === target || fk.column === target || fk.constraint === target));
   const fromChild = fks.filter((fk) => fk.foreignTable === parentTable && hinted(fk) && (fk.table === target || fk.constraint === target));
@@ -231,6 +272,8 @@ export function resolveLink(parentTable: string, target: string, hint: string | 
       where: (parent, child) => `${parent}.${quoteIdent(fk.column)} = ${child}.${quoteIdent(fk.foreignColumn)}`,
     };
   }
+  const inferred = inferLinkFromColumns(parentTable, target, hint, types);
+  if (inferred) return inferred;
   throw new Error(`Relação ambígua ou inexistente: ${parentTable} -> ${target}`);
 }
 
@@ -257,7 +300,7 @@ function compare(table: string, alias: string, column: string, op: string, value
   if (column.includes(".")) {
     const [relation, childColumn, extra] = column.split(".");
     if (!relation || !childColumn || extra) throw new Error(`Filtro inválido: ${column}`);
-    const link = resolveLink(table, relation, undefined, catalog.fks);
+    const link = resolveLink(table, relation, undefined, catalog.fks, catalog.types);
     const childAlias = "c";
     const inner = compare(link.childTable, childAlias, childColumn, op, value, catalog, values).replaceAll(`${childAlias}.`, `${childAlias}.`);
     return `EXISTS (SELECT 1 FROM ${quoteIdent(link.childTable)} ${childAlias} WHERE ${link.where(alias, childAlias)} AND ${inner})`;

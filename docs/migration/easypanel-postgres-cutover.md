@@ -44,7 +44,7 @@ Sequência típica no **pms-backend** (volume `/app/storage` montado):
 |-------|-----------|--------|
 | 1 Schema | `APP_IMPORT_SUPABASE_SCHEMA=once` + URLs Supabase/destino | `pg_dump --schema-only` → destino; marcador `.supabase-schema-imported` |
 | 2 Dados | `APP_IMPORT_SUPABASE_DATA=force`, `APP_IMPORT_SCHEMA=skip`, `APP_IMPORT_DISCOVER_TABLES=public,auth` | Copia todas as tabelas (pode demorar) |
-| 3 Permissões | `APP_RUN_DB_GRANTS=true` (um restart) | Corrige 42501 |
+| 3 FKs + permissões | `APP_IMPORT_SYNC_FKS=true`, `APP_RUN_DB_GRANTS=true` (um restart cada) | Embeds e 42501 |
 | 4 Cutover | Remover `SUPABASE_*` e `APP_IMPORT_*`; manter `PMS_DB_QUERY_ROLE=service_role` até RLS | Rebuild se alterou imagem |
 
 No serviço **pms-backend** (não no worker), na **primeira** migração para `pms-postgres`:

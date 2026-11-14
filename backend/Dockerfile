@@ -38,6 +38,7 @@ COPY scripts/import-supabase-schema.sh ./scripts/import-supabase-schema.sh
 COPY scripts/import-supabase-data.mjs ./scripts/import-supabase-data.mjs
 COPY scripts/migration ./scripts/migration
 COPY scripts/apply-db-grants.mjs ./scripts/apply-db-grants.mjs
+COPY scripts/sync-foreign-keys-from-supabase.mjs ./scripts/sync-foreign-keys-from-supabase.mjs
 RUN chmod +x ./scripts/docker-entrypoint.sh ./scripts/docker-entrypoint-worker.sh ./scripts/import-supabase-data.sh ./scripts/import-supabase-schema.sh
 
 EXPOSE 3000
