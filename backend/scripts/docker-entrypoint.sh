@@ -39,4 +39,9 @@ if [ "${APP_IMPORT_SYNC_FUNCTIONS:-false}" = "true" ] && [ -f ./scripts/sync-pub
   node ./scripts/sync-public-functions-from-supabase.mjs || echo "WARN: sync functions falhou" >&2
 fi
 
+# RPCs no repositório (não exige SUPABASE_DATABASE_URL) — corrige /rates/quote 42883
+if [ -f ./scripts/apply-bundled-rpcs.sh ]; then
+  ./scripts/apply-bundled-rpcs.sh
+fi
+
 exec node dist/main.js

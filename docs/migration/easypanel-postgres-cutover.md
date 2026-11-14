@@ -64,7 +64,7 @@ Depois do import OK: remova ou comente `SUPABASE_DATABASE_URL` e `APP_IMPORT_SUP
 
 Tabelas copiadas: [../../backend/scripts/migration/core-data-tables.txt](../../backend/scripts/migration/core-data-tables.txt). Para o PMS completo, use ainda dump/restore manual (opção B2) ou amplie o manifest.
 
-**Erro `42883` / `POST /rates/quote` 500:** falta `public.calculate_rate_price(...)` no destino — use `APP_IMPORT_SYNC_FUNCTIONS=true` (ou refaça `APP_IMPORT_SUPABASE_SCHEMA=force` em DB limpo).
+**Erro `42883` / `POST /rates/quote` 500:** falta `public.calculate_rate_price(...)`. Com **rebuild recente**: `APP_APPLY_BUNDLED_RPCS=force` (não precisa `SUPABASE_DATABASE_URL`) ou `APP_IMPORT_SYNC_FUNCTIONS=true` + URL Supabase.
 
 **Erro `42501 permission denied`:** falta GRANT para `authenticated`. No backend: `APP_RUN_DB_GRANTS=true` (restart uma vez) ou reimport; env `PMS_DB_QUERY_ROLE=service_role` até RLS completo.
 
