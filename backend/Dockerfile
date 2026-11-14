@@ -1,24 +1,31 @@
-FROM node:20-alpine AS build
+FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
 
-# bcrypt e outros precisam de toolchain no Alpine; Easypanel pode injetar NODE_ENV=production no build.
-RUN apk add --no-cache python3 make g++
+# Debian: bcrypt/openssl; toolchain só se algum pacote compilar no postinstall.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates python3 make g++ openssl \
+  && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 COPY prisma ./prisma
 COPY nest-cli.json tsconfig.json tsconfig.build.json ./
 COPY src ./src
 
 ENV NODE_ENV=development
-RUN npm ci --include=dev
-RUN npx prisma generate
-RUN npm run build
+RUN npm ci --include=dev --no-audit --no-fund \
+  && npx prisma generate \
+  && npm run build \
+  && npm prune --omit=dev
 
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 ENV NODE_ENV=production
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules

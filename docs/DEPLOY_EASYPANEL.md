@@ -103,7 +103,7 @@ Usa a mesma URL em **pms-api** e **pms-worker**.
 
 1. **App** → Build from Git → Dockerfile path: `backend/Dockerfile`.
 2. **Porta exposta:** `3000`.
-3. **Build vs runtime:** variáveis (`DATABASE_URL`, `JWT_SECRET`, etc.) são **só em runtime** (Environment ao correr o contentor), não precisam de **Build Arguments**. Se o Easypanel enviar `NODE_ENV=production` no `docker build`, o `npm ci` pode falhar ou omitir devDependencies — o `backend/Dockerfile` força `npm ci --include=dev` na stage de build.
+3. **Build vs runtime:** variáveis (`DATABASE_URL`, `JWT_SECRET`, etc.) são **só em runtime** (Environment ao correr o contentor), não precisam de **Build Arguments**. Se o Easypanel enviar `NODE_ENV=production` no `docker build`, o `npm ci` pode falhar ou omitir devDependencies — o `backend/Dockerfile` força `npm ci --include=dev` na stage de build. Erro `retriesLeft` no `npm ci` = rede/registry instável no servidor: repete o build ou usa imagem `node:20-bookworm-slim` (já no Dockerfile) com `.npmrc` de retries.
 4. **Variáveis de runtime** (obrigatórias — ver `backend/.env.example`):
 
 | Variável | Notas |
