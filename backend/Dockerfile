@@ -38,6 +38,7 @@ COPY scripts/import-supabase-schema.sh ./scripts/import-supabase-schema.sh
 COPY scripts/import-supabase-data.mjs ./scripts/import-supabase-data.mjs
 COPY scripts/migration ./scripts/migration
 COPY scripts/apply-bundled-rpcs.sh ./scripts/apply-bundled-rpcs.sh
+COPY scripts/ensure-bundled-rpcs.mjs ./scripts/ensure-bundled-rpcs.mjs
 COPY scripts/apply-db-grants.mjs ./scripts/apply-db-grants.mjs
 COPY scripts/sync-foreign-keys-from-supabase.mjs ./scripts/sync-foreign-keys-from-supabase.mjs
 COPY scripts/sync-public-functions-from-supabase.mjs ./scripts/sync-public-functions-from-supabase.mjs
