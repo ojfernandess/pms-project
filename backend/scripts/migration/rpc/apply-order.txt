@@ -4,6 +4,7 @@ calculate_rate_price.sql
 grant_calculate_rate_price.sql
 cancel_expired_preregistrations.sql
 user_can_access_establishment.sql
+reservation_code_trigger.sql
 create_reservation_with_lock.sql
 get_fnrh_settings_public.sql
 ari_rate_inventory_grid.sql

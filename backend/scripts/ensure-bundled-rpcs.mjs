@@ -19,6 +19,7 @@ const REQUIRED_RPCS = [
     name: "user_can_access_establishment",
     args: "p_user_id uuid, p_establishment_id uuid",
   },
+  { name: "generate_reservation_code", args: "" },
   {
     name: "create_reservation_with_lock",
     args:

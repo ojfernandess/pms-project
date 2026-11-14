@@ -179,6 +179,7 @@ BEGIN
   END IF;
 
   INSERT INTO public.reservations (
+    reservation_code,
     establishment_id,
     room_id,
     category_id,
@@ -203,6 +204,10 @@ BEGIN
     coupon_id
   )
   VALUES (
+    COALESCE(
+      NULLIF(trim(p_reservation_data->>'reservation_code'), ''),
+      public.generate_reservation_code()
+    ),
     p_establishment_id,
     v_room_id,
     v_category_id,
