@@ -15,6 +15,10 @@ const REQUIRED_RPCS = [
     args: "p_establishment_id uuid, p_category_id uuid, p_pricing_plan_id uuid, p_date date, p_adults integer, p_children integer",
   },
   { name: "cancel_expired_preregistrations", args: "" },
+  {
+    name: "user_can_access_establishment",
+    args: "p_user_id uuid, p_establishment_id uuid",
+  },
   { name: "get_fnrh_settings_public", args: "p_establishment_id uuid" },
   {
     name: "calculate_category_availability",
