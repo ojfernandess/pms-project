@@ -33,7 +33,7 @@ if [ ! -d "$rpc_dir" ]; then
 fi
 
 echo "=== Aplicando RPCs em $rpc_dir ==="
-for f in calculate_rate_price.sql grant_calculate_rate_price.sql; do
+for f in calculate_rate_price.sql grant_calculate_rate_price.sql cancel_expired_preregistrations.sql; do
   path="$rpc_dir/$f"
   if [ ! -f "$path" ]; then
     echo "WARN: falta $path" >&2
@@ -43,13 +43,21 @@ for f in calculate_rate_price.sql grant_calculate_rate_price.sql; do
   psql "$DATABASE_URL" -v ON_ERROR_STOP=0 -f "$path" || true
 done
 
+ok=0
 if psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'calculate_rate_price' LIMIT 1" | grep -q 1; then
   echo "OK: public.calculate_rate_price presente."
+  ok=1
 else
   echo "ERROR: calculate_rate_price ainda ausente após bundled RPCs." >&2
-  if [ "${APP_APPLY_BUNDLED_RPCS_STRICT:-false}" = "true" ]; then
-    exit 1
-  fi
+fi
+if psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'cancel_expired_preregistrations' LIMIT 1" | grep -q 1; then
+  echo "OK: public.cancel_expired_preregistrations presente."
+else
+  echo "ERROR: cancel_expired_preregistrations ainda ausente." >&2
+  ok=0
+fi
+if [ "$ok" != "1" ] && [ "${APP_APPLY_BUNDLED_RPCS_STRICT:-false}" = "true" ]; then
+  exit 1
 fi
 
 mkdir -p "$(dirname "$marker")"
