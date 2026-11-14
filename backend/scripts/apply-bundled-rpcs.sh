@@ -57,7 +57,7 @@ else
   done
 fi
 
-for fn in calculate_rate_price cancel_expired_preregistrations sync_rate_inventory_from_reservations; do
+for fn in calculate_rate_price cancel_expired_preregistrations sync_rate_inventory_from_reservations create_reservation_with_lock; do
   if psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = '${fn}' LIMIT 1" | grep -q 1; then
     echo "OK: public.${fn} presente."
   else

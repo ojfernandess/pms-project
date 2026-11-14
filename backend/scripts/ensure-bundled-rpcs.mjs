@@ -19,6 +19,11 @@ const REQUIRED_RPCS = [
     name: "user_can_access_establishment",
     args: "p_user_id uuid, p_establishment_id uuid",
   },
+  {
+    name: "create_reservation_with_lock",
+    args:
+      "p_reservation_data jsonb, p_checkin_date date, p_checkout_date date, p_establishment_id uuid, p_room_id uuid, p_category_id uuid",
+  },
   { name: "get_fnrh_settings_public", args: "p_establishment_id uuid" },
   {
     name: "calculate_category_availability",
