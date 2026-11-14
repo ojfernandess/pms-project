@@ -11,3 +11,4 @@ ari_rate_inventory_grid.sql
 company_has_feature_access.sql
 create_notification_for_establishment.sql
 get_resolved_email_template.sql
+log_activity.sql

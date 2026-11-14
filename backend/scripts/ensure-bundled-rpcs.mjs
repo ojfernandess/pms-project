@@ -51,6 +51,11 @@ const REQUIRED_RPCS = [
     name: "get_resolved_email_template",
     args: "p_event_type email_event_type, p_establishment_id uuid",
   },
+  {
+    name: "log_activity",
+    args:
+      "p_establishment_id uuid, p_user_id uuid, p_action_type text, p_entity_type text, p_description text, p_entity_id uuid, p_entity_code text, p_old_values jsonb, p_new_values jsonb, p_metadata jsonb",
+  },
 ];
 
 function loadApplyOrder(rpcDir) {

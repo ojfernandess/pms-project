@@ -24,6 +24,14 @@ if [ -n "${DATABASE_URL:-}" ] && [ -f ./scripts/migration/auth-compat.sql ]; the
     || echo "WARN: auth-compat.sql falhou" >&2
 fi
 
+# Com migração estável, force em todo restart sobrecarrega o Postgres e causa "Engine is not yet connected"
+if [ "${PMS_MIGRATION_COMPLETE:-false}" = "true" ] && [ "${APP_APPLY_BUNDLED_RPCS:-auto}" = "force" ]; then
+  if [ "${PMS_ALLOW_BUNDLED_RPCS_FORCE:-false}" != "true" ]; then
+    echo "PMS_MIGRATION_COMPLETE — APP_APPLY_BUNDLED_RPCS=force ignorado (use auto ou PMS_ALLOW_BUNDLED_RPCS_FORCE=true)." >&2
+    export APP_APPLY_BUNDLED_RPCS=auto
+  fi
+fi
+
 # Antes do import longo: calculate_rate_price (evita 42883 se a API subir durante force import)
 if [ -f ./scripts/ensure-bundled-rpcs.mjs ]; then
   node ./scripts/ensure-bundled-rpcs.mjs || echo "WARN: ensure-bundled-rpcs falhou" >&2
@@ -63,7 +71,12 @@ fi
 
 # Reaplica RPC após import/TRUNCATE (import longo + réplicas Easypanel)
 if [ -f ./scripts/ensure-bundled-rpcs.mjs ]; then
-  APP_APPLY_BUNDLED_RPCS="${APP_APPLY_BUNDLED_RPCS:-auto}" node ./scripts/ensure-bundled-rpcs.mjs || echo "WARN: ensure-bundled-rpcs (pós-import) falhou" >&2
+  bundled_mode="${APP_APPLY_BUNDLED_RPCS:-auto}"
+  if [ "${PMS_MIGRATION_COMPLETE:-false}" = "true" ] && [ "$bundled_mode" = "force" ] \
+    && [ "${PMS_ALLOW_BUNDLED_RPCS_FORCE:-false}" != "true" ]; then
+    bundled_mode=auto
+  fi
+  APP_APPLY_BUNDLED_RPCS="$bundled_mode" node ./scripts/ensure-bundled-rpcs.mjs || echo "WARN: ensure-bundled-rpcs (pós-import) falhou" >&2
 fi
 
 exec node dist/main.js
