@@ -127,7 +127,13 @@ export class DataService {
         }
         const entries = known.filter((key) => Object.prototype.hasOwnProperty.call(input, key));
         const values = entries.map((key) => input[key]);
-        const callArgs = entries.map((key, index) => `${quoteArg(key)} := $${index + 1}`).join(", ");
+        const types = argTypeMap(signature.args);
+        const callArgs = entries
+          .map((key, index) => {
+            const pgType = pgCastType(types.get(key) ?? "text");
+            return `${quoteArg(key)} := $${index + 1}::${pgType}`;
+          })
+          .join(", ");
         const call = `public.${quoteArg(name)}(${callArgs})`;
         if (signature.ret === "void") {
           await tx.$queryRawUnsafe(`SELECT ${call}`, ...values);
@@ -228,6 +234,24 @@ const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function argNames(args: string): string[] {
   return args.split(",").map((part) => part.trim().split(/\s+/)[0]).filter((part) => IDENT.test(part));
+}
+
+function argTypeMap(args: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const part of args.split(",")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$/);
+    if (match && IDENT.test(match[1])) map.set(match[1], match[2]);
+  }
+  return map;
+}
+
+/** Tipos de argumentos vindos de pg_get_function_identity_arguments (ex.: uuid, date). */
+function pgCastType(pgType: string): string {
+  const t = pgType.trim();
+  if (!/^[\w\s\[\]()]+$/i.test(t)) return "text";
+  return t;
 }
 
 function quoteArg(name: string): string {

@@ -24,6 +24,10 @@ const REQUIRED_RPCS = [
     name: "sync_rate_inventory_from_reservations",
     args: "p_establishment_id uuid, p_category_id uuid, p_date date",
   },
+  {
+    name: "company_has_feature_access",
+    args: "p_feature_key text, p_company_id uuid",
+  },
 ];
 
 function loadApplyOrder(rpcDir) {
