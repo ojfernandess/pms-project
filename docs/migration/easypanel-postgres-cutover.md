@@ -58,7 +58,9 @@ No serviço **pms-backend** (não no worker), na **primeira** migração para `p
 | `APP_IMPORT_SCHEMA` | `from_supabase` (padrão): cria schemas `auth`/`public` e tabelas do manifest antes de copiar dados |
 | `PRISMA_MIGRATE_ON_START` | `true` se o destino estiver vazio **e** o schema vier só do Prisma; caso contrário aplique antes o DDL Supabase (Parte A §4) |
 
-Reinicie o **backend**. Os logs devem mostrar `Import Supabase → destino`. O marcador fica em `/app/storage/.supabase-data-imported` (monte volume em `/app/storage`).
+Reinicie o **backend**. Os logs devem mostrar `Import Supabase → destino`.
+
+**Import em loop:** não deixe `APP_IMPORT_SUPABASE_DATA=force` após a primeira cópia bem-sucedida — cada restart apaga e recopia 100+ tabelas e atrasa a API. Use `APP_IMPORT_SCHEMA=skip` com discover. No arranque deve aparecer `=== Bundled RPCs` / `OK: public.calculate_rate_price` **antes** do import (imagem `>= 96ad39a`). O marcador fica em `/app/storage/.supabase-data-imported` (monte volume em `/app/storage`).
 
 Depois do import OK: remova ou comente `SUPABASE_DATABASE_URL` e `APP_IMPORT_SUPABASE_DATA`; mantenha só `DATABASE_URL` no Postgres interno.
 

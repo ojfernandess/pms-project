@@ -436,6 +436,17 @@ async function main() {
   }
   if (tables.length === 0) throw new Error(`Nenhuma tabela (manifesto ou discover)`);
 
+  if (discover && IMPORT_SCHEMA === "from_supabase") {
+    console.warn(
+      "AVISO: APP_IMPORT_DISCOVER_TABLES com APP_IMPORT_SCHEMA=from_supabase — use APP_IMPORT_SCHEMA=skip após pg_dump schema.",
+    );
+  }
+  if (MODE === "force") {
+    console.warn(
+      "AVISO: APP_IMPORT_SUPABASE_DATA=force reimporta em CADA restart — desative após sucesso (comente a env).",
+    );
+  }
+
   console.log(`Import Supabase → destino (${tables.length} tabelas, modo=${MODE}, COPY_MODE=node)`);
 
   await target.query("SELECT pg_advisory_lock($1)", [IMPORT_LOCK_KEY]);

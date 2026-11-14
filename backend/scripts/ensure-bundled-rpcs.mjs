@@ -79,14 +79,23 @@ async function main() {
     applySqlFileWithPsql(url, filePath);
   }
 
-  const ok = await hasCalculateRatePrice(client);
+  let ok = await hasCalculateRatePrice(client);
+  if (!ok) {
+    const minimal = path.join(rpcDir, "calculate_rate_price_minimal.sql");
+    if (fs.existsSync(minimal)) {
+      console.warn("  tentando calculate_rate_price_minimal.sql (fallback)...");
+      applySqlFileWithPsql(url, minimal);
+      ok = await hasCalculateRatePrice(client);
+    }
+  }
+
   if (ok) {
     console.log("OK: public.calculate_rate_price(uuid, uuid, uuid, date, integer, integer)");
     fs.mkdirSync(path.dirname(marker), { recursive: true });
     fs.writeFileSync(marker, new Date().toISOString());
   } else {
     console.error(
-      "ERROR: calculate_rate_price ainda ausente. Verifique permissões CREATE no Postgres e tabelas rate_calendar / dynamic_pricing_rules.",
+      "ERROR: calculate_rate_price ainda ausente. Verifique permissões CREATE no Postgres e tabelas rate_calendar / room_categories.",
     );
     if ((process.env.APP_APPLY_BUNDLED_RPCS_STRICT || "false").toLowerCase() === "true") {
       await client.end();

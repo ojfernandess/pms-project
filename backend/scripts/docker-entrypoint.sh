@@ -14,6 +14,13 @@ else
   echo "Skipping prisma migrate deploy (set PRISMA_MIGRATE_ON_START=true for empty Postgres or after baseline)."
 fi
 
+# Antes do import longo: calculate_rate_price (evita 42883 se a API subir durante force import)
+if [ -f ./scripts/ensure-bundled-rpcs.mjs ]; then
+  node ./scripts/ensure-bundled-rpcs.mjs || echo "WARN: ensure-bundled-rpcs falhou" >&2
+else
+  echo "WARN: ensure-bundled-rpcs.mjs ausente — faça rebuild da imagem (branch PMS-Backend >= 96ad39a)." >&2
+fi
+
 # DDL completo (tabelas + RPCs): APP_IMPORT_SUPABASE_SCHEMA=once|force (antes dos dados)
 if [ -f ./scripts/import-supabase-schema.sh ]; then
   ./scripts/import-supabase-schema.sh
@@ -21,7 +28,12 @@ fi
 
 # Dados: APP_IMPORT_SUPABASE_DATA=once|force (+ APP_IMPORT_DISCOVER_TABLES=public,auth após schema)
 if [ -f ./scripts/import-supabase-data.sh ]; then
-  ./scripts/import-supabase-data.sh
+  if [ "${PMS_IMPORT_IN_BACKGROUND:-false}" = "true" ]; then
+    echo "Import de dados em background (PMS_IMPORT_IN_BACKGROUND=true); API sobe em seguida."
+    ./scripts/import-supabase-data.sh &
+  else
+    ./scripts/import-supabase-data.sh
+  fi
 fi
 
 # Postgres próprio: GRANTs para roles authenticated/anon (correge 42501 permission denied)
@@ -37,11 +49,6 @@ fi
 # Funções SQL/RPC (calculate_rate_price, cancel_expired_preregistrations, ...)
 if [ "${APP_IMPORT_SYNC_FUNCTIONS:-false}" = "true" ] && [ -f ./scripts/sync-public-functions-from-supabase.mjs ]; then
   node ./scripts/sync-public-functions-from-supabase.mjs || echo "WARN: sync functions falhou" >&2
-fi
-
-# RPCs no repositório — auto cria calculate_rate_price se faltar (42883 /rates/quote)
-if [ -f ./scripts/ensure-bundled-rpcs.mjs ]; then
-  node ./scripts/ensure-bundled-rpcs.mjs || echo "WARN: ensure-bundled-rpcs falhou" >&2
 fi
 
 exec node dist/main.js
