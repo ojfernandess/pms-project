@@ -46,6 +46,10 @@ const CRITICAL = [
   "calculate_category_availability",
   "sync_rate_inventory_from_reservations",
   "get_fnrh_settings_public",
+  "create_notification_for_establishment",
+  "get_resolved_email_template",
+  "user_can_access_establishment",
+  "generate_reservation_code",
 ];
 
 const RATE_PRICE_IDENTITY =

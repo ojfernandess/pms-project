@@ -42,6 +42,15 @@ const REQUIRED_RPCS = [
     name: "company_has_feature_access",
     args: "p_feature_key text, p_company_id uuid",
   },
+  {
+    name: "create_notification_for_establishment",
+    args:
+      "p_establishment_id uuid, p_type notification_type, p_title text, p_message text, p_priority notification_priority, p_metadata jsonb",
+  },
+  {
+    name: "get_resolved_email_template",
+    args: "p_event_type email_event_type, p_establishment_id uuid",
+  },
 ];
 
 function loadApplyOrder(rpcDir) {
