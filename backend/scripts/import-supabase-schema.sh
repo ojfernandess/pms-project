@@ -64,9 +64,11 @@ if [ "$restore_rc" -ne 0 ]; then
   echo "WARN: pg_restore terminou com código $restore_rc (ver /tmp/pg_restore_schema.log)." >&2
 fi
 
-if ! psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'cancel_expired_preregistrations' LIMIT 1" | grep -q 1; then
-  echo "WARN: função public.cancel_expired_preregistrations ausente — repita APP_IMPORT_SUPABASE_SCHEMA=force num DB limpo ou aplique migrações SQL." >&2
-fi
+for fn in cancel_expired_preregistrations calculate_rate_price; do
+  if ! psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = '${fn}' LIMIT 1" | grep -q 1; then
+    echo "WARN: função public.${fn} ausente — use APP_IMPORT_SYNC_FUNCTIONS=true ou refaça o schema." >&2
+  fi
+done
 
 grants="${IMPORT_GRANTS_SQL:-/app/scripts/migration/grant-app-roles.sql}"
 if [ -f "$grants" ]; then

@@ -44,7 +44,7 @@ Sequência típica no **pms-backend** (volume `/app/storage` montado):
 |-------|-----------|--------|
 | 1 Schema | `APP_IMPORT_SUPABASE_SCHEMA=once` + URLs Supabase/destino | `pg_dump --schema-only` → destino; marcador `.supabase-schema-imported` |
 | 2 Dados | `APP_IMPORT_SUPABASE_DATA=force`, `APP_IMPORT_SCHEMA=skip`, `APP_IMPORT_DISCOVER_TABLES=public,auth` | Copia todas as tabelas (pode demorar) |
-| 3 FKs + permissões | `APP_IMPORT_SYNC_FKS=true`, `APP_RUN_DB_GRANTS=true` (um restart cada) | Embeds e 42501 |
+| 3 RPCs + FKs + permissões | `APP_IMPORT_SYNC_FUNCTIONS=true` (+ opc. `SYNC_FUNCTIONS_CRITICAL_ONLY=true`), `APP_IMPORT_SYNC_FKS=true`, `APP_RUN_DB_GRANTS=true` | Corrige 42883 em `/rates/quote`, embeds, 42501 |
 | 4 Cutover | Remover `SUPABASE_*` e `APP_IMPORT_*`; manter `PMS_DB_QUERY_ROLE=service_role` até RLS | Rebuild se alterou imagem |
 
 No serviço **pms-backend** (não no worker), na **primeira** migração para `pms-postgres`:
@@ -63,6 +63,8 @@ Reinicie o **backend**. Os logs devem mostrar `Import Supabase → destino`. O m
 Depois do import OK: remova ou comente `SUPABASE_DATABASE_URL` e `APP_IMPORT_SUPABASE_DATA`; mantenha só `DATABASE_URL` no Postgres interno.
 
 Tabelas copiadas: [../../backend/scripts/migration/core-data-tables.txt](../../backend/scripts/migration/core-data-tables.txt). Para o PMS completo, use ainda dump/restore manual (opção B2) ou amplie o manifest.
+
+**Erro `42883` / `POST /rates/quote` 500:** falta `public.calculate_rate_price(...)` no destino — use `APP_IMPORT_SYNC_FUNCTIONS=true` (ou refaça `APP_IMPORT_SUPABASE_SCHEMA=force` em DB limpo).
 
 **Erro `42501 permission denied`:** falta GRANT para `authenticated`. No backend: `APP_RUN_DB_GRANTS=true` (restart uma vez) ou reimport; env `PMS_DB_QUERY_ROLE=service_role` até RLS completo.
 

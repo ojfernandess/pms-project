@@ -34,4 +34,9 @@ if [ "${APP_IMPORT_SYNC_FKS:-false}" = "true" ] && [ -f ./scripts/sync-foreign-k
   node ./scripts/sync-foreign-keys-from-supabase.mjs || echo "WARN: sync FKs falhou" >&2
 fi
 
+# Funções SQL/RPC (calculate_rate_price, cancel_expired_preregistrations, ...)
+if [ "${APP_IMPORT_SYNC_FUNCTIONS:-false}" = "true" ] && [ -f ./scripts/sync-public-functions-from-supabase.mjs ]; then
+  node ./scripts/sync-public-functions-from-supabase.mjs || echo "WARN: sync functions falhou" >&2
+fi
+
 exec node dist/main.js
