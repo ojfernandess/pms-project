@@ -51,5 +51,10 @@ if [ "$copy_mode" = "pg" ]; then
   date -Iseconds > "$marker"
   echo "Import pg_restore concluído."
 else
-  node /app/scripts/import-supabase-data.mjs
+  if ! node /app/scripts/import-supabase-data.mjs; then
+    if [ "${APP_IMPORT_STRICT:-false}" = "true" ]; then
+      exit 1
+    fi
+    echo "WARN: import falhou; API sobe na mesma (APP_IMPORT_STRICT=true para abortar)." >&2
+  fi
 fi

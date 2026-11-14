@@ -18,6 +18,9 @@ const BOOTSTRAP_SQL =
   process.env.IMPORT_BOOTSTRAP_SQL || path.join(__dirname, "migration", "bootstrap-target-postgres.sql");
 const RUN_BOOTSTRAP = (process.env.APP_IMPORT_RUN_BOOTSTRAP || "true").toLowerCase() !== "false";
 const IMPORT_SCHEMA = (process.env.APP_IMPORT_SCHEMA || "from_supabase").trim().toLowerCase();
+const IMPORT_LOCK_KEY = 91_524_001;
+
+const NEXTVAL_RE = /nextval\s*\(\s*'([^']+)'::regclass\s*\)/gi;
 
 function loadTables(filePath) {
   const raw = fs.readFileSync(filePath, "utf8");
@@ -71,6 +74,92 @@ async function rowCount(client, fq) {
   return Number(rows[0]?.c ?? 0);
 }
 
+function parseSeqName(raw) {
+  const name = raw.trim();
+  if (name.includes(".")) {
+    const [schema, rel] = name.split(".");
+    return { schema, rel };
+  }
+  return { schema: "public", rel: name };
+}
+
+function collectNextvalSequences(cols) {
+  const out = new Set();
+  for (const c of cols) {
+    if (!c.expr) continue;
+    NEXTVAL_RE.lastIndex = 0;
+    let m;
+    while ((m = NEXTVAL_RE.exec(String(c.expr))) !== null) {
+      out.add(m[1]);
+    }
+  }
+  return out;
+}
+
+async function sequenceExists(client, schema, rel) {
+  const { rows } = await client.query(
+    `SELECT 1 FROM pg_class c
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relkind = 'S' AND n.nspname = $1 AND c.relname = $2`,
+    [schema, rel],
+  );
+  return rows.length > 0;
+}
+
+async function ensureSequenceFromSource(source, target, rawName) {
+  const { schema, rel } = parseSeqName(rawName);
+  if (await sequenceExists(target, schema, rel)) return;
+
+  const fq = `"${schema}"."${rel}"`;
+  const { rows: meta } = await source.query(
+    `SELECT s.seqstart, s.seqincrement, s.seqmax, s.seqmin, s.seqcache, s.seqcycle
+     FROM pg_sequence s
+     JOIN pg_class c ON c.oid = s.seqrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = $1 AND c.relname = $2`,
+    [schema, rel],
+  );
+
+  if (meta.length === 0) {
+    await target.query(`CREATE SEQUENCE IF NOT EXISTS ${fq}`);
+    console.log(`  sequence ${fq} criada (defaults)`);
+    return;
+  }
+
+  const s = meta[0];
+  const cycle = s.seqcycle ? "CYCLE" : "NO CYCLE";
+  await target.query(
+    `CREATE SEQUENCE IF NOT EXISTS ${fq}
+     INCREMENT ${s.seqincrement} MINVALUE ${s.seqmin} MAXVALUE ${s.seqmax}
+     START ${s.seqstart} CACHE ${s.seqcache} ${cycle}`,
+  );
+
+  try {
+    const { rows: lv } = await source.query(`SELECT last_value, is_called FROM ${fq}`);
+    if (lv[0]) {
+      await target.query(`SELECT setval($1::regclass, $2::bigint, $3::boolean)`, [
+        `${schema}.${rel}`,
+        lv[0].last_value,
+        lv[0].is_called,
+      ]);
+    }
+  } catch {
+    // setval opcional
+  }
+  console.log(`  sequence ${fq} criada no destino`);
+}
+
+async function hasPrimaryKey(client, schema, table) {
+  const { rows } = await client.query(
+    `SELECT 1 FROM pg_constraint con
+     JOIN pg_class rel ON rel.oid = con.conrelid
+     JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+     WHERE nsp.nspname = $1 AND rel.relname = $2 AND con.contype = 'p'`,
+    [schema, table],
+  );
+  return rows.length > 0;
+}
+
 async function enumExists(client, schema, typeName) {
   const { rows } = await client.query(
     `SELECT 1 FROM pg_type t
@@ -109,8 +198,15 @@ async function ensureEnumsForTable(source, target, schema, table) {
     if (labels.length === 0) continue;
     await target.query(`CREATE SCHEMA IF NOT EXISTS "${row.enum_schema}"`);
     const literals = labels.map((l) => `'${String(l.enumlabel).replace(/'/g, "''")}'`).join(", ");
-    await target.query(`CREATE TYPE "${row.enum_schema}"."${row.enum_name}" AS ENUM (${literals})`);
-    console.log(`  tipo ${row.enum_schema}.${row.enum_name} criado no destino`);
+    try {
+      await target.query(
+        `CREATE TYPE "${row.enum_schema}"."${row.enum_name}" AS ENUM (${literals})`,
+      );
+      console.log(`  tipo ${row.enum_schema}.${row.enum_name} criado no destino`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/already exists|duplicate key.*pg_type_typname/i.test(msg)) throw e;
+    }
   }
 }
 
@@ -140,6 +236,10 @@ async function ensureTableFromSource(source, target, schema, table) {
     throw new Error(`Origem sem colunas para ${fq}`);
   }
 
+  for (const seqName of collectNextvalSequences(cols)) {
+    await ensureSequenceFromSource(source, target, seqName);
+  }
+
   const colDefs = cols.map((c) => {
     if (c.generated === "s" && c.expr) {
       return `"${c.name}" ${c.pg_type} GENERATED ALWAYS AS (${c.expr}) STORED`;
@@ -167,12 +267,12 @@ async function ensureTableFromSource(source, target, schema, table) {
      WHERE nsp.nspname = $1 AND rel.relname = $2 AND con.contype = 'p'`,
     [schema, table],
   );
-  if (pks[0]?.def) {
+  if (pks[0]?.def && !(await hasPrimaryKey(target, schema, table))) {
     try {
       await target.query(`ALTER TABLE ${fq} ADD CONSTRAINT ${table}_pkey ${pks[0].def}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (!/already exists/i.test(msg)) {
+      if (!/already exists|multiple primary keys/i.test(msg)) {
         console.warn(`  PK em ${fq}: ${msg}`);
       }
     }
@@ -247,6 +347,9 @@ async function main() {
   await source.connect();
   await target.connect();
 
+  await target.query("SELECT pg_advisory_lock($1)", [IMPORT_LOCK_KEY]);
+
+  try {
   if (MODE === "once" || MODE === "true") {
     try {
       const existing = await rowCount(target, `"public"."site_settings"`);
@@ -254,8 +357,6 @@ async function main() {
         console.log(`Destino já tem ${existing} linha(s) em site_settings — importação ignorada (modo once).`);
         fs.mkdirSync(path.dirname(MARKER), { recursive: true });
         fs.writeFileSync(MARKER, new Date().toISOString());
-        await source.end();
-        await target.end();
         return;
       }
     } catch {
@@ -308,11 +409,15 @@ async function main() {
   fs.writeFileSync(MARKER, new Date().toISOString());
   console.log(`Importação concluída (${total} linhas). Marcador: ${MARKER}`);
 
-  await source.end();
-  await target.end();
+  } finally {
+    await target.query("SELECT pg_advisory_unlock($1)", [IMPORT_LOCK_KEY]).catch(() => {});
+    await source.end().catch(() => {});
+    await target.end().catch(() => {});
+  }
 }
 
 main().catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
-  process.exit(1);
+  const strict = (process.env.APP_IMPORT_STRICT || "false").toLowerCase() === "true";
+  process.exit(strict ? 1 : 0);
 });
