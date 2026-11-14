@@ -9,6 +9,7 @@ const catalog: Catalog = {
       checkin_date: "date",
       checkout_date: "date",
     },
+    activity_logs: { id: "uuid", metadata: "json" },
     buildings: { id: "uuid", name: "text" },
     room_categories: { id: "uuid", building_id: "uuid", name: "text" },
   },
@@ -63,6 +64,19 @@ describe("query compiler", () => {
 
   it("refuses an update without a filter", () => {
     expect(() => compileQuery({ action: "update", table: "reservations", values: { status: "cancelled" } }, catalog)).toThrow(/sem filtro/);
+  });
+
+  it("supports json text filters metadata->>key", () => {
+    const compiled = compileQuery(
+      {
+        action: "select",
+        table: "activity_logs",
+        filters: [{ column: "metadata->>reservation_id", op: "eq", value: "abc" }],
+      },
+      catalog,
+    );
+    expect(compiled.sql).toContain(`t."metadata"->>'reservation_id' = $1`);
+    expect(compiled.values).toEqual(["abc"]);
   });
 
   it("casts enum filters to the Postgres enum type", () => {

@@ -33,7 +33,7 @@ if [ ! -d "$rpc_dir" ]; then
 fi
 
 echo "=== Aplicando RPCs em $rpc_dir ==="
-for f in calculate_rate_price.sql grant_calculate_rate_price.sql cancel_expired_preregistrations.sql; do
+for f in calculate_rate_price.sql grant_calculate_rate_price.sql cancel_expired_preregistrations.sql get_fnrh_settings_public.sql; do
   path="$rpc_dir/$f"
   if [ ! -f "$path" ]; then
     echo "WARN: falta $path" >&2

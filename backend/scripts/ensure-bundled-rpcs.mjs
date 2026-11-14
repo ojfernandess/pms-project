@@ -12,10 +12,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RATE_PRICE_SIGNATURE =
   "p_establishment_id uuid, p_category_id uuid, p_pricing_plan_id uuid, p_date date, p_adults integer, p_children integer";
 
+const FNRH_SIGNATURE = "p_establishment_id uuid";
+
 const BUNDLED_FILES = [
   "calculate_rate_price.sql",
   "grant_calculate_rate_price.sql",
   "cancel_expired_preregistrations.sql",
+  "get_fnrh_settings_public.sql",
 ];
 
 function clientConfig(url) {
@@ -41,7 +44,8 @@ async function hasPublicFunction(client, name, identityArgs = null) {
 async function bundledRpcsComplete(client) {
   const rate = await hasPublicFunction(client, "calculate_rate_price", RATE_PRICE_SIGNATURE);
   const cancel = await hasPublicFunction(client, "cancel_expired_preregistrations", "");
-  return rate && cancel;
+  const fnrh = await hasPublicFunction(client, "get_fnrh_settings_public", FNRH_SIGNATURE);
+  return rate && cancel && fnrh;
 }
 
 function applySqlFileWithPsql(url, filePath) {
@@ -101,6 +105,7 @@ async function main() {
   }
 
   const cancelOk = await hasPublicFunction(client, "cancel_expired_preregistrations", "");
+  const fnrhOk = await hasPublicFunction(client, "get_fnrh_settings_public", FNRH_SIGNATURE);
 
   if (rateOk) {
     console.log("OK: public.calculate_rate_price(uuid, uuid, uuid, date, integer, integer)");
@@ -114,9 +119,14 @@ async function main() {
   } else {
     console.error("ERROR: cancel_expired_preregistrations ainda ausente.");
   }
+  if (fnrhOk) {
+    console.log("OK: public.get_fnrh_settings_public(uuid)");
+  } else {
+    console.error("ERROR: get_fnrh_settings_public ainda ausente.");
+  }
 
   const strict = (process.env.APP_APPLY_BUNDLED_RPCS_STRICT || "false").toLowerCase() === "true";
-  if (rateOk && cancelOk) {
+  if (rateOk && cancelOk && fnrhOk) {
     fs.mkdirSync(path.dirname(marker), { recursive: true });
     fs.writeFileSync(marker, new Date().toISOString());
   } else if (strict) {

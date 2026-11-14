@@ -1,4 +1,7 @@
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** PostgREST: metadata->>reservation_id */
+const JSON_TEXT_COL = /^([A-Za-z_][A-Za-z0-9_]*)->>([A-Za-z_][A-Za-z0-9_]*)$/;
+const JSON_COL = /^([A-Za-z_][A-Za-z0-9_]*)->([A-Za-z_][A-Za-z0-9_]*)$/;
 
 export type SqlType = "uuid" | "number" | "boolean" | "date" | "time" | "json" | "text";
 
@@ -80,6 +83,20 @@ export type QueryRequest = {
 export function quoteIdent(name: string): string {
   if (!IDENT.test(name)) throw new Error(`Identificador inválido: ${name}`);
   return `"${name}"`;
+}
+
+/** Coluna simples ou acesso JSON/JSONB (estilo Supabase .eq("metadata->>key", val)). */
+export function columnRef(alias: string, column: string): string {
+  const text = column.match(JSON_TEXT_COL);
+  if (text) {
+    return `${alias}.${quoteIdent(text[1])}->>'${text[2].replace(/'/g, "''")}'`;
+  }
+  const json = column.match(JSON_COL);
+  if (json) {
+    return `${alias}.${quoteIdent(json[1])}->'${json[2].replace(/'/g, "''")}'`;
+  }
+  quoteIdent(column);
+  return `${alias}.${quoteIdent(column)}`;
 }
 
 export function parseSelect(input: string | null | undefined): SelectField[] {
@@ -305,9 +322,11 @@ function compare(table: string, alias: string, column: string, op: string, value
     const inner = compare(link.childTable, childAlias, childColumn, op, value, catalog, values).replaceAll(`${childAlias}.`, `${childAlias}.`);
     return `EXISTS (SELECT 1 FROM ${quoteIdent(link.childTable)} ${childAlias} WHERE ${link.where(alias, childAlias)} AND ${inner})`;
   }
-  quoteIdent(column);
-  const type = catalog.types[table]?.[column] ?? "text";
-  const ref = `${alias}.${quoteIdent(column)}`;
+  const jsonText = column.match(JSON_TEXT_COL);
+  const jsonKey = column.match(JSON_COL);
+  const baseColumn = jsonText?.[1] ?? jsonKey?.[1] ?? column;
+  const type = jsonText ? "text" : catalog.types[table]?.[baseColumn] ?? "text";
+  const ref = columnRef(alias, column);
   if (op === "is" || op === "not.is") {
     if (value === null || value === "null") return op === "is" ? `${ref} IS NULL` : `${ref} IS NOT NULL`;
     const placeholder = bind(values, value === true || value === "true", "boolean");
