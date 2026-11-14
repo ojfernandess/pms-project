@@ -19,4 +19,9 @@ if [ -f ./scripts/import-supabase-data.sh ]; then
   ./scripts/import-supabase-data.sh
 fi
 
+# Postgres próprio: GRANTs para roles authenticated/anon (correge 42501 permission denied)
+if [ "${APP_RUN_DB_GRANTS:-false}" = "true" ] && [ -f ./scripts/apply-db-grants.mjs ]; then
+  node ./scripts/apply-db-grants.mjs || echo "WARN: apply-db-grants falhou" >&2
+fi
+
 exec node dist/main.js

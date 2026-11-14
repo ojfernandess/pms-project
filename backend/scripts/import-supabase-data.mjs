@@ -428,6 +428,12 @@ async function main() {
 
   await target.query("SET session_replication_role = DEFAULT");
 
+  const grantsFile = path.join(__dirname, "migration", "grant-app-roles.sql");
+  if (fs.existsSync(grantsFile)) {
+    console.log("Aplicando GRANTs (authenticated / anon / service_role)...");
+    await target.query(fs.readFileSync(grantsFile, "utf8"));
+  }
+
   fs.mkdirSync(path.dirname(MARKER), { recursive: true });
   fs.writeFileSync(MARKER, new Date().toISOString());
   console.log(`Importação concluída (${total} linhas). Marcador: ${MARKER}`);

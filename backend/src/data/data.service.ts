@@ -148,14 +148,23 @@ export class DataService {
     }
   }
 
+  private resolveDbRole(user: SessionUser | null): string {
+    const override = process.env.PMS_DB_QUERY_ROLE?.trim().toLowerCase();
+    if (override === "authenticated" || override === "anon" || override === "service_role") {
+      return override;
+    }
+    return user ? "authenticated" : "anon";
+  }
+
   private async withRole<T>(user: SessionUser | null, run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
-    const role = user ? "authenticated" : "anon";
-    const claims = JSON.stringify({ sub: user?.id, email: user?.email, role, aud: role });
+    const jwtRole = user ? "authenticated" : "anon";
+    const dbRole = this.resolveDbRole(user);
+    const claims = JSON.stringify({ sub: user?.id, email: user?.email, role: jwtRole, aud: jwtRole });
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('request.jwt.claims', ${claims}, true)`;
       await tx.$executeRaw`SELECT set_config('request.jwt.claim.sub', ${user?.id ?? ""}, true)`;
-      await tx.$executeRaw`SELECT set_config('request.jwt.claim.role', ${role}, true)`;
-      await tx.$executeRawUnsafe(`SET LOCAL ROLE ${role}`);
+      await tx.$executeRaw`SELECT set_config('request.jwt.claim.role', ${jwtRole}, true)`;
+      await tx.$executeRawUnsafe(`SET LOCAL ROLE ${dbRole}`);
       return run(tx);
     }, { maxWait: 15000, timeout: 45000 });
   }

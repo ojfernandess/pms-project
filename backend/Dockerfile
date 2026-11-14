@@ -36,6 +36,7 @@ COPY scripts/docker-entrypoint-worker.sh ./scripts/docker-entrypoint-worker.sh
 COPY scripts/import-supabase-data.sh ./scripts/import-supabase-data.sh
 COPY scripts/import-supabase-data.mjs ./scripts/import-supabase-data.mjs
 COPY scripts/migration ./scripts/migration
+COPY scripts/apply-db-grants.mjs ./scripts/apply-db-grants.mjs
 RUN chmod +x ./scripts/docker-entrypoint.sh ./scripts/docker-entrypoint-worker.sh ./scripts/import-supabase-data.sh
 
 EXPOSE 3000

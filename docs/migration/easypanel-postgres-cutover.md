@@ -53,6 +53,18 @@ Depois do import OK: remova ou comente `SUPABASE_DATABASE_URL` e `APP_IMPORT_SUP
 
 Tabelas copiadas: [../../backend/scripts/migration/core-data-tables.txt](../../backend/scripts/migration/core-data-tables.txt). Para o PMS completo, use ainda dump/restore manual (opção B2) ou amplie o manifest.
 
+**Erro `42501 permission denied`:** falta GRANT para `authenticated`. No backend: `APP_RUN_DB_GRANTS=true` (restart uma vez) ou reimport; env `PMS_DB_QUERY_ROLE=service_role` até RLS completo.
+
+### O que o import *core* **não** inclui (ainda em falta para PMS completo)
+
+- **Dados:** `reservations`, `rooms`, `clients`, `payments`, tarifário, financeiro, filas, etc. (centenas de tabelas `public.*`)
+- **Schema:** FKs, índices, triggers, funções SQL/RPC, **políticas RLS** (`supabase/migrations/`)
+- **Storage:** ficheiros nos buckets Supabase → volume `/app/storage`
+- **Edge/cron:** já no Nest/worker; desligar crons Supabase após validar
+- **Auth runtime:** Nest JWT (não GoTrue); dados `auth.users` vêm do import core
+
+Ordem recomendada: (1) schema completo `pg_dump --schema-only` ou aplicar migrações SQL → (2) core import ou dump dados → (3) `APP_RUN_DB_GRANTS=true` → (4) `PMS_DB_QUERY_ROLE=service_role` → (5) expandir dados → (6) testar [critical-flows-e2e.md](./critical-flows-e2e.md) → (7) cutover produção.
+
 ### Opção B2 — Dump/restore na sua máquina
 
 ```powershell
