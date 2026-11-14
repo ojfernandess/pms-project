@@ -2,6 +2,10 @@
 set -eu
 
 # Easypanel costuma manter o CMD da imagem; use PMS_RUN_MODE=worker no serviço worker.
+if [ "${PMS_MIGRATION_COMPLETE:-false}" = "true" ]; then
+  echo "PMS_MIGRATION_COMPLETE=true — imports Supabase/schema desativados neste arranque."
+fi
+
 if [ "${PMS_RUN_MODE:-api}" = "worker" ]; then
   echo "Starting PMS BullMQ worker (PMS_RUN_MODE=worker)..."
   exec node dist/worker.js
@@ -49,6 +53,11 @@ fi
 # Funções SQL/RPC (calculate_rate_price, cancel_expired_preregistrations, ...)
 if [ "${APP_IMPORT_SYNC_FUNCTIONS:-false}" = "true" ] && [ -f ./scripts/sync-public-functions-from-supabase.mjs ]; then
   node ./scripts/sync-public-functions-from-supabase.mjs || echo "WARN: sync functions falhou" >&2
+fi
+
+# Reaplica RPC após import/TRUNCATE (import longo + réplicas Easypanel)
+if [ -f ./scripts/ensure-bundled-rpcs.mjs ]; then
+  APP_APPLY_BUNDLED_RPCS="${APP_APPLY_BUNDLED_RPCS:-auto}" node ./scripts/ensure-bundled-rpcs.mjs || echo "WARN: ensure-bundled-rpcs (pós-import) falhou" >&2
 fi
 
 exec node dist/main.js

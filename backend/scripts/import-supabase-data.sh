@@ -6,6 +6,11 @@ case "$mode" in
   ""|false|0|skip|no) exit 0 ;;
 esac
 
+if [ "${PMS_MIGRATION_COMPLETE:-false}" = "true" ]; then
+  echo "PMS_MIGRATION_COMPLETE=true — import ignorado."
+  exit 0
+fi
+
 if [ -z "${SUPABASE_DATABASE_URL:-}" ]; then
   echo "APP_IMPORT_SUPABASE_DATA=$mode mas SUPABASE_DATABASE_URL não está definida." >&2
   exit 1

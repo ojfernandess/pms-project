@@ -405,6 +405,11 @@ async function main() {
     return;
   }
 
+  if ((process.env.PMS_MIGRATION_COMPLETE || "").toLowerCase() === "true") {
+    console.log("PMS_MIGRATION_COMPLETE=true — import de dados ignorado.");
+    return;
+  }
+
   const sourceUrl = process.env.SUPABASE_DATABASE_URL?.trim();
   const targetUrl = process.env.DATABASE_URL?.trim();
   if (!sourceUrl) {
@@ -416,6 +421,17 @@ async function main() {
 
   if ((MODE === "once" || MODE === "true") && fs.existsSync(MARKER)) {
     console.log(`Import já concluído (marcador ${MARKER}). Use APP_IMPORT_SUPABASE_DATA=force para repetir.`);
+    return;
+  }
+
+  if (
+    MODE === "force" &&
+    fs.existsSync(MARKER) &&
+    (process.env.APP_IMPORT_FORCE_REIMPORT || "").toLowerCase() !== "true"
+  ) {
+    console.log(
+      `Import force ignorado: marcador ${MARKER} já existe. Defina APP_IMPORT_FORCE_REIMPORT=true para repetir ou PMS_MIGRATION_COMPLETE=true para desligar.`,
+    );
     return;
   }
 
