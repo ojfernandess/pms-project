@@ -163,6 +163,8 @@ O worker agenda `send-daily-digest` e `send-checkout-reminders` via BullMQ (subs
 
 `VITE_PMS_API_URL` tem de coincidir com o domínio do **pms-api** (sem barra final).
 
+**Easypanel — URL da API só no Environment (sem rebuild):** a imagem a partir do commit com `runtime-config.js` lê `VITE_PMS_API_URL` ou `PMS_API_URL` **na subida do contentor** e o browser usa `https://api...` via `resolvePmsApiUrl()`. Após deploy, confira `https://sandbox.../runtime-config.js` no browser.
+
 ---
 
 ## Verificação local (stack completa)

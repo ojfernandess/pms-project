@@ -30,7 +30,11 @@ RUN npm run build
 FROM nginx:1.27-alpine
 
 ENV BACKEND_UPSTREAM=http://backend:3000
+ENV VITE_PMS_API_URL=
+ENV VITE_APP_URL=
 COPY deploy/frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY deploy/frontend/40-generate-runtime-config.sh /docker-entrypoint.d/40-generate-runtime-config.sh
+RUN chmod +x /docker-entrypoint.d/40-generate-runtime-config.sh
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80

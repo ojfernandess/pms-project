@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
+import { resolvePmsApiUrl } from "@/lib/runtimeConfig";
 
 const SESSION_KEY = "pms.auth.session";
 
@@ -24,9 +25,7 @@ type ChangeHandler = {
 const DEFAULT_FETCH_TIMEOUT_MS = 25_000;
 
 function apiBase(): string {
-  const base = import.meta.env.VITE_PMS_API_URL;
-  if (!base) throw new Error("VITE_PMS_API_URL não está configurada");
-  return String(base).replace(/\/$/, "");
+  return resolvePmsApiUrl();
 }
 
 function fetchSignal(external?: AbortSignal): { signal: AbortSignal; cancel: () => void } {
