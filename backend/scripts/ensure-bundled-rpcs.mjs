@@ -9,17 +9,37 @@ import pg from "pg";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const RATE_PRICE_SIGNATURE =
-  "p_establishment_id uuid, p_category_id uuid, p_pricing_plan_id uuid, p_date date, p_adults integer, p_children integer";
-
-const FNRH_SIGNATURE = "p_establishment_id uuid";
-
-const BUNDLED_FILES = [
-  "calculate_rate_price.sql",
-  "grant_calculate_rate_price.sql",
-  "cancel_expired_preregistrations.sql",
-  "get_fnrh_settings_public.sql",
+const REQUIRED_RPCS = [
+  {
+    name: "calculate_rate_price",
+    args: "p_establishment_id uuid, p_category_id uuid, p_pricing_plan_id uuid, p_date date, p_adults integer, p_children integer",
+  },
+  { name: "cancel_expired_preregistrations", args: "" },
+  { name: "get_fnrh_settings_public", args: "p_establishment_id uuid" },
+  {
+    name: "calculate_category_availability",
+    args: "p_establishment_id uuid, p_category_id uuid, p_date date",
+  },
+  {
+    name: "sync_rate_inventory_from_reservations",
+    args: "p_establishment_id uuid, p_category_id uuid, p_date date",
+  },
 ];
+
+function loadApplyOrder(rpcDir) {
+  const orderFile = path.join(rpcDir, "apply-order.txt");
+  if (!fs.existsSync(orderFile)) {
+    return fs
+      .readdirSync(rpcDir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+  }
+  return fs
+    .readFileSync(orderFile, "utf8")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"));
+}
 
 function clientConfig(url) {
   const ssl =
@@ -29,12 +49,12 @@ function clientConfig(url) {
   return { connectionString: url, ssl };
 }
 
-async function hasPublicFunction(client, name, identityArgs = null) {
+async function hasPublicFunction(client, name, identityArgs) {
   const { rows } = await client.query(
     `SELECT 1 FROM pg_proc p
      JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public' AND p.proname = $1
-       AND ($2::text IS NULL OR pg_get_function_identity_arguments(p.oid) = $2)
+       AND pg_get_function_identity_arguments(p.oid) = $2
      LIMIT 1`,
     [name, identityArgs],
   );
@@ -42,10 +62,10 @@ async function hasPublicFunction(client, name, identityArgs = null) {
 }
 
 async function bundledRpcsComplete(client) {
-  const rate = await hasPublicFunction(client, "calculate_rate_price", RATE_PRICE_SIGNATURE);
-  const cancel = await hasPublicFunction(client, "cancel_expired_preregistrations", "");
-  const fnrh = await hasPublicFunction(client, "get_fnrh_settings_public", FNRH_SIGNATURE);
-  return rate && cancel && fnrh;
+  for (const rpc of REQUIRED_RPCS) {
+    if (!(await hasPublicFunction(client, rpc.name, rpc.args))) return false;
+  }
+  return true;
 }
 
 function applySqlFileWithPsql(url, filePath) {
@@ -82,9 +102,10 @@ async function main() {
   }
 
   const rpcDir = process.env.BUNDLED_RPCS_DIR || path.join(__dirname, "migration", "rpc");
+  const files = loadApplyOrder(rpcDir);
 
-  console.log(`=== Bundled RPCs (modo=${mode}) ===`);
-  for (const name of BUNDLED_FILES) {
+  console.log(`=== Bundled RPCs (modo=${mode}, ${files.length} ficheiros) ===`);
+  for (const name of files) {
     const filePath = path.join(rpcDir, name);
     if (!fs.existsSync(filePath)) {
       console.error(`Ficheiro em falta: ${filePath}`);
@@ -94,39 +115,29 @@ async function main() {
     applySqlFileWithPsql(url, filePath);
   }
 
-  let rateOk = await hasPublicFunction(client, "calculate_rate_price", RATE_PRICE_SIGNATURE);
+  let rateOk = await hasPublicFunction(client, REQUIRED_RPCS[0].name, REQUIRED_RPCS[0].args);
   if (!rateOk) {
     const minimal = path.join(rpcDir, "calculate_rate_price_minimal.sql");
     if (fs.existsSync(minimal)) {
       console.warn("  tentando calculate_rate_price_minimal.sql (fallback)...");
       applySqlFileWithPsql(url, minimal);
-      rateOk = await hasPublicFunction(client, "calculate_rate_price", RATE_PRICE_SIGNATURE);
+      rateOk = await hasPublicFunction(client, REQUIRED_RPCS[0].name, REQUIRED_RPCS[0].args);
     }
   }
 
-  const cancelOk = await hasPublicFunction(client, "cancel_expired_preregistrations", "");
-  const fnrhOk = await hasPublicFunction(client, "get_fnrh_settings_public", FNRH_SIGNATURE);
-
-  if (rateOk) {
-    console.log("OK: public.calculate_rate_price(uuid, uuid, uuid, date, integer, integer)");
-  } else {
-    console.error(
-      "ERROR: calculate_rate_price ainda ausente. Verifique rate_calendar / room_categories e permissões CREATE.",
-    );
-  }
-  if (cancelOk) {
-    console.log("OK: public.cancel_expired_preregistrations()");
-  } else {
-    console.error("ERROR: cancel_expired_preregistrations ainda ausente.");
-  }
-  if (fnrhOk) {
-    console.log("OK: public.get_fnrh_settings_public(uuid)");
-  } else {
-    console.error("ERROR: get_fnrh_settings_public ainda ausente.");
+  let allOk = true;
+  for (const rpc of REQUIRED_RPCS) {
+    const ok = await hasPublicFunction(client, rpc.name, rpc.args);
+    if (ok) {
+      console.log(`OK: public.${rpc.name}(${rpc.args || ""})`);
+    } else {
+      console.error(`ERROR: public.${rpc.name} ainda ausente.`);
+      allOk = false;
+    }
   }
 
   const strict = (process.env.APP_APPLY_BUNDLED_RPCS_STRICT || "false").toLowerCase() === "true";
-  if (rateOk && cancelOk && fnrhOk) {
+  if (allOk) {
     fs.mkdirSync(path.dirname(marker), { recursive: true });
     fs.writeFileSync(marker, new Date().toISOString());
   } else if (strict) {

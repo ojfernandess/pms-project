@@ -1,0 +1,6 @@
+# Ordem de aplicação (psql -f) no arranque do backend
+calculate_rate_price.sql
+grant_calculate_rate_price.sql
+cancel_expired_preregistrations.sql
+get_fnrh_settings_public.sql
+ari_rate_inventory_grid.sql

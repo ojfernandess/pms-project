@@ -1,6 +1,5 @@
 #!/bin/sh
 # Aplica RPCs versionadas no repositório (sem precisar de SUPABASE_DATABASE_URL).
-# Corrige 42883 em /rates/quote quando o pg_restore não trouxe calculate_rate_price.
 set -eu
 
 mode="${APP_APPLY_BUNDLED_RPCS:-}"
@@ -32,33 +31,39 @@ if [ ! -d "$rpc_dir" ]; then
   exit 1
 fi
 
-echo "=== Aplicando RPCs em $rpc_dir ==="
-for f in calculate_rate_price.sql grant_calculate_rate_price.sql cancel_expired_preregistrations.sql get_fnrh_settings_public.sql; do
+apply_one() {
+  f=$1
   path="$rpc_dir/$f"
   if [ ! -f "$path" ]; then
     echo "WARN: falta $path" >&2
-    continue
+    return
   fi
   echo "  psql -f $f"
   psql "$DATABASE_URL" -v ON_ERROR_STOP=0 -f "$path" || true
-done
+}
 
-ok=0
-if psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'calculate_rate_price' LIMIT 1" | grep -q 1; then
-  echo "OK: public.calculate_rate_price presente."
-  ok=1
+echo "=== Aplicando RPCs em $rpc_dir ==="
+order_file="$rpc_dir/apply-order.txt"
+if [ -f "$order_file" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    case "$line" in ""|"#"*) continue ;; esac
+    apply_one "$line"
+  done < "$order_file"
 else
-  echo "ERROR: calculate_rate_price ainda ausente após bundled RPCs." >&2
+  for f in "$rpc_dir"/*.sql; do
+    [ -f "$f" ] || continue
+  apply_one "$(basename "$f")"
+  done
 fi
-if psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'cancel_expired_preregistrations' LIMIT 1" | grep -q 1; then
-  echo "OK: public.cancel_expired_preregistrations presente."
-else
-  echo "ERROR: cancel_expired_preregistrations ainda ausente." >&2
-  ok=0
-fi
-if [ "$ok" != "1" ] && [ "${APP_APPLY_BUNDLED_RPCS_STRICT:-false}" = "true" ]; then
-  exit 1
-fi
+
+for fn in calculate_rate_price cancel_expired_preregistrations sync_rate_inventory_from_reservations; do
+  if psql "$DATABASE_URL" -tAc "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = '${fn}' LIMIT 1" | grep -q 1; then
+    echo "OK: public.${fn} presente."
+  else
+    echo "WARN: public.${fn} ausente." >&2
+  fi
+done
 
 mkdir -p "$(dirname "$marker")"
 date -Iseconds > "$marker"
