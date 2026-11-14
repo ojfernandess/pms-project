@@ -1,21 +1,27 @@
-import { formatCurrency } from "./reservationUtils";
+import { formatCurrency, toFiniteNumber } from "./reservationUtils";
 
-export { formatCurrency };
+export { formatCurrency, toFiniteNumber };
 
 /**
  * Calcula a variação percentual entre dois valores
  */
-export const calculatePercentageChange = (current: number, previous: number): number => {
-  if (previous === 0) return current > 0 ? 100 : 0;
-  return ((current - previous) / previous) * 100;
+export const calculatePercentageChange = (
+  current: number | string | null | undefined,
+  previous: number | string | null | undefined,
+): number => {
+  const c = toFiniteNumber(current);
+  const p = toFiniteNumber(previous);
+  if (p === 0) return c > 0 ? 100 : 0;
+  return ((c - p) / p) * 100;
 };
 
 /**
  * Formata variação percentual
  */
-export const formatPercentageChange = (change: number): string => {
-  const sign = change >= 0 ? "+" : "";
-  return `${sign}${change.toFixed(1)}%`;
+export const formatPercentageChange = (change: number | string | null | undefined): string => {
+  const n = toFiniteNumber(change);
+  const sign = n >= 0 ? "+" : "";
+  return `${sign}${n.toFixed(1)}%`;
 };
 
 /**

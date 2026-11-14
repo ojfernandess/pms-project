@@ -1,5 +1,5 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatCurrency } from "@/lib/reservationUtils";
+import { formatCurrency, toFiniteNumber } from "@/lib/reservationUtils";
 
 interface RevenueChartProps {
   data?: Array<{ date: string; revenue: number }>;
@@ -7,7 +7,10 @@ interface RevenueChartProps {
 
 export const RevenueChart = ({ data = [] }: RevenueChartProps) => {
   // Os dados já vêm formatados do hook (apenas dia do mês)
-  const formattedData = data;
+  const formattedData = data.map((row) => ({
+    ...row,
+    revenue: toFiniteNumber(row.revenue),
+  }));
 
   return (
     <ResponsiveContainer width="100%" height={200}>
@@ -22,7 +25,7 @@ export const RevenueChart = ({ data = [] }: RevenueChartProps) => {
           axisLine={false}
           tickLine={false}
           tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
-          tickFormatter={(value) => `R$ ${(value / 1000).toFixed(0)}k`}
+          tickFormatter={(value) => `R$ ${(toFiniteNumber(value) / 1000).toFixed(0)}k`}
         />
         <Tooltip 
           contentStyle={{ 

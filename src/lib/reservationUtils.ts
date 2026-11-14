@@ -395,14 +395,22 @@ export function netPaymentsTotal(
   return Math.round(total * 100) / 100;
 }
 
+/** Postgres/REST via Nest devolve numeric como string — normaliza antes de .toFixed / Intl. */
+export function toFiniteNumber(value: unknown, fallback = 0): number {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 /**
  * Formata valor monetário
  */
-export const formatCurrency = (value: number): string => {
+export const formatCurrency = (value: number | string | null | undefined): string => {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
-  }).format(value);
+  }).format(toFiniteNumber(value));
 };
 
 /**

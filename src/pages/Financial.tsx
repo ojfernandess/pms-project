@@ -23,6 +23,7 @@ import {
   formatCurrency,
   calculatePercentageChange,
   formatPercentageChange,
+  toFiniteNumber,
   getCurrentMonthPeriod,
   getCurrentWeekPeriod,
   getCurrentYearPeriod,
@@ -148,10 +149,10 @@ const Financial = () => {
     isLoading,
   } = useFinancialReports(getPeriod());
 
-  const revenueTotal = revenue?.total || 0;
-  const paymentsTotal = payments?.total || 0;
-  const pendingTotal = pending?.total || 0;
-  const previousRevenue = previousPeriod?.total || 0;
+  const revenueTotal = toFiniteNumber(revenue?.total);
+  const paymentsTotal = toFiniteNumber(payments?.total);
+  const pendingTotal = toFiniteNumber(pending?.total);
+  const previousRevenue = toFiniteNumber(previousPeriod?.total);
 
   const revenueChange = calculatePercentageChange(revenueTotal, previousRevenue);
   const paymentPercentage = revenueTotal > 0 ? (paymentsTotal / revenueTotal) * 100 : 0;
@@ -207,7 +208,7 @@ const Financial = () => {
           .map((fee: any) => `${fee.service_fees?.name || "Taxa"}: R$ ${(Number(fee.amount || 0) * Number(fee.quantity || 1)).toFixed(2)}`)
           .join("; ");
 
-        const totalWithFees = (reservation.total_amount || 0) + serviceFeesTotal;
+        const totalWithFees = toFiniteNumber(reservation.total_amount) + serviceFeesTotal;
 
         return {
           data_checkin: formatDate(reservation.checkin_date),

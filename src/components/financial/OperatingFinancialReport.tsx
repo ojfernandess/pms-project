@@ -26,7 +26,7 @@ import { Loader2, FileSpreadsheet, Settings2, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
-import { formatCurrency, exportToXLSX, exportToCSV } from "@/lib/financialUtils";
+import { formatCurrency, exportToXLSX, exportToCSV, toFiniteNumber } from "@/lib/financialUtils";
 import {
   currentCalendarMonth,
   validateReportFilters,
@@ -42,10 +42,11 @@ import {
 import { DailyResultLinesDialog } from "@/components/financial/DailyResultLinesDialog";
 import type { OperatingFilters, TotalsView } from "@/services/financial/operatingReportService";
 
-function formatPct(value: number | null | undefined, digits = 1): string {
-  if (value == null || Number.isNaN(value)) return "—";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(digits)}%`;
+function formatPct(value: number | string | null | undefined, digits = 1): string {
+  const n = toFiniteNumber(value, NaN);
+  if (Number.isNaN(n)) return "—";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(digits)}%`;
 }
 
 function rankLabel(rank: MonthRank): string {
@@ -67,9 +68,9 @@ function MetricGrid({ view }: { view: TotalsView }) {
     { label: "Valor do proprietário", value: formatCurrency(view.ownerShare) },
     { label: "Líquido", value: formatCurrency(view.net) },
     { label: "Reservas", value: String(view.reservationCount) },
-    { label: "Diárias faturadas", value: view.billedNights.toFixed(0) },
+    { label: "Diárias faturadas", value: toFiniteNumber(view.billedNights).toFixed(0) },
     { label: "ADR", value: formatCurrency(view.adr) },
-    { label: "Ocupação", value: `${view.occupancy.toFixed(1)}%` },
+    { label: "Ocupação", value: `${toFiniteNumber(view.occupancy).toFixed(1)}%` },
   ];
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -405,7 +406,13 @@ export function OperatingFinancialReport() {
                         {formatCurrency(adrSafe(b.billing.gross, b.billing.billedNights))}
                       </TableCell>
                       <TableCell className="text-right">
-                        {b.availableNights ? ((b.billing.billedNights / b.availableNights) * 100).toFixed(1) : "0.0"}%
+                        {b.availableNights
+                          ? (
+                              (toFiniteNumber(b.billing.billedNights) / toFiniteNumber(b.availableNights)) *
+                              100
+                            ).toFixed(1)
+                          : "0.0"}
+                        %
                       </TableCell>
                     </TableRow>
                   ))

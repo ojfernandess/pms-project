@@ -5,7 +5,7 @@ import { OccupancyChart } from "@/components/dashboard/OccupancyChart";
 import { RevenueChart } from "@/components/dashboard/RevenueChart";
 import { RecentReservations } from "@/components/dashboard/RecentReservations";
 import { useDashboard } from "@/hooks/useDashboard";
-import { formatCurrency } from "@/lib/reservationUtils";
+import { formatCurrency, toFiniteNumber } from "@/lib/reservationUtils";
 
 const Dashboard = () => {
   const {
@@ -25,9 +25,10 @@ const Dashboard = () => {
     return "neutral";
   };
 
-  const formatChange = (change: number) => {
-    const sign = change > 0 ? "+" : "";
-    return `${sign}${change.toFixed(1)}%`;
+  const formatChange = (change: number | string | null | undefined) => {
+    const n = toFiniteNumber(change);
+    const sign = n > 0 ? "+" : "";
+    return `${sign}${n.toFixed(1)}%`;
   };
 
   return (

@@ -18,7 +18,7 @@ import {
   Eye,
 } from "lucide-react";
 import { useOwnerDashboard } from "@/hooks/useOwnerDashboard";
-import { formatCurrency } from "@/lib/reservationUtils";
+import { formatCurrency, toFiniteNumber } from "@/lib/reservationUtils";
 import { formatDate } from "@/lib/reservationUtils";
 import { StatsCard } from "@/components/dashboard/StatsCard";
 import { RevenueChart } from "@/components/dashboard/RevenueChart";
@@ -83,9 +83,10 @@ const OwnerDashboard = () => {
     return "neutral";
   };
 
-  const formatChange = (change: number) => {
-    const sign = change > 0 ? "+" : "";
-    return `${sign}${change.toFixed(1)}%`;
+  const formatChange = (change: number | string | null | undefined) => {
+    const n = toFiniteNumber(change);
+    const sign = n > 0 ? "+" : "";
+    return `${sign}${n.toFixed(1)}%`;
   };
 
   const getPriorityBadge = (priority: string) => {

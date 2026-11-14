@@ -10,7 +10,7 @@ import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVe
 import { cn } from "@/lib/utils";
 import { useReservations } from "@/hooks/useReservations";
 import { usePricing } from "@/hooks/usePricing";
-import { validateRoomAvailability, formatCurrency, isPaymentRefundRecord, getRefundedPaymentId } from "@/lib/reservationUtils";
+import { validateRoomAvailability, formatCurrency, isPaymentRefundRecord, getRefundedPaymentId, toFiniteNumber } from "@/lib/reservationUtils";
 import { recordProcessedRefund } from "@/services/financial/refundService";
 import { useRateSystem } from "@/hooks/useRateSystem";
 import { supabase } from "@/integrations/supabase/client";
@@ -3280,9 +3280,11 @@ export const ReservationCalendarMap = ({
                         // Usar cache de preços calculados se disponível
                         const cacheKey = planId ? `${planId}-${category.id}-${dateStr}` : null;
                         const cachedPrice = cacheKey ? calculatedPricesCache.get(cacheKey) : undefined;
-                        const price = cachedPrice !== undefined && cachedPrice > 0 
-                          ? cachedPrice 
-                          : (rateEntry?.base_price || Number(category.base_price) || 0);
+                        const price = toFiniteNumber(
+                          cachedPrice !== undefined && toFiniteNumber(cachedPrice) > 0
+                            ? cachedPrice
+                            : rateEntry?.base_price ?? category.base_price,
+                        );
                         
                         // Calcular preço com regras dinâmicas em background se houver plano
                         if (planId && cacheKey && (!cachedPrice || cachedPrice === 0)) {
