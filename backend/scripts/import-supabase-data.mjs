@@ -309,6 +309,46 @@ async function getWritableColumnNames(client, schema, table) {
   return rows.map((r) => r.name);
 }
 
+async function getColumnPgTypes(client, schema, table) {
+  const { rows } = await client.query(
+    `SELECT a.attname AS name, format_type(a.atttypid, a.atttypmod) AS pg_type
+     FROM pg_attribute a
+     JOIN pg_class c ON c.oid = a.attrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = $1 AND c.relname = $2
+       AND a.attnum > 0 AND NOT a.attisdropped`,
+    [schema, table],
+  );
+  const map = Object.create(null);
+  for (const r of rows) map[r.name] = String(r.pg_type || "").toLowerCase();
+  return map;
+}
+
+/** node-pg: objetos em colunas json/jsonb precisam de string JSON válida */
+function normalizeCopyValue(value, pgType) {
+  if (value === null || value === undefined) return null;
+  const type = pgType || "";
+  const isJson = type === "json" || type === "jsonb" || type.endsWith("json") || type.endsWith("jsonb");
+  if (isJson) {
+    if (typeof value === "string") {
+      const t = value.trim();
+      if (t === "") return null;
+      try {
+        JSON.parse(t);
+        return t;
+      } catch {
+        return JSON.stringify(value);
+      }
+    }
+    if (typeof value === "object") {
+      return JSON.stringify(value);
+    }
+    return JSON.stringify(value);
+  }
+  if (typeof value === "bigint") return value.toString();
+  return value;
+}
+
 async function syncSchemasFromSource(source, target, tableNames) {
   console.log("Sincronizando schema das tabelas listadas (APP_IMPORT_SCHEMA=from_supabase)...");
   for (const name of tableNames) {
@@ -328,6 +368,7 @@ async function copyTable(source, target, fq, schema, table) {
     console.log(`  ${fq}: sem colunas graváveis, ignorando dados`);
     return 0;
   }
+  const colTypes = await getColumnPgTypes(target, schema, table);
   const colSelect = writable.map((c) => `"${c}"`).join(", ");
   const { rows } = await source.query(`SELECT ${colSelect} FROM ${fq}`);
   if (rows.length === 0) {
@@ -343,11 +384,16 @@ async function copyTable(source, target, fq, schema, table) {
     const placeholders = chunk.map((row, rowIndex) => {
       const base = rowIndex * columns.length;
       const ph = columns.map((_, colIndex) => `$${base + colIndex + 1}`);
-      columns.forEach((col) => values.push(row[col]));
+      columns.forEach((col) => values.push(normalizeCopyValue(row[col], colTypes[col])));
       return `(${ph.join(", ")})`;
     });
     const sql = `INSERT INTO ${fq} (${colList}) VALUES ${placeholders.join(", ")}`;
-    await target.query(sql, values);
+    try {
+      await target.query(sql, values);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`${fq} (batch offset ${i}, ${chunk.length} linhas): ${msg}`);
+    }
     copied += chunk.length;
   }
   console.log(`  ${fq}: ${copied} linhas`);
@@ -462,7 +508,9 @@ async function main() {
   fs.mkdirSync(path.dirname(MARKER), { recursive: true });
   fs.writeFileSync(MARKER, new Date().toISOString());
   console.log(`Importação concluída (${total} linhas). Marcador: ${MARKER}`);
-
+  } catch (importErr) {
+    console.error("Importação de dados interrompida (marcador NÃO gravado).", importErr);
+    throw importErr;
   } finally {
     await target.query("SELECT pg_advisory_unlock($1)", [IMPORT_LOCK_KEY]).catch(() => {});
     await source.end().catch(() => {});
