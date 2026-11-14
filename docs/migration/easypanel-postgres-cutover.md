@@ -44,6 +44,7 @@ No serviço **pms-backend** (não no worker), na **primeira** migração para `p
 | `SUPABASE_DATABASE_URL` | Origem Supabase, pooler **session :5432** (não 6543) |
 | `APP_IMPORT_SUPABASE_DATA` | `once` (primeira vez) ou `force` (repetir e faz TRUNCATE nas tabelas do manifest) |
 | `COPY_MODE` | `node` (padrão na imagem) ou `pg` (exige `postgresql-client` na imagem) |
+| `APP_IMPORT_SCHEMA` | `from_supabase` (padrão): cria schemas `auth`/`public` e tabelas do manifest antes de copiar dados |
 | `PRISMA_MIGRATE_ON_START` | `true` se o destino estiver vazio **e** o schema vier só do Prisma; caso contrário aplique antes o DDL Supabase (Parte A §4) |
 
 Reinicie o **backend**. Os logs devem mostrar `Import Supabase → destino`. O marcador fica em `/app/storage/.supabase-data-imported` (monte volume em `/app/storage`).
