@@ -2,7 +2,13 @@ import { compileQuery, parseOr, parseSelect, type Catalog } from "./query-compil
 
 const catalog: Catalog = {
   types: {
-    reservations: { id: "uuid", establishment_id: "uuid", status: "text", checkin_date: "date", checkout_date: "date" },
+    reservations: {
+      id: "uuid",
+      establishment_id: "uuid",
+      status: { kind: "enum", name: "reservation_status" },
+      checkin_date: "date",
+      checkout_date: "date",
+    },
     buildings: { id: "uuid", name: "text" },
     room_categories: { id: "uuid", building_id: "uuid", name: "text" },
   },
@@ -57,5 +63,14 @@ describe("query compiler", () => {
 
   it("refuses an update without a filter", () => {
     expect(() => compileQuery({ action: "update", table: "reservations", values: { status: "cancelled" } }, catalog)).toThrow(/sem filtro/);
+  });
+
+  it("casts enum filters to the Postgres enum type", () => {
+    const compiled = compileQuery(
+      { action: "select", table: "reservations", filters: [{ column: "status", op: "eq", value: "confirmed" }] },
+      catalog,
+    );
+    expect(compiled.sql).toContain('$1::"reservation_status"');
+    expect(compiled.values).toEqual(["confirmed"]);
   });
 });

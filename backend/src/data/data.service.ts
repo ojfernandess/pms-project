@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { SessionUser } from "../auth/auth.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
-import { Catalog, QueryRequest, SqlType, compileQuery, parseSelect } from "./query-compiler";
+import { Catalog, QueryRequest, columnTypeFromUdt, compileQuery, parseSelect } from "./query-compiler";
 
 const RPCS = new Set([
   "apply_recommendation_price",
@@ -157,7 +157,7 @@ export class DataService {
       await tx.$executeRaw`SELECT set_config('request.jwt.claim.role', ${role}, true)`;
       await tx.$executeRawUnsafe(`SET LOCAL ROLE ${role}`);
       return run(tx);
-    }, { timeout: 20000 });
+    }, { maxWait: 15000, timeout: 45000 });
   }
 
   private loadCatalog(): Promise<Catalog> {
@@ -199,7 +199,7 @@ export class DataService {
     const mapped: Catalog["types"] = {};
     for (const column of types) {
       mapped[column.table_name] ??= {};
-      mapped[column.table_name][column.column_name] = mapType(column.udt_name);
+      mapped[column.table_name][column.column_name] = columnTypeFromUdt(column.udt_name);
     }
     return {
       types: mapped,
@@ -224,16 +224,6 @@ function argNames(args: string): string[] {
 function quoteArg(name: string): string {
   if (!IDENT.test(name)) throw new Error(`Identificador inválido: ${name}`);
   return `"${name}"`;
-}
-
-function mapType(udt: string): SqlType {
-  if (udt === "uuid") return "uuid";
-  if (udt === "bool") return "boolean";
-  if (udt === "date") return "date";
-  if (udt === "json" || udt === "jsonb") return "json";
-  if (udt === "timestamp" || udt === "timestamptz") return "time";
-  if (["int2", "int4", "int8", "numeric", "float4", "float8"].includes(udt)) return "number";
-  return "text";
 }
 
 function unwrap(rows: { row: Record<string, unknown> }[]): Record<string, unknown>[] {

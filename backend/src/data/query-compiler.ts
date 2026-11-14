@@ -2,6 +2,40 @@ const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export type SqlType = "uuid" | "number" | "boolean" | "date" | "time" | "json" | "text";
 
+/** Tipo de coluna no catálogo; enums Postgres usam cast explícito ($1::reservation_status). */
+export type ColumnType = SqlType | { kind: "enum"; name: string };
+
+const PG_SCALAR_UDT = new Set([
+  "uuid",
+  "bool",
+  "int2",
+  "int4",
+  "int8",
+  "numeric",
+  "float4",
+  "float8",
+  "text",
+  "varchar",
+  "bpchar",
+  "date",
+  "timestamp",
+  "timestamptz",
+  "json",
+  "jsonb",
+]);
+
+export function columnTypeFromUdt(udt: string): ColumnType {
+  if (udt === "uuid") return "uuid";
+  if (udt === "bool") return "boolean";
+  if (udt === "date") return "date";
+  if (udt === "json" || udt === "jsonb") return "json";
+  if (udt === "timestamp" || udt === "timestamptz") return "time";
+  if (["int2", "int4", "int8", "numeric", "float4", "float8"].includes(udt)) return "number";
+  if (udt === "text" || udt === "varchar" || udt === "bpchar") return "text";
+  if (udt.startsWith("_") || PG_SCALAR_UDT.has(udt)) return "text";
+  return { kind: "enum", name: udt };
+}
+
 export type ForeignKey = {
   constraint: string;
   table: string;
@@ -13,7 +47,7 @@ export type ForeignKey = {
 
 export type Catalog = {
   fks: ForeignKey[];
-  types: Record<string, Record<string, SqlType>>;
+  types: Record<string, Record<string, ColumnType>>;
 };
 
 export type SelectField =
@@ -263,9 +297,13 @@ function compare(table: string, alias: string, column: string, op: string, value
   return `${ref} ${symbol} ${placeholder}`;
 }
 
-function bind(values: unknown[], value: unknown, type: SqlType): string {
+function bind(values: unknown[], value: unknown, type: ColumnType): string {
   const index = values.length + 1;
   if (value === null || value === undefined) return "NULL";
+  if (typeof type === "object" && type.kind === "enum") {
+    values.push(String(value));
+    return `$${index}::${quoteIdent(type.name)}`;
+  }
   if (type === "json") {
     values.push(typeof value === "string" ? value : JSON.stringify(value));
     return `$${index}::jsonb`;
@@ -294,8 +332,12 @@ function bind(values: unknown[], value: unknown, type: SqlType): string {
   return `$${index}`;
 }
 
-function bindArray(values: unknown[], list: unknown[], type: SqlType): string {
+function bindArray(values: unknown[], list: unknown[], type: ColumnType): string {
   const index = values.length + 1;
+  if (typeof type === "object" && type.kind === "enum") {
+    values.push(list.map((item) => (item === null ? null : String(item))));
+    return `$${index}::${quoteIdent(type.name)}[]`;
+  }
   const cast = type === "uuid" ? "uuid" : type === "number" ? "numeric" : type === "boolean" ? "boolean" : type === "date" ? "date" : type === "time" ? "timestamptz" : "text";
   values.push(list.map((item) => (item === null ? null : String(item))));
   return `$${index}::${cast}[]`;
