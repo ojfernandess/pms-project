@@ -38,6 +38,17 @@ function parseTable(name) {
   return { schema: parts[0], table: parts[1] };
 }
 
+/** DEFAULTs simples (uuid, now()); Supabase auth.users usa expressões inválidas em CREATE TABLE. */
+function isSafeDefault(expr) {
+  const s = String(expr).trim();
+  if (!s) return false;
+  if (/\bnextval\s*\(/i.test(s)) return true;
+  if (/^'(?:''|[^'])*'::/.test(s) || /^-?\d+(\.\d+)?$/.test(s)) return true;
+  if (/^(?:gen_random_uuid|uuid_generate_v4|now|current_timestamp)\s*\(\)/i.test(s)) return true;
+  if (/^true$|^false$/i.test(s)) return true;
+  return false;
+}
+
 function clientConfig(url) {
   const ssl =
     /supabase\.com/i.test(url) || process.env.PGSSLMODE === "require"
@@ -115,7 +126,8 @@ async function ensureTableFromSource(source, target, schema, table) {
     `SELECT a.attname AS name,
             pg_catalog.format_type(a.atttypid, a.atttypmod) AS pg_type,
             NOT a.attnotnull AS nullable,
-            pg_get_expr(ad.adbin, ad.adrelid) AS default_expr
+            COALESCE(a.attgenerated, '') AS generated,
+            pg_get_expr(ad.adbin, ad.adrelid) AS expr
      FROM pg_catalog.pg_attribute a
      JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -129,9 +141,18 @@ async function ensureTableFromSource(source, target, schema, table) {
   }
 
   const colDefs = cols.map((c) => {
+    if (c.generated === "s" && c.expr) {
+      return `"${c.name}" ${c.pg_type} GENERATED ALWAYS AS (${c.expr}) STORED`;
+    }
+    if (c.generated === "v" && c.expr) {
+      return `"${c.name}" ${c.pg_type} GENERATED ALWAYS AS (${c.expr}) VIRTUAL`;
+    }
     let def = `"${c.name}" ${c.pg_type}`;
     if (c.nullable === false) def += " NOT NULL";
-    if (c.default_expr) def += ` DEFAULT ${c.default_expr}`;
+    // Não copiamos DEFAULT da origem (auth.users tem DEFAULTs com refs a outras colunas).
+    if (c.expr && isSafeDefault(c.expr)) {
+      def += ` DEFAULT ${c.expr}`;
+    }
     return def;
   });
 
