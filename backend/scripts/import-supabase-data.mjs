@@ -279,6 +279,22 @@ async function ensureTableFromSource(source, target, schema, table) {
   }
 }
 
+/** Colunas que aceitam INSERT (exclui GENERATED — ex. auth.users.confirmed_at). */
+async function getWritableColumnNames(client, schema, table) {
+  const { rows } = await client.query(
+    `SELECT a.attname AS name
+     FROM pg_attribute a
+     JOIN pg_class c ON c.oid = a.attrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = $1 AND c.relname = $2
+       AND a.attnum > 0 AND NOT a.attisdropped
+       AND COALESCE(a.attgenerated, '') = ''
+     ORDER BY a.attnum`,
+    [schema, table],
+  );
+  return rows.map((r) => r.name);
+}
+
 async function syncSchemasFromSource(source, target, tableNames) {
   console.log("Sincronizando schema das tabelas listadas (APP_IMPORT_SCHEMA=from_supabase)...");
   for (const name of tableNames) {
@@ -292,13 +308,19 @@ async function syncSchemasFromSource(source, target, tableNames) {
   }
 }
 
-async function copyTable(source, target, fq) {
-  const { rows } = await source.query(`SELECT * FROM ${fq}`);
+async function copyTable(source, target, fq, schema, table) {
+  const writable = await getWritableColumnNames(target, schema, table);
+  if (writable.length === 0) {
+    console.log(`  ${fq}: sem colunas graváveis, ignorando dados`);
+    return 0;
+  }
+  const colSelect = writable.map((c) => `"${c}"`).join(", ");
+  const { rows } = await source.query(`SELECT ${colSelect} FROM ${fq}`);
   if (rows.length === 0) {
     console.log(`  ${fq}: 0 linhas (vazio)`);
     return 0;
   }
-  const columns = Object.keys(rows[0]);
+  const columns = writable.filter((c) => Object.prototype.hasOwnProperty.call(rows[0], c));
   const colList = columns.map((c) => `"${c}"`).join(", ");
   let copied = 0;
   for (let i = 0; i < rows.length; i += BATCH) {
@@ -400,7 +422,8 @@ async function main() {
         `Tabela ${fq} não existe no destino após sync de schema. Verifique SUPABASE_DATABASE_URL ou APP_IMPORT_SCHEMA=from_supabase.`,
       );
     }
-    total += await copyTable(source, target, fq);
+    const { schema, table } = parseTable(name);
+    total += await copyTable(source, target, fq, schema, table);
   }
 
   await target.query("SET session_replication_role = DEFAULT");
