@@ -9,6 +9,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import {
+  releaseMigrationLock,
+  tryMigrationLock,
+  withRetry,
+} from "./lib/pg-migration-lock.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -81,6 +86,14 @@ async function syncTableFks(source, target, schema, table) {
 }
 
 async function main() {
+  if (
+    (process.env.PMS_MIGRATION_COMPLETE || "").toLowerCase() === "true" &&
+    (process.env.APP_IMPORT_SYNC_FKS || "").toLowerCase() !== "true"
+  ) {
+    console.log("PMS_MIGRATION_COMPLETE — sync FKs ignorado.");
+    return;
+  }
+
   const sourceUrl = process.env.SUPABASE_DATABASE_URL?.trim();
   const targetUrl = process.env.DATABASE_URL?.trim();
   if (!sourceUrl || !targetUrl) {
@@ -92,6 +105,13 @@ async function main() {
   const target = new pg.Client(clientConfig(targetUrl));
   await source.connect();
   await target.connect();
+
+  if (!(await tryMigrationLock(target))) {
+    console.log("Outro pod/processo de migração ativo — sync FKs ignorado neste arranque.");
+    await source.end();
+    await target.end();
+    return;
+  }
 
   let tableNames = [];
   const discover = process.env.APP_IMPORT_DISCOVER_TABLES?.trim();
@@ -105,15 +125,19 @@ async function main() {
     tableNames = loadTables(file);
   }
 
-  console.log(`Sincronizando FKs (${tableNames.length} tabelas)...`);
-  let total = 0;
-  for (const name of tableNames) {
-    const [schema, table] = name.includes(".") ? name.split(".") : ["public", name];
-    total += await syncTableFks(source, target, schema, table);
+  try {
+    console.log(`Sincronizando FKs (${tableNames.length} tabelas)...`);
+    let total = 0;
+    for (const name of tableNames) {
+      const [schema, table] = name.includes(".") ? name.split(".") : ["public", name];
+      total += await withRetry(`FK ${name}`, () => syncTableFks(source, target, schema, table));
+    }
+    console.log(`FKs adicionadas: ${total}`);
+  } finally {
+    await releaseMigrationLock(target);
+    await source.end();
+    await target.end();
   }
-  console.log(`FKs adicionadas: ${total}`);
-  await source.end();
-  await target.end();
 }
 
 main().catch((err) => {
