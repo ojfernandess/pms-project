@@ -118,7 +118,7 @@ function generate(input) {
         autoDeploy: true,
       },
       build: { type: "dockerfile", file: "Dockerfile" },
-      deploy: { command: "node dist/worker.js" },
+      deploy: { command: "./scripts/docker-entrypoint-worker.sh" },
       mounts: [
         {
           type: "bind",

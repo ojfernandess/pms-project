@@ -134,11 +134,15 @@ CORS do Nest aceita `origin: true`; o frontend em outro domínio funciona desde 
 ## 3. pms-worker
 
 1. Mesmo repositório e **mesmo** `backend/Dockerfile` que a API (podes reutilizar a imagem construída).
-2. **Comando** (override no Easypanel):
+2. **Comando** (override no Easypanel) — **não** uses o CMD default da imagem (`docker-entrypoint.sh` → `main.js` = segunda API):
 
 ```sh
-node dist/worker.js
+./scripts/docker-entrypoint-worker.sh
 ```
+
+Logs esperados: `Starting PMS BullMQ worker...` e `BullMQ worker running`. Se só vires `Skipping prisma migrate deploy` / `API listening`, o serviço está a correr a API, não o worker.
+
+3. `DATABASE_URL` no worker: `?connection_limit=2&pool_timeout=20` (Supabase session pooler).
 
 Não precisas de expor porta. As mesmas envs que a API (`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `INTERNAL_API_TOKEN`, etc.).
 

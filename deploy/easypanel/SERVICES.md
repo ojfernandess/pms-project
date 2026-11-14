@@ -68,11 +68,15 @@ Modelo: [../env/postgres.env.example](../env/postgres.env.example).
 2. Nome: `worker`.
 3. **Mesmo repositório** e **mesmo** `backend/Dockerfile` (pode reutilizar imagem do backend se o Easypanel permitir).
 4. **Sem domínio** e **sem porta publicada**.
-5. **Start command (override):**
+5. **Start command (override)** — não use o entrypoint da API (`docker-entrypoint.sh` chama `main.js`):
 
 ```sh
-node dist/worker.js
+./scripts/docker-entrypoint-worker.sh
 ```
+
+Ou: `node dist/worker.js`
+
+Se o worker arrancar com o mesmo comando da API, existem **duas APIs** e o pool Supabase (15 sessões) esgota rápido.
 
 6. **Environment:** igual ao backend (ver [../env/worker.env.example](../env/worker.env.example)), especialmente `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, tokens internos.
 

@@ -149,7 +149,7 @@ export function generate(input: Input): Output {
         file: "Dockerfile",
       },
       deploy: {
-        command: "node dist/worker.js",
+        command: "./scripts/docker-entrypoint-worker.sh",
       },
       mounts: [
         {
