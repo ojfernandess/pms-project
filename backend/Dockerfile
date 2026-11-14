@@ -2,12 +2,16 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
+# bcrypt e outros precisam de toolchain no Alpine; Easypanel pode injetar NODE_ENV=production no build.
+RUN apk add --no-cache python3 make g++
+
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
 COPY nest-cli.json tsconfig.json tsconfig.build.json ./
 COPY src ./src
 
-RUN npm ci
+ENV NODE_ENV=development
+RUN npm ci --include=dev
 RUN npx prisma generate
 RUN npm run build
 

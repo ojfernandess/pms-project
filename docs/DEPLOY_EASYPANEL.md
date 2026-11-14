@@ -103,7 +103,8 @@ Usa a mesma URL em **pms-api** e **pms-worker**.
 
 1. **App** → Build from Git → Dockerfile path: `backend/Dockerfile`.
 2. **Porta exposta:** `3000`.
-3. **Variáveis de runtime** (obrigatórias — ver `backend/.env.example`):
+3. **Build vs runtime:** variáveis (`DATABASE_URL`, `JWT_SECRET`, etc.) são **só em runtime** (Environment ao correr o contentor), não precisam de **Build Arguments**. Se o Easypanel enviar `NODE_ENV=production` no `docker build`, o `npm ci` pode falhar ou omitir devDependencies — o `backend/Dockerfile` força `npm ci --include=dev` na stage de build.
+4. **Variáveis de runtime** (obrigatórias — ver `backend/.env.example`):
 
 | Variável | Notas |
 | --- | --- |
@@ -123,9 +124,9 @@ Variáveis **opcionais** (lidas de `process.env`, não estão todas no `validate
 - `STORAGE_DIR` — diretório para ficheiros (`backend/storage`). Monta **volume persistente** no Easypanel se não quiseres perder uploads ao redeploy.
 - `SUPABASE_SERVICE_ROLE_KEY` — só para jobs que comparam bearer interno (ex. ack worker); **não** expor no frontend.
 
-4. **Arranque / Prisma:** com `DATABASE_URL` no **Supabase** (base já cheia), define `PRISMA_MIGRATE_ON_START=false` — senão o contentor morre com **P3005** e o domínio da API devolve **502**. Corre uma vez o SQL em [scripts/migration/prisma-nest-tables.sql](../scripts/migration/prisma-nest-tables.sql) no SQL Editor do Supabase (tabelas de refresh token e reset de password). Postgres **vazio** no compose (`local-db`): `PRISMA_MIGRATE_ON_START=true`.
+5. **Arranque / Prisma:** com `DATABASE_URL` no **Supabase** (base já cheia), define `PRISMA_MIGRATE_ON_START=false` — senão o contentor morre com **P3005** e o domínio da API devolve **502**. Corre uma vez o SQL em [scripts/migration/prisma-nest-tables.sql](../scripts/migration/prisma-nest-tables.sql) no SQL Editor do Supabase (tabelas de refresh token e reset de password). Postgres **vazio** no compose (`local-db`): `PRISMA_MIGRATE_ON_START=true`.
 
-5. **Domínio:** ex. `https://api.seudominio.com` → apontar ao serviço na porta 3000.
+6. **Domínio:** ex. `https://api.seudominio.com` → apontar ao serviço na porta 3000.
 
 CORS do Nest aceita `origin: true`; o frontend em outro domínio funciona desde que o browser use `VITE_PMS_API_URL` nesse host.
 
