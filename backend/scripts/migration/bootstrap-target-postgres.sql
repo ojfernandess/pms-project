@@ -23,3 +23,5 @@ $$;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT USAGE ON SCHEMA auth TO authenticated, service_role;
 GRANT ALL ON SCHEMA auth TO postgres;
+
+-- Funções auth.uid / auth.role (arranque aplica auth-compat.sql por completo)

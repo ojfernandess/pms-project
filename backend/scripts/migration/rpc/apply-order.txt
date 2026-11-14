@@ -1,4 +1,5 @@
 # Ordem de aplicação (psql -f) no arranque do backend
+../auth-compat.sql
 calculate_rate_price.sql
 grant_calculate_rate_price.sql
 cancel_expired_preregistrations.sql

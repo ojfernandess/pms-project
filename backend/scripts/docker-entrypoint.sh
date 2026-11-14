@@ -18,6 +18,12 @@ else
   echo "Skipping prisma migrate deploy (set PRISMA_MIGRATE_ON_START=true for empty Postgres or after baseline)."
 fi
 
+# auth.uid() / auth.role() para RLS e RPCs SECURITY DEFINER (Postgres sem stack Supabase)
+if [ -n "${DATABASE_URL:-}" ] && [ -f ./scripts/migration/auth-compat.sql ]; then
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=0 -f ./scripts/migration/auth-compat.sql >/dev/null 2>&1 \
+    || echo "WARN: auth-compat.sql falhou" >&2
+fi
+
 # Antes do import longo: calculate_rate_price (evita 42883 se a API subir durante force import)
 if [ -f ./scripts/ensure-bundled-rpcs.mjs ]; then
   node ./scripts/ensure-bundled-rpcs.mjs || echo "WARN: ensure-bundled-rpcs falhou" >&2

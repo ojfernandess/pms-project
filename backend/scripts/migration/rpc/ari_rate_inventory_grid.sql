@@ -336,3 +336,7 @@ COMMENT ON FUNCTION public.calculate_category_availability IS 'Calcula disponibi
 COMMENT ON FUNCTION public.sync_rate_inventory_from_reservations IS 'Sincroniza inventário com reservas atuais (atualização automática)';
 COMMENT ON FUNCTION public.is_date_available_for_sale IS 'Verifica se uma data está disponível para venda considerando status e inventário';
 
+GRANT EXECUTE ON FUNCTION public.calculate_category_availability(UUID, UUID, DATE) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.sync_rate_inventory_from_reservations(UUID, UUID, DATE) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_date_available_for_sale(UUID, UUID, DATE) TO authenticated, service_role;
+

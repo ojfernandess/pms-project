@@ -21,6 +21,10 @@ const REQUIRED_RPCS = [
     args: "p_establishment_id uuid, p_category_id uuid, p_date date",
   },
   {
+    name: "calculate_category_availability",
+    args: "p_establishment_id uuid, p_category_id uuid, p_date date",
+  },
+  {
     name: "sync_rate_inventory_from_reservations",
     args: "p_establishment_id uuid, p_category_id uuid, p_date date",
   },
@@ -110,7 +114,7 @@ async function main() {
 
   console.log(`=== Bundled RPCs (modo=${mode}, ${files.length} ficheiros) ===`);
   for (const name of files) {
-    const filePath = path.join(rpcDir, name);
+    const filePath = path.normalize(path.join(rpcDir, name));
     if (!fs.existsSync(filePath)) {
       console.error(`Ficheiro em falta: ${filePath}`);
       continue;

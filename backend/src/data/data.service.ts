@@ -128,13 +128,14 @@ export class DataService {
         const entries = known.filter((key) => Object.prototype.hasOwnProperty.call(input, key));
         const values = entries.map((key) => input[key]);
         const types = argTypeMap(signature.args);
-        const callArgs = entries
+        const positional = entries
           .map((key, index) => {
             const pgType = pgCastType(types.get(key) ?? "text");
-            return `${quoteArg(key)} := $${index + 1}::${pgType}`;
+            return `$${index + 1}::${pgType}`;
           })
           .join(", ");
-        const call = `public.${quoteArg(name)}(${callArgs})`;
+        const call =
+          entries.length === 0 ? `public.${quoteArg(name)}()` : `public.${quoteArg(name)}(${positional})`;
         if (signature.ret === "void") {
           await tx.$queryRawUnsafe(`SELECT ${call}`, ...values);
           return null;
