@@ -45,6 +45,8 @@ Modelo: [../env/postgres.env.example](../env/postgres.env.example).
 8. **Volume:** montar `/app/storage` (uploads).
 9. **Health check (se o painel permitir override):** HTTP `GET /health` na porta 3000.
 
+**Import Supabase → Postgres interno (opcional):** no **backend** apenas, `APP_IMPORT_SUPABASE_DATA=once`, `SUPABASE_DATABASE_URL` (:5432 session), `COPY_MODE=node`, `DATABASE_URL` no `pms-postgres`. Ver [../../docs/migration/easypanel-postgres-cutover.md](../../docs/migration/easypanel-postgres-cutover.md) § B1.
+
 **Environment (runtime)** — copie de [../env/backend.env.example](../env/backend.env.example):
 
 | Variável | Exemplo |

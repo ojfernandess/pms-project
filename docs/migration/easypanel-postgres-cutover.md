@@ -34,6 +34,26 @@
 
 ## Parte B — Migrar dados (core primeiro)
 
+### Opção B1 — Só env no Easypanel (sem comandos manuais)
+
+No serviço **pms-backend** (não no worker), na **primeira** migração para `pms-postgres`:
+
+| Variável | Valor |
+|----------|--------|
+| `DATABASE_URL` | Postgres **interno** Easypanel (`postgresql://...@projetolab_pms-postgres:5432/...`) — **sem** apontar ao Supabase após o cutover |
+| `SUPABASE_DATABASE_URL` | Origem Supabase, pooler **session :5432** (não 6543) |
+| `APP_IMPORT_SUPABASE_DATA` | `once` (primeira vez) ou `force` (repetir e faz TRUNCATE nas tabelas do manifest) |
+| `COPY_MODE` | `node` (padrão na imagem) ou `pg` (exige `postgresql-client` na imagem) |
+| `PRISMA_MIGRATE_ON_START` | `true` se o destino estiver vazio **e** o schema vier só do Prisma; caso contrário aplique antes o DDL Supabase (Parte A §4) |
+
+Reinicie o **backend**. Os logs devem mostrar `Import Supabase → destino`. O marcador fica em `/app/storage/.supabase-data-imported` (monte volume em `/app/storage`).
+
+Depois do import OK: remova ou comente `SUPABASE_DATABASE_URL` e `APP_IMPORT_SUPABASE_DATA`; mantenha só `DATABASE_URL` no Postgres interno.
+
+Tabelas copiadas: [../../backend/scripts/migration/core-data-tables.txt](../../backend/scripts/migration/core-data-tables.txt). Para o PMS completo, use ainda dump/restore manual (opção B2) ou amplie o manifest.
+
+### Opção B2 — Dump/restore na sua máquina
+
 ```powershell
 $env:SOURCE_DATABASE_URL = "postgresql://..."  # Supabase pooler
 .\scripts\migration\dump-supabase-core.ps1

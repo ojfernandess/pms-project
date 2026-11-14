@@ -33,7 +33,10 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 COPY scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
 COPY scripts/docker-entrypoint-worker.sh ./scripts/docker-entrypoint-worker.sh
-RUN chmod +x ./scripts/docker-entrypoint.sh ./scripts/docker-entrypoint-worker.sh
+COPY scripts/import-supabase-data.sh ./scripts/import-supabase-data.sh
+COPY scripts/import-supabase-data.mjs ./scripts/import-supabase-data.mjs
+COPY scripts/migration ./scripts/migration
+RUN chmod +x ./scripts/docker-entrypoint.sh ./scripts/docker-entrypoint-worker.sh ./scripts/import-supabase-data.sh
 
 EXPOSE 3000
 

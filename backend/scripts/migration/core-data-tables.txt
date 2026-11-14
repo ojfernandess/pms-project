@@ -1,0 +1,17 @@
+# Tabelas do pacote “core” (login, empresas, estabelecimentos, settings).
+# Alinhar com scripts/migration/core-data-tables.txt na raiz do repositório.
+
+auth.users
+auth.identities
+
+public.users
+public.admin_users
+public.user_companies
+public.companies
+public.establishments
+public.employee_roles
+public.employees
+
+public.site_settings
+public.hotel_settings
+public.api_settings
