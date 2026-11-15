@@ -1,6 +1,6 @@
-import { format, parseISO } from "date-fns";
+import { addDays, format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { BedDouble, Home, Info, Loader2, Sparkles } from "lucide-react";
+import { BedDouble, BrushCleaning, Home, Info, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
@@ -33,6 +33,7 @@ type Props = {
   loading?: boolean;
   couponFinalAmount?: number | null;
   showCleaningToggle?: boolean;
+  hasCategory?: boolean;
 };
 
 function nightsBetween(checkin: string, checkout: string): number {
@@ -53,6 +54,7 @@ export function ReservationQuoteSummary({
   loading,
   couponFinalAmount,
   showCleaningToggle = true,
+  hasCategory = false,
 }: Props) {
   const nights = nightsBetween(checkinDate, checkoutDate);
   const effectiveLodging =
@@ -60,6 +62,32 @@ export function ReservationQuoteSummary({
   const cleaningAmount = cleaningConfigured && includeCleaning ? cleaningFee : 0;
   const grandTotal = effectiveLodging + cleaningAmount;
   const avgNight = nights > 0 ? effectiveLodging / nights : 0;
+
+  const displayLines: NightlyQuoteLine[] =
+    nightlyLines.length > 0
+      ? nightlyLines
+      : hasCategory && effectiveLodging > 0 && nights > 0
+        ? (() => {
+            const amounts = allocateCleaningFeePerNight(effectiveLodging, nights);
+            const start = parseISO(checkinDate);
+            return Array.from({ length: nights }, (_, i) => {
+              const d = addDays(start, i);
+              return {
+                date: format(d, "yyyy-MM-dd"),
+                dayLabel: format(d, "EEEE", { locale: ptBR }),
+                amount: amounts[i] ?? 0,
+              };
+            });
+          })()
+        : [];
+
+  const emptyTableMessage = !hasCategory
+    ? "Selecione uma categoria para ver o valor de cada diária."
+    : loading
+      ? "Calculando detalhamento das diárias…"
+      : effectiveLodging <= 0
+        ? "Informe categoria e tarifa para ver o detalhamento por diária."
+        : "Tarifa não disponível para exibir diária a diária neste período.";
 
   if (!checkinDate || !checkoutDate || nights <= 0) return null;
 
@@ -85,19 +113,31 @@ export function ReservationQuoteSummary({
               <TableHead>Dia</TableHead>
               <TableHead className="text-right">Valor da diária</TableHead>
               {cleaningConfigured ? (
-                <TableHead className="text-right bg-violet-50/80">Taxa de limpeza</TableHead>
+                <TableHead className="text-right bg-violet-50/80">
+                  <span className="inline-flex items-center justify-end gap-1">
+                    <BrushCleaning className="h-3.5 w-3.5" />
+                    Taxa de limpeza
+                  </span>
+                </TableHead>
               ) : null}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {nightlyLines.length === 0 && !loading ? (
+            {displayLines.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={cleaningConfigured ? 4 : 3} className="text-center text-muted-foreground text-sm">
-                  Selecione categoria e datas para ver o detalhamento.
+                  {loading ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {emptyTableMessage}
+                    </span>
+                  ) : (
+                    emptyTableMessage
+                  )}
                 </TableCell>
               </TableRow>
             ) : (
-              nightlyLines.map((line, index) => {
+              displayLines.map((line, index) => {
                 const cleaningParts =
                   cleaningConfigured && includeCleaning
                     ? allocateCleaningFeePerNight(cleaningFee, nights)
@@ -149,7 +189,7 @@ export function ReservationQuoteSummary({
         </div>
         {cleaningConfigured ? (
           <div className="flex items-start gap-2">
-            <Sparkles className="mt-0.5 h-5 w-5 text-violet-600" />
+            <BrushCleaning className="mt-0.5 h-5 w-5 text-violet-600" />
             <div>
               <p className="text-xs text-muted-foreground">Taxa de limpeza</p>
               <p className="text-lg font-bold">{formatCurrency(cleaningAmount)}</p>

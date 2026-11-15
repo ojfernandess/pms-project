@@ -3718,7 +3718,7 @@ export const ReservationDialog = ({
             {formData.checkin_date &&
               formData.checkout_date &&
               reservationAction !== "blocked" &&
-              (calculatedTotal > 0 || nightlyQuoteLines.length > 0) && (
+              new Date(formData.checkout_date) > new Date(formData.checkin_date) && (
                 <ReservationQuoteSummary
                   checkinDate={formData.checkin_date}
                   checkoutDate={formData.checkout_date}
@@ -3729,6 +3729,7 @@ export const ReservationDialog = ({
                   includeCleaning={includeCleaningInQuote}
                   onIncludeCleaningChange={setIncludeCleaningInQuote}
                   loading={calculatingPrice}
+                  hasCategory={Boolean(formData.category_id)}
                   couponFinalAmount={
                     appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : null
                   }
