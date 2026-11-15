@@ -1,11 +1,15 @@
 import {
   addDays,
+  addMonths,
   differenceInCalendarDays,
   endOfMonth,
+  endOfYear,
   format,
   parseISO,
   startOfMonth,
   startOfWeek,
+  startOfYear,
+  subDays,
   subMonths,
   subYears,
 } from "date-fns";
@@ -30,6 +34,7 @@ export type MetricTotals = SplitAmounts & {
 export type NormalizedReservation = {
   id: string;
   establishmentId: string;
+  roomId: string | null;
   status: string;
   cancelledAt: string | null;
   checkinDate: string;
@@ -85,6 +90,95 @@ export function nightRevenueStayMode(totalAmount: number, nights: number): numbe
   return Number(totalAmount || 0) / nights;
 }
 
+/** Distribui o valor da reserva em centavos; resto na última diária (doc. Dashboard Vendas e Faturamento). */
+export function distributeNightAmounts(totalAmount: number, nightCount: number): number[] {
+  if (nightCount <= 0) return [];
+  const totalCents = Math.round((Number(totalAmount) || 0) * 100);
+  const baseCents = Math.floor(totalCents / nightCount);
+  const remainder = totalCents - baseCents * nightCount;
+  return Array.from({ length: nightCount }, (_, i) => (baseCents + (i === nightCount - 1 ? remainder : 0)) / 100);
+}
+
+export function nightAmountsForStay(totalAmount: number, checkinDate: string, checkoutDate: string): Map<string, number> {
+  const nights = enumerateStayNights(checkinDate, checkoutDate);
+  const amounts = distributeNightAmounts(totalAmount, nights.length);
+  const map = new Map<string, number>();
+  nights.forEach((d, i) => map.set(d, amounts[i] ?? 0));
+  return map;
+}
+
+export type PeriodPreset =
+  | "today"
+  | "yesterday"
+  | "last7"
+  | "last30"
+  | "this_month"
+  | "prev_month"
+  | "this_year"
+  | "custom";
+
+export function resolvePeriodPreset(
+  preset: PeriodPreset,
+  custom?: { startDate: string; endDate: string },
+): { startDate: string; endDate: string } {
+  const today = toDateOnly(format(new Date(), "yyyy-MM-dd"));
+  if (preset === "today") return { startDate: today, endDate: today };
+  if (preset === "yesterday") {
+    const y = format(subDays(parseISO(today), 1), "yyyy-MM-dd");
+    return { startDate: y, endDate: y };
+  }
+  if (preset === "last7") {
+    return { startDate: format(subDays(parseISO(today), 6), "yyyy-MM-dd"), endDate: today };
+  }
+  if (preset === "last30") {
+    return { startDate: format(subDays(parseISO(today), 29), "yyyy-MM-dd"), endDate: today };
+  }
+  if (preset === "this_month") {
+    const d = parseISO(today);
+    return { startDate: format(startOfMonth(d), "yyyy-MM-dd"), endDate: format(endOfMonth(d), "yyyy-MM-dd") };
+  }
+  if (preset === "prev_month") {
+    const d = subMonths(parseISO(today), 1);
+    return { startDate: format(startOfMonth(d), "yyyy-MM-dd"), endDate: format(endOfMonth(d), "yyyy-MM-dd") };
+  }
+  if (preset === "this_year") {
+    const d = parseISO(today);
+    return { startDate: format(startOfYear(d), "yyyy-MM-dd"), endDate: format(endOfYear(d), "yyyy-MM-dd") };
+  }
+  return {
+    startDate: custom?.startDate || today,
+    endDate: custom?.endDate || today,
+  };
+}
+
+export function monthsSpanningRange(
+  startDate: string,
+  endDate: string,
+): Array<{ key: string; label: string; startDate: string; endDate: string }> {
+  const out: Array<{ key: string; label: string; startDate: string; endDate: string }> = [];
+  let cursor = startOfMonth(parseISO(toDateOnly(startDate)));
+  const end = endOfMonth(parseISO(toDateOnly(endDate)));
+  while (cursor <= end) {
+    const start = startOfMonth(cursor);
+    const monthEnd = endOfMonth(cursor);
+    out.push({
+      key: format(start, "yyyy-MM"),
+      label: format(start, "MMMM yyyy", { locale: ptBR }),
+      startDate: format(start, "yyyy-MM-dd"),
+      endDate: format(monthEnd, "yyyy-MM-dd"),
+    });
+    cursor = addMonths(cursor, 1);
+  }
+  return out;
+}
+
+export type MonthlySalesBillingRow = {
+  key: string;
+  label: string;
+  salesGross: number;
+  billingGross: number;
+};
+
 /**
  * 1. comissão = bruto × (% canal / 100)
  * 2. proprietário = (bruto − comissão) × (% proprietário / 100)
@@ -121,9 +215,260 @@ export function adr(gross: number, billedNights: number): number {
   return gross / billedNights;
 }
 
-export function occupancyPct(billedNights: number, availableNights: number): number {
+export function occupancyPct(occupiedNights: number, availableNights: number): number {
   if (!availableNights) return 0;
-  return (billedNights / availableNights) * 100;
+  return (occupiedNights / availableNights) * 100;
+}
+
+/** Taxa ponderada; `null` quando não há capacidade disponível (evita divisão por zero na UI). */
+export function occupancyRate(occupiedNights: number, availableNights: number): number | null {
+  if (!availableNights) return null;
+  return (occupiedNights / availableNights) * 100;
+}
+
+export type LodgingUnitSnapshot = {
+  id: string;
+  establishmentId: string;
+  isBlocked: boolean;
+  status: string;
+};
+
+export type OccupancyNightBlock = {
+  roomId: string;
+  establishmentId: string;
+  checkinDate: string;
+  checkoutDate: string;
+};
+
+export type OccupancyTotals = {
+  occupiedNights: number;
+  availableNights: number;
+  rate: number | null;
+};
+
+export type EstablishmentReportRow = {
+  establishmentId: string;
+  name: string;
+  reservationCount: number;
+  billedNights: number;
+  occupiedNights: number;
+  availableNights: number;
+  occupancyRate: number | null;
+  receitaGross: number;
+  periodBillingGross: number;
+  adr: number;
+  net: number;
+};
+
+export function enumerateInclusiveDays(startDate: string, endDate: string): string[] {
+  const days: string[] = [];
+  let cursor = parseISO(toDateOnly(startDate));
+  const end = parseISO(toDateOnly(endDate));
+  while (cursor <= end) {
+    days.push(format(cursor, "yyyy-MM-dd"));
+    cursor = addDays(cursor, 1);
+  }
+  return days;
+}
+
+/** Indisponibilidade permanente (interdição cadastral), não confundir com manutenção temporária. */
+export function isRoomUnavailableStatic(unit: LodgingUnitSnapshot): boolean {
+  return unit.isBlocked;
+}
+
+export type MaintenanceTicketSnapshot = {
+  roomId: string;
+  establishmentId: string;
+  status: string;
+  openedAt: string;
+  reportedAt: string | null;
+  completedAt: string | null;
+  resolvedAt: string | null;
+};
+
+const MAINTENANCE_ACTIVE_STATUSES = new Set(["open", "in_progress"]);
+
+/**
+ * Converte chamados de manutenção em bloqueios por noite (check-out exclusivo no encerramento).
+ * Abertos / em progresso: até o último dia de `capEndDate`. Concluídos: do abertura até o dia da conclusão.
+ */
+export function maintenanceTicketsToNightBlocks(
+  tickets: MaintenanceTicketSnapshot[],
+  capEndDate: string,
+): OccupancyNightBlock[] {
+  const cap = toDateOnly(capEndDate);
+  const blocks: OccupancyNightBlock[] = [];
+  for (const t of tickets) {
+    const status = String(t.status || "").toLowerCase();
+    if (status === "cancelled" || !t.roomId) continue;
+
+    const checkinDate = toDateOnly(t.openedAt || t.reportedAt || "");
+    if (!checkinDate) continue;
+
+    let checkoutDate: string;
+    if (MAINTENANCE_ACTIVE_STATUSES.has(status)) {
+      checkoutDate = format(addDays(parseISO(cap), 1), "yyyy-MM-dd");
+    } else if (status === "completed") {
+      const doneDay = toDateOnly(t.completedAt || t.resolvedAt || "");
+      if (!doneDay) continue;
+      checkoutDate = format(addDays(parseISO(doneDay), 1), "yyyy-MM-dd");
+    } else {
+      continue;
+    }
+
+    if (checkoutDate <= checkinDate) continue;
+
+    blocks.push({
+      roomId: t.roomId,
+      establishmentId: t.establishmentId,
+      checkinDate,
+      checkoutDate,
+    });
+  }
+  return blocks;
+}
+
+export function mergeNightBlocks(...groups: OccupancyNightBlock[][]): OccupancyNightBlock[] {
+  return groups.flat();
+}
+
+function blockedRoomNightsInRange(
+  blocks: OccupancyNightBlock[],
+  startDate: string,
+  endDate: string,
+  establishmentFilter?: Set<string>,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const b of blocks) {
+    if (establishmentFilter && !establishmentFilter.has(b.establishmentId)) continue;
+    const nights = enumerateStayNights(b.checkinDate, b.checkoutDate).filter((n) => dateInRange(n, startDate, endDate));
+    for (const night of nights) {
+      keys.add(`${b.roomId}|${night}`);
+    }
+  }
+  return keys;
+}
+
+/** Diárias ocupadas = unidades distintas por noite (check-out exclusivo). */
+export function computeOccupiedUnitNights(
+  reservations: NormalizedReservation[],
+  establishmentIds: string[],
+  startDate: string,
+  endDate: string,
+): number {
+  const allowed = new Set(establishmentIds);
+  const keys = new Set<string>();
+  for (const r of reservations) {
+    if (!allowed.has(r.establishmentId)) continue;
+    if (!isRevenueStatus(r.status, r.cancelledAt)) continue;
+    const nights = enumerateStayNights(r.checkinDate, r.checkoutDate).filter((n) => dateInRange(n, startDate, endDate));
+    for (const night of nights) {
+      const key = r.roomId ? `${r.roomId}|${night}` : `res:${r.id}|${night}`;
+      keys.add(key);
+    }
+  }
+  return keys.size;
+}
+
+export function computeAvailableUnitNights(
+  units: LodgingUnitSnapshot[],
+  nightBlocks: OccupancyNightBlock[],
+  establishmentIds: string[],
+  startDate: string,
+  endDate: string,
+): number {
+  const allowed = new Set(establishmentIds);
+  const scopedUnits = units.filter((u) => allowed.has(u.establishmentId));
+  const blocked = blockedRoomNightsInRange(nightBlocks, startDate, endDate, allowed);
+  let total = 0;
+  for (const day of enumerateInclusiveDays(startDate, endDate)) {
+    for (const unit of scopedUnits) {
+      if (isRoomUnavailableStatic(unit)) continue;
+      if (blocked.has(`${unit.id}|${day}`)) continue;
+      total += 1;
+    }
+  }
+  return total;
+}
+
+export function computeOccupancyTotals(
+  reservations: NormalizedReservation[],
+  units: LodgingUnitSnapshot[],
+  nightBlocks: OccupancyNightBlock[],
+  establishmentIds: string[],
+  startDate: string,
+  endDate: string,
+): OccupancyTotals {
+  const occupiedNights = computeOccupiedUnitNights(reservations, establishmentIds, startDate, endDate);
+  const availableNights = computeAvailableUnitNights(units, nightBlocks, establishmentIds, startDate, endDate);
+  return {
+    occupiedNights,
+    availableNights,
+    rate: occupancyRate(occupiedNights, availableNights),
+  };
+}
+
+export function computeEstablishmentReportRows(args: {
+  reservations: NormalizedReservation[];
+  units: LodgingUnitSnapshot[];
+  nightBlocks: OccupancyNightBlock[];
+  establishmentIds: string[];
+  establishmentNames: Map<string, string>;
+  startDate: string;
+  endDate: string;
+  billingMode: BillingMode;
+  groupBy: GroupBy;
+}): EstablishmentReportRow[] {
+  const {
+    reservations,
+    units,
+    nightBlocks,
+    establishmentIds,
+    establishmentNames,
+    startDate,
+    endDate,
+    billingMode,
+    groupBy,
+  } = args;
+  const activeUnitCountByEst = new Map<string, number>();
+  for (const u of units) {
+    if (isRoomUnavailableStatic(u)) continue;
+    activeUnitCountByEst.set(u.establishmentId, (activeUnitCountByEst.get(u.establishmentId) || 0) + 1);
+  }
+
+  return establishmentIds.map((establishmentId) => {
+    const estReservations = reservations.filter((r) => r.establishmentId === establishmentId);
+    const unitCount = activeUnitCountByEst.get(establishmentId) || 0;
+    const report = computePeriodReport({
+      reservations: estReservations,
+      startDate,
+      endDate,
+      groupBy,
+      billingMode,
+      activeUnitCount: unitCount,
+    });
+    const occupancy = computeOccupancyTotals(
+      reservations,
+      units,
+      nightBlocks,
+      [establishmentId],
+      startDate,
+      endDate,
+    );
+    return {
+      establishmentId,
+      name: establishmentNames.get(establishmentId) || establishmentId,
+      reservationCount: report.billing.reservationCount,
+      billedNights: report.billing.billedNights,
+      occupiedNights: occupancy.occupiedNights,
+      availableNights: occupancy.availableNights,
+      occupancyRate: occupancy.rate,
+      receitaGross: report.sales.salesGross,
+      periodBillingGross: report.billing.gross,
+      adr: adr(report.billing.gross, report.billing.billedNights),
+      net: report.billing.net,
+    };
+  });
 }
 
 export function inclusiveDayCount(startDate: string, endDate: string): number {
@@ -320,20 +665,21 @@ export function computePeriodReport(args: {
     if (!isRevenueStatus(r.status, r.cancelledAt)) continue;
 
     const nights = enumerateStayNights(r.checkinDate, r.checkoutDate);
-    const stayNightRev = nightRevenueStayMode(reservationGrossStayMode(r), nights.length);
+    const nightAmounts = nightAmountsForStay(reservationGrossStayMode(r), r.checkinDate, r.checkoutDate);
 
     if (dateInRange(r.createdAtDate, startDate, endDate) && !salesSeen.has(r.id)) {
       salesSeen.add(r.id);
       sales.salesCount += 1;
       sales.salesNights += nights.length;
-      sales.salesGross += nights.length * stayNightRev;
+      sales.salesGross += reservationGrossStayMode(r);
     }
 
     if (billingMode === "stay_nights") {
       const nightsInRange = nights.filter((n) => dateInRange(n, startDate, endDate));
       if (nightsInRange.length === 0) continue;
       for (const night of nightsInRange) {
-        const split = splitRevenue(stayNightRev, r.channelCommissionPct, r.ownerPct);
+        const nightGross = nightAmounts.get(night) ?? 0;
+        const split = splitRevenue(nightGross, r.channelCommissionPct, r.ownerPct);
         addSplit(billing, split, 1, r.id, billingSeen);
         const b = ensureBucket(bucketKey(night, groupBy));
         addSplit(b.billing, split, 1, r.id, b.seen);
@@ -368,6 +714,32 @@ export function computePeriodReport(args: {
   return { billing, sales, availableNights, buckets };
 }
 
+export function computeMonthlySalesBillingTable(
+  reservations: NormalizedReservation[],
+  rangeStart: string,
+  rangeEnd: string,
+  billingMode: BillingMode,
+): MonthlySalesBillingRow[] {
+  const allMonths = monthsSpanningRange(toDateOnly(rangeStart), toDateOnly(rangeEnd));
+
+  return allMonths.map((m) => {
+    const slice = computePeriodReport({
+      reservations,
+      startDate: m.startDate,
+      endDate: m.endDate,
+      groupBy: "month",
+      billingMode,
+      activeUnitCount: 0,
+    });
+    return {
+      key: m.key,
+      label: m.label,
+      salesGross: slice.sales.salesGross,
+      billingGross: slice.billing.gross,
+    };
+  });
+}
+
 export function computeDailySalesResult(
   reservations: NormalizedReservation[],
   day: string,
@@ -380,10 +752,8 @@ export function computeDailySalesResult(
     if (!isRevenueStatus(r.status, r.cancelledAt)) continue;
     if (!ids.has(r.establishmentId)) continue;
     if (toDateOnly(r.createdAtDate) !== toDateOnly(day)) continue;
-    const stay = enumerateStayNights(r.checkinDate, r.checkoutDate);
-    const perNight = nightRevenueStayMode(reservationGrossStayMode(r), stay.length);
-    nights += stay.length;
-    gross += stay.length * perNight;
+    nights += enumerateStayNights(r.checkinDate, r.checkoutDate).length;
+    gross += reservationGrossStayMode(r);
   }
   return { nights, gross };
 }

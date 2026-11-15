@@ -1,9 +1,15 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
   computeDailySalesResult,
+  computeEstablishmentReportRows,
+  computeMonthlySalesBillingTable,
+  computeOccupancyTotals,
   computePeriodReport,
   dailyLineLabels,
+  maintenanceTicketsToNightBlocks,
+  mergeNightBlocks,
   occupancyPct,
+  occupancyRate,
   previousThreeCalendarMonths,
   previousYearRange,
   rankMonthsByGross,
@@ -13,7 +19,12 @@ import {
   type GroupBy,
   type MetricTotals,
   type MonthRank,
+  type EstablishmentReportRow,
+  type LodgingUnitSnapshot,
+  type MonthlySalesBillingRow,
   type NormalizedReservation,
+  type OccupancyNightBlock,
+  type OccupancyTotals,
   type PeriodReport,
   adr,
 } from "@/lib/financial/operatingReportEngine";
@@ -271,6 +282,7 @@ async function normalizeReservations(
   return allRows.map((r) => ({
     id: r.id,
     establishmentId: r.establishment_id,
+    roomId: r.room_id ? String(r.room_id) : null,
     status: r.status,
     cancelledAt: r.cancelled_at,
     checkinDate: toDateOnly(r.checkin_date),
@@ -287,11 +299,11 @@ async function normalizeReservations(
   }));
 }
 
-export async function countActiveLodgingUnits(establishmentIds: string[]): Promise<number> {
-  if (!establishmentIds.length) return 0;
+async function loadLodgingUnits(establishmentIds: string[]): Promise<LodgingUnitSnapshot[]> {
+  if (!establishmentIds.length) return [];
   const { data: rooms, error } = await supabase
     .from("rooms")
-    .select("id, exclude_from_billing, hide_from_map, is_blocked, category_id")
+    .select("id, establishment_id, exclude_from_billing, hide_from_map, is_blocked, status, category_id")
     .in("establishment_id", establishmentIds);
   if (error) throw new Error(error.message);
 
@@ -302,14 +314,93 @@ export async function countActiveLodgingUnits(establishmentIds: string[]): Promi
     for (const c of cats || []) typeByCategory.set((c as any).id, (c as any).type || "");
   }
 
-  return (rooms || []).filter((r: any) =>
-    isLodgingUnit({
-      exclude_from_billing: r.exclude_from_billing,
-      hide_from_map: r.hide_from_map,
-      is_blocked: r.is_blocked,
-      category_type: typeByCategory.get(r.category_id),
-    }),
-  ).length;
+  return (rooms || [])
+    .filter((r: any) =>
+      isLodgingUnit({
+        exclude_from_billing: r.exclude_from_billing,
+        hide_from_map: r.hide_from_map,
+        is_blocked: r.is_blocked,
+        category_type: typeByCategory.get(r.category_id),
+      }),
+    )
+    .map((r: any) => ({
+      id: String(r.id),
+      establishmentId: String(r.establishment_id),
+      isBlocked: Boolean(r.is_blocked),
+      status: String(r.status || "available"),
+    }));
+}
+
+export async function countActiveLodgingUnits(establishmentIds: string[]): Promise<number> {
+  const units = await loadLodgingUnits(establishmentIds);
+  return units.filter((u) => !u.isBlocked).length;
+}
+
+async function loadMaintenanceNightBlocks(
+  establishmentIds: string[],
+  rangeStart: string,
+  rangeEnd: string,
+): Promise<OccupancyNightBlock[]> {
+  if (!establishmentIds.length) return [];
+
+  const tickets = await fetchAllRows<{
+    room_id: string;
+    establishment_id: string;
+    status: string;
+    opened_at: string;
+    reported_at: string | null;
+    completed_at: string | null;
+    resolved_at: string | null;
+  }>(async (from, to) => {
+    const { data, error } = await supabase
+      .from("maintenance_tickets")
+      .select("room_id, establishment_id, status, opened_at, reported_at, completed_at, resolved_at")
+      .in("establishment_id", establishmentIds)
+      .in("status", ["open", "in_progress", "completed"])
+      .lte("opened_at", `${rangeEnd}T23:59:59.999`)
+      .range(from, to);
+    if (error) return { data: null, error };
+    return { data: data || [], error: null };
+  });
+
+  const relevant = tickets.filter((t) => {
+    const status = String(t.status || "").toLowerCase();
+    if (status === "open" || status === "in_progress") return true;
+    if (status === "completed") {
+      const done = toDateOnly(t.completed_at || t.resolved_at || t.opened_at);
+      const opened = toDateOnly(t.opened_at || t.reported_at || "");
+      return opened <= rangeEnd && done >= rangeStart;
+    }
+    return false;
+  });
+
+  return maintenanceTicketsToNightBlocks(
+    relevant.map((t) => ({
+      roomId: String(t.room_id),
+      establishmentId: String(t.establishment_id),
+      status: String(t.status || ""),
+      openedAt: t.opened_at,
+      reportedAt: t.reported_at,
+      completedAt: t.completed_at,
+      resolvedAt: t.resolved_at,
+    })),
+    rangeEnd,
+  );
+}
+
+function nightBlocksFromRaw(rows: RawReservation[]): OccupancyNightBlock[] {
+  const blocks: OccupancyNightBlock[] = [];
+  for (const r of rows) {
+    if (String(r.status || "").toLowerCase() !== "blocked") continue;
+    if (!r.room_id) continue;
+    blocks.push({
+      roomId: String(r.room_id),
+      establishmentId: String(r.establishment_id),
+      checkinDate: toDateOnly(r.checkin_date),
+      checkoutDate: toDateOnly(r.checkout_date),
+    });
+  }
+  return blocks;
 }
 
 export type OperatingFilters = {
@@ -323,16 +414,29 @@ export type OperatingFilters = {
 
 export type TotalsView = MetricTotals & {
   adr: number;
-  occupancy: number;
+  occupancy: number | null;
+  occupiedNights: number;
   availableNights: number;
 };
 
-function withRates(t: MetricTotals, availableNights: number): TotalsView {
+function withRates(
+  t: MetricTotals,
+  occupancy: Pick<OccupancyTotals, "occupiedNights" | "availableNights" | "rate">,
+): TotalsView {
   return {
     ...t,
-    availableNights,
+    occupiedNights: occupancy.occupiedNights,
+    availableNights: occupancy.availableNights,
     adr: adr(t.gross, t.billedNights),
-    occupancy: occupancyPct(t.billedNights, availableNights),
+    occupancy: occupancy.rate,
+  };
+}
+
+function legacyOccupancyFromBilling(t: MetricTotals, availableNights: number): OccupancyTotals {
+  return {
+    occupiedNights: t.billedNights,
+    availableNights,
+    rate: occupancyRate(t.billedNights, availableNights),
   };
 }
 
@@ -355,6 +459,9 @@ export type OperatingReportResult = {
     netChange: number | null;
     occupancyChange: number | null;
   };
+  monthlySalesBilling: MonthlySalesBillingRow[];
+  periodOccupancy: OccupancyTotals;
+  establishmentRows: EstablishmentReportRow[];
 };
 
 export async function fetchOperatingReport(filters: OperatingFilters): Promise<OperatingReportResult> {
@@ -364,13 +471,33 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
   const fetchStart = [startDate, prevMonths[0].startDate, yoyRange?.startDate].filter(Boolean).sort()[0] as string;
   const fetchEnd = [endDate, prevMonths[2].endDate, yoyRange?.endDate].filter(Boolean).sort().at(-1) as string;
 
-  const [raw, activeUnitCount] = await Promise.all([
+  const [raw, lodgingUnits, establishmentMeta, maintenanceNightBlocks] = await Promise.all([
     loadReservationsOverlapping(establishmentIds, fetchStart, fetchEnd),
-    countActiveLodgingUnits(establishmentIds),
+    loadLodgingUnits(establishmentIds),
+    establishmentIds.length
+      ? supabase.from("establishments").select("id, name").in("id", establishmentIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string }>, error: null }),
+    loadMaintenanceNightBlocks(establishmentIds, fetchStart, fetchEnd),
   ]);
+  if (establishmentMeta.error) throw new Error(establishmentMeta.error.message);
+
+  const activeUnitCount = lodgingUnits.filter((u) => !u.isBlocked).length;
+  const nightBlocks = mergeNightBlocks(nightBlocksFromRaw(raw), maintenanceNightBlocks);
+  const establishmentNames = new Map(
+    (establishmentMeta.data || []).map((e) => [String(e.id), String(e.name || e.id)]),
+  );
 
   const paymentWindow = billingMode === "payment_attribution" ? { startDate: fetchStart, endDate: fetchEnd } : undefined;
   const normalized = await normalizeReservations(raw, establishmentIds, paymentWindow);
+
+  const periodOccupancy = computeOccupancyTotals(
+    normalized,
+    lodgingUnits,
+    nightBlocks,
+    establishmentIds,
+    startDate,
+    endDate,
+  );
 
   const period = computePeriodReport({
     reservations: normalized,
@@ -426,30 +553,49 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
       billingMode,
       activeUnitCount,
     });
-    const yoyView = withRates(yoyReport.billing, yoyReport.availableNights);
-    const currentView = withRates(period.billing, period.availableNights);
+    const yoyOcc = legacyOccupancyFromBilling(yoyReport.billing, yoyReport.availableNights);
+    const yoyView = withRates(yoyReport.billing, yoyOcc);
+    const currentView = withRates(period.billing, periodOccupancy);
     yoy = {
       startDate: yoyRange.startDate,
       endDate: yoyRange.endDate,
       billingView: yoyView,
       grossChange: yoyChange(currentView.gross, yoyView.gross),
       netChange: yoyChange(currentView.net, yoyView.net),
-      occupancyChange: yoyChange(currentView.occupancy, yoyView.occupancy),
+      occupancyChange:
+        currentView.occupancy != null && yoyView.occupancy != null
+          ? yoyChange(currentView.occupancy, yoyView.occupancy)
+          : null,
     };
   }
 
+  const establishmentRows = computeEstablishmentReportRows({
+    reservations: normalized,
+    units: lodgingUnits,
+    nightBlocks,
+    establishmentIds,
+    establishmentNames,
+    startDate,
+    endDate,
+    billingMode,
+    groupBy,
+  });
+
   return {
-    period: { ...period, billingView: withRates(period.billing, period.availableNights) },
+    period: { ...period, billingView: withRates(period.billing, periodOccupancy) },
     previousMonths: monthReports.map((m) => ({
       key: m.key,
       label: m.label,
       startDate: m.startDate,
       endDate: m.endDate,
-      view: withRates(m.report.billing, m.report.availableNights),
+      view: withRates(m.report.billing, legacyOccupancyFromBilling(m.report.billing, m.report.availableNights)),
       rank: ranks[m.key],
     })),
     previousMonthsTotal: previousMonthsAcc,
     yoy,
+    monthlySalesBilling: computeMonthlySalesBillingTable(normalized, startDate, endDate, billingMode),
+    periodOccupancy,
+    establishmentRows,
   };
 }
 

@@ -70,7 +70,11 @@ function MetricGrid({ view }: { view: TotalsView }) {
     { label: "Reservas", value: String(view.reservationCount) },
     { label: "Diárias faturadas", value: toFiniteNumber(view.billedNights).toFixed(0) },
     { label: "ADR", value: formatCurrency(view.adr) },
-    { label: "Ocupação", value: `${toFiniteNumber(view.occupancy).toFixed(1)}%` },
+    {
+      label: "Ocupação",
+      value:
+        view.occupancy == null ? "—" : `${toFiniteNumber(view.occupancy).toFixed(2)}%`,
+    },
   ];
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

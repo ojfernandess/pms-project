@@ -48,6 +48,7 @@ import { useServiceFees } from "@/hooks/useServiceFees";
 import { ServiceFeeDialog } from "@/components/financial/ServiceFeeDialog";
 import { ClosingReport } from "@/components/financial/ClosingReport";
 import { OperatingFinancialReport } from "@/components/financial/OperatingFinancialReport";
+import { SalesBillingDashboard } from "@/components/financial/SalesBillingDashboard";
 import { AccountsReceivableList } from "@/components/financial/AccountsReceivableList";
 import { AccountsPayableList } from "@/components/financial/AccountsPayableList";
 import { BankReconciliationDashboard } from "@/components/financial/BankReconciliationDashboard";
@@ -595,8 +596,9 @@ const Financial = () => {
             </Card>
           </div>
 
-          <Tabs defaultValue="operacao" className="space-y-4">
+          <Tabs defaultValue="faturamento_vendas" className="space-y-4">
             <TabsList className="h-auto flex-wrap">
+              <TabsTrigger value="faturamento_vendas">Faturamento de vendas</TabsTrigger>
               <TabsTrigger value="operacao">Operação</TabsTrigger>
               <TabsTrigger value="overview">Visão Geral</TabsTrigger>
               <TabsTrigger value="receivables">Contas a Receber</TabsTrigger>
@@ -609,6 +611,10 @@ const Financial = () => {
               <TabsTrigger value="service_fees">Taxas</TabsTrigger>
               <TabsTrigger value="reports">Relatórios</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="faturamento_vendas" className="space-y-4">
+              <SalesBillingDashboard />
+            </TabsContent>
 
             <TabsContent value="operacao" className="space-y-4">
               <OperatingFinancialReport />

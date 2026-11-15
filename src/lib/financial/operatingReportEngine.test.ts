@@ -2,9 +2,15 @@ import { describe, it, expect } from "vitest";
 import {
   attributionDate,
   bucketKey,
+  computeAvailableUnitNights,
   computeDailySalesResult,
+  computeOccupancyTotals,
+  computeOccupiedUnitNights,
   computePeriodReport,
   dailyLineLabels,
+  maintenanceTicketsToNightBlocks,
+  mergeNightBlocks,
+  occupancyRate,
   enumerateStayNights,
   isCancelledReservation,
   previousThreeCalendarMonths,
@@ -19,6 +25,7 @@ import {
 function res(partial: Partial<NormalizedReservation> & Pick<NormalizedReservation, "id">): NormalizedReservation {
   return {
     establishmentId: "est-1",
+    roomId: null,
     status: "confirmed",
     cancelledAt: null,
     checkinDate: "2026-03-10",
@@ -199,5 +206,159 @@ describe("operatingReportEngine", () => {
   it("atribuição: pagamento > check-in > reserva", () => {
     expect(attributionDate("2026-04-01", "2026-03-10", "2026-03-01")).toBe("2026-04-01");
     expect(attributionDate(null, "2026-03-10", "2026-03-01")).toBe("2026-03-10");
+  });
+
+  it("critério de aceite: venda em out/2026 e faturamento distribuído em 4 meses (R$ 13.950)", () => {
+    const longStay = res({
+      id: "long",
+      createdAtDate: "2026-10-05",
+      checkinDate: "2026-10-13",
+      checkoutDate: "2027-01-11",
+      totalAmount: 13950,
+    });
+    const reservations = [longStay];
+    const salesOct = computePeriodReport({
+      reservations,
+      startDate: "2026-10-01",
+      endDate: "2026-10-31",
+      groupBy: "month",
+      billingMode: "stay_nights",
+      activeUnitCount: 1,
+    });
+    expect(salesOct.sales.salesGross).toBe(13950);
+    expect(salesOct.billing.gross).toBe(2945);
+
+    const nov = computePeriodReport({
+      reservations,
+      startDate: "2026-11-01",
+      endDate: "2026-11-30",
+      groupBy: "month",
+      billingMode: "stay_nights",
+      activeUnitCount: 1,
+    });
+    expect(nov.sales.salesGross).toBe(0);
+    expect(nov.billing.gross).toBe(4650);
+
+    const dec = computePeriodReport({
+      reservations,
+      startDate: "2026-12-01",
+      endDate: "2026-12-31",
+      groupBy: "month",
+      billingMode: "stay_nights",
+      activeUnitCount: 1,
+    });
+    expect(dec.billing.gross).toBe(4805);
+
+    const jan = computePeriodReport({
+      reservations,
+      startDate: "2027-01-01",
+      endDate: "2027-01-31",
+      groupBy: "month",
+      billingMode: "stay_nights",
+      activeUnitCount: 1,
+    });
+    expect(jan.billing.gross).toBe(1550);
+    expect(salesOct.billing.gross + nov.billing.gross + dec.billing.gross + jan.billing.gross).toBe(13950);
+  });
+
+  it("ocupação: unidades distintas por noite e taxa ponderada", () => {
+    const units = [
+      { id: "r1", establishmentId: "a", isBlocked: false, status: "available" },
+      { id: "r2", establishmentId: "a", isBlocked: false, status: "available" },
+      { id: "r3", establishmentId: "b", isBlocked: false, status: "available" },
+      { id: "r4", establishmentId: "b", isBlocked: false, status: "available" },
+      { id: "r5", establishmentId: "b", isBlocked: false, status: "available" },
+    ];
+    const reservations = [
+      res({ id: "1", establishmentId: "a", roomId: "r1", checkinDate: "2026-10-01", checkoutDate: "2026-10-31" }),
+      res({ id: "2", establishmentId: "b", roomId: "r3", checkinDate: "2026-10-01", checkoutDate: "2026-10-31" }),
+    ];
+    const occA = computeOccupancyTotals(reservations, units, [], ["a"], "2026-10-01", "2026-10-30");
+    expect(occA.occupiedNights).toBe(30);
+    expect(occA.availableNights).toBe(60);
+    expect(occA.rate).toBeCloseTo(50);
+
+    const occB = computeOccupancyTotals(reservations, units, [], ["b"], "2026-10-01", "2026-10-30");
+    expect(occB.occupiedNights).toBe(30);
+    expect(occB.availableNights).toBe(90);
+    expect(occB.rate).toBeCloseTo(33.333, 2);
+
+    const consolidated = computeOccupancyTotals(reservations, units, [], ["a", "b"], "2026-10-01", "2026-10-30");
+    expect(consolidated.occupiedNights).toBe(60);
+    expect(consolidated.availableNights).toBe(150);
+    expect(consolidated.rate).toBeCloseTo(40);
+    expect(occupancyRate(1650, 2400)).toBeCloseTo(68.75);
+  });
+
+  it("manutenção: só desconta os dias do chamado (aberto e concluído)", () => {
+    const units = [
+      { id: "u1", establishmentId: "a", isBlocked: false, status: "maintenance" },
+      { id: "u2", establishmentId: "a", isBlocked: false, status: "available" },
+    ];
+    const completedBlocks = maintenanceTicketsToNightBlocks(
+      [
+        {
+          roomId: "u1",
+          establishmentId: "a",
+          status: "completed",
+          openedAt: "2026-11-05T10:00:00Z",
+          reportedAt: null,
+          completedAt: "2026-11-07T18:00:00Z",
+          resolvedAt: null,
+        },
+      ],
+      "2026-11-30",
+    );
+    expect(completedBlocks[0]?.checkinDate).toBe("2026-11-05");
+    expect(completedBlocks[0]?.checkoutDate).toBe("2026-11-08");
+    const availCompleted = computeAvailableUnitNights(
+      units,
+      mergeNightBlocks(completedBlocks, []),
+      ["a"],
+      "2026-11-01",
+      "2026-11-10",
+    );
+    // 10 dias × 2 quartos = 20; u1 indisponível 05, 06, 07 (3 noites)
+    expect(availCompleted).toBe(17);
+
+    const openBlocks = maintenanceTicketsToNightBlocks(
+      [
+        {
+          roomId: "u1",
+          establishmentId: "a",
+          status: "in_progress",
+          openedAt: "2026-11-20T08:00:00Z",
+          reportedAt: null,
+          completedAt: null,
+          resolvedAt: null,
+        },
+      ],
+      "2026-11-25",
+    );
+    const availOpen = computeAvailableUnitNights(units, openBlocks, ["a"], "2026-11-20", "2026-11-25");
+    // 6 dias × 2 = 12; u1 bloqueado em 20–25 (6 noites)
+    expect(availOpen).toBe(6);
+  });
+
+  it("ocupação: canceladas ignoradas, bloqueio reduz disponíveis, sem duplicar quarto", () => {
+    const units = [{ id: "u1", establishmentId: "a", isBlocked: false, status: "available" }];
+    const reservations = [
+      res({ id: "1", establishmentId: "a", roomId: "u1", checkinDate: "2026-11-01", checkoutDate: "2026-11-04" }),
+      res({ id: "2", establishmentId: "a", roomId: "u1", checkinDate: "2026-11-02", checkoutDate: "2026-11-05" }),
+      res({
+        id: "x",
+        establishmentId: "a",
+        roomId: "u1",
+        status: "cancelled",
+        cancelledAt: "2026-11-01",
+        checkinDate: "2026-11-01",
+        checkoutDate: "2026-11-03",
+      }),
+    ];
+    expect(computeOccupiedUnitNights(reservations, ["a"], "2026-11-01", "2026-11-03")).toBe(3);
+    const blocks = [
+      { roomId: "u1", establishmentId: "a", checkinDate: "2026-11-02", checkoutDate: "2026-11-03" },
+    ];
+    expect(computeAvailableUnitNights(units, blocks, ["a"], "2026-11-01", "2026-11-03")).toBe(2);
   });
 });
