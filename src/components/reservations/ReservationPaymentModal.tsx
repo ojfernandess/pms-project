@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -690,40 +690,76 @@ export function ReservationPaymentModal({
     return 0;
   }, [selectedComponent, paymentBreakdown, allPendingAmount]);
 
-  // Inicializar seleção quando o modal abrir
-  useEffect(() => {
-    if (open && reservation && paymentBreakdown) {
-      // Por padrão, selecionar o valor base se houver saldo pendente
-      if (paymentBreakdown.originalBaseAmountPending > 0) {
-        setSelectedComponent("base");
-      } else if (paymentBreakdown.extensionAmountPending > 0 && extensionAmount > 0) {
-        // Se não houver valor base pendente mas houver extensão pendente, selecionar extensão
-        setSelectedComponent("extension");
-      } else {
-        // Se não houver valor base pendente nem extensão pendente, verificar taxas
-        const hasPendingFees = Object.values(paymentBreakdown.serviceFeesPending || {}).some((amount: number) => amount > 0);
-        if (hasPendingFees) {
-          // Selecionar a primeira taxa pendente
-          const firstPendingFee = serviceFees?.find((fee: any) => {
-            const feePending = paymentBreakdown.serviceFeesPending[fee.id] || 0;
-            return feePending > 0;
-          });
-          if (firstPendingFee) {
-            setSelectedComponent(`fee-${firstPendingFee.id}`);
-          } else {
-            setSelectedComponent("");
-          }
-        } else {
-          // Não há nada pendente, não selecionar nada
-          setSelectedComponent("");
-        }
+  const availablePaymentComponentValues = useMemo(() => {
+    const values: string[] = [];
+    if (pendingComponentsCount >= 2 && allPendingAmount > 0.009) {
+      values.push("all");
+    }
+    if (paymentBreakdown.originalBaseAmountPending > 0.009) {
+      values.push("base");
+    }
+    if (
+      !paymentBreakdown.hasNoPayments &&
+      paymentBreakdown.extensionAmount > 0 &&
+      paymentBreakdown.extensionAmountPending > 0.009
+    ) {
+      values.push("extension");
+    }
+    (serviceFees || []).forEach((fee: any) => {
+      const feePending = paymentBreakdown.serviceFeesPending[fee.id] || 0;
+      if (feePending > 0.009) {
+        values.push(`fee-${fee.id}`);
       }
-    } else if (!open) {
-      // Resetar quando o modal fechar
+    });
+    return values;
+  }, [paymentBreakdown, pendingComponentsCount, allPendingAmount, serviceFees]);
+
+  const radioGroupValue = availablePaymentComponentValues.includes(selectedComponent)
+    ? selectedComponent
+    : "";
+
+  const paymentOpenPassRef = useRef(0);
+
+  // Garantir opção válida no RadioGroup (valor inexistente quebra o Radix e o modal não abre)
+  useEffect(() => {
+    if (!open) {
       setSelectedComponent("");
       setShowPaymentSuccess(false);
+      return;
     }
-  }, [open, reservation?.id, paymentBreakdown, extensionAmount, serviceFees]);
+
+    paymentOpenPassRef.current += 1;
+    const openPass = paymentOpenPassRef.current;
+
+    if (availablePaymentComponentValues.length === 0) {
+      setSelectedComponent("");
+      return;
+    }
+
+    const pickDefault = () => {
+      if (availablePaymentComponentValues.includes("base")) return "base";
+      if (availablePaymentComponentValues.includes("all")) return "all";
+      return availablePaymentComponentValues[0];
+    };
+
+    const syncSelection = () => {
+      setSelectedComponent((current) => {
+        if (current && availablePaymentComponentValues.includes(current)) {
+          return current;
+        }
+        return pickDefault();
+      });
+    };
+
+    syncSelection();
+
+    const t = window.setTimeout(() => {
+      if (openPass !== paymentOpenPassRef.current) return;
+      syncSelection();
+    }, 400);
+
+    return () => window.clearTimeout(t);
+  }, [open, reservation?.id, availablePaymentComponentValues.join("|")]);
 
   // Atualizar valor do campo quando seleções mudarem
   useEffect(() => {
@@ -1219,11 +1255,16 @@ export function ReservationPaymentModal({
   const fee = calculateFee();
   const netAmount = parseFloat(amount.replace(",", ".") || "0") - fee;
 
-  if (!reservation) return null;
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="relative max-w-2xl max-h-[90vh] overflow-y-auto">
+        {!reservation ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
+            <p className="text-sm text-muted-foreground">Carregando dados da reserva…</p>
+          </div>
+        ) : (
+          <>
         {showPaymentSuccess && (
           <div
             className="absolute inset-0 z-50 flex flex-col items-center justify-center rounded-lg bg-white/95 backdrop-blur-sm animate-in fade-in duration-300"
@@ -1243,6 +1284,9 @@ export function ReservationPaymentModal({
             <DollarSign className="h-5 w-5 text-emerald-600" />
             Lançar Pagamento
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Selecione o componente da reserva a quitar e informe portador, tipo e valor do pagamento.
+          </DialogDescription>
           
           {/* Informações da Reserva com Breakdown Detalhado */}
           <div className="bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-lg p-4 space-y-3">
@@ -1261,7 +1305,7 @@ export function ReservationPaymentModal({
             <div className="pt-2 border-t border-slate-200 space-y-3">
               <Label className="text-sm font-semibold text-slate-700">Selecione o componente a pagar:</Label>
               
-              <RadioGroup value={selectedComponent} onValueChange={setSelectedComponent} className="space-y-2">
+              <RadioGroup value={radioGroupValue} onValueChange={setSelectedComponent} className="space-y-2">
                 {pendingComponentsCount >= 2 && allPendingAmount > 0.009 && (
                   <div className="flex items-center justify-between p-3 rounded-md bg-emerald-50 hover:bg-emerald-100/90 transition-colors border-2 border-emerald-300 shadow-sm">
                     <div className="flex items-center gap-3 flex-1">
@@ -1635,6 +1679,8 @@ export function ReservationPaymentModal({
             </>
           )}
         </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

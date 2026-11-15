@@ -2369,6 +2369,7 @@ export const ReservationDialog = ({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -3991,39 +3992,6 @@ export const ReservationDialog = ({
           </div>
         </form>
 
-        {/* Modal de Lançamento de Pagamento */}
-        <ReservationPaymentModal
-          open={paymentModalOpen}
-          onOpenChange={setPaymentModalOpen}
-          reservation={currentReservation}
-          onSuccess={() => {
-            // Recarregar dados
-            queryClient.invalidateQueries({ queryKey: ["reservations"] });
-            onSuccess();
-            // Recarregar dados da reserva atual
-            if (reservationId) {
-              supabase
-                .from("reservations")
-                .select(`
-                  *, 
-                  financial_responsible:clients!client_id(full_name),
-                  guest:clients!guest_id(full_name),
-                  rooms(room_number)
-                `)
-                .eq("id", reservationId)
-                .single()
-                .then(({ data }) => {
-                  if (data) {
-                    setCurrentReservation({
-                      ...data,
-                      guest_name: data.guest?.full_name || data.financial_responsible?.full_name,
-                    });
-                  }
-                });
-            }
-          }}
-        />
-
       {/* Modal de Cancelamento */}
       {reservationId && (
         <CancelReservationDialog
@@ -4197,6 +4165,37 @@ export const ReservationDialog = ({
       </AlertDialog>
       </DialogContent>
     </Dialog>
+
+    <ReservationPaymentModal
+      open={paymentModalOpen}
+      onOpenChange={setPaymentModalOpen}
+      reservation={currentReservation}
+      onSuccess={() => {
+        queryClient.invalidateQueries({ queryKey: ["reservations"] });
+        onSuccess();
+        if (reservationId) {
+          supabase
+            .from("reservations")
+            .select(`
+              *, 
+              financial_responsible:clients!client_id(full_name),
+              guest:clients!guest_id(full_name),
+              rooms(room_number)
+            `)
+            .eq("id", reservationId)
+            .single()
+            .then(({ data }) => {
+              if (data) {
+                setCurrentReservation({
+                  ...data,
+                  guest_name: data.guest?.full_name || data.financial_responsible?.full_name,
+                });
+              }
+            });
+        }
+      }}
+    />
+    </>
   );
 };
 
