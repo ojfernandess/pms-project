@@ -770,44 +770,16 @@ export function ReservationPaymentModal({
     }
   }, [selectedAmount, open]);
 
-  // Preencher dados iniciais ao abrir e atualizar reserva se necessário
+  // Preencher dados iniciais ao abrir (sem refetch pesado — evita rajada de requests no backend)
   useEffect(() => {
     if (open && reservation) {
-      // Buscar dados atualizados da reserva para garantir que temos as informações mais recentes
-      const refreshReservation = async () => {
-        try {
-          const { data: freshReservation } = await supabase
-            .from("reservations")
-            .select(`
-              *,
-              financial_responsible:clients!client_id(*),
-              guest:clients!guest_id(*),
-              rooms (*),
-              room_categories (*)
-            `)
-            .eq("id", reservation.id)
-            .single();
-          
-          if (freshReservation) {
-            // Invalidar queries para atualizar dados em outros componentes
-            queryClient.invalidateQueries({ queryKey: ["reservations"] });
-            queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
-          }
-        } catch (error) {
-          console.warn("Erro ao atualizar dados da reserva:", error);
-          // Continuar mesmo se houver erro
-        }
-      };
-      
-      refreshReservation();
-      
       setPaymentDate(new Date());
       setObservations("");
       setSelectedCarrierId("");
       setSelectedPaymentTypeId("");
       setInstallments("1");
     }
-  }, [open, reservation, queryClient]);
+  }, [open, reservation?.id]);
 
   const handleSubmit = async () => {
     if (!selectedComponent) {
@@ -1197,18 +1169,11 @@ export function ReservationPaymentModal({
       setShowPaymentSuccess(true);
       toast.success("Pagamento lançado com sucesso!");
 
-      // Invalidar todas as queries relacionadas para forçar atualização
-      queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
-      queryClient.invalidateQueries({ queryKey: ["reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      await queryClient.refetchQueries({
-        queryKey: ["reservation_payments", reservation.id],
-        exact: true,
-      });
-      await queryClient.refetchQueries({ queryKey: ["reservations"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] }),
+        queryClient.invalidateQueries({ queryKey: ["reservations"] }),
+        queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] }),
+      ]);
 
       await new Promise((resolve) => setTimeout(resolve, 1400));
 

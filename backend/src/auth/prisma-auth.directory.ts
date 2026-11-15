@@ -37,19 +37,25 @@ export class PrismaAuthDirectory implements AuthDirectory {
   }
 
   async loadScope(userId: string): Promise<ScopeFacts> {
-    const adminRows = await this.prisma.$queryRaw<Array<{ is_super_admin: boolean }>>`
-      SELECT COALESCE(bool_or(is_super_admin), false) AS is_super_admin
-      FROM public.admin_users
-      WHERE user_id = ${userId}::uuid
+    const rows = await this.prisma.$queryRaw<
+      Array<{ is_super_admin: boolean; company_ids: string[] | null }>
+    >`
+      SELECT
+        COALESCE((
+          SELECT bool_or(is_super_admin)
+          FROM public.admin_users
+          WHERE user_id = ${userId}::uuid
+        ), false) AS is_super_admin,
+        (
+          SELECT array_agg(company_id::text)
+          FROM public.user_companies
+          WHERE user_id = ${userId}::uuid
+        ) AS company_ids
     `;
-    const companyRows = await this.prisma.$queryRaw<Array<{ company_id: string }>>`
-      SELECT company_id
-      FROM public.user_companies
-      WHERE user_id = ${userId}::uuid
-    `;
+    const row = rows[0];
     return {
-      isSuperAdmin: adminRows[0]?.is_super_admin === true,
-      companyIds: companyRows.map((row) => row.company_id),
+      isSuperAdmin: row?.is_super_admin === true,
+      companyIds: row?.company_ids?.filter(Boolean) ?? [],
     };
   }
 
