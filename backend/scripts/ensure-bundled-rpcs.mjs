@@ -89,16 +89,36 @@ function clientConfig(url) {
   return { connectionString: url, ssl };
 }
 
-async function hasPublicFunction(client, name, identityArgs) {
+/** Compara só tipos (pg às vezes omite nomes: "uuid" vs "p_company_id uuid"). */
+function normalizeIdentityArgTypes(identityArgs) {
+  const raw = (identityArgs ?? "").trim();
+  if (!raw) return "";
+  return raw
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+    .map((part) => {
+      const tokens = part.split(/\s+/);
+      return tokens[tokens.length - 1];
+    })
+    .join(",");
+}
+
+async function listPublicFunctionSignatures(client, name) {
   const { rows } = await client.query(
-    `SELECT 1 FROM pg_proc p
+    `SELECT pg_get_function_identity_arguments(p.oid) AS args
+     FROM pg_proc p
      JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE n.nspname = 'public' AND p.proname = $1
-       AND pg_get_function_identity_arguments(p.oid) = $2
-     LIMIT 1`,
-    [name, identityArgs],
+     WHERE n.nspname = 'public' AND p.proname = $1`,
+    [name],
   );
-  return rows.length > 0;
+  return rows.map((r) => r.args);
+}
+
+async function hasPublicFunction(client, name, identityArgs) {
+  const expected = normalizeIdentityArgTypes(identityArgs);
+  const signatures = await listPublicFunctionSignatures(client, name);
+  return signatures.some((args) => normalizeIdentityArgTypes(args) === expected);
 }
 
 async function bundledRpcsComplete(client) {
@@ -135,20 +155,28 @@ async function applyIncrementalPatches(client, url, rpcDir) {
       continue;
     }
     console.log(`=== Patch incremental: ${patch.sql} (RPC de credenciais API ausente) ===`);
-    applySqlFileWithPsql(url, filePath);
+    const ok = applySqlFileWithPsql(url, filePath, { stopOnError: true });
+    if (!ok) {
+      console.error(`Patch ${patch.sql} falhou — veja erros psql acima.`);
+    }
   }
 }
 
-function applySqlFileWithPsql(url, filePath) {
-  const result = spawnSync("psql", [url, "-v", "ON_ERROR_STOP=0", "-f", filePath], {
-    encoding: "utf8",
-    maxBuffer: 10 * 1024 * 1024,
-  });
+function applySqlFileWithPsql(url, filePath, { stopOnError = false } = {}) {
+  const result = spawnSync(
+    "psql",
+    [url, "-v", `ON_ERROR_STOP=${stopOnError ? 1 : 0}`, "-f", filePath],
+    {
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  );
   if (result.stdout?.trim()) console.log(result.stdout.trim());
   if (result.stderr?.trim()) console.log(result.stderr.trim());
   if (result.status !== 0) {
     console.error(`psql saiu com código ${result.status} em ${path.basename(filePath)}`);
   }
+  return result.status === 0;
 }
 
 async function main() {
@@ -206,7 +234,14 @@ async function main() {
     if (ok) {
       console.log(`OK: public.${rpc.name}(${rpc.args || ""})`);
     } else {
-      console.error(`ERROR: public.${rpc.name} ainda ausente.`);
+      const found = await listPublicFunctionSignatures(client, rpc.name);
+      if (found.length > 0) {
+        console.error(
+          `ERROR: public.${rpc.name} — esperado (${rpc.args || "sem args"}); no DB: ${found.join(" | ")}`,
+        );
+      } else {
+        console.error(`ERROR: public.${rpc.name} ainda ausente.`);
+      }
       allOk = false;
     }
   }

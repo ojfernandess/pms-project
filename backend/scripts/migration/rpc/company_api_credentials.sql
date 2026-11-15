@@ -2,7 +2,16 @@
 -- Aplicar no arranque do backend via apply-order.txt
 
 -- Credenciais de API por empresa (client_id/client_secret)
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- pgcrypto em extensions (Supabase / baseline) e fallback em public (Postgres local)
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+DO $ext$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END;
+$ext$;
 
 CREATE TABLE IF NOT EXISTS public.company_api_credentials (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -61,7 +70,7 @@ CREATE OR REPLACE FUNCTION public.rotate_company_api_credentials(
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_uid UUID;

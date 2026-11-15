@@ -120,13 +120,10 @@ export class DataService {
         `;
         if (signatures.length === 0) throw new Error(`Função não encontrada: ${name}`);
         const input = args ?? {};
-        const signature = signatures.find((item) => Object.keys(input).every((key) => argNames(item.args).includes(key))) ?? signatures[0];
-        const known = argNames(signature.args);
-        for (const key of Object.keys(input)) {
-          if (!known.includes(key)) throw new Error(`Argumento desconhecido: ${key}`);
-        }
-        const entries = known.filter((key) => Object.prototype.hasOwnProperty.call(input, key));
-        const values = entries.map((key) => input[key]);
+        const signature =
+          signatures.find((item) => Object.keys(input).every((key) => argNames(item.args).includes(key))) ??
+          signatures[0];
+        const { entries, values } = resolveRpcInvocation(signature.args, input);
         const types = argTypeMap(signature.args);
         const positional = entries
           .map((key, index) => {
@@ -243,9 +240,43 @@ function argTypeMap(args: string): Map<string, string> {
     const trimmed = part.trim();
     if (!trimmed) continue;
     const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$/);
-    if (match && IDENT.test(match[1])) map.set(match[1], match[2]);
+    if (match && IDENT.test(match[1])) {
+      map.set(match[1], match[2]);
+    } else if (/^[a-z][\w\[\]]*$/i.test(trimmed)) {
+      map.set(trimmed, trimmed);
+    }
   }
   return map;
+}
+
+/** Aceita nomes do cliente (ex. p_company_id) quando o PG só expõe o tipo (ex. uuid). */
+function resolveRpcInvocation(
+  signatureArgs: string,
+  input: Record<string, unknown>,
+): { entries: string[]; values: unknown[] } {
+  const known = argNames(signatureArgs);
+  const namedEntries = known.filter((key) => Object.prototype.hasOwnProperty.call(input, key));
+  if (namedEntries.length > 0 || Object.keys(input).length === 0) {
+    return { entries: namedEntries, values: namedEntries.map((key) => input[key]) };
+  }
+
+  const inputKeys = Object.keys(input);
+  const typeParts = signatureArgs
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (typeParts.length !== inputKeys.length) {
+    throw new Error(`Argumento desconhecido: ${inputKeys[0] ?? ""}`);
+  }
+
+  const entries = typeParts.map((part) => {
+    const match = part.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$/);
+    if (match && IDENT.test(match[1])) return match[1];
+    const tokens = part.split(/\s+/);
+    return tokens[tokens.length - 1];
+  });
+  const values = inputKeys.length === 1 ? [input[inputKeys[0]]] : inputKeys.map((key) => input[key]);
+  return { entries, values };
 }
 
 /** Tipos de argumentos vindos de pg_get_function_identity_arguments (ex.: uuid, date). */
