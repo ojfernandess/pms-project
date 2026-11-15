@@ -12,11 +12,17 @@ COPY prisma ./prisma
 COPY nest-cli.json tsconfig.json tsconfig.build.json ./
 COPY src ./src
 
+# Easypanel envia NODE_ENV=production como build-arg; não propagar — build precisa de devDependencies.
 ENV NODE_ENV=development
-RUN npm ci --include=dev --no-audit --no-fund \
-  && npx prisma generate \
-  && npm run build \
-  && npm prune --omit=dev
+ENV NPM_CONFIG_PRODUCTION=false
+ENV NODE_OPTIONS=--max-old-space-size=4096
+ARG DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build
+ENV DATABASE_URL=$DATABASE_URL
+
+RUN npm ci --include=dev --no-audit --no-fund
+RUN npx prisma generate
+RUN npm run build
+RUN npm prune --omit=dev
 
 FROM node:20-bookworm-slim
 
