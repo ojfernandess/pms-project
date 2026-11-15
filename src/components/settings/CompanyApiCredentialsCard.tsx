@@ -116,25 +116,37 @@ export function CompanyApiCredentialsCard({ companyId, supabaseProjectUrl, isFea
         method: "GET",
         url: `${endpointBase}?action=list-reservations`,
         acceptedParams: [
-          "booking_id (number, opcional): ID da reserva.",
-          "status (number, opcional): Status da reserva.",
-          "per_page (number, opcional): Itens por página (20, 50, 100, 200, 500).",
+          "establishment_id (uuid, opcional): Estabelecimento; padrão é o primeiro ativo da empresa.",
+          "booking_id (string, opcional): UUID ou reservation_code.",
+          "status (string, opcional): pending, confirmed, checkedin, blocked, etc.",
+          "per_page (number, opcional): Itens por página (1–200, padrão 20).",
           "page (number, opcional): Página atual.",
-          "checkin (date, opcional): Filtra por data de check-in.",
-          "checkout (date, opcional): Filtra por data de check-out.",
-          "created (date, opcional): Filtra por data de criação.",
-          "period_one (date, opcional): Início do período.",
-          "period_two (date, opcional): Fim do período.",
-          "guest (number, opcional): ID do hóspede.",
+          "date_from / date_to (date, opcional): Reservas que intersectam o período (YYYY-MM-DD).",
+          "stay_from / stay_to (date, opcional): Alias de date_from / date_to.",
+          "checkin_from / checkin_to (date, opcional): Filtra pela data de check-in.",
+          "checkout_from / checkout_to (date, opcional): Filtra pela data de check-out.",
+          "checkin / checkout / created (date, opcional): Atalhos legados (>= checkin, <= checkout, >= created).",
+          "period_one / period_two (date, opcional): Alias de checkin_from / checkout_to.",
+          "guest (uuid, opcional): client_id ou guest_id.",
         ],
         responseExample: `{
   "success": true,
   "action": "list-reservations",
+  "filters": { "date_from": "2026-04-01", "date_to": "2026-04-30" },
   "current_page": 1,
-  "total_pages": 3,
   "total_bookings": 58,
   "bookings": [
-    { "booking_id": 111111, "status": 2, "checkin": "2026-04-10" }
+    {
+      "id": "uuid",
+      "reservation_code": "RES-001",
+      "checkin_date": "2026-04-10",
+      "checkout_date": "2026-04-12",
+      "status": "confirmed",
+      "guest_display_name": "Maria Silva",
+      "room": { "room_number": "101" },
+      "payments": [],
+      "balance_due": 800
+    }
   ]
 }`,
       },
@@ -306,6 +318,40 @@ export function CompanyApiCredentialsCard({ companyId, supabaseProjectUrl, isFea
       "full_name": "Maria Silva",
       "email": "maria@email.com",
       "phone": "+55 11 99999-9999"
+    }
+  ]
+}`,
+      },
+      {
+        title: "Quadro diário de quartos",
+        description:
+          "Por data ou intervalo (até 62 dias), lista todos os quartos com check-ins, check-outs, hospedagens da noite e bloqueios (reserva blocked, quarto bloqueado, status maintenance/blocked).",
+        method: "GET",
+        url: `${endpointBase}?action=room-daily-board&date_from=2026-04-18&date_to=2026-04-20`,
+        acceptedParams: [
+          "establishment_id (uuid, opcional): Estabelecimento; padrão é o primeiro ativo.",
+          "date (YYYY-MM-DD, opcional): Um único dia (equivale a date_from=date_to).",
+          "date_from / date_to (opcional): Intervalo de dias (máx. 62).",
+        ],
+        responseExample: `{
+  "success": true,
+  "action": "room-daily-board",
+  "date_from": "2026-04-18",
+  "date_to": "2026-04-18",
+  "days": [
+    {
+      "date": "2026-04-18",
+      "summary": { "total_rooms": 40, "check_ins": 5, "check_outs": 4, "rooms_with_blocks": 1 },
+      "rooms": [
+        {
+          "room_number": "101",
+          "check_ins": [{ "reservation_code": "RES-1", "guest_name": "Ana" }],
+          "check_outs": [],
+          "overnight_reservations": [],
+          "blocks": [],
+          "occupied_overnight": false
+        }
+      ]
     }
   ]
 }`,
@@ -619,6 +665,17 @@ export function CompanyApiCredentialsCard({ companyId, supabaseProjectUrl, isFea
         payloadExample: `{
   "establishment_id": "660e8400-e29b-41d4-a716-446655440001",
   "date": "2026-04-18"
+}`,
+      });
+      fromDocs.push({
+        title: "Quadro diário de quartos (POST, corpo JSON)",
+        description: "Envia `establishment_id`, `date` ou `date_from`/`date_to` no corpo JSON.",
+        method: "POST",
+        fullUrl: `${endpointBase}?action=room-daily-board`,
+        payloadExample: `{
+  "establishment_id": "660e8400-e29b-41d4-a716-446655440001",
+  "date_from": "2026-04-18",
+  "date_to": "2026-04-25"
 }`,
       });
       const stayReviewDoc = endpointDocs.find((d) => d.title === "Gerar link de avaliação da estadia");

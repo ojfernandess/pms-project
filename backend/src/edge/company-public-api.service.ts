@@ -10,27 +10,6 @@ type HeaderMap = Map<string, string>;
 const DATE_ONLY = new Set(["checkin_date", "checkout_date", "birth_date"]);
 const TIME_ONLY = new Set(["checkin_time", "checkout_time"]);
 
-const RESERVATION_LIST_SELECT = {
-  id: true,
-  reservation_code: true,
-  checkin_date: true,
-  checkout_date: true,
-  adults: true,
-  children: true,
-  status: true,
-  payment_status: true,
-  total_amount: true,
-  paid_amount: true,
-  notes: true,
-  channel: true,
-  created_at: true,
-  updated_at: true,
-  room_id: true,
-  category_id: true,
-  client_id: true,
-  guest_id: true,
-} satisfies Prisma.reservationsSelect;
-
 const RESERVATION_DETAIL_SELECT = {
   id: true,
   reservation_code: true,
@@ -97,9 +76,22 @@ const SUPPORTED_ACTIONS = [
   "list-maintenance",
   "list-clients",
   "occupancy-map",
+  "room-daily-board",
   "list-stay-reviews",
   "stay-review-link",
 ];
+
+const RESERVATION_LIST_DETAIL_SELECT = {
+  ...RESERVATION_DETAIL_SELECT,
+  pricing_plans: { select: { id: true, name: true } },
+  room_categories: { select: { id: true, name: true } },
+  rooms: { select: { id: true, room_number: true, floor: true, status: true, is_blocked: true } },
+  clients_reservations_client_idToclients: { select: CLIENT_SELECT },
+  clients_reservations_guest_idToclients: { select: CLIENT_SELECT },
+  establishments: { select: { id: true, name: true, company_id: true } },
+} satisfies Prisma.reservationsSelect;
+
+const MAX_ROOM_DAILY_BOARD_DAYS = 62;
 
 @Injectable()
 export class CompanyPublicApiService {
@@ -180,6 +172,7 @@ export class CompanyPublicApiService {
     if (action === "list-maintenance") return this.listMaintenance(companyId, query, respond);
     if (action === "list-clients") return this.listClients(companyId, query, respond);
     if (action === "occupancy-map") return this.occupancyMap(companyId, method, query, input.body, respond);
+    if (action === "room-daily-board") return this.roomDailyBoard(companyId, method, query, input.body, respond);
     if (action === "list-stay-reviews") return this.listStayReviews(companyId, query, respond);
     if (action === "stay-review-link") return this.stayReviewLink(companyId, method, query, input.body, respond);
     if (action === "me" || action === "establishments") return this.companyProfile(companyId, action, respond);
@@ -207,76 +200,31 @@ export class CompanyPublicApiService {
       return respond(companyId, 403, { success: false, error: "Estabelecimento inválido para esta empresa." });
     }
 
-    const bookingId = text(query.booking_id);
-    const where: Prisma.reservationsWhereInput = { establishment_id: establishmentId };
-    const and: Prisma.reservationsWhereInput[] = [];
-    if (bookingId) {
-      if (!isUuid(bookingId)) {
-        console.error("list-reservations failed", "booking_id is not a uuid");
-        return respond(companyId, 500, { success: false, error: "Erro ao listar reservas" });
-      }
-      and.push({ OR: [{ id: bookingId }, { reservation_code: bookingId }] });
-    }
-    const statusFilter = text(query.status);
-    if (statusFilter) {
-      if (!isReservationStatus(statusFilter)) {
-        console.error("list-reservations failed", "invalid status");
-        return respond(companyId, 500, { success: false, error: "Erro ao listar reservas" });
-      }
-      and.push({ status: statusFilter });
-    }
-    const checkin = text(query.checkin);
-    if (checkin) {
-      const parsed = parseInstant(`${checkin}T00:00:00.000Z`);
-      if (!parsed) return this.listFailure(companyId, "list-reservations", respond);
-      and.push({ checkin_date: { gte: parsed } });
-    }
-    const checkout = text(query.checkout);
-    if (checkout) {
-      const parsed = parseInstant(`${checkout}T00:00:00.000Z`);
-      if (!parsed) return this.listFailure(companyId, "list-reservations", respond);
-      and.push({ checkout_date: { lte: parsed } });
-    }
-    const created = text(query.created);
-    if (created) {
-      const parsed = parseInstant(`${created}T00:00:00.000Z`);
-      if (!parsed) return this.listFailure(companyId, "list-reservations", respond);
-      and.push({ created_at: { gte: parsed } });
-    }
-    const periodOne = text(query.period_one);
-    if (periodOne) {
-      const parsed = parseInstant(`${periodOne}T00:00:00.000Z`);
-      if (!parsed) return this.listFailure(companyId, "list-reservations", respond);
-      and.push({ checkin_date: { gte: parsed } });
-    }
-    const periodTwo = text(query.period_two);
-    if (periodTwo) {
-      const parsed = parseInstant(`${periodTwo}T00:00:00.000Z`);
-      if (!parsed) return this.listFailure(companyId, "list-reservations", respond);
-      and.push({ checkout_date: { lte: parsed } });
-    }
-    if (and.length) where.AND = and;
+    const filterResult = this.buildReservationListWhere(query, establishmentId);
+    if (filterResult.error) return this.listFailure(companyId, "list-reservations", respond);
 
     try {
       const [total, data] = await Promise.all([
-        this.prisma.reservations.count({ where }),
+        this.prisma.reservations.count({ where: filterResult.where }),
         this.prisma.reservations.findMany({
-          where,
-          select: RESERVATION_LIST_SELECT,
-          orderBy: { created_at: "desc" },
+          where: filterResult.where,
+          select: RESERVATION_LIST_DETAIL_SELECT,
+          orderBy: { checkin_date: "desc" },
           skip: paging.skip,
           take: paging.take,
         }),
       ]);
+      const bookings = await this.hydrateBookingDetails(data);
       return respond(companyId, 200, {
         success: true,
         action: "list-reservations",
         establishment_id: establishmentId,
+        filters: filterResult.applied,
         current_page: paging.page,
         per_page: paging.perPage,
         total_pages: total > 0 ? Math.ceil(total / paging.perPage) : 0,
         total_bookings: total,
-        bookings: jsonSafe(data),
+        bookings,
       });
     } catch (error) {
       console.error("list-reservations failed", error instanceof Error ? error.message : "failed");
@@ -414,174 +362,37 @@ export class CompanyPublicApiService {
     }
     if (!bookingId) return respond(companyId, 400, { success: false, error: "Parâmetro obrigatório ausente: booking_id" });
 
-    const found = await this.findReservation(bookingId, RESERVATION_DETAIL_SELECT);
-    if (found.error) {
-      console.error("get-reservation-by-id reservation query failed", found.message ?? "failed");
+    const where: Prisma.reservationsWhereInput = isUuid(bookingId)
+      ? { OR: [{ id: bookingId }, { reservation_code: bookingId }] }
+      : { reservation_code: bookingId };
+    let reservation: Prisma.reservationsGetPayload<{ select: typeof RESERVATION_LIST_DETAIL_SELECT }> | null = null;
+    try {
+      reservation = await this.prisma.reservations.findFirst({
+        where,
+        select: RESERVATION_LIST_DETAIL_SELECT,
+      });
+    } catch (error) {
+      console.error("get-reservation-by-id reservation query failed", error instanceof Error ? error.message : "failed");
       return respond(companyId, 500, { success: false, error: "Erro ao consultar reserva" });
     }
-    const reservation = found.row;
     if (!reservation || !reservation.establishment_id) {
       return respond(companyId, 404, { success: false, error: "Reserva não encontrada" });
     }
 
-    const establishment = await this.establishmentById(String(reservation.establishment_id));
+    const establishment = reservation.establishments ?? (await this.establishmentById(String(reservation.establishment_id)));
     if (!establishment || String(establishment.company_id) !== companyId) {
       return respond(companyId, 404, { success: false, error: "Reserva não encontrada" });
     }
 
-    const guestClientId = reservation.guest_id || reservation.client_id;
-    const [pricingPlan, category, room, responsible, guest, payments, otaReservation, serviceFees, coupon, webCheckin] = await Promise.all([
-      reservation.pricing_plan_id
-        ? this.optional(this.prisma.pricing_plans.findUnique({ where: { id: reservation.pricing_plan_id }, select: { id: true, name: true } }))
-        : Promise.resolve(null),
-      reservation.category_id
-        ? this.optional(this.prisma.room_categories.findUnique({ where: { id: reservation.category_id }, select: { id: true, name: true } }))
-        : Promise.resolve(null),
-      reservation.room_id
-        ? this.optional(this.prisma.rooms.findUnique({ where: { id: reservation.room_id }, select: { id: true, room_number: true, floor: true, status: true } }))
-        : Promise.resolve(null),
-      reservation.client_id
-        ? this.optional(this.prisma.clients.findUnique({ where: { id: reservation.client_id }, select: CLIENT_SELECT }))
-        : Promise.resolve(null),
-      guestClientId
-        ? this.optional(this.prisma.clients.findUnique({ where: { id: guestClientId }, select: CLIENT_SELECT }))
-        : Promise.resolve(null),
-      this.optional(this.prisma.payments.findMany({
-        where: { reservation_id: reservation.id },
-        select: { id: true, amount: true, payment_method: true, payment_date: true, notes: true },
-        orderBy: { payment_date: "desc" },
-      })),
-      this.findSingleOta(reservation.id),
-      this.optional(this.prisma.reservation_service_fees.findMany({
-        where: { reservation_id: reservation.id },
-        select: {
-          id: true,
-          amount: true,
-          quantity: true,
-          notes: true,
-          service_fee_id: true,
-          service_fees: { select: { id: true, name: true, description: true } },
-        },
-      })),
-      reservation.coupon_id
-        ? this.optional(this.prisma.discount_coupons.findUnique({
-            where: { id: reservation.coupon_id },
-            select: {
-              id: true,
-              code: true,
-              name: true,
-              description: true,
-              discount_type: true,
-              discount_value: true,
-              apply_to: true,
-              status: true,
-              valid_from: true,
-              valid_until: true,
-            },
-          }))
-        : Promise.resolve(null),
-      this.optional(this.prisma.web_checkin.findUnique({
-        where: { reservation_id: reservation.id },
-        select: {
-          id: true,
-          status: true,
-          locator: true,
-          started_at: true,
-          completed_at: true,
-          expires_at: true,
-          terms_accepted: true,
-          terms_accepted_at: true,
-        },
-      })),
-    ]);
-
-    const totalAmount = Number(reservation.total_amount ?? 0);
-    const paidAmount = Number(reservation.paid_amount ?? 0);
-    const otaPlain = otaReservation ? (jsonSafe(otaReservation) as Record<string, unknown>) : null;
-    const fallbackGuestName = String(otaReservation?.ota_guest_name || "").trim() || null;
-    const fallbackGuestEmail = String(otaReservation?.ota_guest_email || "").trim() || null;
-    const fallbackGuestPhone = String(otaReservation?.ota_guest_phone || "").trim() || null;
-    const otaAddrNorm = normalizeOtaGuestAddress(otaReservation?.ota_guest_address);
-    const otaGuestProfile = fallbackGuestName
-      ? {
-          source: "ota_reservations",
-          has_client_record: false,
-          profile_reference: otaReservation?.id ? `ota_reservations:${String(otaReservation.id)}` : `reservation:${String(reservation.id)}`,
-          full_name: fallbackGuestName,
-          email: fallbackGuestEmail,
-          phone: fallbackGuestPhone,
-          document_type: null as string | null,
-          document_number: null as string | null,
-          address: otaAddrNorm,
-        }
-      : null;
-
-    const guestFromClient = guest ? { ...(jsonSafe(guest) as Record<string, unknown>), source: "clients", has_client_record: true } : null;
-    const guestData = guestFromClient ?? otaGuestProfile;
-    const responsibleFromClient = responsible
-      ? { ...(jsonSafe(responsible) as Record<string, unknown>), source: "clients", has_client_record: true }
-      : null;
-    const financialResponsibleData = responsibleFromClient ?? (otaGuestProfile ? { ...otaGuestProfile } : null);
-    const guestDisplayName =
-      (guestData && typeof guestData === "object" && "full_name" in guestData && String((guestData as { full_name?: string }).full_name || "").trim()) ||
-      String(reservation.guest_name || "").trim() ||
-      fallbackGuestName ||
-      null;
-    const plainReservation = jsonSafe(reservation) as Record<string, unknown>;
-    const nights = nightsBetween(String(plainReservation.checkin_date || ""), String(plainReservation.checkout_date || ""));
-    const hasClientRows = Boolean(reservation.client_id || reservation.guest_id);
-    const guestProfileSource = guestFromClient
-      ? "clients"
-      : otaGuestProfile
-        ? "ota_reservations"
-        : String(reservation.guest_name || "").trim()
-          ? "reservation_guest_name"
-          : "unknown";
-    const otaChannel = otaPlain?.ota_channels as { name?: string | null } | null | undefined;
+    const [booking] = await this.hydrateBookingDetails([reservation]);
+    if (!booking) {
+      return respond(companyId, 500, { success: false, error: "Erro ao consultar reserva" });
+    }
 
     return respond(companyId, 200, {
       success: true,
       action: "get-reservation-by-id",
-      booking: {
-        ...plainReservation,
-        establishment: jsonSafe(establishment),
-        pricing_plan: jsonSafe(pricingPlan),
-        category: jsonSafe(category),
-        room: jsonSafe(room),
-        financial_responsible: financialResponsibleData,
-        guest: guestData,
-        guest_profile: {
-          source: guestProfileSource,
-          has_client_record: hasClientRows,
-          client_id: reservation.client_id ?? null,
-          guest_id: reservation.guest_id ?? null,
-          reservation_guest_name: String(reservation.guest_name || "").trim() || null,
-          financial_same_as_guest:
-            Boolean(otaGuestProfile && !responsibleFromClient) ||
-            Boolean(reservation.client_id && reservation.guest_id && String(reservation.client_id) === String(reservation.guest_id)),
-        },
-        guest_display_name: guestDisplayName,
-        nights,
-        coupon: jsonSafe(coupon),
-        service_fees: jsonSafe(serviceFees ?? []),
-        web_checkin: jsonSafe(webCheckin),
-        ota: otaReservation
-          ? {
-              ota_channel_id: otaReservation.ota_channel_id,
-              ota_channel_name: otaChannel?.name ?? otaReservation.ota_source_channel_name ?? null,
-              partner_channel_name: otaReservation.ota_source_channel_name ?? null,
-              ota_reservation_code: otaReservation.ota_reservation_code,
-              cm_booking_id: otaReservation.ota_cm_booking_id ?? null,
-              segment: otaReservation.ota_segment ?? null,
-              special_requests: otaReservation.ota_special_requests ?? null,
-              guest_address: otaReservation.ota_guest_address ?? null,
-              sync_status: otaReservation.sync_status ?? null,
-              synced_at: otaPlain?.synced_at ?? null,
-            }
-          : null,
-        payments: jsonSafe(payments ?? []),
-        balance_due: Math.max(totalAmount - paidAmount, 0),
-      },
+      booking,
     });
   }
 
@@ -939,6 +750,194 @@ export class CompanyPublicApiService {
     });
   }
 
+  private async roomDailyBoard(
+    companyId: string,
+    method: string,
+    query: Query,
+    rawBody: unknown,
+    respond: Respond,
+  ): Promise<ApiResult> {
+    let establishmentId = text(query.establishment_id);
+    let dateFrom = text(query.date_from || query.from);
+    let dateTo = text(query.date_to || query.to);
+    let singleDate = text(query.date);
+    if (method === "POST") {
+      const body = parseBody(rawBody);
+      if (!establishmentId) establishmentId = String(body.establishment_id || "").trim();
+      if (!dateFrom) dateFrom = String(body.date_from || body.from || "").trim();
+      if (!dateTo) dateTo = String(body.date_to || body.to || "").trim();
+      if (!singleDate) singleDate = String(body.date || "").trim();
+    }
+    if (!dateFrom && singleDate) dateFrom = singleDate;
+    if (!dateTo && singleDate) dateTo = singleDate;
+    if (!dateFrom) dateFrom = todayUtcYmd();
+    if (!dateTo) dateTo = dateFrom;
+    if (!parseDateYmd(dateFrom) || !parseDateYmd(dateTo)) {
+      return respond(companyId, 400, { success: false, error: "Datas invalidas. Use YYYY-MM-DD em date, date_from e date_to." });
+    }
+    if (dateFrom > dateTo) {
+      const swap = dateFrom;
+      dateFrom = dateTo;
+      dateTo = swap;
+    }
+    const dayCount = daysBetweenYmd(dateFrom, dateTo) + 1;
+    if (dayCount > MAX_ROOM_DAILY_BOARD_DAYS) {
+      return respond(companyId, 400, {
+        success: false,
+        error: `Intervalo maximo de ${MAX_ROOM_DAILY_BOARD_DAYS} dias.`,
+      });
+    }
+
+    if (!establishmentId) establishmentId = await this.firstActiveEstablishment(companyId);
+    if (!establishmentId) {
+      return respond(companyId, 400, { success: false, error: "Nenhum estabelecimento ativo encontrado para esta empresa." });
+    }
+    const establishment = await this.establishmentForCompany(companyId, establishmentId);
+    if (!establishment) return respond(companyId, 403, { success: false, error: "Estabelecimento invalido para esta empresa." });
+
+    const rangeStart = parseDateYmd(dateFrom)!;
+    const rangeEnd = parseDateYmd(dateTo)!;
+
+    type RoomRow = {
+      id: string;
+      room_number: string;
+      floor: number | null;
+      status: string;
+      is_blocked: boolean | null;
+      category_id: string;
+      room_categories: { id: string; name: string; building_id: string | null; buildings: { id: string; name: string } | null } | null;
+    };
+
+    let roomsData: RoomRow[] = [];
+    try {
+      roomsData = await this.prisma.rooms.findMany({
+        where: { establishment_id: establishmentId },
+        select: {
+          id: true,
+          room_number: true,
+          floor: true,
+          status: true,
+          is_blocked: true,
+          category_id: true,
+          room_categories: {
+            select: { id: true, name: true, building_id: true, buildings: { select: { id: true, name: true } } },
+          },
+        },
+        orderBy: { room_number: "asc" },
+      });
+    } catch (error) {
+      console.error("room-daily-board rooms failed", error instanceof Error ? error.message : "failed");
+      return respond(companyId, 500, { success: false, error: "Erro ao carregar quartos" });
+    }
+
+    let reservationsData: Array<{
+      id: string;
+      reservation_code: string;
+      room_id: string | null;
+      category_id: string;
+      checkin_date: Date;
+      checkout_date: Date;
+      status: string;
+      guest_name: string | null;
+      adults: number;
+      children: number;
+    }> = [];
+    try {
+      reservationsData = await this.prisma.reservations.findMany({
+        where: {
+          establishment_id: establishmentId,
+          status: { not: "cancelled" },
+          checkin_date: { lte: rangeEnd },
+          checkout_date: { gt: rangeStart },
+        },
+        select: {
+          id: true,
+          reservation_code: true,
+          room_id: true,
+          category_id: true,
+          checkin_date: true,
+          checkout_date: true,
+          status: true,
+          guest_name: true,
+          adults: true,
+          children: true,
+        },
+      });
+    } catch (error) {
+      console.error("room-daily-board reservations failed", error instanceof Error ? error.message : "failed");
+      return respond(companyId, 500, { success: false, error: "Erro ao carregar reservas" });
+    }
+
+    const dates = eachDateYmd(dateFrom, dateTo);
+    const days = dates.map((dateStr) => {
+      const rooms = roomsData.map((room) => {
+        const roomReservations = reservationsData.filter((r) => r.room_id && String(r.room_id) === String(room.id));
+        const summary = (r: (typeof reservationsData)[number]) => reservationBoardSummary(r);
+        const checkIns = roomReservations
+          .filter((r) => ymd(r.checkin_date) === dateStr && String(r.status) !== "blocked")
+          .map(summary);
+        const checkOuts = roomReservations
+          .filter((r) => ymd(r.checkout_date) === dateStr && String(r.status) !== "blocked")
+          .map(summary);
+        const overnight = roomReservations
+          .filter((r) => reservationCoversNight(ymd(r.checkin_date), ymd(r.checkout_date), dateStr))
+          .map(summary);
+        const blockReservations = roomReservations
+          .filter(
+            (r) =>
+              String(r.status) === "blocked" &&
+              reservationCoversNight(ymd(r.checkin_date), ymd(r.checkout_date), dateStr),
+          )
+          .map((r) => ({ ...summary(r), block_type: "reservation_blocked" }));
+        const roomBlocks: Array<Record<string, unknown>> = [...blockReservations];
+        if (room.is_blocked === true) {
+          roomBlocks.push({ block_type: "room_is_blocked", room_id: room.id, date: dateStr });
+        }
+        if (room.status === "blocked" || room.status === "maintenance") {
+          roomBlocks.push({ block_type: "room_status", room_status: room.status, room_id: room.id, date: dateStr });
+        }
+        const category = room.room_categories;
+        const building = category?.buildings;
+        return {
+          room_id: room.id,
+          room_number: room.room_number,
+          floor: room.floor,
+          room_status: room.status,
+          is_blocked: room.is_blocked === true,
+          category_id: category?.id ?? room.category_id,
+          category_name: category?.name ?? null,
+          building_id: building?.id ?? null,
+          building_name: building?.name ?? null,
+          check_ins: checkIns,
+          check_outs: checkOuts,
+          overnight_reservations: overnight,
+          blocks: roomBlocks,
+          has_blocks: roomBlocks.length > 0,
+          occupied_overnight: overnight.some((r) => String((r as { status?: string }).status) !== "blocked"),
+        };
+      });
+
+      const summary = {
+        total_rooms: rooms.length,
+        check_ins: rooms.reduce((n, r) => n + r.check_ins.length, 0),
+        check_outs: rooms.reduce((n, r) => n + r.check_outs.length, 0),
+        rooms_with_blocks: rooms.filter((r) => r.has_blocks).length,
+        occupied_overnight: rooms.filter((r) => r.occupied_overnight).length,
+      };
+
+      return { date: dateStr, summary, rooms };
+    });
+
+    return respond(companyId, 200, {
+      success: true,
+      action: "room-daily-board",
+      establishment_id: establishmentId,
+      date_from: dateFrom,
+      date_to: dateTo,
+      days,
+    });
+  }
+
   private async listStayReviews(companyId: string, query: Query, respond: Respond): Promise<ApiResult> {
     const paging = pageParams(query, 50);
     let establishmentId = text(query.establishment_id);
@@ -1170,6 +1169,296 @@ export class CompanyPublicApiService {
       company: jsonSafe(company),
       establishments: establishmentsWithUnits,
     });
+  }
+
+  private buildReservationListWhere(
+    query: Query,
+    establishmentId: string,
+  ): { where: Prisma.reservationsWhereInput; applied: Record<string, string>; error?: boolean } {
+    const where: Prisma.reservationsWhereInput = { establishment_id: establishmentId };
+    const and: Prisma.reservationsWhereInput[] = [];
+    const applied: Record<string, string> = {};
+
+    const bookingId = text(query.booking_id);
+    if (bookingId) {
+      and.push({ OR: [{ id: bookingId }, { reservation_code: bookingId }] });
+      applied.booking_id = bookingId;
+    }
+
+    const statusFilter = text(query.status);
+    if (statusFilter) {
+      if (!isReservationStatus(statusFilter)) return { where, applied, error: true };
+      and.push({ status: statusFilter });
+      applied.status = statusFilter;
+    }
+
+    const guestId = text(query.guest);
+    if (guestId) {
+      and.push({ OR: [{ client_id: guestId }, { guest_id: guestId }] });
+      applied.guest = guestId;
+    }
+
+    const applyDateGte = (key: string, field: "checkin_date" | "checkout_date" | "created_at", param: string) => {
+      const parsed = parseDateYmd(param);
+      if (!parsed) return false;
+      and.push({ [field]: { gte: parsed } });
+      applied[key] = param;
+      return true;
+    };
+    const applyDateLte = (key: string, field: "checkin_date" | "checkout_date" | "created_at", param: string) => {
+      const parsed = parseDateYmd(param);
+      if (!parsed) return false;
+      and.push({ [field]: { lte: parsed } });
+      applied[key] = param;
+      return true;
+    };
+
+    const checkinFrom = text(query.checkin_from || query.period_one);
+    if (checkinFrom && !applyDateGte("checkin_from", "checkin_date", checkinFrom)) return { where, applied, error: true };
+    const checkinTo = text(query.checkin_to);
+    if (checkinTo && !applyDateLte("checkin_to", "checkin_date", checkinTo)) return { where, applied, error: true };
+    const checkoutFrom = text(query.checkout_from);
+    if (checkoutFrom && !applyDateGte("checkout_from", "checkout_date", checkoutFrom)) return { where, applied, error: true };
+    const checkoutTo = text(query.checkout_to || query.period_two);
+    if (checkoutTo && !applyDateLte("checkout_to", "checkout_date", checkoutTo)) return { where, applied, error: true };
+
+    const stayFrom = text(query.date_from || query.stay_from);
+    const stayTo = text(query.date_to || query.stay_to);
+    if (stayFrom || stayTo) {
+      const from = stayFrom || stayTo;
+      const to = stayTo || stayFrom;
+      if (!from || !to || !parseDateYmd(from) || !parseDateYmd(to)) return { where, applied, error: true };
+      const start = parseDateYmd(from)!;
+      const end = parseDateYmd(to)!;
+      and.push({ checkin_date: { lte: end } });
+      and.push({ checkout_date: { gt: start } });
+      applied.date_from = from;
+      applied.date_to = to;
+    }
+
+    const checkin = text(query.checkin);
+    if (checkin && !applyDateGte("checkin", "checkin_date", checkin)) return { where, applied, error: true };
+    const checkout = text(query.checkout);
+    if (checkout && !applyDateLte("checkout", "checkout_date", checkout)) return { where, applied, error: true };
+    const created = text(query.created);
+    if (created && !applyDateGte("created", "created_at", created)) return { where, applied, error: true };
+
+    if (and.length) where.AND = and;
+    return { where, applied };
+  }
+
+  private async hydrateBookingDetails(
+    rows: Prisma.reservationsGetPayload<{ select: typeof RESERVATION_LIST_DETAIL_SELECT }>[],
+  ): Promise<Record<string, unknown>[]> {
+    if (rows.length === 0) return [];
+    const ids = rows.map((r) => r.id);
+    const couponIds = [...new Set(rows.map((r) => r.coupon_id).filter((id): id is string => Boolean(id)))];
+
+    const [paymentsRows, feeRows, webRows, otaRows, couponRows] = await Promise.all([
+      this.optional(
+        this.prisma.payments.findMany({
+          where: { reservation_id: { in: ids } },
+          select: { id: true, amount: true, payment_method: true, payment_date: true, notes: true, reservation_id: true },
+          orderBy: { payment_date: "desc" },
+        }),
+      ),
+      this.optional(
+        this.prisma.reservation_service_fees.findMany({
+          where: { reservation_id: { in: ids } },
+          select: {
+            id: true,
+            reservation_id: true,
+            amount: true,
+            quantity: true,
+            notes: true,
+            service_fee_id: true,
+            service_fees: { select: { id: true, name: true, description: true } },
+          },
+        }),
+      ),
+      this.optional(
+        this.prisma.web_checkin.findMany({
+          where: { reservation_id: { in: ids } },
+          select: {
+            id: true,
+            reservation_id: true,
+            status: true,
+            locator: true,
+            started_at: true,
+            completed_at: true,
+            expires_at: true,
+            terms_accepted: true,
+            terms_accepted_at: true,
+          },
+        }),
+      ),
+      this.optional(
+        this.prisma.ota_reservations.findMany({
+          where: { reservation_id: { in: ids } },
+          include: { ota_channels: { select: { id: true, name: true } } },
+        }),
+      ),
+      couponIds.length
+        ? this.optional(
+            this.prisma.discount_coupons.findMany({
+              where: { id: { in: couponIds } },
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                description: true,
+                discount_type: true,
+                discount_value: true,
+                apply_to: true,
+                status: true,
+                valid_from: true,
+                valid_until: true,
+              },
+            }),
+          )
+        : Promise.resolve([]),
+    ]);
+
+    const paymentsByRes = groupBy(paymentsRows ?? [], (p) => String(p.reservation_id));
+    const feesByRes = groupBy(feeRows ?? [], (p) => String(p.reservation_id));
+    const webByRes = new Map((webRows ?? []).map((w) => [String(w.reservation_id), w]));
+    const otaByRes = new Map<string, (typeof otaRows extends (infer O)[] | null ? O : never)>();
+    for (const ota of otaRows ?? []) {
+      const key = String(ota.reservation_id);
+      if (!otaByRes.has(key)) otaByRes.set(key, ota);
+    }
+    const couponsById = new Map((couponRows ?? []).map((c) => [String(c.id), c]));
+
+    return rows.map((reservation) =>
+      this.assembleBookingPayload(reservation, {
+        payments: paymentsByRes.get(String(reservation.id)) ?? [],
+        serviceFees: feesByRes.get(String(reservation.id)) ?? [],
+        webCheckin: webByRes.get(String(reservation.id)) ?? null,
+        otaReservation: otaByRes.get(String(reservation.id)) ?? null,
+        coupon: reservation.coupon_id ? couponsById.get(String(reservation.coupon_id)) ?? null : null,
+      }),
+    );
+  }
+
+  private assembleBookingPayload(
+    reservation: Prisma.reservationsGetPayload<{ select: typeof RESERVATION_LIST_DETAIL_SELECT }>,
+    extras: {
+      payments: Array<Record<string, unknown>>;
+      serviceFees: Array<Record<string, unknown>>;
+      webCheckin: Record<string, unknown> | null;
+      otaReservation: Record<string, unknown> | null;
+      coupon: Record<string, unknown> | null;
+    },
+  ): Record<string, unknown> {
+    const responsible = reservation.clients_reservations_client_idToclients;
+    const guestClient = reservation.clients_reservations_guest_idToclients ?? responsible;
+    const otaReservation = extras.otaReservation as {
+      id?: string;
+      ota_channel_id?: string | null;
+      ota_source_channel_name?: string | null;
+      ota_reservation_code?: string | null;
+      ota_cm_booking_id?: string | null;
+      ota_segment?: string | null;
+      ota_special_requests?: string | null;
+      ota_guest_address?: unknown;
+      sync_status?: string | null;
+      synced_at?: Date | null;
+      ota_guest_name?: string | null;
+      ota_guest_email?: string | null;
+      ota_guest_phone?: string | null;
+      ota_channels?: { name?: string | null } | null;
+    } | null;
+
+    const otaPlain = otaReservation ? (jsonSafe(otaReservation) as Record<string, unknown>) : null;
+    const fallbackGuestName = String(otaReservation?.ota_guest_name || "").trim() || null;
+    const otaAddrNorm = normalizeOtaGuestAddress(otaReservation?.ota_guest_address);
+    const otaGuestProfile = fallbackGuestName
+      ? {
+          source: "ota_reservations",
+          has_client_record: false,
+          profile_reference: otaReservation?.id ? `ota_reservations:${String(otaReservation.id)}` : `reservation:${String(reservation.id)}`,
+          full_name: fallbackGuestName,
+          email: String(otaReservation?.ota_guest_email || "").trim() || null,
+          phone: String(otaReservation?.ota_guest_phone || "").trim() || null,
+          document_type: null as string | null,
+          document_number: null as string | null,
+          address: otaAddrNorm,
+        }
+      : null;
+
+    const guestFromClient = guestClient ? { ...(jsonSafe(guestClient) as Record<string, unknown>), source: "clients", has_client_record: true } : null;
+    const guestData = guestFromClient ?? otaGuestProfile;
+    const responsibleFromClient = responsible
+      ? { ...(jsonSafe(responsible) as Record<string, unknown>), source: "clients", has_client_record: true }
+      : null;
+    const financialResponsibleData = responsibleFromClient ?? (otaGuestProfile ? { ...otaGuestProfile } : null);
+    const guestDisplayName =
+      (guestData && typeof guestData === "object" && "full_name" in guestData && String((guestData as { full_name?: string }).full_name || "").trim()) ||
+      String(reservation.guest_name || "").trim() ||
+      fallbackGuestName ||
+      null;
+
+    const plainReservation = jsonSafe(reservation) as Record<string, unknown>;
+    delete plainReservation.pricing_plans;
+    delete plainReservation.room_categories;
+    delete plainReservation.rooms;
+    delete plainReservation.clients_reservations_client_idToclients;
+    delete plainReservation.clients_reservations_guest_idToclients;
+    delete plainReservation.establishments;
+
+    const nights = nightsBetween(String(plainReservation.checkin_date || ""), String(plainReservation.checkout_date || ""));
+    const hasClientRows = Boolean(reservation.client_id || reservation.guest_id);
+    const guestProfileSource = guestFromClient
+      ? "clients"
+      : otaGuestProfile
+        ? "ota_reservations"
+        : String(reservation.guest_name || "").trim()
+          ? "reservation_guest_name"
+          : "unknown";
+    const otaChannel = otaPlain?.ota_channels as { name?: string | null } | null | undefined;
+    const totalAmount = Number(reservation.total_amount ?? 0);
+    const paidAmount = Number(reservation.paid_amount ?? 0);
+
+    return {
+      ...plainReservation,
+      establishment: jsonSafe(reservation.establishments),
+      pricing_plan: jsonSafe(reservation.pricing_plans),
+      category: jsonSafe(reservation.room_categories),
+      room: jsonSafe(reservation.rooms),
+      financial_responsible: financialResponsibleData,
+      guest: guestData,
+      guest_profile: {
+        source: guestProfileSource,
+        has_client_record: hasClientRows,
+        client_id: reservation.client_id ?? null,
+        guest_id: reservation.guest_id ?? null,
+        reservation_guest_name: String(reservation.guest_name || "").trim() || null,
+        financial_same_as_guest:
+          Boolean(otaGuestProfile && !responsibleFromClient) ||
+          Boolean(reservation.client_id && reservation.guest_id && String(reservation.client_id) === String(reservation.guest_id)),
+      },
+      guest_display_name: guestDisplayName,
+      nights,
+      coupon: jsonSafe(extras.coupon),
+      service_fees: jsonSafe(extras.serviceFees ?? []),
+      web_checkin: jsonSafe(extras.webCheckin),
+      ota: otaReservation
+        ? {
+            ota_channel_id: otaReservation.ota_channel_id,
+            ota_channel_name: otaChannel?.name ?? otaReservation.ota_source_channel_name ?? null,
+            partner_channel_name: otaReservation.ota_source_channel_name ?? null,
+            ota_reservation_code: otaReservation.ota_reservation_code,
+            cm_booking_id: otaReservation.ota_cm_booking_id ?? null,
+            segment: otaReservation.ota_segment ?? null,
+            special_requests: otaReservation.ota_special_requests ?? null,
+            guest_address: otaReservation.ota_guest_address ?? null,
+            sync_status: otaReservation.sync_status ?? null,
+            synced_at: otaPlain?.synced_at ?? null,
+          }
+        : null,
+      payments: jsonSafe(extras.payments ?? []),
+      balance_due: Math.max(totalAmount - paidAmount, 0),
+    };
   }
 
   private async listFailure(companyId: string, label: string, respond: Respond, error = "Erro ao listar reservas"): Promise<ApiResult> {
@@ -1456,6 +1745,66 @@ function parseInstant(value: string): Date | null {
 
 function ymd(value: Date): string {
   return value.toISOString().slice(0, 10);
+}
+
+function parseDateYmd(value: string): Date | null {
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  return parseInstant(`${trimmed}T00:00:00.000Z`);
+}
+
+function daysBetweenYmd(from: string, to: string): number {
+  const start = Date.parse(`${from}T12:00:00Z`);
+  const end = Date.parse(`${to}T12:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.round((end - start) / 86400000);
+}
+
+function eachDateYmd(from: string, to: string): string[] {
+  const out: string[] = [];
+  const start = parseDateYmd(from);
+  const end = parseDateYmd(to);
+  if (!start || !end) return out;
+  const cursor = new Date(start);
+  const limit = new Date(end);
+  while (cursor.getTime() <= limit.getTime()) {
+    out.push(ymd(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return out;
+}
+
+function reservationBoardSummary(reservation: {
+  id: string;
+  reservation_code: string;
+  checkin_date: Date;
+  checkout_date: Date;
+  status: string;
+  guest_name: string | null;
+  adults: number;
+  children: number;
+}) {
+  return {
+    id: reservation.id,
+    reservation_code: reservation.reservation_code,
+    checkin_date: ymd(reservation.checkin_date),
+    checkout_date: ymd(reservation.checkout_date),
+    status: reservation.status,
+    guest_name: reservation.guest_name,
+    adults: reservation.adults,
+    children: reservation.children,
+  };
+}
+
+function groupBy<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const key = keyFn(item);
+    const bucket = map.get(key) ?? [];
+    bucket.push(item);
+    map.set(key, bucket);
+  }
+  return map;
 }
 
 function isReservationStatus(value: string): value is Exclude<Prisma.reservationsCreateInput["status"], undefined> {
