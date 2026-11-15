@@ -594,14 +594,26 @@ export const RateCalendarGrid = ({
     childPrice?: number;
   }) => {
     try {
+      const dateStr = format(data.date, "yyyy-MM-dd");
       await upsertRateCalendar([{
         pricing_plan_id: data.planId,
         category_id: data.categoryId,
-        date: format(data.date, "yyyy-MM-dd"),
+        date: dateStr,
         base_price: data.basePrice,
         adult_price: data.adultPrice,
         child_price: data.childPrice,
       }]);
+      const cacheKey = `${data.planId}-${data.categoryId}-${dateStr}`;
+      setCalculatedPrices((prev) => {
+        const next = new Map(prev);
+        next.set(cacheKey, data.basePrice);
+        return next;
+      });
+      setDynamicPriceKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(cacheKey);
+        return next;
+      });
       setEditingRate(null);
     } catch (error: any) {
       toast.error(error.message || "Erro ao salvar tarifa");
@@ -959,13 +971,15 @@ export const RateCalendarGrid = ({
                       // Determinar preço: exibir imediatamente (rate_calendar ou base da categoria) e atualizar ao concluir cálculo
                       const cacheKey = `${plan.id}-${category.id}-${dateStr}`;
                       const entryEnriched = rateEntry && 'original_base_price' in rateEntry && rateEntry.original_base_price !== undefined;
-                      let price = calculatedPrices.get(cacheKey);
+                      const calendarPrice =
+                        rateEntry?.base_price != null && Number(rateEntry.base_price) > 0
+                          ? Number(rateEntry.base_price)
+                          : undefined;
+                      const cachedPrice = calculatedPrices.get(cacheKey);
+                      let price = calendarPrice ?? cachedPrice;
 
                       if (!price || price === 0) {
-                        price = rateEntry?.base_price;
-                        if (!price || price === 0) {
-                          price = Number(category.base_price) || 0;
-                        }
+                        price = Number(category.base_price) || 0;
                       }
 
                       // Quando regras dinâmicas desativadas e temos dados enriquecidos: mostrar tarifa base

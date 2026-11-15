@@ -1,5 +1,5 @@
 import { useMemo, useEffect, useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { fetchRatesMap } from "@/lib/ratesApi";
@@ -113,6 +113,37 @@ function sanitizeRateRestrictionPayload<T extends Partial<RateRestriction>>(r: T
     (next as { pricing_plan_id?: string | null }).pricing_plan_id = null;
   }
   return next;
+}
+
+function normalizeCalendarDateKey(date: unknown): string {
+  if (typeof date === "string") return date.slice(0, 10);
+  if (date instanceof Date) return format(date, "yyyy-MM-dd");
+  return String(date ?? "").slice(0, 10);
+}
+
+/** Atualiza todas as queries rate_calendar em cache (UI reage sem esperar debounce/refetch). */
+function patchRateCalendarQueries(queryClient: QueryClient, patches: Array<Partial<RateCalendarEntry> & Record<string, unknown>>) {
+  if (!patches.length) return;
+  queryClient.setQueriesData<RateCalendarEntry[]>({ queryKey: ["rate_calendar"], exact: false }, (old) => {
+    if (!old?.length) return old;
+    const next = [...old];
+    for (const patch of patches) {
+      const dateKey = normalizeCalendarDateKey(patch.date);
+      const planId = String(patch.pricing_plan_id ?? "");
+      const categoryId = String(patch.category_id ?? "");
+      if (!planId || !categoryId || !dateKey) continue;
+      const idx = next.findIndex(
+        (e) =>
+          e.pricing_plan_id === planId && e.category_id === categoryId && normalizeCalendarDateKey(e.date) === dateKey,
+      );
+      if (idx >= 0) {
+        next[idx] = { ...next[idx], ...patch, date: dateKey } as RateCalendarEntry;
+      } else {
+        next.push({ ...patch, date: dateKey } as RateCalendarEntry);
+      }
+    }
+    return next;
+  });
 }
 
 export interface UseRateSystemOptions {
@@ -648,8 +679,16 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
       
       return data;
     },
-    onSuccess: (_data, variables) => {
-      invalidateCalendarCache(getEstablishmentId() ?? undefined);
+    onSuccess: (data, variables) => {
+      const establishmentId = getEstablishmentId() ?? undefined;
+      invalidateCalendarCache(establishmentId);
+      const savedRows = (Array.isArray(data) ? data : []) as Array<
+        Partial<RateCalendarEntry> & Record<string, unknown>
+      >;
+      if (savedRows.length > 0) {
+        patchRateCalendarQueries(queryClient, savedRows);
+      }
+      void queryClient.invalidateQueries({ queryKey: ["rate_calendar"], exact: false, refetchType: "active" });
       debouncedCalendarInvalidate();
       queryClient.invalidateQueries({ queryKey: ["activity_logs"] });
       if (USE_RATE_CALENDAR_SUMMARY) {
