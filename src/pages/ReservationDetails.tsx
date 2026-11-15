@@ -43,7 +43,15 @@ import {
 } from "lucide-react";
 import { format, parseISO, differenceInDays, addDays, isAfter, isBefore, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { formatCurrency, validateRoomAvailability, validateCategoryAvailability, isPaymentRefundRecord, getRefundedPaymentId, netPaymentsTotal } from "@/lib/reservationUtils";
+import {
+  formatCurrency,
+  formatPaymentNotesForDisplay,
+  validateRoomAvailability,
+  validateCategoryAvailability,
+  isPaymentRefundRecord,
+  getRefundedPaymentId,
+  netPaymentsTotal,
+} from "@/lib/reservationUtils";
 import { useServiceFees } from "@/hooks/useServiceFees";
 import { useReservationServiceFees } from "@/hooks/useReservationServiceFees";
 import { AddServiceFeeDialog } from "@/components/reservations/AddServiceFeeDialog";
@@ -975,6 +983,37 @@ const ReservationDetails = () => {
       
       let remaining = paymentAmount;
       
+      if (paymentComponent === "all") {
+        if (remainingForBase > 0 && remaining > 0) {
+          const appliedToBase = Math.min(remaining, remainingForBase);
+          remainingForBase -= appliedToBase;
+          remaining -= appliedToBase;
+        }
+        if (extensionAmount > 0 && extensionAddedAt && paymentDate >= extensionAddedAt && remainingForExtension > 0 && remaining > 0) {
+          const appliedToExtension = Math.min(remaining, remainingForExtension);
+          remainingForExtension -= appliedToExtension;
+          remaining -= appliedToExtension;
+        }
+        if (remaining > 0) {
+          sortedFees.forEach((fee: any) => {
+            if (remaining <= 0) return;
+            const feeId = fee.id;
+            if (!feeId) return;
+            const feeCreatedAt = fee.created_at ? new Date(fee.created_at) : null;
+            if (!feeCreatedAt || paymentDate < feeCreatedAt) return;
+            const feeTotal = Number(fee.amount || 0) * Number(fee.quantity || 1);
+            const currentPaid = feesPaid[feeId] || 0;
+            const feeRemaining = feeTotal - currentPaid;
+            if (feeRemaining > 0 && remaining > 0) {
+              const appliedToFee = Math.min(remaining, feeRemaining);
+              feesPaid[feeId] = (feesPaid[feeId] || 0) + appliedToFee;
+              remaining -= appliedToFee;
+            }
+          });
+        }
+        return;
+      }
+
       // Se o pagamento foi feito para um componente específico, aplicar APENAS àquele componente
       // IMPORTANTE: Não afetar outros componentes de forma alguma
       if (paymentComponent) {
@@ -3021,7 +3060,7 @@ const ReservationDetails = () => {
                       </div>
                       {payment.notes && (
                         <div className={cn("text-xs mt-1 italic", isRefund ? "text-rose-700" : "text-slate-600")}>
-                          📝 {String(payment.notes).replace(/\[REFUND:[0-9a-f-]+\]\s*/i, "")}
+                          📝 {formatPaymentNotesForDisplay(payment.notes)}
                     </div>
                       )}
                     </div>

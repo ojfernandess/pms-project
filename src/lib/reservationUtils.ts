@@ -413,6 +413,43 @@ export const formatCurrency = (value: number | string | null | undefined): strin
   }).format(toFiniteNumber(value));
 };
 
+/** Sufixo nas notas ao quitar todos os componentes pendentes de uma vez ([COMPONENT:all]). */
+export function buildAllPendingComponentsCoverageSuffix(
+  breakdown: {
+    originalBaseAmountPending: number;
+    extensionAmountPending: number;
+    serviceFeesPending: Record<string, number>;
+  },
+  serviceFees: Array<{ id: string; service_fees?: { name?: string } | null }>
+): string {
+  const parts: string[] = [];
+  if (breakdown.originalBaseAmountPending > 0.009) {
+    parts.push(`Valor base (${formatCurrency(breakdown.originalBaseAmountPending)})`);
+  }
+  if (breakdown.extensionAmountPending > 0.009) {
+    parts.push(`Diárias adicionais (${formatCurrency(breakdown.extensionAmountPending)})`);
+  }
+  for (const fee of serviceFees || []) {
+    const pending = breakdown.serviceFeesPending[fee.id] || 0;
+    if (pending > 0.009) {
+      const name = fee.service_fees?.name || "Taxa extra";
+      parts.push(`${name} (${formatCurrency(pending)})`);
+    }
+  }
+  return parts.length ? ` | Itens quitados: ${parts.join("; ")}` : "";
+}
+
+/** Exibe observações de pagamento de forma legível (remove tags internas de componente). */
+export function formatPaymentNotesForDisplay(notes: string | null | undefined): string {
+  if (!notes) return "";
+  let s = String(notes).replace(/\[REFUND:[0-9a-f-]+\]\s*/gi, "");
+  s = s.replace(/\[COMPONENT:all\]\s*\|?\s*/i, "Pagamento total (todos os componentes) — ");
+  s = s.replace(/\[COMPONENT:base\]\s*\|?\s*/i, "Valor base — ");
+  s = s.replace(/\[COMPONENT:extension\]\s*\|?\s*/i, "Diárias adicionais — ");
+  s = s.replace(/\[COMPONENT:fee-[^\]]+\]\s*\|?\s*/i, "Taxa extra — ");
+  return s.trim();
+}
+
 /**
  * Formata moeda sem mostrar centavos quando forem zero
  * Ex: R$ 380,00 -> R$ 380 | R$ 380,99 -> R$ 380,99

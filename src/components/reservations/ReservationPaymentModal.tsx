@@ -9,7 +9,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, CreditCard, DollarSign, Loader2, TrendingUp, Receipt } from "lucide-react";
+import { CalendarIcon, CheckCircle2, CreditCard, DollarSign, Loader2, Layers, TrendingUp, Receipt } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,7 +19,11 @@ import { logActivity } from "@/lib/activityLogger";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePricing } from "@/hooks/usePricing";
 import { useActivityLogs } from "@/hooks/useActivityLogs";
-import { formatCurrency, isPaymentRefundRecord } from "@/lib/reservationUtils";
+import {
+  buildAllPendingComponentsCoverageSuffix,
+  formatCurrency,
+  isPaymentRefundRecord,
+} from "@/lib/reservationUtils";
 
 interface ReservationPaymentModalProps {
   open: boolean;
@@ -57,9 +61,10 @@ export function ReservationPaymentModal({
   const [originalCheckoutDate, setOriginalCheckoutDate] = useState<string | null>(null);
   const [extensionAmount, setExtensionAmount] = useState<number>(0);
   
-  // Estado para seleção de componente do pagamento (apenas um por vez)
-  // Valores possíveis: "base" | "extension" | `fee-${feeId}` | ""
+  // Estado para seleção de componente do pagamento
+  // Valores possíveis: "all" | "base" | "extension" | `fee-${feeId}` | ""
   const [selectedComponent, setSelectedComponent] = useState<string>("");
+  const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
 
   // Buscar taxas extras da reserva com detalhes
   const { data: serviceFees = [] } = useQuery({
@@ -466,6 +471,38 @@ export function ReservationPaymentModal({
       
       let remaining = paymentAmount;
       
+      // Pagamento com todos os componentes ou sem tag: distribuir na ordem padrão (base → extensão → taxas)
+      if (paymentComponent === "all") {
+        if (remainingForBase > 0 && remaining > 0) {
+          const appliedToBase = Math.min(remaining, remainingForBase);
+          remainingForBase -= appliedToBase;
+          remaining -= appliedToBase;
+        }
+        if (!wasCreatedWithoutPayment && effectiveExtensionAmount > 0 && extensionAddedAt && paymentDate >= extensionAddedAt && remainingForExtension > 0 && remaining > 0) {
+          const appliedToExtension = Math.min(remaining, remainingForExtension);
+          remainingForExtension -= appliedToExtension;
+          remaining -= appliedToExtension;
+        }
+        if (remaining > 0) {
+          sortedFees.forEach((fee: any) => {
+            if (remaining <= 0) return;
+            const feeId = fee.id;
+            if (!feeId) return;
+            const feeCreatedAt = fee.created_at ? new Date(fee.created_at) : null;
+            if (!feeCreatedAt || paymentDate < feeCreatedAt) return;
+            const feeTotal = Number(fee.amount || 0) * Number(fee.quantity || 1);
+            const currentPaid = feesPaid[feeId] || 0;
+            const feeRemaining = feeTotal - currentPaid;
+            if (feeRemaining > 0 && remaining > 0) {
+              const appliedToFee = Math.min(remaining, feeRemaining);
+              feesPaid[feeId] = (feesPaid[feeId] || 0) + appliedToFee;
+              remaining -= appliedToFee;
+            }
+          });
+        }
+        return;
+      }
+
       // Se o pagamento foi feito para um componente específico, aplicar APENAS àquele componente
       // IMPORTANTE: Não afetar outros componentes de forma alguma
       if (paymentComponent) {
@@ -608,9 +645,33 @@ export function ReservationPaymentModal({
     };
   }, [reservation?.total_amount, reservation?.paid_amount, serviceFees, extensionAmount, originalCheckoutDate, existingPayments, activityLogs]);
 
-  // Calcular valor selecionado baseado no componente selecionado (apenas um por vez)
+  const pendingComponentsCount = useMemo(() => {
+    let count = 0;
+    if (paymentBreakdown.originalBaseAmountPending > 0.009) count++;
+    if (paymentBreakdown.extensionAmountPending > 0.009) count++;
+    count += Object.values(paymentBreakdown.serviceFeesPending || {}).filter((v) => v > 0.009).length;
+    return count;
+  }, [paymentBreakdown]);
+
+  const allPendingAmount = useMemo(() => {
+    const feesSum = Object.values(paymentBreakdown.serviceFeesPending || {}).reduce((sum, v) => sum + (v || 0), 0);
+    return (
+      Math.round(
+        (paymentBreakdown.originalBaseAmountPending +
+          paymentBreakdown.extensionAmountPending +
+          feesSum) *
+          100
+      ) / 100
+    );
+  }, [paymentBreakdown]);
+
+  // Calcular valor selecionado baseado no componente selecionado
   const selectedAmount = useMemo(() => {
     if (!selectedComponent) return 0;
+
+    if (selectedComponent === "all") {
+      return allPendingAmount;
+    }
     
     if (selectedComponent === "base") {
       return paymentBreakdown.originalBaseAmountPending;
@@ -627,7 +688,7 @@ export function ReservationPaymentModal({
     }
     
     return 0;
-  }, [selectedComponent, paymentBreakdown]);
+  }, [selectedComponent, paymentBreakdown, allPendingAmount]);
 
   // Inicializar seleção quando o modal abrir
   useEffect(() => {
@@ -660,6 +721,7 @@ export function ReservationPaymentModal({
     } else if (!open) {
       // Resetar quando o modal fechar
       setSelectedComponent("");
+      setShowPaymentSuccess(false);
     }
   }, [open, reservation?.id, paymentBreakdown, extensionAmount, serviceFees]);
 
@@ -758,8 +820,11 @@ export function ReservationPaymentModal({
       }
       
       // Criar apenas UMA parcela, mas registrar todas as informações
-      const componentPrefix = `[COMPONENT:${selectedComponent}]`;
-      
+      const componentPrefix =
+        selectedComponent === "all"
+          ? `[COMPONENT:all]${buildAllPendingComponentsCoverageSuffix(paymentBreakdown, serviceFees)}`
+          : `[COMPONENT:${selectedComponent}]`;
+
       // Montar notas com informações completas de parcelas
       let paymentNotes = componentPrefix;
       if (installmentsCount > 1) {
@@ -1093,32 +1158,32 @@ export function ReservationPaymentModal({
         }
       }
 
+      setShowPaymentSuccess(true);
       toast.success("Pagamento lançado com sucesso!");
-      
+
       // Invalidar todas as queries relacionadas para forçar atualização
       queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
       queryClient.invalidateQueries({ queryKey: ["reservations"] });
       queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-      
-      // Aguardar um pouco para garantir que o banco processou a inserção e propagou os relacionamentos
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Refetch explícito para garantir que os dados sejam atualizados imediatamente
-      // Isso garante que os relacionamentos (payment_carriers, payment_types) sejam carregados
-      await queryClient.refetchQueries({ 
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      await queryClient.refetchQueries({
         queryKey: ["reservation_payments", reservation.id],
-        exact: true 
+        exact: true,
       });
       await queryClient.refetchQueries({ queryKey: ["reservations"] });
-      
-      // Resetar estados antes de fechar o modal
+
+      await new Promise((resolve) => setTimeout(resolve, 1400));
+
       setSelectedComponent("");
       setAmount("");
       setObservations("");
       setSelectedCarrierId("");
       setSelectedPaymentTypeId("");
       setInstallments("1");
-      
+      setShowPaymentSuccess(false);
+
       onSuccess?.();
       onOpenChange(false);
     } catch (error) {
@@ -1158,7 +1223,21 @@ export function ReservationPaymentModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="relative max-w-2xl max-h-[90vh] overflow-y-auto">
+        {showPaymentSuccess && (
+          <div
+            className="absolute inset-0 z-50 flex flex-col items-center justify-center rounded-lg bg-white/95 backdrop-blur-sm animate-in fade-in duration-300"
+            aria-live="polite"
+          >
+            <div className="flex flex-col items-center gap-3 animate-in zoom-in-95 duration-500">
+              <div className="rounded-full bg-emerald-100 p-5 shadow-lg ring-4 ring-emerald-200/60">
+                <CheckCircle2 className="h-14 w-14 text-emerald-600" strokeWidth={2} />
+              </div>
+              <p className="text-lg font-semibold text-emerald-800">Pagamento lançado com sucesso!</p>
+              <p className="text-sm text-slate-500">Atualizando informações…</p>
+            </div>
+          </div>
+        )}
         <DialogHeader className="space-y-2">
           <DialogTitle className="text-xl font-bold text-slate-900 flex items-center gap-2">
             <DollarSign className="h-5 w-5 text-emerald-600" />
@@ -1183,6 +1262,28 @@ export function ReservationPaymentModal({
               <Label className="text-sm font-semibold text-slate-700">Selecione o componente a pagar:</Label>
               
               <RadioGroup value={selectedComponent} onValueChange={setSelectedComponent} className="space-y-2">
+                {pendingComponentsCount >= 2 && allPendingAmount > 0.009 && (
+                  <div className="flex items-center justify-between p-3 rounded-md bg-emerald-50 hover:bg-emerald-100/90 transition-colors border-2 border-emerald-300 shadow-sm">
+                    <div className="flex items-center gap-3 flex-1">
+                      <RadioGroupItem value="all" id="all-components" />
+                      <label htmlFor="all-components" className="flex items-center gap-2 cursor-pointer flex-1">
+                        <Layers className="h-4 w-4 text-emerald-700" />
+                        <div className="flex flex-col">
+                          <span className="text-sm text-emerald-800 font-semibold">
+                            Pagar todos os componentes pendentes
+                          </span>
+                          <span className="text-xs text-emerald-700">
+                            Um único pagamento quitando base, extensão e taxas (conforme saldo)
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                    <span className="text-sm font-bold text-emerald-900">
+                      R$ {allPendingAmount.toFixed(2).replace(".", ",")}
+                    </span>
+                  </div>
+                )}
+
                 {/* Valor Base Original */}
                 {paymentBreakdown.originalBaseAmountPending > 0 && (
                   <div className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 transition-colors border border-slate-200">
@@ -1299,11 +1400,18 @@ export function ReservationPaymentModal({
               {/* Valor Total Selecionado */}
               {selectedComponent && (
                 <div className="flex justify-between items-center pt-2 border-t border-slate-300">
-                  <span className="text-sm font-semibold text-slate-700">Valor Selecionado:</span>
+                  <span className="text-sm font-semibold text-slate-700">
+                    {selectedComponent === "all" ? "Valor total dos componentes:" : "Valor Selecionado:"}
+                  </span>
                   <span className="text-base font-bold text-emerald-600">
                     R$ {selectedAmount.toFixed(2).replace(".", ",")}
                   </span>
                 </div>
+              )}
+              {selectedComponent === "all" && (
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  O detalhe do pagamento registrará cada item quitado nas observações da reserva.
+                </p>
               )}
             </div>
             
