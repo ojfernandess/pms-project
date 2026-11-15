@@ -137,7 +137,7 @@ export class DataService {
         const call =
           entries.length === 0 ? `public.${quoteArg(name)}()` : `public.${quoteArg(name)}(${positional})`;
         if (signature.ret === "void") {
-          await tx.$queryRawUnsafe(`SELECT ${call}`, ...values);
+          await tx.$executeRawUnsafe(`SELECT ${call}`, ...values);
           return null;
         }
         if (signature.retset) {

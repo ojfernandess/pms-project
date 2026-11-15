@@ -9,6 +9,8 @@ create_reservation_with_lock.sql
 get_fnrh_settings_public.sql
 ari_rate_inventory_grid.sql
 company_has_feature_access.sql
+company_api_credentials.sql
+establishment_email_templates_unique.sql
 create_notification_for_establishment.sql
 get_resolved_email_template.sql
 log_activity.sql
