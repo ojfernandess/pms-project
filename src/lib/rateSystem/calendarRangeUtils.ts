@@ -5,6 +5,13 @@
 
 import { addDays, eachDayOfInterval, format, startOfDay } from "date-fns";
 
+/** Normaliza date do rate_calendar (ISO ou yyyy-MM-dd) para lookup no mapa/ARI. */
+export function normalizeRateCalendarDateKey(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  return m ? m[1] : s.slice(0, 10);
+}
+
 export const MAX_DAYS_PER_REQUEST = 31;
 /** Máximo total de dias permitido — se exceder, abortar e mostrar aviso */
 export const MAX_TOTAL_DAYS_ALLOWED = 93;

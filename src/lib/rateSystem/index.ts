@@ -1,6 +1,7 @@
 export {
   getCalendarRange,
   getDateStringsFromRange,
+  normalizeRateCalendarDateKey,
   MAX_DAYS_PER_REQUEST,
   MAX_TOTAL_DAYS_ALLOWED,
   type DateRange,

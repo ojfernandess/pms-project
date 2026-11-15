@@ -1021,6 +1021,22 @@ export const ReservationDialog = ({
     loadRoomsForReservation,
   ]);
 
+  const provisionalLodgingTotal = useMemo(() => {
+    if (!formData.category_id || !formData.checkin_date || !formData.checkout_date || !categories?.length) {
+      return 0;
+    }
+    const category = categories.find((c) => c.id === formData.category_id);
+    if (!category) return 0;
+    return calculateReservationTotal(
+      Number(category.base_price) || 0,
+      formData.checkin_date,
+      formData.checkout_date,
+    );
+  }, [formData.category_id, formData.checkin_date, formData.checkout_date, categories]);
+
+  const displayLodgingTotal =
+    calculatedTotal > 0 ? calculatedTotal : provisionalLodgingTotal;
+
   // Calcular total quando necessário (com tarifário dinâmico)
   useEffect(() => {
     // Evitar cálculo se estiver editando uma reserva existente sem mudanças
@@ -1031,6 +1047,16 @@ export const ReservationDialog = ({
     // Se o preço foi definido manualmente, não recalcular automaticamente
     if (isManualPrice) {
       return;
+    }
+
+  if (
+      formData.category_id &&
+      formData.checkin_date &&
+      formData.checkout_date &&
+      categories &&
+      provisionalLodgingTotal > 0
+    ) {
+      setCalculatedTotal(provisionalLodgingTotal);
     }
 
     let cancelled = false;
@@ -1107,7 +1133,7 @@ export const ReservationDialog = ({
       setIsManualPrice(false); // Resetar flag ao limpar
       }
       }
-    }, 500); // Debounce de 500ms para evitar recálculos excessivos
+    }, 120);
 
     return () => {
       cancelled = true;
@@ -1124,8 +1150,8 @@ export const ReservationDialog = ({
     promotionCode,
     reservationId,
     isEditMode,
-    isManualPrice, // Adicionar isManualPrice como dependência
-    // Remover calculatePrice das dependências para evitar recriação constante
+    isManualPrice,
+    provisionalLodgingTotal,
   ]);
 
   useEffect(() => {
@@ -1153,7 +1179,7 @@ export const ReservationDialog = ({
       } catch {
         if (!cancelled) setNightlyQuoteLines([]);
       }
-    }, 500);
+    }, 120);
 
     return () => {
       cancelled = true;
@@ -1169,6 +1195,7 @@ export const ReservationDialog = ({
     reservationId,
     isEditMode,
     isManualPrice,
+    provisionalLodgingTotal,
   ]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -3662,7 +3689,7 @@ export const ReservationDialog = ({
             )}
 
             {/* Cupom de Desconto */}
-            {formData.checkin_date && formData.checkout_date && calculatedTotal > 0 && (
+            {formData.checkin_date && formData.checkout_date && displayLodgingTotal > 0 && (
               <div className="col-span-2">
                 <Label htmlFor="promotion_code">Cupom de Desconto (opcional)</Label>
                 <div className="flex gap-2">
@@ -3724,12 +3751,12 @@ export const ReservationDialog = ({
                   checkinDate={formData.checkin_date}
                   checkoutDate={formData.checkout_date}
                   nightlyLines={nightlyQuoteLines}
-                  lodgingTotal={calculatedTotal}
+                  lodgingTotal={displayLodgingTotal}
                   cleaningFee={cleaningFeeConfig?.amount ?? 0}
                   cleaningConfigured={cleaningConfigured}
                   includeCleaning={includeCleaningInQuote}
                   onIncludeCleaningChange={setIncludeCleaningInQuote}
-                  loading={calculatingPrice}
+                  loading={calculatingPrice && calculatedTotal <= 0 && provisionalLodgingTotal <= 0}
                   hasCategory={Boolean(formData.category_id)}
                   couponFinalAmount={
                     appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : null

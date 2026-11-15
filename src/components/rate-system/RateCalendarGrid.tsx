@@ -22,7 +22,7 @@ import { RateEditDialog } from "./RateEditDialog";
 import { BulkEditDialog } from "./BulkEditDialog";
 import { RateMetricsSummary } from "./RateMetricsSummary";
 import { CreateRateDialog } from "./CreateRateDialog";
-import { useLazyCalendarRange } from "@/lib/rateSystem";
+import { useLazyCalendarRange, normalizeRateCalendarDateKey } from "@/lib/rateSystem";
 
 interface RateCalendarGridProps {
   ratePlans: RatePlan[];
@@ -173,13 +173,32 @@ export const RateCalendarGrid = ({
     return categories.filter(c => c.id === selectedCategory);
   }, [categories, selectedCategory]);
 
-  // Preencher calculatedPrices com rate_calendar assim que carregar (evita flash base → tarifário)
+  const rateEntryLookup = useMemo(() => {
+    const map = new Map<string, RateCalendarEntry>();
+    for (const entry of filteredRateCalendar) {
+      const dateKey = normalizeRateCalendarDateKey(entry.date);
+      map.set(`${entry.pricing_plan_id}|${entry.category_id}|${dateKey}`, {
+        ...entry,
+        date: dateKey,
+      } as RateCalendarEntry);
+    }
+    return map;
+  }, [filteredRateCalendar]);
+
+  const getRateEntry = useCallback(
+    (planId: string, categoryId: string, dateStr: string) =>
+      rateEntryLookup.get(`${planId}|${categoryId}|${normalizeRateCalendarDateKey(dateStr)}`),
+    [rateEntryLookup],
+  );
+
+  // Preencher calculatedPrices com rate_calendar assim que carregar (evita flash preço mínimo → tarifário)
   useEffect(() => {
     if (filteredRateCalendar.length === 0) return;
     setCalculatedPrices((prev) => {
       const merged = new Map(prev);
       for (const entry of filteredRateCalendar) {
-        const key = `${entry.pricing_plan_id}-${entry.category_id}-${entry.date}`;
+        const dateKey = normalizeRateCalendarDateKey(entry.date);
+        const key = `${entry.pricing_plan_id}-${entry.category_id}-${dateKey}`;
         const price = Number(entry.base_price ?? 0);
         if (price > 0 && (!merged.has(key) || Math.abs((merged.get(key) ?? 0) - price) > 0.01)) {
           merged.set(key, price);
@@ -189,12 +208,10 @@ export const RateCalendarGrid = ({
     });
   }, [filteredRateCalendar]);
 
-  // Limpar cache quando o plano mudar
   useEffect(() => {
-    setCalculatedPrices(new Map());
     setDynamicPriceKeys(new Set());
     setCalculatingPriceKeys(new Set());
-  }, [selectedRatePlan]);
+  }, [selectedRatePlan, selectedCategory]);
 
   // Calcular preços quando o plano ou período mudar (apenas para datas sem entrada no calendário)
   useEffect(() => {
@@ -275,9 +292,7 @@ export const RateCalendarGrid = ({
         for (const category of categoriesToProcess) {
           for (const date of datesToProcess) {
             const dateStr = format(date, "yyyy-MM-dd");
-            const rateEntry = filteredRateCalendar.find(
-              (r) => r.pricing_plan_id === plan.id && r.category_id === category.id && r.date === dateStr
-            );
+            const rateEntry = getRateEntry(plan.id, category.id, dateStr);
             if (!rateEntry?.base_price || rateEntry.base_price <= 0) {
               const key = `${plan.id}-${category.id}-${dateStr}`;
               keysToCalculate.add(key);
@@ -314,11 +329,7 @@ export const RateCalendarGrid = ({
                 continue;
               }
               
-              const rateEntry = filteredRateCalendar.find(
-                r => r.pricing_plan_id === plan.id &&
-                r.category_id === category.id &&
-                r.date === dateStr
-              );
+              const rateEntry = getRateEntry(plan.id, category.id, dateStr);
               const entryEnriched = rateEntry && "original_base_price" in rateEntry && (rateEntry as { original_base_price?: number }).original_base_price !== undefined;
               if (entryEnriched && rateEntry?.base_price && rateEntry.base_price > 0) {
                 // Se regras desativadas, usar tarifa base; senão usar preço dinâmico
@@ -356,9 +367,7 @@ export const RateCalendarGrid = ({
             for (const category of categoriesToProcess) {
               for (const date of datesToProcess) {
                 const dateStr = format(date, "yyyy-MM-dd");
-                const rateEntry = filteredRateCalendar.find(
-                  (r) => r.pricing_plan_id === plan.id && r.category_id === category.id && r.date === dateStr
-                );
+                const rateEntry = getRateEntry(plan.id, category.id, dateStr);
                 const entry = rateEntry as { base_price?: number; original_base_price?: number } | undefined;
                 if (entry?.original_base_price !== undefined) {
                   const key = `${plan.id}-${category.id}-${dateStr}`;
@@ -417,9 +426,7 @@ export const RateCalendarGrid = ({
                   try {
                     const calculatedPrice = await calculateRatePrice(category.id, plan.id, date, 2, 0);
                     const dateStr = format(date, "yyyy-MM-dd");
-                    const rateEntry = filteredRateCalendar.find(
-                      (r) => r.pricing_plan_id === plan.id && r.category_id === category.id && r.date === dateStr
-                    );
+                    const rateEntry = getRateEntry(plan.id, category.id, dateStr);
                     const originalPrice = rateEntry?.base_price || Number(category.base_price) || 0;
                     const isDynamicPrice = calculatedPrice > 0 && Math.abs(calculatedPrice - originalPrice) > 0.01;
                     if (calculatedPrice > 0) {
@@ -534,9 +541,9 @@ export const RateCalendarGrid = ({
     };
 
     // Debounce para evitar muitas chamadas
-    const timeoutId = setTimeout(calculateMissingPrices, 300);
+    const timeoutId = setTimeout(calculateMissingPrices, 0);
     return () => clearTimeout(timeoutId);
-  }, [selectedRatePlan, filteredCategories, visibleDates, calculateRatePrice, activePlansToShow, dynamicRules, hasFeatureAccess, autoApplyDynamicRules, filteredRateCalendar, dynamicPrices, persistDynamicRates]);
+  }, [selectedRatePlan, filteredCategories, visibleDates, calculateRatePrice, activePlansToShow, dynamicRules, hasFeatureAccess, autoApplyDynamicRules, filteredRateCalendar, dynamicPrices, persistDynamicRates, getRateEntry]);
 
   const getRateForDate = async (planId: string, categoryId: string, date: Date) => {
     const dateStr = format(date, "yyyy-MM-dd");
@@ -962,11 +969,7 @@ export const RateCalendarGrid = ({
                   {visibleDates.map((date) => {
                     const dateStr = format(date, "yyyy-MM-dd");
                       // Buscar entrada específica para o plano e categoria
-                    const rateEntry = filteredRateCalendar.find(
-                        r => r.pricing_plan_id === plan.id &&
-                        r.category_id === category.id &&
-                      r.date === dateStr
-                    );
+                    const rateEntry = getRateEntry(plan.id, category.id, dateStr);
                     
                       // Determinar preço: exibir imediatamente (rate_calendar ou base da categoria) e atualizar ao concluir cálculo
                       const cacheKey = `${plan.id}-${category.id}-${dateStr}`;
@@ -1185,19 +1188,11 @@ export const RateCalendarGrid = ({
                 
                 // Tarifa Base + Flutuação: usar preço do plano base quando o plano derivado tem base_plan_id_for_rate
                 if (basePlanId && plan?.fluctuation_type && plan.fluctuation_value != null) {
-                  const basePlanEntry = filteredRateCalendar.find(
-                    r => r.pricing_plan_id === basePlanId &&
-                    r.category_id === item.categoryId &&
-                    r.date === dateStr
-                  );
+                  const basePlanEntry = getRateEntry(basePlanId, item.categoryId, dateStr);
                   const basePrice = Number(basePlanEntry?.base_price ?? category?.base_price ?? 0) || 0;
                   currentPrice = applyPlanFluctuation(Number(basePrice), plan!);
                 } else {
-                  const existingEntry = filteredRateCalendar.find(
-                    r => r.pricing_plan_id === item.planId &&
-                    r.category_id === item.categoryId &&
-                    r.date === dateStr
-                  );
+                  const existingEntry = getRateEntry(item.planId, item.categoryId, dateStr);
                   currentPrice = Number(existingEntry?.base_price ?? category?.base_price ?? 0) || 0;
                 }
                 
@@ -1213,11 +1208,7 @@ export const RateCalendarGrid = ({
                 if (newBasePrice < 0) newBasePrice = 0;
                 newBasePrice = Math.round(newBasePrice * 100) / 100;
 
-                const existingEntry = filteredRateCalendar.find(
-                  r => r.pricing_plan_id === item.planId &&
-                  r.category_id === item.categoryId &&
-                  r.date === dateStr
-                );
+                const existingEntry = getRateEntry(item.planId, item.categoryId, dateStr);
 
                 entries.push({
                   pricing_plan_id: item.planId,
