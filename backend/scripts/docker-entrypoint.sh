@@ -30,6 +30,11 @@ if [ -n "${DATABASE_URL:-}" ] && [ -f ./scripts/migration/cleaning_fee_configura
     || echo "WARN: cleaning_fee_configuration.sql falhou" >&2
 fi
 
+if [ -n "${DATABASE_URL:-}" ] && [ -f ./scripts/migration/rpc/rate_calendar_unique_constraint.sql ]; then
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/rate_calendar_unique_constraint.sql \
+    || echo "WARN: rate_calendar_unique_constraint.sql falhou" >&2
+fi
+
 # Com migração estável, force em todo restart sobrecarrega o Postgres e causa "Engine is not yet connected"
 if [ "${PMS_MIGRATION_COMPLETE:-false}" = "true" ] && [ "${APP_APPLY_BUNDLED_RPCS:-auto}" = "force" ]; then
   if [ "${PMS_ALLOW_BUNDLED_RPCS_FORCE:-false}" != "true" ]; then

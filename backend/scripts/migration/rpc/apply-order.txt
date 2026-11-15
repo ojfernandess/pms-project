@@ -14,3 +14,6 @@ establishment_email_templates_unique.sql
 create_notification_for_establishment.sql
 get_resolved_email_template.sql
 log_activity.sql
+generate_rate_recommendations.sql
+apply_recommendation_price.sql
+rate_calendar_unique_constraint.sql

@@ -137,6 +137,25 @@ const INCREMENTAL_PATCHES = [
       { name: "rotate_company_api_credentials", args: "p_company_id uuid" },
     ],
   },
+  {
+    sql: "generate_rate_recommendations.sql",
+    checks: [
+      {
+        name: "generate_rate_recommendations",
+        args: "p_establishment_id uuid, p_start_date date, p_end_date date, p_category_id uuid",
+      },
+    ],
+  },
+  {
+    sql: "apply_recommendation_price.sql",
+    checks: [
+      {
+        name: "apply_recommendation_price",
+        args:
+          "p_establishment_id uuid, p_category_id uuid, p_pricing_plan_id uuid, p_date date, p_suggested_price numeric",
+      },
+    ],
+  },
 ];
 
 async function applyIncrementalPatches(client, url, rpcDir) {
