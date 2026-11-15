@@ -133,16 +133,35 @@ export function useEstablishmentEmailTemplates(establishmentId?: string) {
       bcc_emails?: string;
     }) => {
       const { data: { user } } = await supabase.auth.getUser();
+      const row = {
+        ...payload,
+        is_active: true,
+        created_by: user?.id ?? null,
+      };
+
+      const { data: existing, error: lookupError } = await supabase
+        .from("establishment_email_templates")
+        .select("id")
+        .eq("establishment_id", payload.establishment_id)
+        .eq("event_type", payload.event_type)
+        .maybeSingle();
+
+      if (lookupError) throw lookupError;
+
+      if (existing?.id) {
+        const { data, error } = await supabase
+          .from("establishment_email_templates")
+          .update(row)
+          .eq("id", existing.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      }
+
       const { data, error } = await supabase
         .from("establishment_email_templates")
-        .upsert(
-          {
-            ...payload,
-            is_active: true,
-            created_by: user?.id ?? null,
-          },
-          { onConflict: "establishment_id,event_type" },
-        )
+        .insert([row])
         .select()
         .single();
 
