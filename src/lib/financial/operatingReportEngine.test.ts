@@ -3,8 +3,10 @@ import {
   attributionDate,
   bucketKey,
   computeAvailableUnitNights,
+  computeBillingAnalyticRows,
   computeDailySalesResult,
   computeOccupancyTotals,
+  computeSalesAnalyticRows,
   computeOccupiedUnitNights,
   computePeriodReport,
   dailyLineLabels,
@@ -19,8 +21,29 @@ import {
   stayNightCount,
   validateReportFilters,
   yoyChange,
+  type AnalyticReservation,
   type NormalizedReservation,
 } from "./operatingReportEngine";
+
+function analytic(partial: Partial<AnalyticReservation> & Pick<AnalyticReservation, "id">): AnalyticReservation {
+  return {
+    ...res(partial),
+    reservationCode: "10001",
+    identificationNumber: "90001",
+    displayReservation: "10001",
+    guestName: "Hóspede Teste",
+    companyName: "Empresa Teste",
+    channelLabel: "BOOKING.COM",
+    establishmentName: "Hotel Teste",
+    establishmentNumericId: 25,
+    rateCodeLabel: "PUBLIC - PUBLICA",
+    rateTypeLabel: "Pacote",
+    createdAtIso: "2026-11-02T23:51:00Z",
+    checkinTime: "14:00:00",
+    checkoutTime: "12:00:00",
+    ...partial,
+  };
+}
 
 function res(partial: Partial<NormalizedReservation> & Pick<NormalizedReservation, "id">): NormalizedReservation {
   return {
@@ -288,6 +311,45 @@ describe("operatingReportEngine", () => {
     expect(consolidated.availableNights).toBe(150);
     expect(consolidated.rate).toBeCloseTo(40);
     expect(occupancyRate(1650, 2400)).toBeCloseTo(68.75);
+  });
+
+  it("analítico vendas: reserva criada no período com receita integral", () => {
+    const rows = computeSalesAnalyticRows(
+      [
+        analytic({
+          id: "s1",
+          createdAtDate: "2026-11-02",
+          checkinDate: "2026-03-12",
+          checkoutDate: "2026-03-13",
+          totalAmount: 513.26,
+        }),
+      ],
+      "2026-11-01",
+      "2026-11-30",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].nights).toBe(1);
+    expect(rows[0].gross).toBe(513.26);
+    expect(rows[0].companyOrChannel).toBe("BOOKING.COM");
+  });
+
+  it("analítico faturamento: uma linha por diária no intervalo", () => {
+    const rows = computeBillingAnalyticRows(
+      [
+        analytic({
+          id: "b1",
+          createdAtDate: "2026-10-26",
+          checkinDate: "2026-10-26",
+          checkoutDate: "2026-11-13",
+          totalAmount: 1200,
+        }),
+      ],
+      "2026-11-01",
+      "2026-11-05",
+    );
+    expect(rows).toHaveLength(5);
+    expect(rows.reduce((s, r) => s + r.periodAmount, 0)).toBeCloseTo(333.33, 1);
+    expect(rows[0].originLabel).toBe("Rateio de pacote");
   });
 
   it("manutenção: só desconta os dias do chamado (aberto e concluído)", () => {

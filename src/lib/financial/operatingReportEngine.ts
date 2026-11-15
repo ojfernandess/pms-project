@@ -771,3 +771,171 @@ export function dailyLineLabels(label: string, isUnified: boolean): { nights: st
     revenue: `RECEITA ${name}`,
   };
 }
+
+const STATUS_LABELS: Record<string, string> = {
+  confirmed: "Reserva Confirmada",
+  pending: "Pendente",
+  checkedin: "Check-in realizado",
+  cancelled: "Cancelada",
+  blocked: "Bloqueio",
+  preregistration: "Pré-reserva",
+  unpaid: "Não paga",
+  noshow: "No-show",
+};
+
+export function reservationStatusLabel(status: string): string {
+  const key = String(status || "").toLowerCase();
+  return STATUS_LABELS[key] || status;
+}
+
+export type AnalyticReservation = NormalizedReservation & {
+  reservationCode: string;
+  identificationNumber: string | null;
+  displayReservation: string;
+  guestName: string;
+  companyName: string;
+  channelLabel: string;
+  establishmentName: string;
+  establishmentNumericId: number | null;
+  rateCodeLabel: string;
+  rateTypeLabel: string;
+  createdAtIso: string;
+  checkinTime: string | null;
+  checkoutTime: string | null;
+};
+
+export type SalesAnalyticRow = {
+  key: string;
+  establishmentName: string;
+  reservationDisplay: string;
+  createdAtLabel: string;
+  checkinLabel: string;
+  checkoutLabel: string;
+  statusLabel: string;
+  companyOrChannel: string;
+  nights: number;
+  gross: number;
+  adr: number;
+  net: number;
+};
+
+export type BillingAnalyticRow = {
+  key: string;
+  establishmentLabel: string;
+  reservationDisplay: string;
+  identificationNumber: string;
+  guestName: string;
+  nightDate: string;
+  nightDateLabel: string;
+  rateCodeLabel: string;
+  rateTypeLabel: string;
+  originLabel: string;
+  createdAtLabel: string;
+  checkinLabel: string;
+  checkoutLabel: string;
+  statusLabel: string;
+  companyName: string;
+  nightAttributedAmount: number;
+  periodAmount: number;
+};
+
+export function formatAnalyticDateTime(date: string, time?: string | null, createdAtIso?: string): string {
+  if (createdAtIso && !date) {
+    return format(parseISO(createdAtIso), "dd/MM/yyyy HH:mm");
+  }
+  const day = format(parseISO(toDateOnly(date)), "dd/MM/yyyy");
+  if (time && String(time).trim()) {
+    const t = String(time).slice(0, 8);
+    const hm = t.length >= 5 ? t.slice(0, 5) : t;
+    return `${day} ${hm}`;
+  }
+  return `${day} 00:00`;
+}
+
+export function formatAnalyticNightDate(date: string): string {
+  return format(parseISO(toDateOnly(date)), "dd/MM/yyyy");
+}
+
+function splitReservationNet(r: AnalyticReservation): { gross: number; net: number } {
+  const gross = Number(r.totalAmount) || 0;
+  const split = splitRevenue(gross, r.channelCommissionPct, r.ownerPct);
+  return { gross, net: split.net };
+}
+
+export function computeSalesAnalyticRows(
+  reservations: AnalyticReservation[],
+  startDate: string,
+  endDate: string,
+): SalesAnalyticRow[] {
+  const rows: SalesAnalyticRow[] = [];
+  for (const r of reservations) {
+    if (!isRevenueStatus(r.status, r.cancelledAt)) continue;
+    if (!dateInRange(r.createdAtDate, startDate, endDate)) continue;
+    const nights = enumerateStayNights(r.checkinDate, r.checkoutDate).length;
+    const { gross, net } = splitReservationNet(r);
+    rows.push({
+      key: r.id,
+      establishmentName: r.establishmentName,
+      reservationDisplay: r.displayReservation,
+      createdAtLabel: formatAnalyticDateTime(r.createdAtDate, null, r.createdAtIso),
+      checkinLabel: formatAnalyticDateTime(r.checkinDate, r.checkinTime),
+      checkoutLabel: formatAnalyticDateTime(r.checkoutDate, r.checkoutTime),
+      statusLabel: reservationStatusLabel(r.status),
+      companyOrChannel: r.channelLabel,
+      nights,
+      gross,
+      adr: adr(gross, nights),
+      net,
+    });
+  }
+  return rows.sort((a, b) => b.createdAtLabel.localeCompare(a.createdAtLabel));
+}
+
+export function computeBillingAnalyticRows(
+  reservations: AnalyticReservation[],
+  startDate: string,
+  endDate: string,
+): BillingAnalyticRow[] {
+  const rows: BillingAnalyticRow[] = [];
+  for (const r of reservations) {
+    if (!isRevenueStatus(r.status, r.cancelledAt)) continue;
+    const nights = enumerateStayNights(r.checkinDate, r.checkoutDate);
+    const nightAmounts = nightAmountsForStay(Number(r.totalAmount) || 0, r.checkinDate, r.checkoutDate);
+    const estLabel =
+      r.establishmentNumericId != null
+        ? `${r.establishmentName} (#${r.establishmentNumericId})`
+        : r.establishmentName;
+    const originLabel =
+      r.rateTypeLabel === "Pacote" ? "Rateio de pacote" : r.displayReservation || r.reservationCode;
+    const idNum = r.identificationNumber || "—";
+
+    for (const night of nights) {
+      if (!dateInRange(night, startDate, endDate)) continue;
+      const amount = nightAmounts.get(night) ?? 0;
+      rows.push({
+        key: `${r.id}|${night}`,
+        establishmentLabel: estLabel,
+        reservationDisplay: r.displayReservation,
+        identificationNumber: idNum,
+        guestName: r.guestName,
+        nightDate: night,
+        nightDateLabel: formatAnalyticNightDate(night),
+        rateCodeLabel: r.rateCodeLabel,
+        rateTypeLabel: r.rateTypeLabel,
+        originLabel,
+        createdAtLabel: formatAnalyticDateTime(r.createdAtDate, null, r.createdAtIso),
+        checkinLabel: formatAnalyticDateTime(r.checkinDate, r.checkinTime),
+        checkoutLabel: formatAnalyticDateTime(r.checkoutDate, r.checkoutTime),
+        statusLabel: reservationStatusLabel(r.status),
+        companyName: r.companyName,
+        nightAttributedAmount: amount,
+        periodAmount: amount,
+      });
+    }
+  }
+  return rows.sort((a, b) => {
+    const c = a.nightDate.localeCompare(b.nightDate);
+    if (c !== 0) return c;
+    return a.reservationDisplay.localeCompare(b.reservationDisplay);
+  });
+}

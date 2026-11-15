@@ -1,10 +1,12 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
+  computeBillingAnalyticRows,
   computeDailySalesResult,
   computeEstablishmentReportRows,
   computeMonthlySalesBillingTable,
   computeOccupancyTotals,
   computePeriodReport,
+  computeSalesAnalyticRows,
   dailyLineLabels,
   maintenanceTicketsToNightBlocks,
   mergeNightBlocks,
@@ -19,6 +21,8 @@ import {
   type GroupBy,
   type MetricTotals,
   type MonthRank,
+  type AnalyticReservation,
+  type BillingAnalyticRow,
   type EstablishmentReportRow,
   type LodgingUnitSnapshot,
   type MonthlySalesBillingRow,
@@ -26,6 +30,7 @@ import {
   type OccupancyNightBlock,
   type OccupancyTotals,
   type PeriodReport,
+  type SalesAnalyticRow,
   adr,
 } from "@/lib/financial/operatingReportEngine";
 
@@ -33,10 +38,14 @@ const RESERVATION_SELECT = `
   id,
   establishment_id,
   reservation_code,
+  identification_number,
+  guest_name,
   status,
   cancelled_at,
   checkin_date,
   checkout_date,
+  checkin_time,
+  checkout_time,
   created_at,
   total_amount,
   paid_amount,
@@ -44,6 +53,9 @@ const RESERVATION_SELECT = `
   channel,
   room_id,
   category_id,
+  pricing_plans(code, name, plan_type),
+  guest:clients!guest_id(full_name),
+  client:clients!client_id(full_name),
   reservation_service_fees(amount, quantity)
 `;
 
@@ -51,10 +63,14 @@ type RawReservation = {
   id: string;
   establishment_id: string;
   reservation_code?: string;
+  identification_number?: number | string | null;
+  guest_name?: string | null;
   status: string;
   cancelled_at: string | null;
   checkin_date: string;
   checkout_date: string;
+  checkin_time?: string | null;
+  checkout_time?: string | null;
   created_at: string;
   total_amount: number;
   paid_amount: number;
@@ -62,6 +78,9 @@ type RawReservation = {
   channel: string | null;
   room_id: string | null;
   category_id: string | null;
+  pricing_plans?: { code?: string | null; name?: string | null; plan_type?: string | null } | null;
+  guest?: { full_name?: string | null } | null;
+  client?: { full_name?: string | null } | null;
   reservation_service_fees?: Array<{ amount?: number; quantity?: number }>;
 };
 
@@ -388,6 +407,59 @@ async function loadMaintenanceNightBlocks(
   );
 }
 
+function formatRateTypeLabel(planType: string | null | undefined): string {
+  const p = String(planType || "").toLowerCase();
+  if (p.includes("package") || p.includes("pacote")) return "Pacote";
+  return "Padrão";
+}
+
+function formatChannelLabel(channel: string | null | undefined): string {
+  const ch = String(channel || "").trim();
+  if (!ch || ["direct", "direto", "balcão", "balcao"].includes(ch.toLowerCase())) return "";
+  return ch.toUpperCase();
+}
+
+function formatRateCodeLabel(plan?: { code?: string | null; name?: string | null } | null): string {
+  const code = String(plan?.code || "").trim();
+  const name = String(plan?.name || "").trim();
+  if (code && name) return `${code} - ${name}`;
+  return code || name || "—";
+}
+
+function buildAnalyticReservations(
+  normalized: NormalizedReservation[],
+  rawById: Map<string, RawReservation>,
+  establishmentMeta: Map<string, { name: string; numericId: number | null }>,
+): AnalyticReservation[] {
+  return normalized.map((n) => {
+    const raw = rawById.get(n.id);
+    const est = establishmentMeta.get(n.establishmentId);
+    const reservationCode = String(raw?.reservation_code || "").trim();
+    const idNum = raw?.identification_number != null ? String(raw.identification_number) : null;
+    const displayReservation = reservationCode || idNum || n.id.slice(0, 8);
+    const guestFromRel = raw?.guest?.full_name || raw?.client?.full_name;
+    const guestName = String(raw?.guest_name || guestFromRel || "").trim() || "—";
+    const companyName = String(raw?.client?.full_name || guestFromRel || "").trim() || "—";
+    const plan = raw?.pricing_plans;
+    return {
+      ...n,
+      reservationCode,
+      identificationNumber: idNum,
+      displayReservation,
+      guestName,
+      companyName,
+      channelLabel: formatChannelLabel(raw?.channel),
+      establishmentName: est?.name || n.establishmentId,
+      establishmentNumericId: est?.numericId ?? null,
+      rateCodeLabel: formatRateCodeLabel(plan),
+      rateTypeLabel: formatRateTypeLabel(plan?.plan_type),
+      createdAtIso: raw?.created_at || "",
+      checkinTime: raw?.checkin_time ?? null,
+      checkoutTime: raw?.checkout_time ?? null,
+    };
+  });
+}
+
 function nightBlocksFromRaw(rows: RawReservation[]): OccupancyNightBlock[] {
   const blocks: OccupancyNightBlock[] = [];
   for (const r of rows) {
@@ -462,6 +534,10 @@ export type OperatingReportResult = {
   monthlySalesBilling: MonthlySalesBillingRow[];
   periodOccupancy: OccupancyTotals;
   establishmentRows: EstablishmentReportRow[];
+  salesAnalytic: SalesAnalyticRow[];
+  billingAnalytic: BillingAnalyticRow[];
+  salesAnalyticTotal: number;
+  billingAnalyticTotal: number;
 };
 
 export async function fetchOperatingReport(filters: OperatingFilters): Promise<OperatingReportResult> {
@@ -475,8 +551,8 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     loadReservationsOverlapping(establishmentIds, fetchStart, fetchEnd),
     loadLodgingUnits(establishmentIds),
     establishmentIds.length
-      ? supabase.from("establishments").select("id, name").in("id", establishmentIds)
-      : Promise.resolve({ data: [] as Array<{ id: string; name: string }>, error: null }),
+      ? supabase.from("establishments").select("id, name, numeric_id").in("id", establishmentIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string; numeric_id?: number }>, error: null }),
     loadMaintenanceNightBlocks(establishmentIds, fetchStart, fetchEnd),
   ]);
   if (establishmentMeta.error) throw new Error(establishmentMeta.error.message);
@@ -486,6 +562,13 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
   const establishmentNames = new Map(
     (establishmentMeta.data || []).map((e) => [String(e.id), String(e.name || e.id)]),
   );
+  const establishmentMetaById = new Map(
+    (establishmentMeta.data || []).map((e) => [
+      String(e.id),
+      { name: String(e.name || e.id), numericId: typeof e.numeric_id === "number" ? e.numeric_id : null },
+    ]),
+  );
+  const rawById = new Map(raw.map((r) => [r.id, r]));
 
   const paymentWindow = billingMode === "payment_attribution" ? { startDate: fetchStart, endDate: fetchEnd } : undefined;
   const normalized = await normalizeReservations(raw, establishmentIds, paymentWindow);
@@ -581,6 +664,12 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     groupBy,
   });
 
+  const analyticReservations = buildAnalyticReservations(normalized, rawById, establishmentMetaById);
+  const salesAnalytic = computeSalesAnalyticRows(analyticReservations, startDate, endDate);
+  const billingAnalytic = computeBillingAnalyticRows(analyticReservations, startDate, endDate);
+  const salesAnalyticTotal = salesAnalytic.reduce((sum, row) => sum + row.gross, 0);
+  const billingAnalyticTotal = billingAnalytic.reduce((sum, row) => sum + row.periodAmount, 0);
+
   return {
     period: { ...period, billingView: withRates(period.billing, periodOccupancy) },
     previousMonths: monthReports.map((m) => ({
@@ -596,6 +685,10 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     monthlySalesBilling: computeMonthlySalesBillingTable(normalized, startDate, endDate, billingMode),
     periodOccupancy,
     establishmentRows,
+    salesAnalytic,
+    billingAnalytic,
+    salesAnalyticTotal,
+    billingAnalyticTotal,
   };
 }
 

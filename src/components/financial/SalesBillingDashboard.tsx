@@ -21,7 +21,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Loader2, ChevronDown, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
@@ -37,7 +36,7 @@ import {
 } from "@/lib/financial/operatingReportEngine";
 import { useOperatingFinancialReport } from "@/hooks/useOperatingFinancialReport";
 import type { OperatingFilters, TotalsView } from "@/services/financial/operatingReportService";
-import { SalesBillingDefinitions } from "@/components/financial/SalesBillingDefinitions";
+import { SalesBillingAnalytic } from "@/components/financial/SalesBillingAnalytic";
 import {
   Bar,
   BarChart,
@@ -383,6 +382,16 @@ export function SalesBillingDashboard() {
         </Table>
       </Card>
 
+      {report ? (
+        <SalesBillingAnalytic
+          salesRows={report.salesAnalytic}
+          billingRows={report.billingAnalytic}
+          salesTotal={report.salesAnalyticTotal}
+          billingTotal={report.billingAnalyticTotal}
+          periodLabel={`${applied.startDate} a ${applied.endDate}`}
+        />
+      ) : null}
+
       <Card className="p-6">
         <h3 className="text-lg font-semibold">Vendas × Faturamento por mês</h3>
         <p className="mb-3 text-xs text-muted-foreground">
@@ -466,13 +475,7 @@ export function SalesBillingDashboard() {
   );
 
   return (
-    <Tabs defaultValue="dashboard" className="space-y-4">
-      <TabsList>
-        <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-        <TabsTrigger value="docs">Lógica e definições</TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="dashboard" className="space-y-4">
+    <div className="space-y-4">
         <Card className="p-6">
           <div className="mb-4 flex items-center justify-between gap-2">
             <h3 className="text-lg font-semibold">
@@ -591,12 +594,7 @@ export function SalesBillingDashboard() {
           <FiltersToolbar onApply={apply} loading={reportQuery.isFetching} />
         </Card>
         {dashboardBody}
-      </TabsContent>
-
-      <TabsContent value="docs">
-        <SalesBillingDefinitions />
-      </TabsContent>
-    </Tabs>
+    </div>
   );
 }
 
