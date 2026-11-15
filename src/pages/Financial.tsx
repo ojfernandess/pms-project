@@ -985,7 +985,7 @@ const Financial = () => {
                     <p className="text-sm text-muted-foreground mt-1">
                       Gerencie as taxas e serviços que podem ser adicionados às reservas. A{" "}
                       <strong>taxa de limpeza</strong> só aparece aqui após ser configurada em Configurações → Serviços
-                      (estabelecimento ou prédio).
+                      do estabelecimento (hotel) ou em Unidades → Prédio → Serviços.
                     </p>
                   </div>
                   <Button

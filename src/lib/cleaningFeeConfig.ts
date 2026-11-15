@@ -16,7 +16,7 @@ export function isCleaningFeeConfigured(config: CleaningFeeConfig | null | undef
   return Boolean(config?.isActive && Number(config?.amount) > 0);
 }
 
-/** Resolve taxa de limpeza: prédio da categoria tem prioridade sobre estabelecimento. */
+/** Resolve taxa de limpeza: prédio da categoria tem prioridade; senão usa a do hotel/estabelecimento. */
 export async function fetchCleaningFeeConfig(params: {
   establishmentId: string;
   buildingId?: string | null;
@@ -31,7 +31,11 @@ export async function fetchCleaningFeeConfig(params: {
       .eq("service_kind", CLEANING_FEE_KIND)
       .maybeSingle();
 
-    if (buildingRow) {
+    if (
+      buildingRow &&
+      Boolean(buildingRow.is_active) &&
+      Number(buildingRow.default_amount || 0) > 0
+    ) {
       const serviceFeeId = await findLinkedServiceFeeId(establishmentId, buildingRow.id);
       return mapRow(buildingRow, serviceFeeId);
     }

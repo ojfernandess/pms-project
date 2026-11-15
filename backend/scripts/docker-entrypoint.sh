@@ -24,6 +24,12 @@ if [ -n "${DATABASE_URL:-}" ] && [ -f ./scripts/migration/auth-compat.sql ]; the
     || echo "WARN: auth-compat.sql falhou" >&2
 fi
 
+# DDL incremental (colunas usadas pelo frontend / DataService)
+if [ -n "${DATABASE_URL:-}" ] && [ -f ./scripts/migration/cleaning_fee_configuration.sql ]; then
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/cleaning_fee_configuration.sql \
+    || echo "WARN: cleaning_fee_configuration.sql falhou" >&2
+fi
+
 # Com migração estável, force em todo restart sobrecarrega o Postgres e causa "Engine is not yet connected"
 if [ "${PMS_MIGRATION_COMPLETE:-false}" = "true" ] && [ "${APP_APPLY_BUNDLED_RPCS:-auto}" = "force" ]; then
   if [ "${PMS_ALLOW_BUNDLED_RPCS_FORCE:-false}" != "true" ]; then

@@ -1114,7 +1114,7 @@ const Settings = () => {
 // Componente de Gerenciamento de Serviços
 const ServicesManager = () => {
   const { services, isLoading, saveServices, isSaving } = useEstablishmentServices();
-  const { buildings, isLoading: isLoadingBuildings } = useBuildings();
+  const { buildings } = useBuildings();
   const { data: establishmentCleaningConfig, isLoading: isLoadingCleaningConfig } = useCleaningFeeConfig(null);
   const hasBuildings = (buildings?.length ?? 0) > 0;
   const [localServices, setLocalServices] = useState<Array<{ id?: string; name: string; description: string; is_active: boolean }>>([]);
@@ -1213,26 +1213,22 @@ const ServicesManager = () => {
           </p>
         </div>
 
-        {isLoadingBuildings ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Verificando unidades…
-          </div>
-        ) : hasBuildings ? (
-          <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950">
+        <CleaningFeeSettingCard
+          initialConfig={establishmentCleaningConfig}
+          isLoading={isLoadingCleaningConfig}
+          establishmentHasBuildings={hasBuildings}
+        />
+
+        {hasBuildings ? (
+          <div className="flex gap-2 rounded-lg border border-sky-200 bg-sky-50/80 p-4 text-sm text-sky-950">
             <AlertCircle className="h-5 w-5 shrink-0" />
             <p>
-              Este estabelecimento utiliza <strong>prédios</strong>. Configure a taxa de limpeza em{" "}
-              <strong>Unidades → Prédio → aba Serviços</strong> de cada prédio. O Financeiro → Taxas só exibirá a taxa
-              após o valor ser salvo no prédio correspondente.
+              Este estabelecimento também possui <strong>prédios</strong>. A taxa acima vale para o{" "}
+              <strong>hotel</strong> (categorias/unidades sem prédio). Para cada prédio, configure uma taxa específica
+              em <strong>Unidades → Prédio → aba Serviços</strong>.
             </p>
           </div>
-        ) : (
-          <CleaningFeeSettingCard
-            initialConfig={establishmentCleaningConfig}
-            isLoading={isLoadingCleaningConfig}
-          />
-        )}
+        ) : null}
 
         {/* Formulário para adicionar novo serviço */}
         <div className="border rounded-lg p-4 space-y-4">

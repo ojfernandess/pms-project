@@ -14,11 +14,19 @@ import { formatCurrency } from "@/lib/reservationUtils";
 type Props = {
   buildingId?: string | null;
   buildingName?: string;
+  /** Quando o hotel também opera prédios, reforça que esta taxa é do estabelecimento (não do prédio). */
+  establishmentHasBuildings?: boolean;
   initialConfig?: CleaningFeeConfig | null;
   isLoading?: boolean;
 };
 
-export function CleaningFeeSettingCard({ buildingId, buildingName, initialConfig, isLoading }: Props) {
+export function CleaningFeeSettingCard({
+  buildingId,
+  buildingName,
+  establishmentHasBuildings,
+  initialConfig,
+  isLoading,
+}: Props) {
   const { selectedEstablishment } = useEstablishment();
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState("");
@@ -68,7 +76,9 @@ export function CleaningFeeSettingCard({ buildingId, buildingName, initialConfig
 
   const scopeLabel = buildingId
     ? `Prédio${buildingName ? `: ${buildingName}` : ""}`
-    : "Estabelecimento";
+    : establishmentHasBuildings
+      ? "Hotel / estabelecimento (unidades sem prédio)"
+      : "Estabelecimento";
 
   return (
     <Card className="p-4 border-violet-200/80 bg-violet-50/30">
