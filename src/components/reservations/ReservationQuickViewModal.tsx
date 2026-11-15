@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/hooks/usePermissions";
+import { PreregistrationExpiryTimer } from "@/components/reservations/PreregistrationExpiryTimer";
 
 interface ReservationQuickViewModalProps {
   open: boolean;
@@ -242,6 +243,13 @@ export function ReservationQuickViewModal({
                 </Button>
               )}
             </div>
+
+            {reservation.status === "preregistration" && (
+              <PreregistrationExpiryTimer
+                expirationDate={reservation.expiration_date}
+                variant="compact"
+              />
+            )}
 
             {/* Botão de Efetivar Pré-reserva - apenas se for pré-reserva */}
             {/* Verificar o status original da reserva, não o status calculado */}

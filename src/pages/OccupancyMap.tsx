@@ -43,6 +43,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
+import { OccupancyDashboardPanel } from "@/components/occupancy/OccupancyDashboardPanel";
 import {
   Tooltip,
   TooltipContent,
@@ -749,6 +750,8 @@ const OccupancyMap = () => {
           </div>
         </div>
       </Card>
+
+      <OccupancyDashboardPanel rooms={roomsFromHook} selectedDate={selectedDate} />
 
       <div className="space-y-6">
         {/* Mapa de Quartos */}
