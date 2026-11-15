@@ -30,6 +30,7 @@ import {
   validateReportFilters,
   resolvePeriodPreset,
   type BillingMode,
+  type CleaningFeeReportMode,
   type GroupBy,
   type MonthRank,
   type PeriodPreset,
@@ -125,6 +126,7 @@ export function SalesBillingDashboard() {
     groupBy: "month" as GroupBy,
     billingMode: "stay_nights" as BillingMode,
     compareYoy: false,
+    cleaningFeeReportMode: "lodging_only" as CleaningFeeReportMode,
   });
   const [applied, setApplied] = useState<OperatingFilters | null>(null);
 
@@ -171,6 +173,10 @@ export function SalesBillingDashboard() {
 
   const billingModeLabel =
     applied?.billingMode === "stay_nights" ? "Período (PMS)" : "Pagamento / check-in";
+  const cleaningModeLabel =
+    applied?.cleaningFeeReportMode === "with_cleaning_allocated"
+      ? "Diárias + limpeza rateada"
+      : "Somente diárias";
 
   const exportEvolution = async (kind: "csv" | "xlsx") => {
     if (!report) return;
@@ -205,7 +211,7 @@ export function SalesBillingDashboard() {
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-lg font-semibold">Indicadores do período filtrado</h3>
           <p className="text-xs text-muted-foreground">
-            {applied.startDate} a {applied.endDate} · critério {billingModeLabel}
+            {applied.startDate} a {applied.endDate} · {billingModeLabel} · {cleaningModeLabel}
           </p>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
@@ -548,6 +554,25 @@ export function SalesBillingDashboard() {
                 <SelectContent>
                   <SelectItem value="stay_nights">Período (PMS)</SelectItem>
                   <SelectItem value="payment_attribution">Pagamento / check-in</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Taxa de limpeza no relatório</Label>
+              <Select
+                value={draft.cleaningFeeReportMode}
+                onValueChange={(v: CleaningFeeReportMode) =>
+                  setDraft((d) => ({ ...d, cleaningFeeReportMode: v }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="lodging_only">Somente diárias (sem limpeza)</SelectItem>
+                  <SelectItem value="with_cleaning_allocated">
+                    Diárias + limpeza (vendas e faturamento rateado)
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>

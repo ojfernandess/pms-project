@@ -15,6 +15,8 @@ import { useBuildingServices } from "@/hooks/useBuildingServices";
 import { Loader2, Copy, Check, Save, Plus, X, Upload, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { CleaningFeeSettingCard } from "@/components/settings/CleaningFeeSettingCard";
+import { useCleaningFeeConfig } from "@/hooks/useCleaningFeeConfig";
 
 interface BuildingDialogProps {
   open: boolean;
@@ -1048,6 +1050,7 @@ export const BuildingDialog = ({
           <TabsContent value="services">
             <BuildingServicesManager 
               buildingId={buildingId || null}
+              buildingName={formData.name}
               services={services}
               isLoading={isLoadingServices}
               saveServices={saveServices}
@@ -1063,17 +1066,20 @@ export const BuildingDialog = ({
 // Componente de Gerenciamento de Serviços do Prédio
 const BuildingServicesManager = ({
   buildingId,
+  buildingName,
   services,
   isLoading,
   saveServices,
   isSaving,
 }: {
   buildingId: string | null;
+  buildingName?: string;
   services: any[];
   isLoading: boolean;
   saveServices: (services: Array<{ id?: string; name: string; description?: string; is_active: boolean }>) => Promise<any>;
   isSaving: boolean;
 }) => {
+  const { data: cleaningConfig, isLoading: isLoadingCleaning } = useCleaningFeeConfig(buildingId);
   const [localServices, setLocalServices] = useState<Array<{ id?: string; name: string; description: string; is_active: boolean }>>([]);
   const [newServiceName, setNewServiceName] = useState("");
   const [newServiceDescription, setNewServiceDescription] = useState("");
@@ -1169,6 +1175,19 @@ const BuildingServicesManager = ({
             Gerencie os serviços disponibilizados pelo prédio (Wi-fi, Piscina, Estacionamento, etc.)
           </p>
         </div>
+
+        {buildingId ? (
+          <CleaningFeeSettingCard
+            buildingId={buildingId}
+            buildingName={buildingName}
+            initialConfig={cleaningConfig}
+            isLoading={isLoadingCleaning}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Salve o prédio primeiro para configurar a taxa de limpeza.
+          </p>
+        )}
 
         {/* Formulário para adicionar novo serviço */}
         <div className="border rounded-lg p-4 space-y-4">

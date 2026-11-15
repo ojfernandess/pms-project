@@ -18,6 +18,7 @@ import {
   toDateOnly,
   yoyChange,
   type BillingMode,
+  type CleaningFeeReportMode,
   type GroupBy,
   type MetricTotals,
   type MonthRank,
@@ -56,7 +57,11 @@ const RESERVATION_SELECT = `
   pricing_plans(code, name, plan_type),
   guest:clients!guest_id(full_name),
   client:clients!client_id(full_name),
-  reservation_service_fees(amount, quantity)
+  reservation_service_fees(
+    amount,
+    quantity,
+    service_fees(service_kind)
+  )
 `;
 
 type RawReservation = {
@@ -81,7 +86,11 @@ type RawReservation = {
   pricing_plans?: { code?: string | null; name?: string | null; plan_type?: string | null } | null;
   guest?: { full_name?: string | null } | null;
   client?: { full_name?: string | null } | null;
-  reservation_service_fees?: Array<{ amount?: number; quantity?: number }>;
+  reservation_service_fees?: Array<{
+    amount?: number;
+    quantity?: number;
+    service_fees?: { service_kind?: string | null } | null;
+  }>;
 };
 
 async function fetchAllRows<T>(build: (from: number, to: number) => Promise<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
@@ -101,6 +110,18 @@ async function fetchAllRows<T>(build: (from: number, to: number) => Promise<{ da
 
 function serviceFeesTotal(fees?: Array<{ amount?: number; quantity?: number }>): number {
   return (fees || []).reduce((sum, f) => sum + Number(f.amount || 0) * Number(f.quantity ?? 1), 0);
+}
+
+function cleaningFeesTotal(
+  fees?: Array<{
+    amount?: number;
+    quantity?: number;
+    service_fees?: { service_kind?: string | null } | null;
+  }>,
+): number {
+  return (fees || [])
+    .filter((f) => String(f.service_fees?.service_kind || "") === "cleaning_fee")
+    .reduce((sum, f) => sum + Number(f.amount || 0) * Number(f.quantity ?? 1), 0);
 }
 
 function isLodgingUnit(room: {
@@ -309,6 +330,7 @@ async function normalizeReservations(
     createdAtDate: toDateOnly(r.created_at),
     totalAmount: Number(r.total_amount || 0),
     serviceFeesTotal: serviceFeesTotal(r.reservation_service_fees),
+    cleaningFeeTotal: cleaningFeesTotal(r.reservation_service_fees),
     paymentStatus: r.payment_status,
     paidAmount: Number(r.paid_amount || 0),
     netPayments: netByReservation.get(r.id) || 0,
@@ -482,6 +504,7 @@ export type OperatingFilters = {
   groupBy: GroupBy;
   billingMode: BillingMode;
   compareYoy: boolean;
+  cleaningFeeReportMode?: CleaningFeeReportMode;
 };
 
 export type TotalsView = MetricTotals & {
@@ -541,7 +564,15 @@ export type OperatingReportResult = {
 };
 
 export async function fetchOperatingReport(filters: OperatingFilters): Promise<OperatingReportResult> {
-  const { startDate, endDate, establishmentIds, groupBy, billingMode, compareYoy } = filters;
+  const {
+    startDate,
+    endDate,
+    establishmentIds,
+    groupBy,
+    billingMode,
+    compareYoy,
+    cleaningFeeReportMode = "lodging_only",
+  } = filters;
   const prevMonths = previousThreeCalendarMonths(startDate);
   const yoyRange = compareYoy ? previousYearRange(startDate, endDate) : null;
   const fetchStart = [startDate, prevMonths[0].startDate, yoyRange?.startDate].filter(Boolean).sort()[0] as string;
@@ -589,6 +620,7 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     groupBy,
     billingMode,
     activeUnitCount,
+    cleaningFeeReportMode,
   });
 
   const monthReports = prevMonths.map((m) => {
@@ -599,6 +631,7 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
       groupBy: "month",
       billingMode,
       activeUnitCount,
+      cleaningFeeReportMode,
     });
     return { ...m, report: r };
   });
@@ -635,6 +668,7 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
       groupBy,
       billingMode,
       activeUnitCount,
+      cleaningFeeReportMode,
     });
     const yoyOcc = legacyOccupancyFromBilling(yoyReport.billing, yoyReport.availableNights);
     const yoyView = withRates(yoyReport.billing, yoyOcc);
@@ -662,11 +696,22 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     endDate,
     billingMode,
     groupBy,
+    cleaningFeeReportMode,
   });
 
   const analyticReservations = buildAnalyticReservations(normalized, rawById, establishmentMetaById);
-  const salesAnalytic = computeSalesAnalyticRows(analyticReservations, startDate, endDate);
-  const billingAnalytic = computeBillingAnalyticRows(analyticReservations, startDate, endDate);
+  const salesAnalytic = computeSalesAnalyticRows(
+    analyticReservations,
+    startDate,
+    endDate,
+    cleaningFeeReportMode,
+  );
+  const billingAnalytic = computeBillingAnalyticRows(
+    analyticReservations,
+    startDate,
+    endDate,
+    cleaningFeeReportMode,
+  );
   const salesAnalyticTotal = salesAnalytic.reduce((sum, row) => sum + row.gross, 0);
   const billingAnalyticTotal = billingAnalytic.reduce((sum, row) => sum + row.periodAmount, 0);
 
@@ -682,7 +727,13 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     })),
     previousMonthsTotal: previousMonthsAcc,
     yoy,
-    monthlySalesBilling: computeMonthlySalesBillingTable(normalized, startDate, endDate, billingMode),
+    monthlySalesBilling: computeMonthlySalesBillingTable(
+      normalized,
+      startDate,
+      endDate,
+      billingMode,
+      cleaningFeeReportMode,
+    ),
     periodOccupancy,
     establishmentRows,
     salesAnalytic,

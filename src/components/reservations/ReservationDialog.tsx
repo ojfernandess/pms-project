@@ -10,6 +10,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useReservations } from "@/hooks/useReservations";
 import { usePricing } from "@/hooks/usePricing";
+import { useCleaningFeeConfig } from "@/hooks/useCleaningFeeConfig";
+import {
+  attachCleaningFeeToReservation,
+  isCleaningFeeConfigured,
+} from "@/lib/cleaningFeeConfig";
+import { ReservationQuoteSummary } from "@/components/reservations/ReservationQuoteSummary";
 import { useHotelSettings } from "@/hooks/useHotelSettings";
 import { DEFAULT_HOTEL_TZ, zonedLocalDateTimeToUtcIso } from "@/lib/hotelTimezoneDate";
 import { useRateSystem } from "@/hooks/useRateSystem";
@@ -123,7 +129,7 @@ export const ReservationDialog = ({
   initialData
 }: ReservationDialogProps) => {
   const { createReservation, updateReservation, isCreating, isUpdating, cancelReservation } = useReservations();
-  const { calculatePrice } = usePricing();
+  const { calculatePrice, calculateNightlyBreakdown } = usePricing();
   const { settings: hotelSettings } = useHotelSettings();
   const { ratePlans } = useRateSystem();
   const { canDelete } = usePermissions();
@@ -133,6 +139,10 @@ export const ReservationDialog = ({
   const [loadingRooms, setLoadingRooms] = useState(false);
 
   const [calculatedTotal, setCalculatedTotal] = useState<number>(0);
+  const [nightlyQuoteLines, setNightlyQuoteLines] = useState<
+    Array<{ date: string; dayLabel: string; amount: number }>
+  >([]);
+  const [includeCleaningInQuote, setIncludeCleaningInQuote] = useState(true);
   const [isManualPrice, setIsManualPrice] = useState(false); // Flag para indicar que o preço foi definido manualmente
   const [promotionCode, setPromotionCode] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null); // Cupom aplicado
@@ -152,21 +162,6 @@ export const ReservationDialog = ({
   const [selectedServiceFee, setSelectedServiceFee] = useState<{ id: string; name: string; description?: string } | null>(null);
   const [editingServiceFee, setEditingServiceFee] = useState<{ id: string; amount: number; quantity: number; notes?: string } | null>(null);
   
-  // Calcular total incluindo taxas e desconto do cupom
-  // O desconto é aplicado apenas no valor base da reserva, não nas taxas
-  const totalWithFees = useMemo(() => {
-    const baseTotal = calculatedTotal || 0;
-    const feesTotal = reservationServiceFees.reduce((sum: number, fee: any) => {
-      return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
-    }, 0);
-    
-    // Aplicar desconto do cupom apenas no valor base se houver
-    const discountedBase = appliedCoupon && appliedCoupon.valid 
-      ? appliedCoupon.final_amount 
-      : baseTotal;
-    
-    return discountedBase + feesTotal;
-  }, [calculatedTotal, reservationServiceFees, appliedCoupon]);
   const [calculatingPrice, setCalculatingPrice] = useState(false);
   const [createNewClient, setCreateNewClient] = useState(true); // Sempre criar novo cliente
   const [creatingClient, setCreatingClient] = useState(false);
@@ -363,6 +358,57 @@ export const ReservationDialog = ({
       return data;
     },
   });
+
+  const quoteCategoryBuildingId = useMemo(() => {
+    const cat = categories?.find((c) => c.id === formData.category_id);
+    return (cat as { building_id?: string | null } | undefined)?.building_id ?? null;
+  }, [categories, formData.category_id]);
+
+  const { data: cleaningFeeConfig } = useCleaningFeeConfig(quoteCategoryBuildingId);
+  const cleaningConfigured = isCleaningFeeConfigured(cleaningFeeConfig);
+
+  const persistCleaningFeeIfNeeded = async (createdReservationId: string) => {
+    if (!includeCleaningInQuote || !cleaningConfigured || !cleaningFeeConfig?.serviceFeeId) {
+      return;
+    }
+    try {
+      await attachCleaningFeeToReservation({
+        reservationId: createdReservationId,
+        serviceFeeId: cleaningFeeConfig.serviceFeeId,
+        amount: cleaningFeeConfig.amount,
+      });
+      queryClient.invalidateQueries({ queryKey: ["reservation_service_fees", createdReservationId] });
+    } catch (e) {
+      console.error(e);
+      toast.error("Reserva criada, mas não foi possível vincular a taxa de limpeza.");
+    }
+  };
+
+  // Calcular total incluindo taxas, limpeza na cotação e desconto do cupom
+  const totalWithFees = useMemo(() => {
+    const baseTotal = calculatedTotal || 0;
+    const feesTotal = reservationServiceFees.reduce((sum: number, fee: any) => {
+      return sum + Number(fee.amount || 0) * Number(fee.quantity || 1);
+    }, 0);
+
+    const discountedBase =
+      appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : baseTotal;
+
+    const quoteCleaning =
+      !reservationId && cleaningConfigured && includeCleaningInQuote
+        ? Number(cleaningFeeConfig?.amount || 0)
+        : 0;
+
+    return discountedBase + feesTotal + quoteCleaning;
+  }, [
+    calculatedTotal,
+    reservationServiceFees,
+    appliedCoupon,
+    reservationId,
+    cleaningConfigured,
+    includeCleaningInQuote,
+    cleaningFeeConfig?.amount,
+  ]);
 
   // Função para busca inicial de cliente
   const searchInitialClient = async () => {
@@ -1080,6 +1126,49 @@ export const ReservationDialog = ({
     isEditMode,
     isManualPrice, // Adicionar isManualPrice como dependência
     // Remover calculatePrice das dependências para evitar recriação constante
+  ]);
+
+  useEffect(() => {
+    if (reservationId && !isEditMode) return;
+    if (isManualPrice) return;
+
+    let cancelled = false;
+    const timeoutId = setTimeout(async () => {
+      if (!formData.category_id || !formData.checkin_date || !formData.checkout_date) {
+        if (!cancelled) setNightlyQuoteLines([]);
+        return;
+      }
+      try {
+        const lines = await calculateNightlyBreakdown(
+          formData.category_id,
+          formData.checkin_date,
+          formData.checkout_date,
+          formData.pricing_plan_id && formData.pricing_plan_id.trim() !== ""
+            ? formData.pricing_plan_id
+            : undefined,
+          formData.adults,
+          formData.children,
+        );
+        if (!cancelled) setNightlyQuoteLines(lines);
+      } catch {
+        if (!cancelled) setNightlyQuoteLines([]);
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [
+    formData.category_id,
+    formData.checkin_date,
+    formData.checkout_date,
+    formData.pricing_plan_id,
+    formData.adults,
+    formData.children,
+    reservationId,
+    isEditMode,
+    isManualPrice,
   ]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -2138,7 +2227,10 @@ export const ReservationDialog = ({
         
         console.log("📤 Dados da reserva a serem enviados:", cleanReservationData);
         
-        await createReservation(cleanReservationData);
+        const created = await createReservation(cleanReservationData);
+        if (created?.id) {
+          await persistCleaningFeeIfNeeded(created.id);
+        }
       }
 
       // Limpar formulário
@@ -3622,43 +3714,27 @@ export const ReservationDialog = ({
               </div>
             )}
 
-            {/* Total calculado */}
-            {calculatedTotal > 0 && (
-              <div className="col-span-2 p-4 bg-muted rounded-lg">
-                <div className="flex justify-between items-center">
-                  <span className="font-medium">Total estimado:</span>
-                  {calculatingPrice ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                  ) : (
-                    <span className="text-2xl font-bold text-primary">
-                      {formatCurrency(appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : calculatedTotal)}
-                    </span>
-                  )}
-                </div>
-                {appliedCoupon && appliedCoupon.valid && (
-                  <div className="mt-2 pt-2 border-t border-slate-300">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-600">Subtotal:</span>
-                      <span className="text-slate-700">{formatCurrency(calculatedTotal)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm text-green-600">
-                      <span>Desconto ({appliedCoupon.coupon_code}):</span>
-                      <span className="font-semibold">-{formatCurrency(appliedCoupon.discount_amount)}</span>
-                    </div>
-                  </div>
-                )}
-                {formData.checkin_date && formData.checkout_date && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {Math.ceil(
-                      (new Date(formData.checkout_date).getTime() -
-                        new Date(formData.checkin_date).getTime()) /
-                        (1000 * 60 * 60 * 24)
-                    )}{" "}
-                    noite(s)
-                  </p>
-                )}
-              </div>
-            )}
+            {/* Cotação estimada */}
+            {formData.checkin_date &&
+              formData.checkout_date &&
+              reservationAction !== "blocked" &&
+              (calculatedTotal > 0 || nightlyQuoteLines.length > 0) && (
+                <ReservationQuoteSummary
+                  checkinDate={formData.checkin_date}
+                  checkoutDate={formData.checkout_date}
+                  nightlyLines={nightlyQuoteLines}
+                  lodgingTotal={calculatedTotal}
+                  cleaningFee={cleaningFeeConfig?.amount ?? 0}
+                  cleaningConfigured={cleaningConfigured}
+                  includeCleaning={includeCleaningInQuote}
+                  onIncludeCleaningChange={setIncludeCleaningInQuote}
+                  loading={calculatingPrice}
+                  couponFinalAmount={
+                    appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : null
+                  }
+                  showCleaningToggle={!reservationId}
+                />
+              )}
 
             {/* Motivo do Bloqueio - Apenas para bloqueios */}
             {reservationAction === "blocked" && (
@@ -4060,7 +4136,10 @@ export const ReservationDialog = ({
                     cleanReservationData.checkout_time = null;
                   }
                   
-                  await createReservation(cleanReservationData);
+                  const createdPast = await createReservation(cleanReservationData);
+                  if (createdPast?.id) {
+                    await persistCleaningFeeIfNeeded(createdPast.id);
+                  }
 
                   // Limpar formulário
                   const defaultCheckinTime = hotelSettings?.checkin_time 

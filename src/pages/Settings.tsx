@@ -30,6 +30,9 @@ import { CompanyApiCredentialsCard } from "@/components/settings/CompanyApiCrede
 import { PmsWebhooksReference } from "@/components/settings/PmsWebhooksReference";
 import { CompanyApiRequestLogsPanel } from "@/components/settings/CompanyApiRequestLogsPanel";
 import { FnrhSettingsCard } from "@/components/settings/FnrhSettingsCard";
+import { CleaningFeeSettingCard } from "@/components/settings/CleaningFeeSettingCard";
+import { useCleaningFeeConfig } from "@/hooks/useCleaningFeeConfig";
+import { useBuildings } from "@/hooks/useBuildings";
 import { EstablishmentEmailTemplatesManager } from "@/components/settings/EstablishmentEmailTemplatesManager";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 import {
@@ -1111,6 +1114,9 @@ const Settings = () => {
 // Componente de Gerenciamento de Serviços
 const ServicesManager = () => {
   const { services, isLoading, saveServices, isSaving } = useEstablishmentServices();
+  const { buildings, isLoading: isLoadingBuildings } = useBuildings();
+  const { data: establishmentCleaningConfig, isLoading: isLoadingCleaningConfig } = useCleaningFeeConfig(null);
+  const hasBuildings = (buildings?.length ?? 0) > 0;
   const [localServices, setLocalServices] = useState<Array<{ id?: string; name: string; description: string; is_active: boolean }>>([]);
   const [newServiceName, setNewServiceName] = useState("");
   const [newServiceDescription, setNewServiceDescription] = useState("");
@@ -1206,6 +1212,27 @@ const ServicesManager = () => {
             Gerencie os serviços disponibilizados pelo hotel (Wi-fi, Piscina, Estacionamento, etc.)
           </p>
         </div>
+
+        {isLoadingBuildings ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Verificando unidades…
+          </div>
+        ) : hasBuildings ? (
+          <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950">
+            <AlertCircle className="h-5 w-5 shrink-0" />
+            <p>
+              Este estabelecimento utiliza <strong>prédios</strong>. Configure a taxa de limpeza em{" "}
+              <strong>Unidades → Prédio → aba Serviços</strong> de cada prédio. O Financeiro → Taxas só exibirá a taxa
+              após o valor ser salvo no prédio correspondente.
+            </p>
+          </div>
+        ) : (
+          <CleaningFeeSettingCard
+            initialConfig={establishmentCleaningConfig}
+            isLoading={isLoadingCleaningConfig}
+          />
+        )}
 
         {/* Formulário para adicionar novo serviço */}
         <div className="border rounded-lg p-4 space-y-4">

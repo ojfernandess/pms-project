@@ -56,6 +56,7 @@ function res(partial: Partial<NormalizedReservation> & Pick<NormalizedReservatio
     createdAtDate: "2026-03-01",
     totalAmount: 300,
     serviceFeesTotal: 30,
+    cleaningFeeTotal: 0,
     paymentStatus: "pending",
     paidAmount: 0,
     netPayments: 0,

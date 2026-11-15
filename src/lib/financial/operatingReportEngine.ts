@@ -1,3 +1,4 @@
+import { allocateCleaningFeePerNight } from "@/lib/cleaningFeeConfig";
 import {
   addDays,
   addMonths,
@@ -31,6 +32,8 @@ export type MetricTotals = SplitAmounts & {
   reservationCount: number;
 };
 
+export type CleaningFeeReportMode = "lodging_only" | "with_cleaning_allocated";
+
 export type NormalizedReservation = {
   id: string;
   establishmentId: string;
@@ -42,6 +45,7 @@ export type NormalizedReservation = {
   createdAtDate: string;
   totalAmount: number;
   serviceFeesTotal: number;
+  cleaningFeeTotal: number;
   paymentStatus: string;
   paidAmount: number;
   netPayments: number;
@@ -418,6 +422,7 @@ export function computeEstablishmentReportRows(args: {
   endDate: string;
   billingMode: BillingMode;
   groupBy: GroupBy;
+  cleaningFeeReportMode?: CleaningFeeReportMode;
 }): EstablishmentReportRow[] {
   const {
     reservations,
@@ -429,6 +434,7 @@ export function computeEstablishmentReportRows(args: {
     endDate,
     billingMode,
     groupBy,
+    cleaningFeeReportMode = "lodging_only",
   } = args;
   const activeUnitCountByEst = new Map<string, number>();
   for (const u of units) {
@@ -446,6 +452,7 @@ export function computeEstablishmentReportRows(args: {
       groupBy,
       billingMode,
       activeUnitCount: unitCount,
+      cleaningFeeReportMode,
     });
     const occupancy = computeOccupancyTotals(
       reservations,
@@ -644,8 +651,19 @@ export function computePeriodReport(args: {
   groupBy: GroupBy;
   billingMode: BillingMode;
   activeUnitCount: number;
+  cleaningFeeReportMode?: CleaningFeeReportMode;
 }): PeriodReport {
-  const { reservations, startDate, endDate, groupBy, billingMode, activeUnitCount } = args;
+  const {
+    reservations,
+    startDate,
+    endDate,
+    groupBy,
+    billingMode,
+    activeUnitCount,
+    cleaningFeeReportMode = "lodging_only",
+  } = args;
+  const includeCleaningInSales = cleaningFeeReportMode === "with_cleaning_allocated";
+  const allocateCleaningInBilling = cleaningFeeReportMode === "with_cleaning_allocated";
   const billingSeen = new Set<string>();
   const billing = emptyTotals();
   const salesSeen = new Set<string>();
@@ -666,19 +684,25 @@ export function computePeriodReport(args: {
 
     const nights = enumerateStayNights(r.checkinDate, r.checkoutDate);
     const nightAmounts = nightAmountsForStay(reservationGrossStayMode(r), r.checkinDate, r.checkoutDate);
+    const cleaningPerNight =
+      allocateCleaningInBilling && r.cleaningFeeTotal > 0
+        ? new Map(nights.map((d, i) => [d, allocateCleaningFeePerNight(r.cleaningFeeTotal, nights.length)[i] ?? 0]))
+        : new Map<string, number>();
 
     if (dateInRange(r.createdAtDate, startDate, endDate) && !salesSeen.has(r.id)) {
       salesSeen.add(r.id);
       sales.salesCount += 1;
       sales.salesNights += nights.length;
-      sales.salesGross += reservationGrossStayMode(r);
+      let saleGross = reservationGrossStayMode(r);
+      if (includeCleaningInSales) saleGross += Number(r.cleaningFeeTotal) || 0;
+      sales.salesGross += saleGross;
     }
 
     if (billingMode === "stay_nights") {
       const nightsInRange = nights.filter((n) => dateInRange(n, startDate, endDate));
       if (nightsInRange.length === 0) continue;
       for (const night of nightsInRange) {
-        const nightGross = nightAmounts.get(night) ?? 0;
+        const nightGross = (nightAmounts.get(night) ?? 0) + (cleaningPerNight.get(night) ?? 0);
         const split = splitRevenue(nightGross, r.channelCommissionPct, r.ownerPct);
         addSplit(billing, split, 1, r.id, billingSeen);
         const b = ensureBucket(bucketKey(night, groupBy));
@@ -719,6 +743,7 @@ export function computeMonthlySalesBillingTable(
   rangeStart: string,
   rangeEnd: string,
   billingMode: BillingMode,
+  cleaningFeeReportMode: CleaningFeeReportMode = "lodging_only",
 ): MonthlySalesBillingRow[] {
   const allMonths = monthsSpanningRange(toDateOnly(rangeStart), toDateOnly(rangeEnd));
 
@@ -730,6 +755,7 @@ export function computeMonthlySalesBillingTable(
       groupBy: "month",
       billingMode,
       activeUnitCount: 0,
+      cleaningFeeReportMode,
     });
     return {
       key: m.key,
@@ -856,8 +882,12 @@ export function formatAnalyticNightDate(date: string): string {
   return format(parseISO(toDateOnly(date)), "dd/MM/yyyy");
 }
 
-function splitReservationNet(r: AnalyticReservation): { gross: number; net: number } {
-  const gross = Number(r.totalAmount) || 0;
+function splitReservationNet(
+  r: AnalyticReservation,
+  cleaningFeeReportMode: CleaningFeeReportMode = "lodging_only",
+): { gross: number; net: number } {
+  let gross = Number(r.totalAmount) || 0;
+  if (cleaningFeeReportMode === "with_cleaning_allocated") gross += Number(r.cleaningFeeTotal) || 0;
   const split = splitRevenue(gross, r.channelCommissionPct, r.ownerPct);
   return { gross, net: split.net };
 }
@@ -866,13 +896,14 @@ export function computeSalesAnalyticRows(
   reservations: AnalyticReservation[],
   startDate: string,
   endDate: string,
+  cleaningFeeReportMode: CleaningFeeReportMode = "lodging_only",
 ): SalesAnalyticRow[] {
   const rows: SalesAnalyticRow[] = [];
   for (const r of reservations) {
     if (!isRevenueStatus(r.status, r.cancelledAt)) continue;
     if (!dateInRange(r.createdAtDate, startDate, endDate)) continue;
     const nights = enumerateStayNights(r.checkinDate, r.checkoutDate).length;
-    const { gross, net } = splitReservationNet(r);
+    const { gross, net } = splitReservationNet(r, cleaningFeeReportMode);
     rows.push({
       key: r.id,
       establishmentName: r.establishmentName,
@@ -895,12 +926,18 @@ export function computeBillingAnalyticRows(
   reservations: AnalyticReservation[],
   startDate: string,
   endDate: string,
+  cleaningFeeReportMode: CleaningFeeReportMode = "lodging_only",
 ): BillingAnalyticRow[] {
   const rows: BillingAnalyticRow[] = [];
+  const allocateCleaning = cleaningFeeReportMode === "with_cleaning_allocated";
   for (const r of reservations) {
     if (!isRevenueStatus(r.status, r.cancelledAt)) continue;
     const nights = enumerateStayNights(r.checkinDate, r.checkoutDate);
     const nightAmounts = nightAmountsForStay(Number(r.totalAmount) || 0, r.checkinDate, r.checkoutDate);
+    const cleaningPerNight =
+      allocateCleaning && r.cleaningFeeTotal > 0
+        ? new Map(nights.map((d, i) => [d, allocateCleaningFeePerNight(r.cleaningFeeTotal, nights.length)[i] ?? 0]))
+        : new Map<string, number>();
     const estLabel =
       r.establishmentNumericId != null
         ? `${r.establishmentName} (#${r.establishmentNumericId})`
@@ -911,7 +948,7 @@ export function computeBillingAnalyticRows(
 
     for (const night of nights) {
       if (!dateInRange(night, startDate, endDate)) continue;
-      const amount = nightAmounts.get(night) ?? 0;
+      const amount = (nightAmounts.get(night) ?? 0) + (cleaningPerNight.get(night) ?? 0);
       rows.push({
         key: `${r.id}|${night}`,
         establishmentLabel: estLabel,

@@ -57,6 +57,19 @@ import { RefundsList } from "@/components/financial/RefundsList";
 import { CancellationReport } from "@/components/financial/CancellationReport";
 import { NoShowReport } from "@/components/financial/NoShowReport";
 import { SoldReservationsReport } from "@/components/financial/SoldReservationsReport";
+import { CLEANING_FEE_KIND } from "@/lib/cleaningFeeConfig";
+
+function serviceFeeVisibleInFinancialList(fee: {
+  service_kind?: string | null;
+  is_active?: boolean;
+  default_amount?: number | null;
+  source_service_id?: string | null;
+}): boolean {
+  if (fee.service_kind !== CLEANING_FEE_KIND) return true;
+  return Boolean(
+    fee.is_active && Number(fee.default_amount || 0) > 0 && fee.source_service_id,
+  );
+}
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -970,7 +983,9 @@ const Financial = () => {
                   <div>
                     <h2 className="text-2xl font-bold">Tipo da Taxa</h2>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Gerencie as taxas e serviços que podem ser adicionados às reservas
+                      Gerencie as taxas e serviços que podem ser adicionados às reservas. A{" "}
+                      <strong>taxa de limpeza</strong> só aparece aqui após ser configurada em Configurações → Serviços
+                      (estabelecimento ou prédio).
                     </p>
                   </div>
                   <Button
@@ -1020,6 +1035,7 @@ const Financial = () => {
                     <div className="text-sm font-semibold text-muted-foreground mb-2">
                       {(() => {
                         const filtered = serviceFees.filter((fee: any) => {
+                          if (!serviceFeeVisibleInFinancialList(fee)) return false;
                           const matchesSearch = fee.name?.toLowerCase().includes(searchServiceFeeTerm.toLowerCase());
                           const matchesStatus = 
                             statusServiceFeeFilter === "all" ||
@@ -1034,6 +1050,7 @@ const Financial = () => {
                     </div>
                     {serviceFees
                       .filter((fee: any) => {
+                        if (!serviceFeeVisibleInFinancialList(fee)) return false;
                         const matchesSearch = fee.name?.toLowerCase().includes(searchServiceFeeTerm.toLowerCase());
                         const matchesStatus = 
                           statusServiceFeeFilter === "all" ||
