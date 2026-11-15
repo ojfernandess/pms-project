@@ -112,10 +112,9 @@ export class DataService {
         const signatures = await tx.$queryRaw<{ args: string; retset: boolean; ret: string }[]>`
           SELECT pg_get_function_identity_arguments(p.oid) AS args,
                  p.proretset AS retset,
-                 t.typname AS ret
+                 format_type(p.prorettype, NULL) AS ret
           FROM pg_proc p
           JOIN pg_namespace n ON n.oid = p.pronamespace
-          JOIN pg_type t ON t.oid = p.prorettype
           WHERE n.nspname = 'public' AND p.proname = ${name}
         `;
         if (signatures.length === 0) throw new Error(`Função não encontrada: ${name}`);
@@ -133,7 +132,8 @@ export class DataService {
           .join(", ");
         const call =
           entries.length === 0 ? `public.${quoteArg(name)}()` : `public.${quoteArg(name)}(${positional})`;
-        if (signature.ret === "void") {
+        const retType = (signature.ret ?? "").toLowerCase();
+        if (retType === "void") {
           await tx.$executeRawUnsafe(`SELECT ${call}`, ...values);
           return null;
         }
