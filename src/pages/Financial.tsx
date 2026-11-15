@@ -56,6 +56,7 @@ import { InvoiceList } from "@/components/financial/InvoiceList";
 import { RefundsList } from "@/components/financial/RefundsList";
 import { CancellationReport } from "@/components/financial/CancellationReport";
 import { NoShowReport } from "@/components/financial/NoShowReport";
+import { SoldReservationsReport } from "@/components/financial/SoldReservationsReport";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -1166,6 +1167,15 @@ const Financial = () => {
                   <Card className="p-6">
                     <h4 className="font-medium mb-4">Relatório de No-Show</h4>
                     <NoShowReport />
+                  </Card>
+
+                  {/* Relatório de Reservas Vendidas */}
+                  <Card className="p-6">
+                    <h4 className="font-medium mb-1">Relatório de Reservas Vendidas</h4>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Reservas criadas no período, com dados completos, valores e identificadores OTA (Bukly).
+                    </p>
+                    <SoldReservationsReport />
                   </Card>
                   
                   <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer">
