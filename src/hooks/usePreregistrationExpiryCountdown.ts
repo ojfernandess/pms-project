@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { format, parseISO, isValid } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { parseISO, isValid } from "date-fns";
+import { DEFAULT_HOTEL_TZ, formatUtcIsoInHotelTimeZone } from "@/lib/hotelTimezoneDate";
 
 export type PreregistrationExpiryUrgency = "normal" | "warning" | "critical" | "expired" | "none";
 
@@ -27,7 +27,10 @@ export function formatPreregistrationCountdown(remainingMs: number): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-export function usePreregistrationExpiryCountdown(expirationDate: string | null | undefined) {
+export function usePreregistrationExpiryCountdown(
+  expirationDate: string | null | undefined,
+  timeZone: string = DEFAULT_HOTEL_TZ,
+) {
   const expiryMs = useMemo(() => parseExpirationMs(expirationDate), [expirationDate]);
   const [now, setNow] = useState(() => Date.now());
 
@@ -53,7 +56,8 @@ export function usePreregistrationExpiryCountdown(expirationDate: string | null 
 
     const remainingMs = expiryMs - now;
     const isExpired = remainingMs <= 0;
-    const expiresAtLabel = format(new Date(expiryMs), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
+    const expiresAtLabel =
+      formatUtcIsoInHotelTimeZone(new Date(expiryMs).toISOString(), timeZone) ?? "";
 
     let urgency: PreregistrationExpiryUrgency = "normal";
     if (isExpired) {

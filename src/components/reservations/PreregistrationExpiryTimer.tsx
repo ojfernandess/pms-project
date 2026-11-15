@@ -1,6 +1,8 @@
 import { AlertTriangle, Clock, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePreregistrationExpiryCountdown } from "@/hooks/usePreregistrationExpiryCountdown";
+import { useHotelSettings } from "@/hooks/useHotelSettings";
+import { DEFAULT_HOTEL_TZ } from "@/lib/hotelTimezoneDate";
 
 interface PreregistrationExpiryTimerProps {
   expirationDate?: string | null;
@@ -41,8 +43,10 @@ export function PreregistrationExpiryTimer({
   className,
   variant = "prominent",
 }: PreregistrationExpiryTimerProps) {
+  const { settings: hotelSettings } = useHotelSettings();
+  const hotelTz = hotelSettings?.timezone?.trim() || DEFAULT_HOTEL_TZ;
   const { hasExpiration, isExpired, countdownLabel, expiresAtLabel, urgency } =
-    usePreregistrationExpiryCountdown(expirationDate);
+    usePreregistrationExpiryCountdown(expirationDate, hotelTz);
 
   const styles = urgencyStyles[urgency];
 
