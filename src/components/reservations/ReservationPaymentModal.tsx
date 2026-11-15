@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, parseISO, differenceInDays } from "date-fns";
+import { format, parseISO, differenceInDays, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, CheckCircle2, CreditCard, DollarSign, Loader2, Layers, TrendingUp, Receipt } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -1255,39 +1255,57 @@ export function ReservationPaymentModal({
   const fee = calculateFee();
   const netAmount = parseFloat(amount.replace(",", ".") || "0") - fee;
 
+  const guestDisplayName =
+    reservation?.guest_name ||
+    reservation?.guest?.full_name ||
+    reservation?.financial_responsible?.full_name ||
+    "—";
+
+  const formatCheckoutPeriod = (fromDate: string | null, toDate?: string | null) => {
+    if (!fromDate || !toDate) return null;
+    const from = parseISO(fromDate);
+    const to = parseISO(toDate);
+    if (!isValid(from) || !isValid(to)) return null;
+    return `${format(from, "dd/MM/yyyy", { locale: ptBR })} → ${format(to, "dd/MM/yyyy", { locale: ptBR })}`;
+  };
+
+  const extensionPeriodLabel = formatCheckoutPeriod(originalCheckoutDate, reservation?.checkout_date);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="relative max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[min(90dvh,90vh)] p-0 gap-0 overflow-hidden flex flex-col sm:max-w-2xl">
         {!reservation ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-12">
+          <div className="flex flex-col items-center justify-center gap-3 py-12 px-6">
             <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
             <p className="text-sm text-muted-foreground">Carregando dados da reserva…</p>
           </div>
         ) : (
-          <>
-        {showPaymentSuccess && (
-          <div
-            className="absolute inset-0 z-50 flex flex-col items-center justify-center rounded-lg bg-white/95 backdrop-blur-sm animate-in fade-in duration-300"
-            aria-live="polite"
-          >
-            <div className="flex flex-col items-center gap-3 animate-in zoom-in-95 duration-500">
-              <div className="rounded-full bg-emerald-100 p-5 shadow-lg ring-4 ring-emerald-200/60">
-                <CheckCircle2 className="h-14 w-14 text-emerald-600" strokeWidth={2} />
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            {showPaymentSuccess && (
+              <div
+                className="absolute inset-0 z-50 flex flex-col items-center justify-center rounded-lg bg-white/95 backdrop-blur-sm animate-in fade-in duration-300"
+                aria-live="polite"
+              >
+                <div className="flex flex-col items-center gap-3 animate-in zoom-in-95 duration-500">
+                  <div className="rounded-full bg-emerald-100 p-5 shadow-lg ring-4 ring-emerald-200/60">
+                    <CheckCircle2 className="h-14 w-14 text-emerald-600" strokeWidth={2} />
+                  </div>
+                  <p className="text-lg font-semibold text-emerald-800">Pagamento lançado com sucesso!</p>
+                  <p className="text-sm text-slate-500">Atualizando informações…</p>
+                </div>
               </div>
-              <p className="text-lg font-semibold text-emerald-800">Pagamento lançado com sucesso!</p>
-              <p className="text-sm text-slate-500">Atualizando informações…</p>
-            </div>
-          </div>
-        )}
-        <DialogHeader className="space-y-2">
-          <DialogTitle className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <DollarSign className="h-5 w-5 text-emerald-600" />
-            Lançar Pagamento
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            Selecione o componente da reserva a quitar e informe portador, tipo e valor do pagamento.
-          </DialogDescription>
-          
+            )}
+            <DialogHeader className="shrink-0 space-y-1.5 px-6 pt-6 pb-2 text-left">
+              <DialogTitle className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <DollarSign className="h-5 w-5 text-emerald-600" />
+                Lançar Pagamento
+              </DialogTitle>
+              <DialogDescription className="sr-only">
+                Selecione o componente da reserva a quitar e informe portador, tipo e valor do pagamento.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 space-y-4">
           {/* Informações da Reserva com Breakdown Detalhado */}
           <div className="bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-lg p-4 space-y-3">
             <div className="flex justify-between items-center">
@@ -1298,7 +1316,7 @@ export function ReservationPaymentModal({
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm text-slate-600">Hóspede:</span>
-              <span className="text-sm font-semibold text-slate-900">{reservation.guest_name}</span>
+              <span className="text-sm font-semibold text-slate-900">{guestDisplayName}</span>
             </div>
             
             {/* Seleção de Componentes do Pagamento */}
@@ -1329,7 +1347,7 @@ export function ReservationPaymentModal({
                 )}
 
                 {/* Valor Base Original */}
-                {paymentBreakdown.originalBaseAmountPending > 0 && (
+                {paymentBreakdown.originalBaseAmountPending > 0.009 && (
                   <div className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 transition-colors border border-slate-200">
                     <div className="flex items-center gap-3 flex-1">
                       <RadioGroupItem value="base" id="base-amount" />
@@ -1369,9 +1387,9 @@ export function ReservationPaymentModal({
                         <TrendingUp className="h-4 w-4 text-blue-600" />
                         <div className="flex flex-col">
                           <span className="text-sm text-blue-700 font-semibold">Diárias Adicionadas (Extensão da Reserva)</span>
-                          {reservation?.checkout_date && (
+                          {extensionPeriodLabel && (
                             <span className="text-xs text-blue-600 mt-0.5 font-medium">
-                              Período estendido: {format(parseISO(originalCheckoutDate), "dd/MM/yyyy", { locale: ptBR })} → {format(parseISO(reservation.checkout_date), "dd/MM/yyyy", { locale: ptBR })}
+                              Período estendido: {extensionPeriodLabel}
                             </span>
                           )}
                           {paymentBreakdown.extensionAmountPending < paymentBreakdown.extensionAmount && (
@@ -1468,7 +1486,7 @@ export function ReservationPaymentModal({
             <div className="flex justify-between items-center">
               <span className="text-sm text-slate-600">Valor Pago:</span>
               <span className="text-sm font-semibold text-emerald-600">
-                R$ {(reservation.paid_amount || 0).toFixed(2).replace(".", ",")}
+                R$ {Number(reservation.paid_amount || 0).toFixed(2).replace(".", ",")}
               </span>
             </div>
             <div className="flex justify-between items-center pt-1 border-t border-slate-300">
@@ -1478,9 +1496,7 @@ export function ReservationPaymentModal({
               </span>
             </div>
           </div>
-        </DialogHeader>
 
-        <div className="space-y-4 py-4">
           {/* Mostrar campos de pagamento apenas quando um componente estiver selecionado */}
           {selectedComponent && (
             <>
@@ -1678,8 +1694,13 @@ export function ReservationPaymentModal({
               </div>
             </>
           )}
-        </div>
-          </>
+          {availablePaymentComponentValues.length === 0 && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Não há componentes com saldo pendente nesta reserva.
+            </div>
+          )}
+            </div>
+          </div>
         )}
       </DialogContent>
     </Dialog>
