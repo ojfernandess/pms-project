@@ -178,7 +178,40 @@ export const usePendingReservations = () => {
         );
       });
 
-      return counterReservations;
+      const creatorIds = [
+        ...new Set(
+          counterReservations
+            .map((r: any) => r.created_by)
+            .filter((id: unknown): id is string => typeof id === "string" && id.length > 0),
+        ),
+      ];
+
+      let usersMap: Record<string, { id: string; full_name: string | null; email: string | null }> =
+        {};
+
+      if (creatorIds.length > 0) {
+        const { data: creators, error: creatorsError } = await supabase
+          .from("users")
+          .select("id, full_name, email")
+          .in("id", creatorIds);
+
+        if (creatorsError) {
+          console.warn("Erro ao buscar usuários criadores das reservas de balcão:", creatorsError);
+        } else {
+          usersMap = (creators || []).reduce(
+            (acc, user) => {
+              acc[user.id] = user;
+              return acc;
+            },
+            {} as typeof usersMap,
+          );
+        }
+      }
+
+      return counterReservations.map((reservation: any) => ({
+        ...reservation,
+        created_by_user: reservation.created_by ? usersMap[reservation.created_by] ?? null : null,
+      }));
     },
   });
 

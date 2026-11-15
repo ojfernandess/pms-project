@@ -473,6 +473,7 @@ const PendingReservations = () => {
                     <TableRow>
                       <TableHead>Código</TableHead>
                       <TableHead>Hóspede</TableHead>
+                      <TableHead>Criado por</TableHead>
                       <TableHead>Check-in</TableHead>
                       <TableHead>Check-out</TableHead>
                       <TableHead>Quarto</TableHead>
@@ -489,6 +490,11 @@ const PendingReservations = () => {
                         </TableCell>
                         <TableCell>
                           {reservationGuestDisplayName(reservation)}
+                        </TableCell>
+                        <TableCell>
+                          {reservation.created_by_user?.full_name?.trim() ||
+                            reservation.created_by_user?.email?.trim() ||
+                            "—"}
                         </TableCell>
                         <TableCell>
                           {formatDate(reservation.checkin_date)}
