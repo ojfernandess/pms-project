@@ -47,6 +47,10 @@ const REQUIRED_RPCS = [
     args: "p_company_id uuid",
   },
   {
+    name: "rotate_company_api_credentials",
+    args: "p_company_id uuid",
+  },
+  {
     name: "create_notification_for_establishment",
     args:
       "p_establishment_id uuid, p_type notification_type, p_title text, p_message text, p_priority notification_priority, p_metadata jsonb",
@@ -104,6 +108,37 @@ async function bundledRpcsComplete(client) {
   return true;
 }
 
+/** SQL aplicado mesmo em modo auto quando as RPCs ainda não existem (schema parcial em produção). */
+const INCREMENTAL_PATCHES = [
+  {
+    sql: "company_api_credentials.sql",
+    checks: [
+      { name: "get_company_api_credentials_status", args: "p_company_id uuid" },
+      { name: "rotate_company_api_credentials", args: "p_company_id uuid" },
+    ],
+  },
+];
+
+async function applyIncrementalPatches(client, url, rpcDir) {
+  for (const patch of INCREMENTAL_PATCHES) {
+    let needs = false;
+    for (const check of patch.checks) {
+      if (!(await hasPublicFunction(client, check.name, check.args))) {
+        needs = true;
+        break;
+      }
+    }
+    if (!needs) continue;
+    const filePath = path.normalize(path.join(rpcDir, patch.sql));
+    if (!fs.existsSync(filePath)) {
+      console.error(`Patch em falta: ${filePath}`);
+      continue;
+    }
+    console.log(`=== Patch incremental: ${patch.sql} (RPC de credenciais API ausente) ===`);
+    applySqlFileWithPsql(url, filePath);
+  }
+}
+
 function applySqlFileWithPsql(url, filePath) {
   const result = spawnSync("psql", [url, "-v", "ON_ERROR_STOP=0", "-f", filePath], {
     encoding: "utf8",
@@ -132,12 +167,16 @@ async function main() {
   const client = new pg.Client(clientConfig(url));
   await client.connect();
 
-  if (mode === "auto" && (await bundledRpcsComplete(client))) {
-    await client.end();
-    return;
+  const rpcDir = process.env.BUNDLED_RPCS_DIR || path.join(__dirname, "migration", "rpc");
+
+  if (mode === "auto") {
+    await applyIncrementalPatches(client, url, rpcDir);
+    if (await bundledRpcsComplete(client)) {
+      await client.end();
+      return;
+    }
   }
 
-  const rpcDir = process.env.BUNDLED_RPCS_DIR || path.join(__dirname, "migration", "rpc");
   const files = loadApplyOrder(rpcDir);
 
   console.log(`=== Bundled RPCs (modo=${mode}, ${files.length} ficheiros) ===`);

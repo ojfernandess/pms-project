@@ -27,12 +27,21 @@ ALTER TABLE public.company_api_credentials ENABLE ROW LEVEL SECURITY;
 
 -- Sem políticas explícitas: acesso apenas por service role e funções SECURITY DEFINER.
 
-DROP TRIGGER IF EXISTS update_company_api_credentials_updated_at
-  ON public.company_api_credentials;
-
-CREATE TRIGGER update_company_api_credentials_updated_at
-  BEFORE UPDATE ON public.company_api_credentials
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'update_updated_at_column'
+  ) THEN
+    DROP TRIGGER IF EXISTS update_company_api_credentials_updated_at
+      ON public.company_api_credentials;
+    CREATE TRIGGER update_company_api_credentials_updated_at
+      BEFORE UPDATE ON public.company_api_credentials
+      FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+  END IF;
+END $$;
 
 COMMENT ON TABLE public.company_api_credentials IS
   'Credenciais de API por empresa para integrações externas (client_id + hash do client_secret).';
