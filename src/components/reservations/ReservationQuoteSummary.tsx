@@ -1,6 +1,7 @@
 import { addDays, format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { BedDouble, BrushCleaning, Home, Info, Loader2 } from "lucide-react";
+import { BedDouble, Home, Info, Loader2 } from "lucide-react";
+import { CleaningBroomIcon } from "@/components/icons/CleaningBroomIcon";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
@@ -115,7 +116,7 @@ export function ReservationQuoteSummary({
               {cleaningConfigured ? (
                 <TableHead className="text-right bg-violet-50/80">
                   <span className="inline-flex items-center justify-end gap-1">
-                    <BrushCleaning className="h-3.5 w-3.5" />
+                    <CleaningBroomIcon className="h-3.5 w-3.5" />
                     Taxa de limpeza
                   </span>
                 </TableHead>
@@ -189,7 +190,7 @@ export function ReservationQuoteSummary({
         </div>
         {cleaningConfigured ? (
           <div className="flex items-start gap-2">
-            <BrushCleaning className="mt-0.5 h-5 w-5 text-violet-600" />
+            <CleaningBroomIcon className="mt-0.5 h-5 w-5 text-violet-600" />
             <div>
               <p className="text-xs text-muted-foreground">Taxa de limpeza</p>
               <p className="text-lg font-bold">{formatCurrency(cleaningAmount)}</p>
