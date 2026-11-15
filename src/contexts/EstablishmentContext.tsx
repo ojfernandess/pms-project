@@ -205,37 +205,30 @@ export const EstablishmentProvider = ({ children }: { children: ReactNode }) => 
     retry: 1,
   });
 
-  const isLoading =
-    establishmentsQueryLoading && !directlySelectedEstablishment && establishments.length === 0;
+  const selectedEstablishment =
+    directlySelectedEstablishment ||
+    establishments.find((e) => e.id === selectedEstablishmentId) ||
+    null;
+
+  const isLoading = !!currentUserId && establishmentsQueryLoading && !selectedEstablishment;
 
   // Verificar se o estabelecimento selecionado pertence ao usuário atual
   useEffect(() => {
     if (selectedEstablishmentId && establishments.length > 0) {
       const establishmentExists = establishments.some((e) => e.id === selectedEstablishmentId);
-      if (!establishmentExists) {
-        // O estabelecimento selecionado não pertence ao usuário atual, limpar
+      if (!establishmentExists && directlySelectedEstablishment?.id !== selectedEstablishmentId) {
         setSelectedEstablishmentId(null);
         localStorage.removeItem("selectedEstablishmentId");
       }
     }
-  }, [selectedEstablishmentId, establishments]);
+  }, [selectedEstablishmentId, establishments, directlySelectedEstablishment]);
 
-  // Se houver um estabelecimento selecionado diretamente, usar ele
-  // Caso contrário, buscar na lista de estabelecimentos
-  const selectedEstablishment = directlySelectedEstablishment || 
-    establishments.find((e) => e.id === selectedEstablishmentId) || 
-    null;
-  
-  // Quando a lista de estabelecimentos for carregada, verificar se o estabelecimento
-  // selecionado diretamente está na lista e atualizar se necessário
+  // Quando a lista carregar, trocar o snapshot direto pela linha da lista (dados frescos)
   useEffect(() => {
-    if (directlySelectedEstablishment && establishments.length > 0) {
-      const foundInList = establishments.find((e) => e.id === directlySelectedEstablishment.id);
-      if (foundInList) {
-        // O estabelecimento está na lista, podemos usar o da lista
-        // Isso garante que temos os dados mais atualizados
-        setDirectlySelectedEstablishment(null);
-      }
+    if (!directlySelectedEstablishment || establishments.length === 0) return;
+    const foundInList = establishments.find((e) => e.id === directlySelectedEstablishment.id);
+    if (foundInList) {
+      setDirectlySelectedEstablishment(null);
     }
   }, [directlySelectedEstablishment, establishments]);
 

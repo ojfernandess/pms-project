@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
@@ -10,6 +10,7 @@ export const useAuth = () => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const userIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -29,6 +30,7 @@ export const useAuth = () => {
 
         setSession(session);
         setUser(session?.user ?? null);
+        userIdRef.current = session?.user?.id ?? null;
         setLoading(false);
       })
       .catch((error) => {
@@ -46,16 +48,18 @@ export const useAuth = () => {
 
         try {
           // Limpar dados do usuário anterior quando fizer logout ou trocar de usuário
-          if (event === "SIGNED_OUT" || (event === "SIGNED_IN" && user && session?.user?.id !== user.id)) {
-            // Limpar localStorage
+          const nextUserId = session?.user?.id ?? null;
+          if (
+            event === "SIGNED_OUT" ||
+            (event === "SIGNED_IN" && userIdRef.current && nextUserId !== userIdRef.current)
+          ) {
             localStorage.removeItem("selectedEstablishmentId");
-            // Limpar todas as queries do React Query
             queryClient.clear();
           }
-          
-          // Atualizar sessão e usuário
+
           setSession(session);
           setUser(session?.user ?? null);
+          userIdRef.current = nextUserId;
           setLoading(false);
 
           // Se o token foi renovado, garantir que a sessão está atualizada
@@ -75,7 +79,7 @@ export const useAuth = () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [user, queryClient]);
+  }, [queryClient]);
 
   const signOut = async () => {
     // Limpar localStorage antes de fazer logout

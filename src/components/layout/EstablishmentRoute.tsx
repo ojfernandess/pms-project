@@ -1,6 +1,7 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
 
 interface EstablishmentRouteProps {
@@ -9,65 +10,115 @@ interface EstablishmentRouteProps {
 
 export const EstablishmentRoute = ({ children }: EstablishmentRouteProps) => {
   const { establishmentId } = useParams<{ establishmentId: string }>();
-  const { selectedEstablishment, setSelectedEstablishment, establishments, isLoading } = useEstablishment();
+  const { selectedEstablishment, setSelectedEstablishment, establishments, isLoading, refetch } =
+    useEstablishment();
   const navigate = useNavigate();
   const location = useLocation();
+  const [resolving, setResolving] = useState(false);
+  const resolveAttemptedRef = useRef<string | null>(null);
+
+  const numericId = establishmentId ? parseInt(establishmentId, 10) : NaN;
+  const numericIdValid = Number.isFinite(numericId) && numericId > 0;
 
   useEffect(() => {
     if (!establishmentId) {
-      // Se não há establishmentId na URL, redirecionar para user-dashboard
-      // Mas só se não estivermos já na página user-dashboard
       if (location.pathname !== "/user-dashboard") {
         navigate("/user-dashboard", { replace: true });
       }
       return;
     }
 
-    // Converter establishmentId para número
-    const numericId = parseInt(establishmentId, 10);
-    if (isNaN(numericId)) {
-      // Se não é um número válido, redirecionar
+    if (!numericIdValid) {
       navigate("/user-dashboard", { replace: true });
       return;
     }
 
-    // Se já temos o estabelecimento selecionado e é o mesmo da URL, não fazer nada
     if (selectedEstablishment?.numeric_id === numericId) {
       return;
     }
 
-    // Se a lista de estabelecimentos ainda está carregando, aguardar
+    const fromList = establishments.find((e) => e.numeric_id === numericId);
+    if (fromList) {
+      setSelectedEstablishment(fromList);
+      return;
+    }
+
     if (isLoading) {
       return;
     }
 
-    // Buscar o estabelecimento na lista pelo numeric_id
-    const establishment = establishments.find((e) => e.numeric_id === numericId);
-    
-    if (establishment) {
-      // Estabelecimento encontrado, atualizar o contexto
-      setSelectedEstablishment(establishment);
-    } else if (establishments.length > 0) {
-      // Estabelecimento não encontrado, mas há estabelecimentos disponíveis
-      // Redirecionar para user-dashboard
-      navigate("/user-dashboard", { replace: true });
+    const attemptKey = String(numericId);
+    if (resolveAttemptedRef.current === attemptKey || resolving) {
+      return;
     }
-  }, [establishmentId, selectedEstablishment, establishments, isLoading, setSelectedEstablishment, navigate, location.pathname]);
+    resolveAttemptedRef.current = attemptKey;
 
-  // Se não há establishmentId, não renderizar (será redirecionado)
-  if (!establishmentId) {
+    let cancelled = false;
+    setResolving(true);
+
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("establishments")
+          .select("*")
+          .eq("numeric_id", numericId)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        if (error) {
+          console.error("EstablishmentRoute: falha ao resolver numeric_id", error.message);
+          navigate("/user-dashboard", { replace: true });
+          return;
+        }
+
+        if (data) {
+          setSelectedEstablishment(data);
+          void refetch();
+          return;
+        }
+
+        if (establishments.length > 0) {
+          navigate("/user-dashboard", { replace: true });
+        }
+      } finally {
+        if (!cancelled) {
+          setResolving(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    establishmentId,
+    numericId,
+    numericIdValid,
+    selectedEstablishment,
+    establishments,
+    isLoading,
+    setSelectedEstablishment,
+    navigate,
+    location.pathname,
+    refetch,
+    resolving,
+  ]);
+
+  useEffect(() => {
+    resolveAttemptedRef.current = null;
+  }, [establishmentId]);
+
+  if (!establishmentId || !numericIdValid) {
     return null;
   }
 
-  const numericId = parseInt(establishmentId || "0", 10);
-
-  // Já selecionado (ex.: clique no UserDashboard) — não bloquear à espera da lista completa
   if (selectedEstablishment?.numeric_id === numericId) {
     return <>{children}</>;
   }
 
-  // Se ainda está carregando a lista, mostrar loading
-  if (isLoading) {
+  if (isLoading || resolving) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
@@ -78,11 +129,12 @@ export const EstablishmentRoute = ({ children }: EstablishmentRouteProps) => {
     );
   }
 
-  // Se não encontrou o estabelecimento, não renderizar (será redirecionado)
-  if (!selectedEstablishment || selectedEstablishment.numeric_id !== numericId) {
-    return null;
-  }
-
-  return <>{children}</>;
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="text-center">
+        <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+        <p className="text-muted-foreground">Preparando estabelecimento...</p>
+      </div>
+    </div>
+  );
 };
-

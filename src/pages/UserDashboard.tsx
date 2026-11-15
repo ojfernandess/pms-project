@@ -334,9 +334,10 @@ const UserDashboard = () => {
     }
   };
 
-  const handleSelectEstablishment = (establishment: any) => {
+  const handleSelectEstablishment = async (establishment: any) => {
     setSelectedEstablishment(establishment);
-    navigate(`/${establishment.numeric_id}/reservas`);
+    await queryClient.invalidateQueries({ queryKey: ["establishments"] });
+    navigate(`/${establishment.numeric_id}/reservas`, { replace: true });
   };
 
   return (

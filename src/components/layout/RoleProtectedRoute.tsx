@@ -22,6 +22,11 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
   const location = useLocation();
   const [hasChecked, setHasChecked] = useState(false);
   const [hasAccess, setHasAccess] = useState(false);
+
+  useEffect(() => {
+    setHasChecked(false);
+    setHasAccess(false);
+  }, [location.pathname]);
   
   // Para rotas sem establishmentId (como /motor-reservas/configuracoes), buscar role de qualquer estabelecimento
   const isCompanyLevelRoute = location.pathname === "/motor-reservas/configuracoes" || 
