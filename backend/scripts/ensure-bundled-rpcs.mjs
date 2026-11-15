@@ -131,7 +131,7 @@ async function bundledRpcsComplete(client) {
 /** SQL aplicado mesmo em modo auto quando as RPCs ainda não existem (schema parcial em produção). */
 const INCREMENTAL_PATCHES = [
   {
-    sql: "company_api_credentials.sql",
+    sql: "company_api_credentials_rpcs.sql",
     checks: [
       { name: "get_company_api_credentials_status", args: "p_company_id uuid" },
       { name: "rotate_company_api_credentials", args: "p_company_id uuid" },

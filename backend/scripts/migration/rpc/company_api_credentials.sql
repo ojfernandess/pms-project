@@ -1,8 +1,4 @@
--- Origem: supabase migrations 20260407000100 + 20260407000200
--- Aplicar no arranque do backend via apply-order.txt
-
--- Credenciais de API por empresa (client_id/client_secret)
--- pgcrypto em extensions (Supabase / baseline) e fallback em public (Postgres local)
+-- Company API credentials (schema + RPCs). Strings ASCII-only for UTF8-safe apply on Linux.
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 DO $ext$
@@ -34,8 +30,6 @@ CREATE INDEX IF NOT EXISTS idx_company_api_credentials_active
 
 ALTER TABLE public.company_api_credentials ENABLE ROW LEVEL SECURITY;
 
--- Sem políticas explícitas: acesso apenas por service role e funções SECURITY DEFINER.
-
 DO $$
 BEGIN
   IF EXISTS (
@@ -51,15 +45,6 @@ BEGIN
       FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
   END IF;
 END $$;
-
-COMMENT ON TABLE public.company_api_credentials IS
-  'Credenciais de API por empresa para integrações externas (client_id + hash do client_secret).';
-
-COMMENT ON COLUMN public.company_api_credentials.client_id IS
-  'Identificador público da integração da empresa.';
-
-COMMENT ON COLUMN public.company_api_credentials.client_secret_hash IS
-  'Hash SHA-256 do client_secret (o secret em texto é mostrado apenas na rotação/geração).';
 
 CREATE OR REPLACE FUNCTION public.rotate_company_api_credentials(
   p_company_id UUID
@@ -81,9 +66,8 @@ DECLARE
   v_secret_hash TEXT;
 BEGIN
   v_uid := auth.uid();
-
   IF v_uid IS NULL THEN
-    RAISE EXCEPTION 'Usuário não autenticado';
+    RAISE EXCEPTION 'Usuario nao autenticado';
   END IF;
 
   SELECT EXISTS (
@@ -96,7 +80,7 @@ BEGIN
   INTO v_has_access;
 
   IF NOT v_has_access THEN
-    RAISE EXCEPTION 'Sem permissão para esta empresa';
+    RAISE EXCEPTION 'Sem permissao para esta empresa';
   END IF;
 
   SELECT public.company_has_feature_access('api_integrations', p_company_id)
@@ -140,9 +124,6 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.rotate_company_api_credentials(UUID) IS
-  'Gera/rotaciona credenciais de API da empresa. Requer usuário autenticado vinculado à empresa e feature api_integrations ativa.';
-
 CREATE OR REPLACE FUNCTION public.get_company_api_credentials_status(
   p_company_id UUID
 ) RETURNS TABLE (
@@ -162,7 +143,7 @@ DECLARE
 BEGIN
   v_uid := auth.uid();
   IF v_uid IS NULL THEN
-    RAISE EXCEPTION 'Usuário não autenticado';
+    RAISE EXCEPTION 'Usuario nao autenticado';
   END IF;
 
   SELECT EXISTS (
@@ -175,7 +156,7 @@ BEGIN
   INTO v_has_access;
 
   IF NOT v_has_access THEN
-    RAISE EXCEPTION 'Sem permissão para esta empresa';
+    RAISE EXCEPTION 'Sem permissao para esta empresa';
   END IF;
 
   RETURN QUERY
@@ -191,14 +172,9 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.get_company_api_credentials_status(UUID) IS
-  'Retorna metadados não sensíveis das credenciais de API da empresa para uso no painel.';
-
 GRANT EXECUTE ON FUNCTION public.rotate_company_api_credentials(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_company_api_credentials_status(UUID) TO authenticated;
 
-
--- Log de chamadas ? API p?blica por empresa (company-public-api)
 CREATE TABLE IF NOT EXISTS public.company_api_request_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
@@ -214,9 +190,6 @@ CREATE INDEX IF NOT EXISTS idx_company_api_request_logs_company_created
   ON public.company_api_request_logs(company_id, created_at DESC);
 
 ALTER TABLE public.company_api_request_logs ENABLE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE public.company_api_request_logs IS
-  'Hist?rico resumido de chamadas ? Edge Function company-public-api por empresa.';
 
 CREATE OR REPLACE FUNCTION public.set_company_api_credentials_active(
   p_company_id UUID,
@@ -234,7 +207,7 @@ DECLARE
 BEGIN
   v_uid := auth.uid();
   IF v_uid IS NULL THEN
-    RAISE EXCEPTION 'Usu?rio n?o autenticado';
+    RAISE EXCEPTION 'Usuario nao autenticado';
   END IF;
 
   SELECT EXISTS (
@@ -247,7 +220,7 @@ BEGIN
   INTO v_has_access;
 
   IF NOT v_has_access THEN
-    RAISE EXCEPTION 'Sem permiss?o para esta empresa';
+    RAISE EXCEPTION 'Sem permissao para esta empresa';
   END IF;
 
   IF p_is_active = true THEN
@@ -271,9 +244,6 @@ BEGIN
   RETURN true;
 END;
 $$;
-
-COMMENT ON FUNCTION public.set_company_api_credentials_active(UUID, BOOLEAN) IS
-  'Ativa ou desativa credenciais de API da empresa. Reativar exige feature api_integrations.';
 
 CREATE OR REPLACE FUNCTION public.get_company_api_request_logs(
   p_company_id UUID,
@@ -299,7 +269,7 @@ DECLARE
 BEGIN
   v_uid := auth.uid();
   IF v_uid IS NULL THEN
-    RAISE EXCEPTION 'Usu?rio n?o autenticado';
+    RAISE EXCEPTION 'Usuario nao autenticado';
   END IF;
 
   SELECT EXISTS (
@@ -312,7 +282,7 @@ BEGIN
   INTO v_has_access;
 
   IF NOT v_has_access THEN
-    RAISE EXCEPTION 'Sem permiss?o para esta empresa';
+    RAISE EXCEPTION 'Sem permissao para esta empresa';
   END IF;
 
   v_lim := GREATEST(1, LEAST(COALESCE(p_limit, 50), 200));
@@ -333,9 +303,6 @@ BEGIN
   LIMIT v_lim;
 END;
 $$;
-
-COMMENT ON FUNCTION public.get_company_api_request_logs(UUID, INTEGER) IS
-  'Lista ?ltimas chamadas ? API p?blica da empresa (painel).';
 
 GRANT EXECUTE ON FUNCTION public.set_company_api_credentials_active(UUID, BOOLEAN) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_company_api_request_logs(UUID, INTEGER) TO authenticated;
