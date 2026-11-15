@@ -43,6 +43,10 @@ const REQUIRED_RPCS = [
     args: "p_feature_key text, p_company_id uuid",
   },
   {
+    name: "get_company_api_credentials_status",
+    args: "p_company_id uuid",
+  },
+  {
     name: "create_notification_for_establishment",
     args:
       "p_establishment_id uuid, p_type notification_type, p_title text, p_message text, p_priority notification_priority, p_metadata jsonb",
