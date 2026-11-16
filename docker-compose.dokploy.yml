@@ -2,6 +2,7 @@
 # Build via URL Git (funciona mesmo se code/ só tiver este YAML, sem clone completo).
 # Repo privado: configure Git no Dokploy e use DOKPLOY_USE_LOCAL_BUILD=1 + clone (ver README).
 x-pms-git-repo: &pms_git_repo "https://github.com/ojfernandess/pms-project.git#PMS-Backend"
+x-pms-git-backend: &pms_git_backend "https://github.com/ojfernandess/pms-project.git#PMS-Backend:backend"
 
 services:
   postgres:
@@ -38,8 +39,8 @@ services:
 
   backend:
     build:
-      context: *pms_git_repo
-      dockerfile: backend/Dockerfile
+      context: *pms_git_backend
+      dockerfile: Dockerfile
     restart: unless-stopped
     expose:
       - "3000"
@@ -82,8 +83,8 @@ services:
 
   worker:
     build:
-      context: *pms_git_repo
-      dockerfile: backend/Dockerfile
+      context: *pms_git_backend
+      dockerfile: Dockerfile
     restart: unless-stopped
     command: ["./scripts/docker-entrypoint-worker.sh"]
     environment:
