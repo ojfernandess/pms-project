@@ -30,8 +30,19 @@ Copiar no Windows (PowerShell):
 ```powershell
 Get-Content deploy\dokploy\pms-install.base64 -Raw | Set-Clipboard
 ```
-4. **Source**: GitHub `ojfernandess/pms-project`, branch `PMS-Backend`, raiz do repo; compose path `deploy/dokploy/docker-compose.yml` (se o import não fixar sozinho).
-5. Ative **HTTPS** no domínio gerado.
-6. Primeiro deploy com Postgres vazio: `PRISMA_MIGRATE_ON_START=true` → deploy → depois `false`.
+4. **Source (obrigatório — não deixar só Raw após import)**:
+   - Type: **GitHub** → `ojfernandess/pms-project`
+   - Branch: **PMS-Backend**
+   - **Root / build path:** raiz vazia (`/`)
+   - **Compose file:** `docker-compose.dokploy.yml` (na raiz do repo)
+   - Salvar → **Pull/Clone** → confirmar que existe pasta `backend/` no código clonado
+5. Ative **HTTPS** no domínio do `frontend`.
+6. Primeiro Postgres vazio: `PRISMA_MIGRATE_ON_START=true` → deploy → depois `false`.
+
+### Erro `.../code/backend not found`
+
+- **Source não é Git** ou o clone falhou → configurar GitHub como acima.
+- **Compose errado** → usar `docker-compose.dokploy.yml`, não só o YAML colado no import (paths relativos à raiz).
+- Alternativa: `deploy/dokploy/docker-compose.yml` (paths `../../backend`) se insistir neste path.
 
 Documentação geral: [../README.md](../README.md).

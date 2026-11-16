@@ -9,8 +9,14 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dokployDir = path.resolve(__dirname, "..");
+const repoRoot = path.resolve(dokployDir, "../..");
 
-const compose = readFileSync(path.join(dokployDir, "docker-compose.yml"), "utf8");
+// Dokploy clona o monorepo em .../code/ — compose na raiz evita path backend not found.
+const composePath =
+  process.env.DOKPLOY_COMPOSE_FILE === "subpath"
+    ? path.join(dokployDir, "docker-compose.yml")
+    : path.join(repoRoot, "docker-compose.dokploy.yml");
+const compose = readFileSync(composePath, "utf8");
 const config = readFileSync(path.join(dokployDir, "template.toml"), "utf8");
 
 const importPayload = { compose, config };
@@ -26,7 +32,7 @@ const out = {
     owner: "ojfernandess",
     repo: "pms-project",
     ref: "PMS-Backend",
-    composeFile: "deploy/dokploy/docker-compose.yml",
+    composeFile: "docker-compose.dokploy.yml",
   },
   dokploy: {
     importPayload,

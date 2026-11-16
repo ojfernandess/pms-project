@@ -38,7 +38,7 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: ../../backend
       dockerfile: Dockerfile
     restart: unless-stopped
     expose:
@@ -82,7 +82,7 @@ services:
 
   worker:
     build:
-      context: ./backend
+      context: ../../backend
       dockerfile: Dockerfile
     restart: unless-stopped
     command: ["./scripts/docker-entrypoint-worker.sh"]
@@ -110,7 +110,7 @@ services:
 
   frontend:
     build:
-      context: .
+      context: ../..
       dockerfile: Dockerfile
       args:
         VITE_PMS_API_URL: ${VITE_PMS_API_URL:-https://localhost}
