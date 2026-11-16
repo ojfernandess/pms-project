@@ -8,6 +8,7 @@ import { Loader2 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { buildWebCheckinLocatorUrl } from "@/lib/webCheckinPublicUrl";
 
 const PaymentSuccess = () => {
   const { paymentIntentId } = useParams<{ paymentIntentId: string }>();
@@ -547,8 +548,7 @@ const PaymentSuccess = () => {
 
   const getCheckinLink = () => {
     if (!reservationData?.locator) return "";
-    const baseUrl = window.location.origin;
-    return `${baseUrl}/web-checkin/${reservationData.locator}`;
+    return buildWebCheckinLocatorUrl(reservationData.locator, siteSettings, window.location.origin);
   };
 
   // Logo do sistema (priorizar logo do PMS customizado, depois site_settings)

@@ -49,6 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         logo_url: null,
         favicon_url: null,
         pms_base_url: null,
+        web_checkin_public_base_url: null,
       });
     }
 
@@ -89,6 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         logo_url: null,
         favicon_url: null,
         pms_base_url: null,
+        web_checkin_public_base_url: null,
       });
     }
 
@@ -143,6 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           logo_url: null,
           favicon_url: null,
           pms_base_url: null,
+          web_checkin_public_base_url: null,
         });
       }
       
@@ -157,6 +160,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         logo_url: null,
         favicon_url: null,
         pms_base_url: null,
+        web_checkin_public_base_url: null,
       });
     }
 
@@ -171,6 +175,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       logo_url: null,
       favicon_url: null,
       pms_base_url: null,
+      web_checkin_public_base_url: null,
     });
     
     // Retornar configurações com headers apropriados
@@ -191,6 +196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       logo_url: null,
       favicon_url: null,
       pms_base_url: null,
+      web_checkin_public_base_url: null,
     });
   }
 }

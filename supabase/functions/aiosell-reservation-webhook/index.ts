@@ -950,6 +950,24 @@ function resolvePoliciesLink(
   }
 }
 
+function stripTrailingSlashes(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+function buildWebCheckinLocatorUrl(
+  locator: string,
+  site: { web_checkin_public_base_url?: string | null; pms_base_url?: string | null } | null | undefined,
+  envFallback?: string,
+): string {
+  const code = String(locator ?? "").trim();
+  if (!code) return "";
+  const custom = site?.web_checkin_public_base_url?.trim();
+  const base = custom
+    ? stripTrailingSlashes(/^https?:\/\//i.test(custom) ? custom : `https://${custom}`)
+    : `${stripTrailingSlashes((site?.pms_base_url?.trim() || envFallback?.trim() || "https://localhost"))}/web-checkin`;
+  return `${base}/${encodeURIComponent(code)}`;
+}
+
 function resolveLogoUrls(
   supabase: SupabaseClient,
   hotelSettings: any,
@@ -1047,9 +1065,9 @@ async function buildVariables(
     .select("locator")
     .eq("reservation_id", reservation.id)
     .maybeSingle();
-  if (wc?.locator) webCheckinLink = `${baseUrl}/web-checkin/${wc.locator}`;
+  if (wc?.locator) webCheckinLink = buildWebCheckinLocatorUrl(wc.locator, siteSettings, baseUrl);
   else if (reservation.reservation_code) {
-    webCheckinLink = `${baseUrl}/web-checkin/${reservation.reservation_code}`;
+    webCheckinLink = buildWebCheckinLocatorUrl(reservation.reservation_code, siteSettings, baseUrl);
   }
 
   const { logoUrl, hotelLogo } = resolveLogoUrls(supabase, hotelSettings, siteSettings);
@@ -1406,7 +1424,7 @@ async function notifyGuestAfterOtaReservationBooked(
 
     const { data: siteSettings } = await supabase
       .from("site_settings")
-      .select("logo_url, pms_base_url")
+      .select("logo_url, pms_base_url, web_checkin_public_base_url")
       .maybeSingle();
 
     await ensureWebCheckinRow(supabase, reservation, establishmentId);

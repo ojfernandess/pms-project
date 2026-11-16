@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildWebCheckinLocatorUrl } from "../_shared/webCheckinPublicUrl.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -418,7 +419,7 @@ serve(async (req) => {
         // Para o link, sempre usar reservation_code se disponível, senão identification_number
         const locatorForLink = reservationCode || identificationNumber || "";
         const webCheckinLink = locatorForLink
-          ? `${baseUrl}/web-checkin/${locatorForLink}`
+          ? buildWebCheckinLocatorUrl(locatorForLink, siteSettings as Record<string, unknown>, baseUrl)
           : "";
         
         // Preparar primeiro quarto (rooms pode ser um array, pegar o primeiro item)

@@ -3,6 +3,7 @@
  */
 
 import { reservationGuestDisplayName } from './reservationChannelDisplay';
+import { buildWebCheckinLocatorUrl } from '@/lib/webCheckinPublicUrl';
 
 export interface TemplateVariables {
   [key: string]: string | number | null | undefined | any; // Permite objetos e arrays
@@ -820,9 +821,7 @@ export async function generateReservationVariables(
 
       // Se temos um locator, gerar o link
       if (webCheckin?.locator) {
-        // Usar pms_base_url de site_settings se disponível, senão detectar automaticamente
-        const baseUrl = siteSettings?.pms_base_url || detectBaseUrl();
-        return `${baseUrl}/web-checkin/${webCheckin.locator}`;
+        return buildWebCheckinLocatorUrl(webCheckin.locator, siteSettings, detectBaseUrl());
       }
 
       return '';

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildWebCheckinLocatorUrl } from "../_shared/webCheckinPublicUrl.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -481,17 +482,21 @@ serve(async (req) => {
 
     const { data: siteSettings } = await supabase
       .from("site_settings")
-      .select("features_enabled")
+      .select("features_enabled, pms_base_url, web_checkin_public_base_url")
       .eq("id", SITE_SETTINGS_ID)
       .single();
 
     const pmsBaseUrl =
-      (await supabase.from("site_settings").select("pms_base_url").eq("id", SITE_SETTINGS_ID).single()).data?.pms_base_url as string | null ||
+      (siteSettings?.pms_base_url as string | null | undefined)?.trim() ||
       req.headers.get("origin") ||
       req.headers.get("referer")?.split("/").slice(0, 3).join("/") ||
       "https://localhost";
 
     const baseUrl = pmsBaseUrl.replace(/\/$/, "");
+    const webCheckinSite = {
+      pms_base_url: siteSettings?.pms_base_url as string | null | undefined,
+      web_checkin_public_base_url: siteSettings?.web_checkin_public_base_url as string | null | undefined,
+    };
     const results: Array<{ reservation_id: string; success: boolean; checkin_charge_id?: string; error?: string }> = [];
 
     for (const reservationId of reservationIds) {
@@ -649,7 +654,9 @@ serve(async (req) => {
             .maybeSingle();
           if (created?.locator) webCheckinLocator = created.locator;
         }
-        const webCheckinLink = webCheckinLocator ? `${baseUrl}/web-checkin/${webCheckinLocator}` : "";
+        const webCheckinLink = webCheckinLocator
+          ? buildWebCheckinLocatorUrl(webCheckinLocator, webCheckinSite, baseUrl)
+          : "";
 
         const otaList = reservation.ota_reservations as
           | { ota_guest_name?: string | null; ota_guest_phone?: string | null }[]

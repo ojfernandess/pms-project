@@ -2,6 +2,7 @@ import { randomBytes } from "crypto";
 import { Injectable, Logger } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
 
 const SITE_SETTINGS_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -420,7 +421,7 @@ export class CheckinChargeService {
 
       const siteSettings = await this.prisma.site_settings.findUnique({
         where: { id: SITE_SETTINGS_ID },
-        select: { features_enabled: true, pms_base_url: true },
+        select: { features_enabled: true, pms_base_url: true, web_checkin_public_base_url: true },
       });
       const baseUrl = (siteSettings?.pms_base_url || "https://localhost").replace(/\/$/, "");
       const results: ChargeResult[] = [];
@@ -433,6 +434,7 @@ export class CheckinChargeService {
             phoneOverrides,
             templateIdOverride,
             baseUrl,
+            siteRow: siteSettings,
             features: siteSettings?.features_enabled ?? null,
           });
           results.push(outcome);
@@ -454,9 +456,10 @@ export class CheckinChargeService {
     phoneOverrides: Record<string, string> | undefined;
     templateIdOverride: string | undefined;
     baseUrl: string;
+    siteRow: { pms_base_url?: string | null; web_checkin_public_base_url?: string | null } | null;
     features: Prisma.JsonValue | null;
   }): Promise<ChargeResult> {
-    const { reservationId, intent, phoneOverrides, templateIdOverride, baseUrl } = input;
+    const { reservationId, intent, phoneOverrides, templateIdOverride, baseUrl, siteRow } = input;
     const reservation = await this.prisma.reservations.findUnique({
       where: { id: reservationId },
       select: {
@@ -590,7 +593,7 @@ export class CheckinChargeService {
         this.logger.warn(`web_checkin não criado para ${reservationId}: ${errorMessage(error)}`);
       }
     }
-    const webCheckinLink = webCheckinLocator ? `${baseUrl}/web-checkin/${webCheckinLocator}` : "";
+    const webCheckinLink = webCheckinLocator ? buildWebCheckinLocatorUrl(webCheckinLocator, siteRow) : "";
 
     const ota = reservation.ota_reservations[0] ?? null;
     const idSet = [...new Set([reservation.guest_id, reservation.client_id].filter((id): id is string => !!id))];

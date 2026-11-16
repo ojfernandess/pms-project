@@ -3324,8 +3324,9 @@ model site_settings {
   updated_at           DateTime @default(now()) @db.Timestamptz(6)
   features_enabled     Json?    @default("{\"email\": true, \"stripe\": true, \"web_checkin\": true, \"channel_manager\": true, \"api_integrations\": true}")
   console_logs_enabled Boolean? @default(true)
-  pms_base_url         String?
-  robots_txt           String?
+  pms_base_url                 String?
+  web_checkin_public_base_url  String?
+  robots_txt                   String?
 
   @@schema("public")
 }

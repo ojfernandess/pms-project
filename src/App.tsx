@@ -17,6 +17,7 @@ import PendingReservations from "./pages/PendingReservations";
 import ActivityLogs from "./pages/ActivityLogs";
 import ReservationDetails from "./pages/ReservationDetails";
 import WebCheckin from "./pages/WebCheckin";
+import { WebCheckinDynamicRoutes } from "./components/routing/WebCheckinDynamicRoutes";
 import GuestDashboard from "./pages/GuestDashboard";
 import GuestResetPassword from "./pages/GuestResetPassword";
 import PublicPolicies from "./pages/PublicPolicies";
@@ -152,6 +153,7 @@ const AppRoutesWithMeta = () => {
             <Route path="/web-checkin/:locator" element={<WebCheckin />} />
             <Route path="/web-checkin/reset-password" element={<GuestResetPassword />} />
             <Route path="/web-checkin" element={<WebCheckin />} />
+            <WebCheckinDynamicRoutes />
             <Route path="/guest-dashboard" element={<GuestDashboard />} />
             <Route path="/review/:locator" element={<ReviewPage />} />
             <Route path="/thank-you" element={<ThankYouPage />} />

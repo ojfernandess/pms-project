@@ -11,6 +11,7 @@ import {
   reservation_status,
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
 
 const STRIPE_API = "https://api.stripe.com/v1";
 const STRIPE_VERSION = "2023-10-16";
@@ -995,7 +996,7 @@ export class StripeWebhookService {
       const hotelSettings = reservation.establishment_id ? await this.hotelSettings(reservation.establishment_id) : null;
       const site = await this.siteSettings();
       const baseUrl = this.baseUrlFromSite(site?.pms_base_url || null);
-      const webCheckinLink = await this.webCheckinLink(reservationId, reservation.reservation_code, baseUrl);
+      const webCheckinLink = await this.webCheckinLink(reservationId, reservation.reservation_code, site);
       const logoUrl = this.resolveLogo(site?.logo_url || hotelSettings?.logo_url || null);
       const hotelLogo = this.resolveLogo(hotelSettings?.logo_url || null);
       const checkinTime = this.asClock(reservation.checkin_time, this.asClock(hotelSettings?.checkin_time, "14:00"));
@@ -1101,7 +1102,7 @@ export class StripeWebhookService {
           room_number: res.rooms?.room_number || "",
           room_name: res.rooms?.name || "",
           category_name: res.room_categories?.name || "",
-          web_checkin_link: locator ? `${baseUrl}/web-checkin/${locator}` : "",
+          web_checkin_link: locator ? buildWebCheckinLocatorUrl(locator, site) : "",
         };
       });
       const variables: Record<string, unknown> = {
@@ -1203,7 +1204,7 @@ export class StripeWebhookService {
       const policiesLink = buildingId
         ? this.policiesLink(baseUrl, "building", buildingId, hotelSettings?.name || null)
         : this.policiesLink(baseUrl, "establishment", establishmentId, hotelSettings?.name || null);
-      const webCheckinLink = await this.webCheckinLink(reservationId, reservation.reservation_code, baseUrl);
+      const webCheckinLink = await this.webCheckinLink(reservationId, reservation.reservation_code, site);
       const logoUrl = this.resolveLogo(site?.logo_url || null);
       const hotelLogo = "";
       const checkinTime = this.asClock(reservation.checkin_time, this.asClock(hotelSettings?.checkin_time, "14:00"));
@@ -1623,8 +1624,14 @@ export class StripeWebhookService {
     });
   }
 
-  private async siteSettings(): Promise<{ logo_url: string | null; pms_base_url: string | null } | null> {
-    return this.prisma.site_settings.findFirst({ select: { logo_url: true, pms_base_url: true } });
+  private async siteSettings(): Promise<{
+    logo_url: string | null;
+    pms_base_url: string | null;
+    web_checkin_public_base_url: string | null;
+  } | null> {
+    return this.prisma.site_settings.findFirst({
+      select: { logo_url: true, pms_base_url: true, web_checkin_public_base_url: true },
+    });
   }
 
   private async singleTemplate(eventType: email_event_type) {
@@ -1678,14 +1685,18 @@ export class StripeWebhookService {
     return null;
   }
 
-  private async webCheckinLink(reservationId: string, reservationCode: string | null, baseUrl: string): Promise<string> {
+  private async webCheckinLink(
+    reservationId: string,
+    reservationCode: string | null,
+    site: { pms_base_url: string | null; web_checkin_public_base_url: string | null } | null,
+  ): Promise<string> {
     try {
       const webCheckin = await this.prisma.web_checkin.findUnique({
         where: { reservation_id: reservationId },
         select: { locator: true },
       });
-      if (webCheckin?.locator) return `${baseUrl}/web-checkin/${webCheckin.locator}`;
-      if (reservationCode) return `${baseUrl}/web-checkin/${reservationCode}`;
+      if (webCheckin?.locator) return buildWebCheckinLocatorUrl(webCheckin.locator, site);
+      if (reservationCode) return buildWebCheckinLocatorUrl(reservationCode, site);
     } catch (error) {
       console.warn("Erro ao buscar web_checkin:", this.errorText(error));
     }

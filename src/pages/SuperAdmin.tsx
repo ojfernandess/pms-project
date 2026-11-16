@@ -100,6 +100,7 @@ const SiteSettingsManager = () => {
     og_title: "",
     og_description: "",
     pms_base_url: "",
+    web_checkin_public_base_url: "",
   });
   const [consoleLogsEnabled, setConsoleLogsEnabled] = useState<boolean>(true);
   const [faviconFile, setFaviconFile] = useState<File | null>(null);
@@ -118,6 +119,7 @@ const SiteSettingsManager = () => {
         og_title: settings.og_title || "",
         og_description: settings.og_description || "",
         pms_base_url: settings.pms_base_url || "",
+        web_checkin_public_base_url: settings.web_checkin_public_base_url || "",
       });
       setConsoleLogsEnabled(settings.console_logs_enabled ?? true);
       if (settings.favicon_url) setFaviconPreview(settings.favicon_url);
@@ -189,6 +191,7 @@ const SiteSettingsManager = () => {
         og_image: ogImageUrl,
         console_logs_enabled: consoleLogsEnabled,
         pms_base_url: formData.pms_base_url || null,
+        web_checkin_public_base_url: formData.web_checkin_public_base_url?.trim() || null,
       });
 
       setFaviconFile(null);
@@ -486,8 +489,41 @@ const SiteSettingsManager = () => {
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <p className="text-sm text-blue-800">
-                <strong>Importante:</strong> Esta URL será usada para gerar links de check-in online e políticas do hotel nos emails.
+                <strong>Importante:</strong> Esta URL será usada para gerar links de políticas do hotel e demais páginas do PMS nos e-mails.
                 Certifique-se de que a URL está correta e acessível publicamente. Se não configurada, o sistema tentará detectar automaticamente.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* URL pública do Web Check-in */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Globe className="h-4 w-4" />
+            <Label className="text-base font-semibold">URL pública do Web Check-in</Label>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Domínio e caminho usados nos links enviados aos hóspedes (e-mail, pagamento, etc.). Não inclua o localizador no final.
+            Se vazio, o sistema usa <code className="text-xs">URL Base do PMS</code> + <code className="text-xs">/web-checkin</code>.
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="web_checkin_public_base_url">Base do Web Check-in</Label>
+            <Input
+              id="web_checkin_public_base_url"
+              type="url"
+              value={formData.web_checkin_public_base_url}
+              onChange={(e) =>
+                setFormData({ ...formData, web_checkin_public_base_url: e.target.value })
+              }
+              placeholder="https://checkin.seudominio.com/Localizador"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Exemplo de link gerado: https://checkin.seudominio.com/Localizador/RSV123456
+            </p>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <p className="text-sm text-amber-900">
+                <strong>DNS / Dokploy:</strong> o domínio configurado (ex. checkin.seudominio.com) deve apontar para o
+                <strong> mesmo frontend</strong> do PMS. No Dokploy, acrescente o domínio extra no serviço do frontend com HTTPS.
               </p>
             </div>
           </div>

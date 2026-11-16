@@ -50,7 +50,7 @@ A função:
 ## Links gerados
 
 - **Pagamento:** a função chama a Edge Function `stripe-payment` para criar um Payment Intent; o link enviado é `{baseUrl}/payment/{payment_intent_id}` (ex.: `https://seusite.com/payment/pi_3T2CfUG70nwUgqCa0ck1JdvX`). Se o Stripe não estiver configurado para o estabelecimento, é usado fallback: `{baseUrl}/payment/checkin/{token}` (a página de check-in cria o Payment Intent ao abrir o link).
-- Web check-in: `{baseUrl}/web-checkin/{locator}` (quando já existir registro em `web_checkin`).
+- Web check-in: `buildWebCheckinLocatorUrl` — usa `site_settings.web_checkin_public_base_url` quando configurado; senão `{pms_base_url}/web-checkin/{locator}`.
 
 ## Automação
 

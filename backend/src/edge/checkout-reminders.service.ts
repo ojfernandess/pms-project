@@ -3,6 +3,7 @@ import { email_event_type, email_status, reservation_status } from "@prisma/clie
 import { PrismaService } from "../prisma/prisma.service";
 import { EmailDispatchService } from "./email-dispatch.service";
 import { SITE_SETTINGS_ID } from "./robots.service";
+import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
 
 type RequestHints = { origin?: string; referer?: string; forwardedHost?: string; forwardedProto?: string };
 
@@ -94,7 +95,7 @@ export class CheckoutRemindersService {
           hotel_address: [hotel?.street, hotel?.number, hotel?.neighborhood, hotel?.city].filter(Boolean).join(", "),
           hotel_website: hotel?.website || "",
           logo_url: hotel?.logo_url || site?.logo_url || "",
-          web_checkin_link: locator ? `${baseUrl}/web-checkin/${locator}` : "",
+          web_checkin_link: locator ? buildWebCheckinLocatorUrl(locator, site) : "",
           policies_link: policiesLink(baseUrl, hotel?.name || "hotel", buildingId ? "building" : "establishment", buildingId || reservation.establishment_id),
         };
         const subject = fill(template.subject, variables);

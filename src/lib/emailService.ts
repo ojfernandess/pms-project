@@ -8,6 +8,7 @@ import { invokePmsFunction } from '@/lib/pmsApi';
 import { processTemplate, generateReservationVariables, type TemplateVariables } from './emailTemplateEngine';
 import { reservationGuestContactFields, reservationGuestDisplayName } from './reservationChannelDisplay';
 import { shouldBlockGuestConfirmationEmail } from './overbookingEmailGuards';
+import { buildWebCheckinLocatorUrl, buildWebCheckinResetPasswordUrl } from '@/lib/webCheckinPublicUrl';
 
 export interface EmailSettings {
   id: string;
@@ -1309,10 +1310,11 @@ export async function sendGuestPasswordResetEmail(
       .maybeSingle();
 
     // Construir URL de reset
-    const baseUrl = typeof window !== 'undefined' 
-      ? window.location.origin 
-      : (process.env.VITE_APP_URL || 'http://localhost:8080');
-    const resetUrl = `${baseUrl}/web-checkin/reset-password?token=${resetToken}`;
+    const fallbackOrigin =
+      typeof window !== 'undefined'
+        ? window.location.origin
+        : (process.env.VITE_APP_URL || 'http://localhost:8080');
+    const resetUrl = buildWebCheckinResetPasswordUrl(resetToken, siteSettings, fallbackOrigin);
 
     // Preparar variáveis do template
     const variables: TemplateVariables = {
@@ -2147,7 +2149,7 @@ export async function sendCheckoutReminderEmail(
     // Garantir que o link do web-checkin está correto (usar o número sem #)
     let webCheckinLink = variables.web_checkin_link || '';
     if (!webCheckinLink && identificationNumberRaw) {
-      webCheckinLink = `${baseUrl}/web-checkin/${identificationNumberRaw}`;
+      webCheckinLink = buildWebCheckinLocatorUrl(identificationNumberRaw, siteSettings, baseUrl || undefined);
     }
 
     // Adicionar/atualizar variáveis específicas

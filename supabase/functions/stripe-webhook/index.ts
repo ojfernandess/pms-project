@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
+import { buildWebCheckinLocatorUrl } from "../_shared/webCheckinPublicUrl.ts";
 
 /**
  * Cria ou busca o portador de pagamento Stripe
@@ -989,7 +990,7 @@ async function sendReservationExtensionEmail(
     try {
       const { data: settings } = await supabaseClient
         .from("site_settings")
-        .select("logo_url, pms_base_url")
+        .select("logo_url, pms_base_url, web_checkin_public_base_url")
         .maybeSingle();
       siteSettings = settings;
       console.log(`📧 [sendReservationExtensionEmail] Site settings carregadas, pms_base_url: ${siteSettings?.pms_base_url || 'não configurado'}`);
@@ -1032,9 +1033,9 @@ async function sendReservationExtensionEmail(
         .maybeSingle();
 
       if (webCheckin?.locator) {
-        webCheckinLink = `${baseUrl}/web-checkin/${webCheckin.locator}`;
+        webCheckinLink = buildWebCheckinLocatorUrl(webCheckin.locator, siteSettings, baseUrl);
       } else if (reservationAny.reservation_code) {
-        webCheckinLink = `${baseUrl}/web-checkin/${reservationAny.reservation_code}`;
+        webCheckinLink = buildWebCheckinLocatorUrl(reservationAny.reservation_code, siteSettings, baseUrl);
       }
     } catch (error) {
       console.warn("⚠️ Erro ao buscar web_checkin:", error);
@@ -1440,7 +1441,7 @@ async function sendMultipleReservationsCreatedEmail(
     // Buscar site_settings
     const { data: siteSettings } = await supabaseClient
       .from("site_settings")
-      .select("logo_url, pms_base_url")
+      .select("logo_url, pms_base_url, web_checkin_public_base_url")
       .maybeSingle();
 
     // Preparar variáveis para múltiplas reservas
@@ -1467,7 +1468,7 @@ async function sendMultipleReservationsCreatedEmail(
       // Priorizar locator do web_checkin, senão usar reservation_code como fallback
       const locator = res.web_checkin?.locator || res.reservation_code || "";
       // Sempre gerar o link se houver locator ou reservation_code
-      const webCheckinLink = locator ? `${baseUrl}/web-checkin/${locator}` : "";
+      const webCheckinLink = locator ? buildWebCheckinLocatorUrl(locator, siteSettings, baseUrl) : "";
 
       return {
         number: index + 1,
@@ -1969,7 +1970,7 @@ async function sendPaymentConfirmedEmail(
     try {
       const { data: settings } = await supabaseClient
         .from("site_settings")
-        .select("logo_url, pms_base_url")
+        .select("logo_url, pms_base_url, web_checkin_public_base_url")
         .maybeSingle();
       siteSettings = settings;
       console.log(`📧 [sendPaymentConfirmedEmail] Site settings carregadas, pms_base_url: ${siteSettings?.pms_base_url || 'não configurado'}`);
@@ -2108,10 +2109,9 @@ async function sendPaymentConfirmedEmail(
         .maybeSingle();
 
       if (webCheckin?.locator) {
-        webCheckinLink = `${baseUrl}/web-checkin/${webCheckin.locator}`;
+        webCheckinLink = buildWebCheckinLocatorUrl(webCheckin.locator, siteSettings, baseUrl);
       } else if (reservationAny.reservation_code) {
-        // Se não existe web_checkin, usar reservation_code como locator
-        webCheckinLink = `${baseUrl}/web-checkin/${reservationAny.reservation_code}`;
+        webCheckinLink = buildWebCheckinLocatorUrl(reservationAny.reservation_code, siteSettings, baseUrl);
       }
     } catch (error) {
       console.warn("⚠️ Erro ao buscar web_checkin:", error);

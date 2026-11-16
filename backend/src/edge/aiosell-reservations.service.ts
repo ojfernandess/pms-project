@@ -11,6 +11,7 @@ import {
   room_status,
   type ota_channels,
 } from "@prisma/client";
+import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
 import { AuthService } from "../auth/auth.service";
 import { StaffIdentityService } from "../auth/staff-identity.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -1330,7 +1331,10 @@ export class AiosellReservationsService {
     }
     const establishmentId = String(reservation.establishment_id ?? "");
     if (!establishmentId) return;
-    const siteRow = await this.prisma.site_settings.findUnique({ where: { id: SITE_SETTINGS_ID }, select: { features_enabled: true, logo_url: true, pms_base_url: true } });
+    const siteRow = await this.prisma.site_settings.findUnique({
+      where: { id: SITE_SETTINGS_ID },
+      select: { features_enabled: true, logo_url: true, pms_base_url: true, web_checkin_public_base_url: true },
+    });
     const features = asRecord(siteRow?.features_enabled);
     if (!isFeatureEnabled(features?.email, establishmentId)) {
       this.logger.warn(`${logPrefix}: e-mail desativado para o estabelecimento`);
@@ -1630,7 +1634,13 @@ export class AiosellReservationsService {
     await this.prisma.web_checkin.create({ data: { reservation_id: reservationId, establishment_id: establishmentId, token, locator: code, expires_at: expiresAt, status: "pending" } });
   }
 
-  private async buildEmailVariables(reservation: JsonRecord, hotel: JsonRecord | null, site: { logo_url?: string | null; pms_base_url?: string | null } | null, baseUrl: string, eventType: string): Promise<TemplateVariables> {
+  private async buildEmailVariables(
+    reservation: JsonRecord,
+    hotel: JsonRecord | null,
+    site: { logo_url?: string | null; pms_base_url?: string | null; web_checkin_public_base_url?: string | null } | null,
+    baseUrl: string,
+    eventType: string,
+  ): Promise<TemplateVariables> {
     const hotelRecord = hotel ?? {};
     const checkinTimeRaw = String(reservation.checkin_time || hotelRecord.checkin_time || "14:00");
     const checkoutTimeRaw = String(reservation.checkout_time || hotelRecord.checkout_time || "12:00");
@@ -1675,7 +1685,7 @@ export class AiosellReservationsService {
       hotel_website: String(hotelRecord.website || ""),
       hotel_policies: typeof hotelRecord.policies === "string" ? hotelRecord.policies : "",
       policies_link: policiesLink(hotelRecord, reservation, baseUrl),
-      web_checkin_link: locator ? `${baseUrl}/web-checkin/${locator}` : "",
+      web_checkin_link: locator ? buildWebCheckinLocatorUrl(locator, site) : "",
       logo_url: logos.logoUrl,
       hotel_logo: logos.hotelLogo,
       payment_link: "",
