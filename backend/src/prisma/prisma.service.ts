@@ -1,13 +1,15 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
-import { normalizePooledDatabaseUrl } from "./database-url";
+import { describeDatabaseUrlTarget, normalizePooledDatabaseUrl, sanitizeDatabaseUrlValue } from "./database-url";
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
-    const url = process.env.DATABASE_URL ? normalizePooledDatabaseUrl(process.env.DATABASE_URL) : undefined;
+    const url = process.env.DATABASE_URL
+      ? normalizePooledDatabaseUrl(sanitizeDatabaseUrlValue(process.env.DATABASE_URL))
+      : undefined;
     super(url ? { datasources: { db: { url } } } : undefined);
   }
 
@@ -18,7 +20,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       try {
         await this.$connect();
         await this.ping();
-        this.logger.log("PostgreSQL connected");
+        this.logger.log(
+          `PostgreSQL connected (${describeDatabaseUrlTarget(process.env.DATABASE_URL ?? "")})`,
+        );
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

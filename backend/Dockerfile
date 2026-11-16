@@ -43,6 +43,7 @@ COPY scripts/import-supabase-data.sh ./scripts/import-supabase-data.sh
 COPY scripts/import-supabase-schema.sh ./scripts/import-supabase-schema.sh
 COPY scripts/import-supabase-data.mjs ./scripts/import-supabase-data.mjs
 COPY scripts/lib ./scripts/lib
+COPY scripts/print-database-url-libpq.mjs ./scripts/print-database-url-libpq.mjs
 COPY scripts/migration ./scripts/migration
 COPY scripts/apply-bundled-rpcs.sh ./scripts/apply-bundled-rpcs.sh
 COPY scripts/ensure-bundled-rpcs.mjs ./scripts/ensure-bundled-rpcs.mjs

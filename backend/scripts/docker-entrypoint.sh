@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 
+# psql/pg_restore não aceitam ?connection_limit= nem valor colado como "DATABASE_URL=postgresql://..."
+PSQL_DATABASE_URL="${DATABASE_URL:-}"
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/print-database-url-libpq.mjs ]; then
+  PSQL_DATABASE_URL="$(node ./scripts/print-database-url-libpq.mjs)"
+fi
+
 # Easypanel costuma manter o CMD da imagem; use PMS_RUN_MODE=worker no serviço worker.
 if [ "${PMS_MIGRATION_COMPLETE:-false}" = "true" ]; then
   echo "PMS_MIGRATION_COMPLETE=true — imports Supabase/schema desativados neste arranque."
@@ -19,19 +25,19 @@ else
 fi
 
 # auth.uid() / auth.role() para RLS e RPCs SECURITY DEFINER (Postgres sem stack Supabase)
-if [ -n "${DATABASE_URL:-}" ] && [ -f ./scripts/migration/auth-compat.sql ]; then
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=0 -f ./scripts/migration/auth-compat.sql >/dev/null 2>&1 \
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/auth-compat.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=0 -f ./scripts/migration/auth-compat.sql >/dev/null 2>&1 \
     || echo "WARN: auth-compat.sql falhou" >&2
 fi
 
 # DDL incremental (colunas usadas pelo frontend / DataService)
-if [ -n "${DATABASE_URL:-}" ] && [ -f ./scripts/migration/cleaning_fee_configuration.sql ]; then
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/cleaning_fee_configuration.sql \
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/cleaning_fee_configuration.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/cleaning_fee_configuration.sql \
     || echo "WARN: cleaning_fee_configuration.sql falhou" >&2
 fi
 
-if [ -n "${DATABASE_URL:-}" ] && [ -f ./scripts/migration/rpc/rate_calendar_unique_constraint.sql ]; then
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/rate_calendar_unique_constraint.sql \
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/rpc/rate_calendar_unique_constraint.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/rate_calendar_unique_constraint.sql \
     || echo "WARN: rate_calendar_unique_constraint.sql falhou" >&2
 fi
 

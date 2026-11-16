@@ -11,6 +11,7 @@ import {
   tryMigrationLock,
   withRetry,
 } from "./lib/pg-migration-lock.mjs";
+import { databaseUrlForLibpq } from "./lib/database-url-libpq.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sqlFile =
@@ -32,7 +33,7 @@ async function main() {
     return;
   }
 
-  const url = process.env.DATABASE_URL?.trim();
+  const url = databaseUrlForLibpq(process.env.DATABASE_URL ?? "");
   if (!url) {
     console.error("DATABASE_URL obrigatória");
     process.exit(1);

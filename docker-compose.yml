@@ -91,7 +91,7 @@ services:
         VITE_PMS_API_URL: ${VITE_PMS_API_URL:-http://localhost:3000}
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
-        VITE_APP_URL: ${VITE_APP_URL:-http://localhost}
+        VITE_APP_URL: ${VITE_APP_URL:-http://localhost:8080}
     environment:
       BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:3000}
     expose:

@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { databaseUrlForLibpq } from "./lib/database-url-libpq.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -202,7 +203,7 @@ async function main() {
   const mode = (process.env.APP_APPLY_BUNDLED_RPCS || "auto").trim().toLowerCase();
   if (["false", "0", "skip", "no", "off"].includes(mode)) return;
 
-  const url = process.env.DATABASE_URL?.trim();
+  const url = databaseUrlForLibpq(process.env.DATABASE_URL ?? "");
   if (!url) return;
 
   const marker = process.env.BUNDLED_RPCS_STATE_FILE || "/app/storage/.bundled-rpcs-applied";

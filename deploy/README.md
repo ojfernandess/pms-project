@@ -68,4 +68,6 @@ Inalterado:
 docker compose --profile local-db -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
+Detalhes, `.env` e limitações: **[LOCAL_DOCKER.md](LOCAL_DOCKER.md)**.
+
 Documentação legada do Compose: [../docs/DEPLOY_EASYPANEL.md](../docs/DEPLOY_EASYPANEL.md) (secção Compose).

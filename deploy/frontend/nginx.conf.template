@@ -49,6 +49,43 @@ server {
         proxy_pass ${BACKEND_UPSTREAM};
     }
 
+    # Rotas Nest (fora de /rest) — necessárias se VITE_PMS_API_URL = mesma origem do SPA (ex. :8080)
+    location /reservations/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass ${BACKEND_UPSTREAM};
+    }
+
+    location /rates/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass ${BACKEND_UPSTREAM};
+    }
+
+    location /establishments/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass ${BACKEND_UPSTREAM};
+    }
+
+    location /companies/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass ${BACKEND_UPSTREAM};
+    }
+
     location /socket.io/ {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
