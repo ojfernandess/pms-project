@@ -1,9 +1,5 @@
-# Dokploy: Compose path na raiz = docker-compose.dokploy.yml
-# Build via URL Git (funciona mesmo se code/ só tiver este YAML, sem clone completo).
-# Repo privado: configure Git no Dokploy e use DOKPLOY_USE_LOCAL_BUILD=1 + clone (ver README).
-x-pms-git-repo: &pms_git_repo "https://github.com/ojfernandess/pms-project.git#PMS-Backend"
-x-pms-git-backend: &pms_git_backend "https://github.com/ojfernandess/pms-project.git#PMS-Backend:backend"
-
+# Dokploy: build por URL Git (sem YAML anchors — bake do Dokploy nao resolve *anchor).
+# Log deve mostrar: ...pms-project.git#PMS-Backend:backend (backend) e #PMS-Backend (frontend).
 services:
   postgres:
     image: postgres:16-alpine
@@ -39,8 +35,9 @@ services:
 
   backend:
     build:
-      context: *pms_git_backend
+      context: "https://github.com/ojfernandess/pms-project.git#PMS-Backend:backend"
       dockerfile: Dockerfile
+    image: pms-staysos-api
     restart: unless-stopped
     expose:
       - "3000"
@@ -82,9 +79,7 @@ services:
       start_period: 120s
 
   worker:
-    build:
-      context: *pms_git_backend
-      dockerfile: Dockerfile
+    image: pms-staysos-api
     restart: unless-stopped
     command: ["./scripts/docker-entrypoint-worker.sh"]
     environment:
@@ -111,7 +106,7 @@ services:
 
   frontend:
     build:
-      context: *pms_git_repo
+      context: "https://github.com/ojfernandess/pms-project.git#PMS-Backend"
       dockerfile: Dockerfile
       args:
         VITE_PMS_API_URL: ${VITE_PMS_API_URL:-https://localhost}

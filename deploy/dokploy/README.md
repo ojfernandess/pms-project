@@ -49,4 +49,12 @@ O log usa `code/docker-compose.yml` quando o Dokploy **não clonou** o monorepo 
 
 No painel, em **General / Compose path**, troca de `docker-compose.yml` para **`docker-compose.dokploy.yml`** e faz **Deploy**.
 
+### Build ainda falha em `COPY scripts/... not found`
+
+Nos logs, confirme:
+
+- `load git source ...#PMS-Backend:backend` no build do **backend**
+- Se aparecer só `#PMS-Backend` no backend: compose antigo ou **reimporte** `pms-install.base64` atual
+- Faça **um deploy com cache limpo** (opção *Clean cache* / rebuild sem cache no Dokploy) — camadas CACHED de contexto errado quebram o build
+
 Documentação geral: [../README.md](../README.md).
