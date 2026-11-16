@@ -323,6 +323,40 @@ export function CompanyApiCredentialsCard({ companyId, supabaseProjectUrl, isFea
 }`,
       },
       {
+        title: "Quadro diário de quartos",
+        description:
+          "Por data ou intervalo (até 62 dias), lista todos os quartos com check-ins, check-outs, hospedagens da noite e bloqueios (reserva blocked, quarto bloqueado, status maintenance/blocked).",
+        method: "GET",
+        url: `${endpointBase}?action=room-daily-board&date_from=2026-04-18&date_to=2026-04-20`,
+        acceptedParams: [
+          "establishment_id (uuid, opcional): Estabelecimento; padrão é o primeiro ativo.",
+          "date (YYYY-MM-DD, opcional): Um único dia (equivale a date_from=date_to).",
+          "date_from / date_to (opcional): Intervalo de dias (máx. 62).",
+        ],
+        responseExample: `{
+  "success": true,
+  "action": "room-daily-board",
+  "date_from": "2026-04-18",
+  "date_to": "2026-04-18",
+  "days": [
+    {
+      "date": "2026-04-18",
+      "summary": { "total_rooms": 40, "check_ins": 5, "check_outs": 4, "rooms_with_blocks": 1 },
+      "rooms": [
+        {
+          "room_number": "101",
+          "check_ins": [{ "reservation_code": "RES-1", "guest_name": "Ana" }],
+          "check_outs": [],
+          "overnight_reservations": [],
+          "blocks": [],
+          "occupied_overnight": false
+        }
+      ]
+    }
+  ]
+}`,
+      },
+      {
         title: "Mapa de Ocupação",
         description:
           "Retorna o estado dos quartos em uma data (noite): reserva atribuída ao quarto quando a data está entre check-in (inclusivo) e check-out (exclusivo), resumo de totais e identificação de categoria/prédio.",
@@ -633,6 +667,17 @@ export function CompanyApiCredentialsCard({ companyId, supabaseProjectUrl, isFea
   "date": "2026-04-18"
 }`,
       });
+      fromDocs.push({
+        title: "Quadro diário de quartos (POST, corpo JSON)",
+        description: "Envia `establishment_id`, `date` ou `date_from`/`date_to` no corpo JSON.",
+        method: "POST",
+        fullUrl: `${endpointBase}?action=room-daily-board`,
+        payloadExample: `{
+  "establishment_id": "660e8400-e29b-41d4-a716-446655440001",
+  "date_from": "2026-04-18",
+  "date_to": "2026-04-25"
+}`,
+      });
       const stayReviewDoc = endpointDocs.find((d) => d.title === "Gerar link de avaliação da estadia");
       if (stayReviewDoc?.payloadExample?.trim()) {
         fromDocs.push({
@@ -667,17 +712,6 @@ export function CompanyApiCredentialsCard({ companyId, supabaseProjectUrl, isFea
     if (!endpointBase || !status?.client_id || !newSecret) return "";
     return `curl -X GET "${endpointBase}?action=establishments" \\
   -H "ClientId: ${status.client_id}" \\
-      fromDocs.push({
-        title: "Quadro diário de quartos (POST, corpo JSON)",
-        description: "Envia `establishment_id`, `date` ou `date_from`/`date_to` no corpo JSON.",
-        method: "POST",
-        fullUrl: `${endpointBase}?action=room-daily-board`,
-        payloadExample: `{
-  "establishment_id": "660e8400-e29b-41d4-a716-446655440001",
-  "date_from": "2026-04-18",
-  "date_to": "2026-04-25"
-}`,
-      });
   -H "ClientSecret: ${newSecret}"`;
   }, [endpointBase, status?.client_id, newSecret, persistedSecret]);
 

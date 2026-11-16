@@ -223,12 +223,6 @@ export const EstablishmentProvider = ({ children }: { children: ReactNode }) => 
     }
   }, [selectedEstablishmentId, establishments, directlySelectedEstablishment]);
 
-  // Se houver um estabelecimento selecionado diretamente, usar ele
-  // Caso contrário, buscar na lista de estabelecimentos
-  const selectedEstablishment = directlySelectedEstablishment || 
-    establishments.find((e) => e.id === selectedEstablishmentId) || 
-    null;
-  
   // Quando a lista de estabelecimentos for carregada, verificar se o estabelecimento
   // selecionado diretamente está na lista e atualizar se necessário
   useEffect(() => {

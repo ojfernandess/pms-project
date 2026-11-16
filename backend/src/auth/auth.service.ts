@@ -73,10 +73,35 @@ export class AuthService {
   }
 
   async me(userId: string): Promise<SessionUser> {
+    const now = Date.now();
+    const cached = this.meCache.get(userId);
+    if (cached && cached.expiresAt > now) {
+      return cached.user;
+    }
+
     const user = await this.directory.findById(userId);
     if (!user) throw new UnauthorizedException("Invalid login credentials");
     const scope = await this.directory.loadScope(user.id);
-    return { id: user.id, email: user.email, ...scope };
+    const sessionUser: SessionUser = { id: user.id, email: user.email, ...scope };
+
+    this.meCache.set(userId, {
+      user: sessionUser,
+      expiresAt: now + AuthService.ME_CACHE_TTL_MS,
+    });
+    if (this.meCache.size > AuthService.ME_CACHE_MAX_ENTRIES) {
+      const firstKey = this.meCache.keys().next().value as string | undefined;
+      if (firstKey) this.meCache.delete(firstKey);
+    }
+
+    return sessionUser;
+  }
+
+  invalidateMeCache(userId?: string): void {
+    if (userId) {
+      this.meCache.delete(userId);
+      return;
+    }
+    this.meCache.clear();
   }
 
   async forgotPassword(email: string): Promise<{ status: "accepted"; resetToken?: string }> {
@@ -88,7 +113,7 @@ export class AuthService {
     if (this.config.get<boolean>("PASSWORD_RESET_DEBUG") === true) {
       return { status: "accepted", resetToken };
     }
-    if (this.meCache.size > AuthService.ME_CACHE_MAX_ENTRIES) {
+    return { status: "accepted" };
   }
 
   async resetPassword(token: string, password: string): Promise<void> {

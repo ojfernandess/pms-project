@@ -894,7 +894,6 @@ export const ARIGrid = ({
       }
       
       // O toast já é exibido pelo hook useRateSystem
-      // Não invalidar queries manualmente aqui, o hook já faz isso
     } catch (error: any) {
       console.error('[ARIGrid] Erro ao salvar edição:', error);
       // Não limpar o estado em caso de erro para permitir nova tentativa
