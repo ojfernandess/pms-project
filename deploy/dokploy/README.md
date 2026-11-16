@@ -41,8 +41,12 @@ Get-Content deploy\dokploy\pms-install.base64 -Raw | Set-Clipboard
 
 ### Erro `.../code/backend not found`
 
-- **Source não é Git** ou o clone falhou → configurar GitHub como acima.
-- **Compose errado** → usar `docker-compose.dokploy.yml`, não só o YAML colado no import (paths relativos à raiz).
-- Alternativa: `deploy/dokploy/docker-compose.yml` (paths `../../backend`) se insistir neste path.
+O log usa `code/docker-compose.yml` quando o Dokploy **não clonou** o monorepo (só ficou o YAML do import).
+
+**Correção A (recomendada):** Compose file = **`docker-compose.dokploy.yml`** (build por **URL GitHub**, não precisa de `code/backend`).
+
+**Correção B:** Source = GitHub, root `/`, Pull — e compose `docker-compose.dokploy.yml` com paths locais (versões antigas).
+
+No painel, em **General / Compose path**, troca de `docker-compose.yml` para **`docker-compose.dokploy.yml`** e faz **Deploy**.
 
 Documentação geral: [../README.md](../README.md).
