@@ -1,0 +1,41 @@
+# Dokploy template — StayOS PMS (import via pms-install.json)
+[variables]
+main_domain = "${domain}"
+postgres_password = "${password}"
+jwt_secret = "${password:48}"
+internal_api_token = "${password:32}"
+socket_auth_token = "${password:32}"
+
+[config]
+mounts = []
+
+env = [
+  "POSTGRES_USER=postgres",
+  "POSTGRES_PASSWORD=${postgres_password}",
+  "POSTGRES_DB=pms",
+  "DATABASE_URL=postgresql://postgres:${postgres_password}@postgres:5432/pms?schema=public&connection_limit=10&pool_timeout=30",
+  "WORKER_DATABASE_URL=postgresql://postgres:${postgres_password}@postgres:5432/pms?schema=public&connection_limit=3&pool_timeout=30",
+  "REDIS_URL=redis://redis:6379",
+  "JWT_SECRET=${jwt_secret}",
+  "INTERNAL_API_TOKEN=${internal_api_token}",
+  "SOCKET_AUTH_TOKEN=${socket_auth_token}",
+  "JWT_ACCESS_TTL=15m",
+  "JWT_REFRESH_TTL_DAYS=7",
+  "PUBLIC_APP_URL=https://${main_domain}",
+  "SITE_URL=https://${main_domain}",
+  "VITE_PMS_API_URL=https://${main_domain}",
+  "VITE_APP_URL=https://${main_domain}",
+  "BACKEND_UPSTREAM=http://backend:3000",
+  "PRISMA_MIGRATE_ON_START=false",
+  "PASSWORD_RESET_DEBUG=false",
+  "VITE_SUPABASE_URL=",
+  "VITE_SUPABASE_PUBLISHABLE_KEY=",
+  "SUPABASE_URL=",
+  "SUPABASE_ANON_KEY=",
+]
+
+[[config.domains]]
+serviceName = "frontend"
+port = 80
+host = "${main_domain}"
+path = "/"
