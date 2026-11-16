@@ -16,9 +16,7 @@ export interface AppEnv {
 }
 
 export function validateEnv(config: Record<string, unknown>): AppEnv {
-  const databaseUrl = normalizePooledDatabaseUrl(
-    sanitizeDatabaseUrlValue(requiredString(config, "DATABASE_URL")),
-  );
+  const databaseUrl = normalizePooledDatabaseUrl(requiredString(config, "DATABASE_URL"));
   const redisUrl = requiredString(config, "REDIS_URL");
   const jwtSecret = requiredString(config, "JWT_SECRET");
   if (jwtSecret.length < 32) {

@@ -2951,17 +2951,12 @@ const ReservationDetails = () => {
           {/* Botão de Efetivar Pré-reserva - apenas se for pré-reserva */}
           {reservation.status === "preregistration" && (
             <Card className="p-6 bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200">
-              <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <div>
                   <h3 className="text-lg font-semibold text-purple-900 mb-1">Pré-reserva</h3>
                   <p className="text-sm text-purple-700">
                     Esta é uma pré-reserva. Efetive para convertê-la em uma reserva confirmada.
                   </p>
-                  <PreregistrationExpiryTimer
-                    expirationDate={reservation.expiration_date}
-                    className="mt-4"
-                    variant="prominent"
-                  />
                 </div>
                 <Button
                   onClick={async () => {
@@ -2972,12 +2967,12 @@ const ReservationDetails = () => {
                       // Erro já tratado no hook
                     }
                   }}
-                  className="gap-2 px-6 py-6 h-auto rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-base shadow-lg hover:shadow-xl transition-all duration-200 shrink-0 self-start lg:self-center"
+                  className="gap-2 px-6 py-6 h-auto rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-base shadow-lg hover:shadow-xl transition-all duration-200"
                 >
                   <CheckCircle2 className="h-5 w-5" />
                   Efetivar Pré-reserva
                 </Button>
-              </div>
+                  className="gap-2 px-6 py-6 h-auto rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-base shadow-lg hover:shadow-xl transition-all duration-200 shrink-0 self-start lg:self-center"
             </Card>
           )}
 
@@ -3060,12 +3055,12 @@ const ReservationDetails = () => {
                       </div>
                       {payment.notes && (
                         <div className={cn("text-xs mt-1 italic", isRefund ? "text-rose-700" : "text-slate-600")}>
-                          📝 {formatPaymentNotesForDisplay(payment.notes)}
+                          📝 {String(payment.notes).replace(/\[REFUND:[0-9a-f-]+\]\s*/i, "")}
                     </div>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                    <div className="text-right min-w-[100px]">
+                          📝 {formatPaymentNotesForDisplay(payment.notes)}
                       <div className={cn("font-semibold", isRefund && "text-rose-700")}>
                         {isRefund ? `−${formatCurrency(displayAmount)}` : formatCurrency(displayAmount)}
                       </div>

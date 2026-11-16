@@ -492,11 +492,6 @@ const PendingReservations = () => {
                           {reservationGuestDisplayName(reservation)}
                         </TableCell>
                         <TableCell>
-                          {reservation.created_by_user?.full_name?.trim() ||
-                            reservation.created_by_user?.email?.trim() ||
-                            "—"}
-                        </TableCell>
-                        <TableCell>
                           {formatDate(reservation.checkin_date)}
                         </TableCell>
                         <TableCell>

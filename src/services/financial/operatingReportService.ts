@@ -86,11 +86,7 @@ type RawReservation = {
   pricing_plans?: { code?: string | null; name?: string | null; plan_type?: string | null } | null;
   guest?: { full_name?: string | null } | null;
   client?: { full_name?: string | null } | null;
-  reservation_service_fees?: Array<{
-    amount?: number;
-    quantity?: number;
-    service_fees?: { service_kind?: string | null } | null;
-  }>;
+  reservation_service_fees?: Array<{ amount?: number; quantity?: number }>;
 };
 
 async function fetchAllRows<T>(build: (from: number, to: number) => Promise<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
@@ -112,6 +108,10 @@ function serviceFeesTotal(fees?: Array<{ amount?: number; quantity?: number }>):
   return (fees || []).reduce((sum, f) => sum + Number(f.amount || 0) * Number(f.quantity ?? 1), 0);
 }
 
+function isLodgingUnit(room: {
+  exclude_from_billing?: boolean | null;
+  hide_from_map?: boolean | null;
+  is_blocked?: boolean | null;
 function cleaningFeesTotal(
   fees?: Array<{
     amount?: number;
@@ -124,10 +124,6 @@ function cleaningFeesTotal(
     .reduce((sum, f) => sum + Number(f.amount || 0) * Number(f.quantity ?? 1), 0);
 }
 
-function isLodgingUnit(room: {
-  exclude_from_billing?: boolean | null;
-  hide_from_map?: boolean | null;
-  is_blocked?: boolean | null;
   category_type?: string | null;
 }): boolean {
   if (room.exclude_from_billing) return false;
@@ -330,11 +326,11 @@ async function normalizeReservations(
     createdAtDate: toDateOnly(r.created_at),
     totalAmount: Number(r.total_amount || 0),
     serviceFeesTotal: serviceFeesTotal(r.reservation_service_fees),
-    cleaningFeeTotal: cleaningFeesTotal(r.reservation_service_fees),
     paymentStatus: r.payment_status,
     paidAmount: Number(r.paid_amount || 0),
     netPayments: netByReservation.get(r.id) || 0,
     firstPaymentDate: firstPaymentByReservation.get(r.id) || null,
+    cleaningFeeTotal: cleaningFeesTotal(r.reservation_service_fees),
     channelCommissionPct: matchChannelCommission(r, otaByReservation, channels || []),
     ownerPct: r.room_id ? ownerByRoom.get(r.room_id) || 0 : 0,
   }));
@@ -504,11 +500,11 @@ export type OperatingFilters = {
   groupBy: GroupBy;
   billingMode: BillingMode;
   compareYoy: boolean;
-  cleaningFeeReportMode?: CleaningFeeReportMode;
 };
 
 export type TotalsView = MetricTotals & {
   adr: number;
+  cleaningFeeReportMode?: CleaningFeeReportMode;
   occupancy: number | null;
   occupiedNights: number;
   availableNights: number;
@@ -564,6 +560,10 @@ export type OperatingReportResult = {
 };
 
 export async function fetchOperatingReport(filters: OperatingFilters): Promise<OperatingReportResult> {
+  const { startDate, endDate, establishmentIds, groupBy, billingMode, compareYoy } = filters;
+  const prevMonths = previousThreeCalendarMonths(startDate);
+  const yoyRange = compareYoy ? previousYearRange(startDate, endDate) : null;
+  const fetchStart = [startDate, prevMonths[0].startDate, yoyRange?.startDate].filter(Boolean).sort()[0] as string;
   const {
     startDate,
     endDate,
@@ -573,10 +573,6 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     compareYoy,
     cleaningFeeReportMode = "lodging_only",
   } = filters;
-  const prevMonths = previousThreeCalendarMonths(startDate);
-  const yoyRange = compareYoy ? previousYearRange(startDate, endDate) : null;
-  const fetchStart = [startDate, prevMonths[0].startDate, yoyRange?.startDate].filter(Boolean).sort()[0] as string;
-  const fetchEnd = [endDate, prevMonths[2].endDate, yoyRange?.endDate].filter(Boolean).sort().at(-1) as string;
 
   const [raw, lodgingUnits, establishmentMeta, maintenanceNightBlocks] = await Promise.all([
     loadReservationsOverlapping(establishmentIds, fetchStart, fetchEnd),
@@ -620,6 +616,10 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     groupBy,
     billingMode,
     activeUnitCount,
+  });
+
+  const monthReports = prevMonths.map((m) => {
+    const r = computePeriodReport({
     cleaningFeeReportMode,
   });
 
@@ -632,10 +632,6 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
       billingMode,
       activeUnitCount,
       cleaningFeeReportMode,
-    });
-    return { ...m, report: r };
-  });
-  const ranks = rankMonthsByGross(monthReports.map((m) => ({ key: m.key, gross: m.report.billing.gross })));
   const previousMonthsAcc = {
     gross: 0,
     channelCommission: 0,
@@ -668,11 +664,11 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
       groupBy,
       billingMode,
       activeUnitCount,
-      cleaningFeeReportMode,
     });
     const yoyOcc = legacyOccupancyFromBilling(yoyReport.billing, yoyReport.availableNights);
     const yoyView = withRates(yoyReport.billing, yoyOcc);
     const currentView = withRates(period.billing, periodOccupancy);
+      cleaningFeeReportMode,
     yoy = {
       startDate: yoyRange.startDate,
       endDate: yoyRange.endDate,
@@ -696,6 +692,10 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     endDate,
     billingMode,
     groupBy,
+  });
+
+  const analyticReservations = buildAnalyticReservations(normalized, rawById, establishmentMetaById);
+  const salesAnalytic = computeSalesAnalyticRows(analyticReservations, startDate, endDate);
     cleaningFeeReportMode,
   });
 
@@ -712,10 +712,6 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     endDate,
     cleaningFeeReportMode,
   );
-  const salesAnalyticTotal = salesAnalytic.reduce((sum, row) => sum + row.gross, 0);
-  const billingAnalyticTotal = billingAnalytic.reduce((sum, row) => sum + row.periodAmount, 0);
-
-  return {
     period: { ...period, billingView: withRates(period.billing, periodOccupancy) },
     previousMonths: monthReports.map((m) => ({
       key: m.key,
@@ -727,6 +723,10 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
     })),
     previousMonthsTotal: previousMonthsAcc,
     yoy,
+    monthlySalesBilling: computeMonthlySalesBillingTable(normalized, startDate, endDate, billingMode),
+    periodOccupancy,
+    establishmentRows,
+    salesAnalytic,
     monthlySalesBilling: computeMonthlySalesBillingTable(
       normalized,
       startDate,
@@ -734,10 +734,6 @@ export async function fetchOperatingReport(filters: OperatingFilters): Promise<O
       billingMode,
       cleaningFeeReportMode,
     ),
-    periodOccupancy,
-    establishmentRows,
-    salesAnalytic,
-    billingAnalytic,
     salesAnalyticTotal,
     billingAnalyticTotal,
   };

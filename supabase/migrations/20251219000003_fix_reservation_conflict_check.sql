@@ -269,7 +269,10 @@ BEGIN
     COALESCE((p_reservation_data->>'checkout_time')::TIME, NULL),
     COALESCE((p_reservation_data->>'pricing_plan_id')::UUID, NULL),
     COALESCE((p_reservation_data->>'created_by')::UUID, NULL),
-    COALESCE((p_reservation_data->>'expiration_date')::DATE, NULL),
+    CASE
+      WHEN NULLIF(trim(p_reservation_data->>'expiration_date'), '') IS NULL THEN NULL
+      ELSE (p_reservation_data->>'expiration_date')::timestamptz
+    END,
     COALESCE(p_reservation_data->>'channel', 'direct'),
     COALESCE((p_reservation_data->>'coupon_id')::UUID, NULL)
   )

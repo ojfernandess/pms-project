@@ -33,7 +33,7 @@ async function main() {
     return;
   }
 
-  const url = databaseUrlForLibpq(process.env.DATABASE_URL ?? "");
+  const url = process.env.DATABASE_URL?.trim();
   if (!url) {
     console.error("DATABASE_URL obrigatória");
     process.exit(1);

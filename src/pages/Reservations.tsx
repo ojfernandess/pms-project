@@ -47,28 +47,6 @@ import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterR
 import { useTranslation } from "react-i18next";
 import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 
-function formatReservationCreatedAt(iso?: string | null): string {
-  if (!iso) return "—";
-  const d = parseISO(iso);
-  if (!isValid(d)) return "—";
-  return format(d, "dd/MM/yyyy HH:mm", { locale: ptBR });
-}
-
-function getReservationOriginLabel(reservation: {
-  channel?: string | null;
-  origin?: string | null;
-  source?: string | null;
-}): string {
-  const channel = (reservation.channel || "").trim().toLowerCase();
-  if (channel && channel !== "direct") {
-    if (channel === "ota") return "OTA";
-    return reservation.channel || "Canal";
-  }
-  const origin = (reservation.origin || reservation.source || "").trim();
-  if (origin) return origin;
-  return "Direto / PMS";
-}
-
 const Reservations = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -601,7 +579,6 @@ const Reservations = () => {
                 <TableHead>Quarto</TableHead>
                 <TableHead>Check-in</TableHead>
                 <TableHead>Check-out</TableHead>
-                <TableHead>Criada em</TableHead>
                 <TableHead>Valor</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Ações</TableHead>
@@ -624,12 +601,7 @@ const Reservations = () => {
                   </TableCell>
                   <TableCell>{formatDate(reservation.checkin_date)}</TableCell>
                   <TableCell>{formatDate(reservation.checkout_date)}</TableCell>
-                  <TableCell>
-                    <div className="text-sm leading-tight">{formatReservationCreatedAt(reservation.created_at)}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      {getReservationOriginLabel(reservation)}
-                    </div>
-                  </TableCell>
+                <TableHead>Criada em</TableHead>
                   <TableCell className="font-medium">
                     {formatCurrency(reservation.total_amount)}
                   </TableCell>
@@ -652,6 +624,12 @@ const Reservations = () => {
                           Ver Detalhes
                         </DropdownMenuItem>
                         
+                  <TableCell>
+                    <div className="text-sm leading-tight">{formatReservationCreatedAt(reservation.created_at)}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {getReservationOriginLabel(reservation)}
+                    </div>
+                  </TableCell>
                         {/* Separador */}
                         {(canUpdate("reservations") || canDelete("reservations")) && (
                           <DropdownMenuSeparator />

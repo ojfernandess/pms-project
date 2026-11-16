@@ -471,64 +471,6 @@ export const usePricing = () => {
     return totalPrice > 0 ? totalPrice : 0;
   };
 
-  const calculateNightlyBreakdown = async (
-    categoryId: string,
-    checkinDate: string,
-    checkoutDate: string,
-    pricingPlanId?: string,
-    adults: number = 1,
-    children: number = 0,
-  ): Promise<Array<{ date: string; dayLabel: string; amount: number }>> => {
-    const establishmentId = getEstablishmentId();
-    if (!establishmentId || !categoryId || !checkinDate || !checkoutDate) return [];
-
-    let planId = pricingPlanId;
-    if (!planId) {
-      const { data: defaultPlan } = await supabase
-        .from("pricing_plans")
-        .select("id")
-        .eq("establishment_id", establishmentId)
-        .eq("code", "BAR")
-        .maybeSingle();
-      planId = defaultPlan?.id;
-    }
-    if (!planId) return [];
-
-    const [cy, cm, cd] = checkinDate.split("-").map(Number);
-    const [ey, em, ed] = checkoutDate.split("-").map(Number);
-    const checkin = startOfDay(new Date(cy, cm - 1, cd));
-    const checkout = startOfDay(new Date(ey, em - 1, ed));
-    const nights = Math.ceil((checkout.getTime() - checkin.getTime()) / (1000 * 60 * 60 * 24));
-    if (nights <= 0) return [];
-
-    const requests = Array.from({ length: nights }, (_, i) => {
-      const currentDate = startOfDay(addDays(checkin, i));
-      return {
-        establishmentId,
-        categoryId,
-        planId: planId!,
-        date: format(currentDate, "yyyy-MM-dd"),
-        adults,
-        children,
-      };
-    });
-
-    try {
-      const batchResults = await batchCalculateRatePrice(requests, supabase);
-      return batchResults.map((result, i) => {
-        const d = addDays(checkin, i);
-        const dateStr = format(d, "yyyy-MM-dd");
-        return {
-          date: dateStr,
-          dayLabel: format(d, "EEEE", { locale: ptBR }),
-          amount: result.success ? Number(result.price) || 0 : 0,
-        };
-      });
-    } catch {
-      return [];
-    }
-  };
-
   // Validar código de promoção
   const validatePromotionCode = async (
     code: string,
@@ -602,7 +544,6 @@ export const usePricing = () => {
     updatePromotion: updatePromotion.mutateAsync,
     deletePromotion: deletePromotion.mutateAsync,
     calculatePrice,
-    calculateNightlyBreakdown,
     validatePromotionCode,
     isCreating: createSeason.isPending || createRule.isPending || createPromotion.isPending,
   };

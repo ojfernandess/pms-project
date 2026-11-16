@@ -1559,6 +1559,18 @@ export const ReservationDialog = ({
           return;
         }
         
+        // Criar data com timezone local
+        // O PostgreSQL TIMESTAMPTZ armazena em UTC, então precisamos garantir que a data seja interpretada no timezone local
+        const [year, month, day] = expirationDate.split('-').map(Number);
+        const [hours, minutes] = expirationTime.split(':').map(Number);
+        
+        // Validar valores numéricos
+        if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hours) || isNaN(minutes)) {
+          toast.error("Data ou hora de expiração inválida");
+          setLoading(false);
+          return;
+        }
+        
         const hotelTimezone = hotelSettings?.timezone?.trim() || DEFAULT_HOTEL_TZ;
         let expirationISOString: string;
         try {
@@ -1572,7 +1584,6 @@ export const ReservationDialog = ({
           setLoading(false);
           return;
         }
-
         reservationData.expiration_date = expirationISOString;
       }
 
@@ -2166,7 +2177,10 @@ export const ReservationDialog = ({
 
                 if (!categoryAvailability.available) {
                   console.warn("❌ Disponibilidade não confirmada na categoria:", categoryAvailability.reason);
-                  toast.error(categoryAvailability.reason || "Nenhum quarto disponível neste período");
+        const created = await createReservation(cleanReservationData);
+        if (created?.id) {
+          await persistCleaningFeeIfNeeded(created.id);
+        }
                   setLoading(false);
                   return;
                 }
@@ -2254,10 +2268,7 @@ export const ReservationDialog = ({
         
         console.log("📤 Dados da reserva a serem enviados:", cleanReservationData);
         
-        const created = await createReservation(cleanReservationData);
-        if (created?.id) {
-          await persistCleaningFeeIfNeeded(created.id);
-        }
+        await createReservation(cleanReservationData);
       }
 
       // Limpar formulário
@@ -2308,6 +2319,7 @@ export const ReservationDialog = ({
     } catch (error: any) {
       toast.error(error.message || "Erro ao salvar reserva");
     } finally {
+    <>
       setLoading(false);
       setCreatingClient(false);
     }
@@ -2396,7 +2408,6 @@ export const ReservationDialog = ({
   };
 
   return (
-    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -3601,7 +3612,7 @@ export const ReservationDialog = ({
                 max={
                   selectedCategory
                     ? selectedCategory.capacity_children
-                    : 10
+            {formData.checkin_date && formData.checkout_date && displayLodgingTotal > 0 && (
                 }
                 value={formData.children}
                 onChange={(e) =>
@@ -3654,43 +3665,28 @@ export const ReservationDialog = ({
                       availableRooms.length === 0 &&
                       !(reservationId && (formData.room_id || "").trim())
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={
-                        availableRooms.length === 0 && !(reservationId && (formData.room_id || "").trim())
-                          ? "Nenhum quarto disponível"
-                          : "Selecione um quarto"
-                      } />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableRooms.map((room) => (
-                        <SelectItem key={room.id} value={room.id}>
-                          {room.room_number} {room.floor && `- Andar ${room.floor}`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                {formData.category_id && !loadingRooms && (
-                  <>
-                    {!formData.checkin_date || !formData.checkout_date ? (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Preencha as datas de check-in e check-out para ver a disponibilidade
-                      </p>
-                    ) : availableRooms.length === 0 &&
-                      !(reservationId && (formData.room_id || "").trim()) ? (
-                      <p className="text-xs text-warning mt-1">
-                        Nenhum quarto disponível neste período
-                      </p>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Cupom de Desconto */}
-            {formData.checkin_date && formData.checkout_date && displayLodgingTotal > 0 && (
-              <div className="col-span-2">
+            {/* Cotação estimada */}
+            {formData.checkin_date &&
+              formData.checkout_date &&
+              reservationAction !== "blocked" &&
+              new Date(formData.checkout_date) > new Date(formData.checkin_date) && (
+                <ReservationQuoteSummary
+                  checkinDate={formData.checkin_date}
+                  checkoutDate={formData.checkout_date}
+                  nightlyLines={nightlyQuoteLines}
+                  lodgingTotal={displayLodgingTotal}
+                  cleaningFee={cleaningFeeConfig?.amount ?? 0}
+                  cleaningConfigured={cleaningConfigured}
+                  includeCleaning={includeCleaningInQuote}
+                  onIncludeCleaningChange={setIncludeCleaningInQuote}
+                  loading={calculatingPrice && calculatedTotal <= 0 && provisionalLodgingTotal <= 0}
+                  hasCategory={Boolean(formData.category_id)}
+                  couponFinalAmount={
+                    appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : null
+                  }
+                  showCleaningToggle={!reservationId}
+                />
+              )}
                 <Label htmlFor="promotion_code">Cupom de Desconto (opcional)</Label>
                 <div className="flex gap-2">
                   <Input
@@ -3742,28 +3738,43 @@ export const ReservationDialog = ({
               </div>
             )}
 
-            {/* Cotação estimada */}
-            {formData.checkin_date &&
-              formData.checkout_date &&
-              reservationAction !== "blocked" &&
-              new Date(formData.checkout_date) > new Date(formData.checkin_date) && (
-                <ReservationQuoteSummary
-                  checkinDate={formData.checkin_date}
-                  checkoutDate={formData.checkout_date}
-                  nightlyLines={nightlyQuoteLines}
-                  lodgingTotal={displayLodgingTotal}
-                  cleaningFee={cleaningFeeConfig?.amount ?? 0}
-                  cleaningConfigured={cleaningConfigured}
-                  includeCleaning={includeCleaningInQuote}
-                  onIncludeCleaningChange={setIncludeCleaningInQuote}
-                  loading={calculatingPrice && calculatedTotal <= 0 && provisionalLodgingTotal <= 0}
-                  hasCategory={Boolean(formData.category_id)}
-                  couponFinalAmount={
-                    appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : null
-                  }
-                  showCleaningToggle={!reservationId}
-                />
-              )}
+            {/* Total calculado */}
+            {calculatedTotal > 0 && (
+              <div className="col-span-2 p-4 bg-muted rounded-lg">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">Total estimado:</span>
+                  {calculatingPrice ? (
+                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  ) : (
+                    <span className="text-2xl font-bold text-primary">
+                      {formatCurrency(appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : calculatedTotal)}
+                    </span>
+                  )}
+                </div>
+                {appliedCoupon && appliedCoupon.valid && (
+                  <div className="mt-2 pt-2 border-t border-slate-300">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">Subtotal:</span>
+                      <span className="text-slate-700">{formatCurrency(calculatedTotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm text-green-600">
+                      <span>Desconto ({appliedCoupon.coupon_code}):</span>
+                      <span className="font-semibold">-{formatCurrency(appliedCoupon.discount_amount)}</span>
+                    </div>
+                  </div>
+                )}
+                {formData.checkin_date && formData.checkout_date && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {Math.ceil(
+                      (new Date(formData.checkout_date).getTime() -
+                        new Date(formData.checkin_date).getTime()) /
+                        (1000 * 60 * 60 * 24)
+                    )}{" "}
+                    noite(s)
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Motivo do Bloqueio - Apenas para bloqueios */}
             {reservationAction === "blocked" && (
@@ -3931,39 +3942,6 @@ export const ReservationDialog = ({
                 id="notes"
                 value={formData.notes}
                 onChange={(e) =>
-                  setFormData({ ...formData, notes: e.target.value })
-                }
-                rows={3}
-                placeholder={reservationAction === "blocked" ? "Observações adicionais sobre o bloqueio" : "Observações sobre a reserva"}
-                disabled={reservationId && !isEditMode}
-              />
-            </div>
-          </div>
-
-          {/* Resumo de Valores - apenas para reservas existentes */}
-          {reservationId && !isEditMode && currentReservation && (
-            <div className="grid grid-cols-3 gap-4 p-4 border-t bg-slate-50 rounded-lg">
-              <div>
-                <div className="text-sm text-muted-foreground mb-1">Valor Total</div>
-                <div className="text-lg font-bold text-blue-600">
-                  {formatCurrency(totalWithFees)}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-muted-foreground mb-1">Valor Pago</div>
-                <div className="text-lg font-bold text-orange-600">
-                  {formatCurrency(currentReservation.paid_amount || 0)}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-muted-foreground mb-1">Valor Restante</div>
-                <div className="text-lg font-bold text-red-600">
-                  {formatCurrency(Math.max(0, totalWithFees - (currentReservation.paid_amount || 0)))}
-                </div>
-              </div>
-            </div>
-          )}
-
           <div className="flex justify-between gap-2">
             {/* Botão Lançar Pagamento - apenas para reservas existentes */}
             {reservationId && currentReservation && (
@@ -4019,6 +3997,39 @@ export const ReservationDialog = ({
           </div>
         </form>
 
+        {/* Modal de Lançamento de Pagamento */}
+        <ReservationPaymentModal
+          open={paymentModalOpen}
+          onOpenChange={setPaymentModalOpen}
+          reservation={currentReservation}
+          onSuccess={() => {
+            // Recarregar dados
+            queryClient.invalidateQueries({ queryKey: ["reservations"] });
+            onSuccess();
+            // Recarregar dados da reserva atual
+            if (reservationId) {
+              supabase
+                .from("reservations")
+                .select(`
+                  *, 
+                  financial_responsible:clients!client_id(full_name),
+                  guest:clients!guest_id(full_name),
+                  rooms(room_number)
+                `)
+                .eq("id", reservationId)
+                .single()
+                .then(({ data }) => {
+                  if (data) {
+                    setCurrentReservation({
+                      ...data,
+                      guest_name: data.guest?.full_name || data.financial_responsible?.full_name,
+                    });
+                  }
+                });
+            }
+          }}
+        />
+
       {/* Modal de Cancelamento */}
       {reservationId && (
         <CancelReservationDialog
@@ -4044,7 +4055,10 @@ export const ReservationDialog = ({
               setSelectedServiceFee(null);
               setEditingServiceFee(null);
             }
-          }}
+                  const createdPast = await createReservation(cleanReservationData);
+                  if (createdPast?.id) {
+                    await persistCleaningFeeIfNeeded(createdPast.id);
+                  }
           serviceFee={selectedServiceFee}
           reservationId={reservationId}
           existingFee={editingServiceFee || undefined}
@@ -4101,6 +4115,37 @@ export const ReservationDialog = ({
               onClick={async () => {
                 if (!pendingReservationData) {
                   setShowPastDateAlert(false);
+
+    <ReservationPaymentModal
+      open={paymentModalOpen}
+      onOpenChange={setPaymentModalOpen}
+      reservation={currentReservation}
+      onSuccess={() => {
+        queryClient.invalidateQueries({ queryKey: ["reservations"] });
+        onSuccess();
+        if (reservationId) {
+          supabase
+            .from("reservations")
+            .select(`
+              *, 
+              financial_responsible:clients!client_id(full_name),
+              guest:clients!guest_id(full_name),
+              rooms(room_number)
+            `)
+            .eq("id", reservationId)
+            .single()
+            .then(({ data }) => {
+              if (data) {
+                setCurrentReservation({
+                  ...data,
+                  guest_name: data.guest?.full_name || data.financial_responsible?.full_name,
+                });
+              }
+            });
+        }
+      }}
+    />
+    </>
                   return;
                 }
 
@@ -4132,10 +4177,7 @@ export const ReservationDialog = ({
                     cleanReservationData.checkout_time = null;
                   }
                   
-                  const createdPast = await createReservation(cleanReservationData);
-                  if (createdPast?.id) {
-                    await persistCleaningFeeIfNeeded(createdPast.id);
-                  }
+                  await createReservation(cleanReservationData);
 
                   // Limpar formulário
                   const defaultCheckinTime = hotelSettings?.checkin_time 
@@ -4192,37 +4234,6 @@ export const ReservationDialog = ({
       </AlertDialog>
       </DialogContent>
     </Dialog>
-
-    <ReservationPaymentModal
-      open={paymentModalOpen}
-      onOpenChange={setPaymentModalOpen}
-      reservation={currentReservation}
-      onSuccess={() => {
-        queryClient.invalidateQueries({ queryKey: ["reservations"] });
-        onSuccess();
-        if (reservationId) {
-          supabase
-            .from("reservations")
-            .select(`
-              *, 
-              financial_responsible:clients!client_id(full_name),
-              guest:clients!guest_id(full_name),
-              rooms(room_number)
-            `)
-            .eq("id", reservationId)
-            .single()
-            .then(({ data }) => {
-              if (data) {
-                setCurrentReservation({
-                  ...data,
-                  guest_name: data.guest?.full_name || data.financial_responsible?.full_name,
-                });
-              }
-            });
-        }
-      }}
-    />
-    </>
   );
 };
 
