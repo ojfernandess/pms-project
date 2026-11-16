@@ -32,7 +32,7 @@ import { BlockViewDialog } from "@/components/reservations/BlockViewDialog";
 import { CancelReservationDialog } from "@/components/reservations/CancelReservationDialog";
 import { MaintenanceTicketDialog } from "@/components/maintenance/MaintenanceTicketDialog";
 import PendingReservations from "@/pages/PendingReservations";
-import { formatCurrency, formatDate } from "@/lib/reservationUtils";
+import { formatCurrency, formatDate, formatReservationCreatedAt } from "@/lib/reservationUtils";
 import { format, parseISO, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -46,13 +46,6 @@ import { logActivity } from "@/lib/activityLogger";
 import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 import { useTranslation } from "react-i18next";
 import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
-
-function formatReservationCreatedAt(iso?: string | null): string {
-  if (!iso) return "—";
-  const d = parseISO(iso);
-  if (!isValid(d)) return "—";
-  return format(d, "dd/MM/yyyy HH:mm", { locale: ptBR });
-}
 
 function getReservationOriginLabel(reservation: {
   channel?: string | null;

@@ -31,7 +31,7 @@ import { useReservations } from "@/hooks/useReservations";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { SplitReservationDialog } from "@/components/reservations/SplitReservationDialog";
 import { ChangeRoomDialog } from "@/components/reservations/ChangeRoomDialog";
-import { formatCurrency, formatDate } from "@/lib/reservationUtils";
+import { formatCurrency, formatDate, formatReservationCreatedAt } from "@/lib/reservationUtils";
 import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 import {
   channexRevisionPayloadGuestName,
@@ -473,6 +473,7 @@ const PendingReservations = () => {
                     <TableRow>
                       <TableHead>Código</TableHead>
                       <TableHead>Hóspede</TableHead>
+                      <TableHead>Criado em</TableHead>
                       <TableHead>Criado por</TableHead>
                       <TableHead>Check-in</TableHead>
                       <TableHead>Check-out</TableHead>
@@ -490,6 +491,9 @@ const PendingReservations = () => {
                         </TableCell>
                         <TableCell>
                           {reservationGuestDisplayName(reservation)}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm">
+                          {formatReservationCreatedAt(reservation.created_at)}
                         </TableCell>
                         <TableCell>
                           {reservation.created_by_user?.full_name?.trim() ||

@@ -1,3 +1,5 @@
+import { format, isValid, parseISO } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -527,4 +529,12 @@ export const formatDate = (date: string): string => {
   }
   return new Date(raw).toLocaleDateString("pt-BR");
 };
+
+/** Data e hora de criação da reserva (TIMESTAMPTZ → exibição pt-BR). */
+export function formatReservationCreatedAt(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = parseISO(iso);
+  if (!isValid(d)) return "—";
+  return format(d, "dd/MM/yyyy HH:mm", { locale: ptBR });
+}
 
