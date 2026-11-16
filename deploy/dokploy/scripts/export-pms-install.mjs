@@ -33,7 +33,7 @@ const out = {
     base64,
   },
   notes: [
-    "No Dokploy: Create Service → Compose → Advanced → Import → cole dokploy.base64.",
+    "No Dokploy: Import → cole SÓ deploy/dokploy/pms-install.base64 (não o .json).",
     "Ligue o repositório Git na raiz do monorepo (mesma branch).",
     "Primeiro Postgres vazio: defina PRISMA_MIGRATE_ON_START=true no Environment, deploy, depois volte a false.",
     "DATABASE_URL no painel: só a URL, sem prefixo DATABASE_URL=.",
@@ -41,6 +41,9 @@ const out = {
 };
 
 const outPath = path.join(dokployDir, "pms-install.json");
+const base64OnlyPath = path.join(dokployDir, "pms-install.base64");
 writeFileSync(outPath, `${JSON.stringify(out, null, 2)}\n`, "utf8");
+writeFileSync(base64OnlyPath, base64, "utf8");
 console.error(`Escrito: ${outPath}`);
+console.error(`Escrito: ${base64OnlyPath} (cole SÓ este ficheiro no Dokploy)`);
 console.error(`Base64 length: ${base64.length}`);

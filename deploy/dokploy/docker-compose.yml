@@ -1,6 +1,6 @@
-# StayOS PMS — blueprint Dokploy (Compose único, build a partir do Git).
-# Conecte o repositório: ojfernandess/pms-project, branch PMS-Backend, raiz do monorepo.
-# Import: deploy/dokploy/pms-install.json (campo base64 no painel Advanced → Import).
+# StayOS PMS — blueprint Dokploy (compose unico, build Git).
+# Repo: ojfernandess/pms-project branch PMS-Backend (monorepo root).
+# Import Dokploy: paste deploy/dokploy/pms-install.base64 (NOT the JSON file).
 version: "3.8"
 
 services:
