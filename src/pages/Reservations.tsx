@@ -295,6 +295,7 @@ const Reservations = () => {
       cancelled: { label: "Cancelada", variant: "destructive" },
       noshow: { label: "No Show", variant: "destructive" },
       blocked: { label: "Quarto Bloqueado", variant: "secondary" },
+      preregistration: { label: "Pré-reserva", variant: "secondary" },
     };
 
     const statusInfo = statusMap[status] || { label: status, variant: "outline" };
@@ -514,6 +515,9 @@ const Reservations = () => {
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setStatusFilter("pending")}>
                       {t("reservations.pendingStatusFilter")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setStatusFilter("preregistration")}>
+                      {t("reservations.preregistrationStatus")}
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setStatusFilter("confirmed")}>
                       {t("reservations.confirmedStatus")}

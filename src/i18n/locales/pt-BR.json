@@ -75,7 +75,8 @@
     "checkedin": "Check-in",
     "checkedout": "Check-out",
     "blocked": "Quartos Bloqueados",
-    "cancelled": "Canceladas"
+    "cancelled": "Canceladas",
+    "preregistrationStatus": "Pré-reservas"
   },
   "language": {
     "title": "Idioma",
