@@ -57,4 +57,13 @@ Nos logs, confirme:
 - Se aparecer só `#PMS-Backend` no backend: compose antigo ou **reimporte** `pms-install.base64` atual
 - Faça **um deploy com cache limpo** (opção *Clean cache* / rebuild sem cache no Dokploy) — camadas CACHED de contexto errado quebram o build
 
-Documentação geral: [../README.md](../README.md).
+## Postgres vazio: `Tabela não encontrada: site_settings`
+
+O backend sobe, mas o **schema PMS** (centenas de tabelas `public.*`) não vem do build. É preciso **pg_restore** do Easypanel (sandbox) ou aplicar `supabase/migrations`.
+
+- `PRISMA_MIGRATE_ON_START=true` só aplica migracoes Nest (2 ficheiros), **nao** o schema completo.
+- Apos deploy, veja logs: `Schema PMS incompleto` ou `check-public-schema`.
+- Diagnostico: `GET https://myapi.../health?deep=1` → `schema.ready: false`.
+- Opcional: `PMS_REQUIRE_PUBLIC_SCHEMA=true` para falhar o container sem schema (apos import).
+
+Documentação geral: [../README.md](../README.md). [../../docs/migration/easypanel-postgres-cutover.md](../../docs/migration/easypanel-postgres-cutover.md).

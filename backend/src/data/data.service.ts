@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { SessionUser } from "../auth/auth.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { SchemaReadinessService } from "../prisma/schema-readiness.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { Catalog, QueryRequest, columnTypeFromUdt, compileQuery, parseSelect } from "./query-compiler";
 
@@ -50,10 +51,12 @@ type QueryResult = { data: unknown; error: { message: string; code?: string } | 
 export class DataService {
   private readonly logger = new Logger(DataService.name);
   private catalog: Promise<Catalog> | null = null;
+  private readonly missingTableWarned = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly schemaReadiness: SchemaReadinessService,
   ) {}
 
   async query(request: QueryRequest, user: SessionUser | null): Promise<QueryResult> {
@@ -100,7 +103,7 @@ export class DataService {
       return { data: request.head ? null : records, error: null, count: rows.count };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erro na consulta";
-      this.logger.warn(message);
+      this.logQueryFailure(message);
       return { data: null, error: { message }, count: null };
     }
   }
@@ -171,6 +174,21 @@ export class DataService {
       await tx.$executeRawUnsafe(`SET LOCAL ROLE ${dbRole}`);
       return run(tx);
     }, { maxWait: 15000, timeout: 45000 });
+  }
+
+  private logQueryFailure(message: string): void {
+    const missing = /^Tabela não encontrada: (.+)$/.exec(message);
+    if (missing && !this.schemaReadiness.schemaReady) {
+      const table = missing[1];
+      if (!this.missingTableWarned.has(table)) {
+        this.missingTableWarned.add(table);
+        this.logger.warn(
+          `${message} — Postgres sem schema PMS; restaure dump/migracoes. Avisos repetidos desta tabela suprimidos.`,
+        );
+      }
+      return;
+    }
+    this.logger.warn(message);
   }
 
   private loadCatalog(): Promise<Catalog> {

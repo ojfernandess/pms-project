@@ -1,0 +1,39 @@
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { PrismaService } from "./prisma.service";
+
+@Injectable()
+export class SchemaReadinessService implements OnModuleInit {
+  private readonly logger = new Logger(SchemaReadinessService.name);
+  /** false quando public.companies (e resto do PMS) ainda nao existe — ex. Postgres novo no Dokploy. */
+  schemaReady = false;
+  publicTableCount = 0;
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async onModuleInit(): Promise<void> {
+    try {
+      const rows = await this.prisma.$queryRaw<
+        { companies: string | null; table_count: bigint | number }[]
+      >`
+        SELECT to_regclass('public.companies')::text AS companies,
+               (SELECT count(*) FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_type = 'BASE TABLE') AS table_count
+      `;
+      const row = rows[0];
+      this.publicTableCount = Number(row?.table_count ?? 0);
+      this.schemaReady = Boolean(row?.companies);
+      if (!this.schemaReady) {
+        this.logger.error(
+          `Schema PMS incompleto (${this.publicTableCount} tabelas em public; falta companies/site_settings). ` +
+            "Restaure pg_dump do Easypanel ou aplique migracoes SQL. " +
+            "PRISMA_MIGRATE_ON_START nao cria o schema completo do PMS.",
+        );
+        return;
+      }
+      this.logger.log(`Schema PMS validado (public.companies presente; ${this.publicTableCount} tabelas).`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Validacao de schema falhou: ${message}`);
+    }
+  }
+}

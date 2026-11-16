@@ -24,6 +24,10 @@ else
   echo "Skipping prisma migrate deploy (set PRISMA_MIGRATE_ON_START=true for empty Postgres or after baseline)."
 fi
 
+if [ -f ./scripts/check-public-schema.mjs ]; then
+  node ./scripts/check-public-schema.mjs || echo "WARN: check-public-schema falhou" >&2
+fi
+
 # auth.uid() / auth.role() para RLS e RPCs SECURITY DEFINER (Postgres sem stack Supabase)
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/auth-compat.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=0 -f ./scripts/migration/auth-compat.sql >/dev/null 2>&1 \
