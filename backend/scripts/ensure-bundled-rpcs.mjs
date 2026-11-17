@@ -133,6 +133,19 @@ async function hasPgcryptoCrypt(client) {
   return rows.length > 0;
 }
 
+/** Versao antiga usava crypt() sem schema; pgcrypto esta em extensions. */
+async function guestVerifyPasswordStale(client) {
+  const { rows } = await client.query(
+    `SELECT pg_get_functiondef(p.oid) AS def
+     FROM pg_proc p
+     JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public' AND p.proname = 'verify_guest_password'
+     LIMIT 1`,
+  );
+  if (!rows[0]?.def) return true;
+  return !String(rows[0].def).includes("extensions.crypt");
+}
+
 async function bundledRpcsComplete(client) {
   for (const rpc of REQUIRED_RPCS) {
     if (!(await hasPublicFunction(client, rpc.name, rpc.args))) return false;
@@ -189,6 +202,9 @@ async function applyIncrementalPatches(client, url, rpcDir) {
       }
     }
     if (patch.requiresPgcrypto && !(await hasPgcryptoCrypt(client))) {
+      needs = true;
+    }
+    if (patch.sql === "guest_account_rpcs.sql" && (await guestVerifyPasswordStale(client))) {
       needs = true;
     }
     if (!needs) continue;

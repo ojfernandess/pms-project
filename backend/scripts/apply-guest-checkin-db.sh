@@ -20,6 +20,9 @@ fi
 echo "=== pgcrypto-bootstrap.sql ==="
 psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/pgcrypto-bootstrap.sql
 
+echo "=== guest_verify_password_hotfix.sql ==="
+psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/guest_verify_password_hotfix.sql
+
 echo "=== guest_account_rpcs.sql ==="
 psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/guest_account_rpcs.sql
 

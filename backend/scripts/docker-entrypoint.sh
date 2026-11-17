@@ -39,6 +39,12 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/pgcrypto-bootstrap.sq
     || echo "WARN: pgcrypto-bootstrap.sql falhou (precisa superuser no Postgres para CREATE EXTENSION)" >&2
 fi
 
+# Funcao verify_guest_password legada (crypt sem schema extensions) → 42883 no login
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/rpc/guest_verify_password_hotfix.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/guest_verify_password_hotfix.sql \
+    || echo "WARN: guest_verify_password_hotfix.sql falhou" >&2
+fi
+
 # DDL incremental (colunas usadas pelo frontend / DataService)
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/cleaning_fee_configuration.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/cleaning_fee_configuration.sql \
