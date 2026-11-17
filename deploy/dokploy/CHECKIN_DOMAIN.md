@@ -41,6 +41,7 @@ Cole o novo `deploy/dokploy/pms-install.base64` em **Advanced → Import** (só 
 WEB_CHECKIN_PUBLIC_HOST=checkin.stayos.com.br
 WEB_CHECKIN_TRAEFIK_RULE=Host(`checkin.stayos.com.br`)
 WEB_CHECKIN_PUBLIC_URL=https://checkin.stayos.com.br
+CORS_ORIGINS=https://pms.stayos.com.br,https://checkin.stayos.com.br
 ```
 
 3. **Domains** (já deve existir `pms` no frontend):
