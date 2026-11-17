@@ -3352,6 +3352,7 @@ model site_settings {
   pms_base_url                 String?
   web_checkin_public_base_url  String?
   robots_txt                   String?
+  storage_config               Json?    @default("{\"provider\":\"local\"}")
 
   @@schema("public")
 }

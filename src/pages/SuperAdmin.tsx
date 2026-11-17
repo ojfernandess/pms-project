@@ -71,6 +71,7 @@ import { toast } from "sonner";
 import { invalidateLogConfigCache } from "@/lib/logger";
 import { WebCheckinDomainHelp } from "@/components/site-settings/WebCheckinDomainHelp";
 import { PlatformCustomDomainsManager } from "@/components/super-admin/PlatformCustomDomainsManager";
+import { PlatformStorageSettingsManager } from "@/components/super-admin/PlatformStorageSettingsManager";
 import { WebCheckinDeployChecklist } from "@/components/site-settings/WebCheckinDeployChecklist";
 import {
   DropdownMenu,
@@ -531,6 +532,7 @@ const SiteSettingsManager = () => {
               pmsBaseUrl={formData.pms_base_url}
             />
             <PlatformCustomDomainsManager />
+            <PlatformStorageSettingsManager />
           </div>
         </div>
 

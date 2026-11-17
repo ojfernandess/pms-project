@@ -41,7 +41,7 @@ import {
   CreditCard,
   Tag
 } from "lucide-react";
-import { format, parseISO, differenceInDays, addDays, isAfter, isBefore, isValid } from "date-fns";
+import { format, parseISO, differenceInDays, addDays, isAfter, isBefore, isValid, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
   formatCurrency,
@@ -84,6 +84,9 @@ import { FnrhConfirmCheckinButton } from "@/components/reservations/FnrhConfirmC
 import { usePermissions } from "@/hooks/usePermissions";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
+import { resolveDocumentFields } from "@/lib/resolveDocumentStorageUrl";
+import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
+import type { NightlyQuoteLine } from "@/components/reservations/ReservationQuoteSummary";
 import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
 import {
   formatReservationChannelOrigin,
@@ -431,75 +434,14 @@ const ReservationDetails = () => {
           console.error("❌ Error fetching guests:", guestsError);
         }
         
-        // Gerar signed URLs para as imagens se necessário (bucket privado)
         const documentsWithUrls = await Promise.all(
-          (documentsData || []).map(async (doc: any) => {
-            const docWithUrls = { ...doc };
-            
-            // Função auxiliar para extrair o caminho do arquivo da URL
-            const extractFilePath = (url: string): string | null => {
-              if (!url) return null;
-              // Se já for um caminho relativo (começa com web-checkin/), retornar direto
-              if (url.startsWith("web-checkin/")) return url;
-              // Se for uma URL completa, extrair o caminho após /documents/
-              const match = url.match(/\/documents\/(.+)$/);
-              if (match) return match[1];
-              // Se não encontrar, tentar usar a URL como está (pode ser um caminho direto)
-              return url;
-            };
-            
-            // Gerar signed URLs para cada tipo de documento se existir
-            if (doc.document_front_url) {
-              try {
-                const filePath = extractFilePath(doc.document_front_url);
-                if (filePath) {
-                  const { data: signedData, error } = await supabase.storage
-                    .from("documents")
-                    .createSignedUrl(filePath, 3600);
-                  if (!error && signedData) {
-                    docWithUrls.document_front_url = signedData.signedUrl;
-                  }
-                }
-              } catch (error) {
-                console.error("Erro ao gerar signed URL para document_front:", error);
-                // Manter URL original se falhar
-              }
-            }
-            
-            if (doc.document_back_url) {
-              try {
-                const filePath = extractFilePath(doc.document_back_url);
-                if (filePath) {
-                  const { data: signedData, error } = await supabase.storage
-                    .from("documents")
-                    .createSignedUrl(filePath, 3600);
-                  if (!error && signedData) {
-                    docWithUrls.document_back_url = signedData.signedUrl;
-                  }
-                }
-              } catch (error) {
-                console.error("Erro ao gerar signed URL para document_back:", error);
-              }
-            }
-            
-            if (doc.selfie_url) {
-              try {
-                const filePath = extractFilePath(doc.selfie_url);
-                if (filePath) {
-                  const { data: signedData, error } = await supabase.storage
-                    .from("documents")
-                    .createSignedUrl(filePath, 3600);
-                  if (!error && signedData) {
-                    docWithUrls.selfie_url = signedData.signedUrl;
-                  }
-                }
-              } catch (error) {
-                console.error("Erro ao gerar signed URL para selfie:", error);
-              }
-            }
-            
-            return docWithUrls;
-          })
+          (documentsData || []).map(async (doc: any) =>
+            resolveDocumentFields(doc, [
+              "document_front_url",
+              "document_back_url",
+              "selfie_url",
+            ])
+          )
         );
         
         // Pré check-in: mesclar web_checkin.guest_data.guests[] (FNRH/dados do fluxo) com as linhas
@@ -845,6 +787,109 @@ const ReservationDetails = () => {
     }
     return 0;
   }, [isEditingDates, editCheckinDate, editCheckoutDate, reservation]);
+
+  const [nightlyRateLines, setNightlyRateLines] = useState<NightlyQuoteLine[]>([]);
+  const [loadingNightlyRates, setLoadingNightlyRates] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadNightlyBreakdown = async () => {
+      if (!reservation?.checkin_date || !reservation?.checkout_date) {
+        setNightlyRateLines([]);
+        return;
+      }
+      const checkin = parseISO(reservation.checkin_date);
+      const checkout = parseISO(reservation.checkout_date);
+      const nights = differenceInDays(checkout, checkin);
+      if (nights <= 0) {
+        setNightlyRateLines([]);
+        return;
+      }
+
+      const establishmentId =
+        reservation.establishment_id ??
+        selectedEstablishment?.id ??
+        getSelectedEstablishmentId();
+      let categoryId =
+        reservation.room_category_id ||
+        reservation.category_id ||
+        reservation.rooms?.room_category_id;
+      if (!establishmentId || !categoryId) {
+        setNightlyRateLines([]);
+        return;
+      }
+
+      setLoadingNightlyRates(true);
+      try {
+        let pricingPlanId = reservation.pricing_plan_id as string | undefined;
+        if (!pricingPlanId) {
+          const { data: rules } = await supabase
+            .from("pricing_rules")
+            .select("pricing_plan_id")
+            .eq("category_id", categoryId)
+            .limit(1);
+          pricingPlanId = rules?.[0]?.pricing_plan_id ?? undefined;
+        }
+        if (!pricingPlanId) {
+          const { data: barPlan } = await supabase
+            .from("pricing_plans")
+            .select("id")
+            .eq("establishment_id", establishmentId)
+            .eq("code", "BAR")
+            .maybeSingle();
+          pricingPlanId = barPlan?.id;
+        }
+        if (!pricingPlanId) {
+          setNightlyRateLines([]);
+          return;
+        }
+
+        const adults = Math.max(1, Number(reservation.adults ?? 2));
+        const children = Math.max(0, Number(reservation.children ?? 0));
+        const requests = Array.from({ length: nights }, (_, i) => ({
+          establishmentId,
+          categoryId,
+          planId: pricingPlanId!,
+          date: format(startOfDay(addDays(checkin, i)), "yyyy-MM-dd"),
+          adults,
+          children,
+        }));
+        const results = await batchCalculateRatePrice(requests, supabase);
+        if (cancelled) return;
+        const lines: NightlyQuoteLine[] = results.map((result, i) => {
+          const d = addDays(checkin, i);
+          return {
+            date: format(d, "yyyy-MM-dd"),
+            dayLabel: format(d, "dd/MM/yyyy (EEE)", { locale: ptBR }),
+            amount: result.success ? result.price : 0,
+          };
+        });
+        setNightlyRateLines(lines);
+      } catch (err) {
+        console.warn("Erro ao carregar diárias da reserva:", err);
+        if (!cancelled) setNightlyRateLines([]);
+      } finally {
+        if (!cancelled) setLoadingNightlyRates(false);
+      }
+    };
+
+    void loadNightlyBreakdown();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    reservation?.id,
+    reservation?.checkin_date,
+    reservation?.checkout_date,
+    reservation?.establishment_id,
+    reservation?.room_category_id,
+    reservation?.category_id,
+    reservation?.pricing_plan_id,
+    reservation?.adults,
+    reservation?.children,
+    reservation?.rooms?.room_category_id,
+    selectedEstablishment?.id,
+  ]);
 
   // Calcular total incluindo taxas
   const totalWithFees = useMemo(() => {
@@ -2849,11 +2894,34 @@ const ReservationDetails = () => {
               })()}
             </div>
             <div className="grid grid-cols-3 gap-6 mb-6">
-              <div className="p-6 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100/50 border border-blue-200">
+              <div className="p-6 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100/50 border border-blue-200 col-span-1">
                 <Label className="text-sm font-medium text-slate-600 mb-2 block">Valor Total</Label>
                 <div className="text-3xl font-bold text-blue-700">
                   {formatCurrency(totalWithFees)}
                 </div>
+                {(nightlyRateLines.length > 0 || loadingNightlyRates) && (
+                  <div className="mt-4 pt-3 border-t border-blue-200/80 space-y-1.5 max-h-40 overflow-y-auto">
+                    <p className="text-xs font-medium text-slate-500 mb-1">Diárias (hospedagem)</p>
+                    {loadingNightlyRates && nightlyRateLines.length === 0 ? (
+                      <p className="text-xs text-slate-500 flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Calculando…
+                      </p>
+                    ) : (
+                      nightlyRateLines.map((line) => (
+                        <div
+                          key={line.date}
+                          className="flex justify-between text-xs text-slate-600"
+                        >
+                          <span className="truncate pr-2">{line.dayLabel}</span>
+                          <span className="font-medium text-blue-800 shrink-0">
+                            {formatCurrency(line.amount)}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
               <div className="p-6 rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100/50 border border-emerald-200">
                 <Label className="text-sm font-medium text-slate-600 mb-2 block">Valor Pago</Label>

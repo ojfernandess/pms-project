@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
 import { resolvePmsApiUrl } from "@/lib/runtimeConfig";
+import { normalizeStorageObjectPath } from "@/lib/storageObjectPath";
 
 const SESSION_KEY = "pms.auth.session";
 
@@ -28,27 +29,6 @@ function apiBase(): string {
   return resolvePmsApiUrl();
 }
 
-/** Path relativo no bucket (sem query de URL assinada nem prefixo /storage/v1/object/...). */
-function normalizeStorageObjectPath(path: string): string {
-  let p = (path || "").trim();
-  if (!p) return p;
-  const storageIdx = p.indexOf("/storage/v1/object/");
-  if (storageIdx >= 0) {
-    const rest = p.slice(storageIdx + "/storage/v1/object/".length);
-    const segments = rest.split("/").filter(Boolean);
-    const head = segments[0] ? decodeURIComponent(segments[0]) : "";
-    if (head === "public" || head === "sign" || head === "sign-get") {
-      p = segments.slice(2).map(decodeURIComponent).join("/");
-    } else {
-      p = segments.slice(1).map(decodeURIComponent).join("/");
-    }
-  }
-  const q = p.indexOf("?");
-  if (q >= 0) p = p.slice(0, q);
-  const hash = p.indexOf("#");
-  if (hash >= 0) p = p.slice(0, hash);
-  return p;
-}
 
 function fetchSignal(external?: AbortSignal): { signal: AbortSignal; cancel: () => void } {
   const timeout = new AbortController();

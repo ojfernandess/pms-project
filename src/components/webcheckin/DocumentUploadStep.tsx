@@ -5,6 +5,17 @@ import { Card } from "@/components/ui/card";
 import { Upload, X, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { useWebCheckin } from "@/hooks/useWebCheckin";
 import { supabase } from "@/integrations/supabase/client";
+import { normalizeStorageObjectPath } from "@/lib/storageObjectPath";
+
+function documentPreviewSrc(stored?: string): string {
+  if (!stored?.trim()) return "";
+  if (/^https?:\/\//i.test(stored)) {
+    return supabase.storage.from("documents").getPublicUrl(
+      normalizeStorageObjectPath(stored)
+    ).data.publicUrl;
+  }
+  return supabase.storage.from("documents").getPublicUrl(stored).data.publicUrl;
+}
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useTranslation } from "react-i18next";
 
@@ -147,10 +158,7 @@ export function DocumentUploadStep({
         throw uploadError;
       }
 
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("documents").getPublicUrl(filePath);
-      const fileUrl = publicUrl;
+      const fileUrl = filePath;
 
       // Atualizar documentos - garantir que o documento seja associado ao hóspede correto
       const updatedDocuments = [...documents];
@@ -273,7 +281,7 @@ export function DocumentUploadStep({
                   {documents[index]?.document_front_url ? (
                     <div className="relative">
                       <img
-                        src={documents[index].document_front_url}
+                        src={documentPreviewSrc(documents[index].document_front_url)}
                         alt="Frente"
                         className="w-full h-32 object-cover rounded border"
                       />
@@ -323,7 +331,7 @@ export function DocumentUploadStep({
                   {documents[index]?.document_back_url ? (
                     <div className="relative">
                       <img
-                        src={documents[index].document_back_url}
+                        src={documentPreviewSrc(documents[index].document_back_url)}
                         alt="Verso"
                         className="w-full h-32 object-cover rounded border"
                       />
@@ -375,7 +383,7 @@ export function DocumentUploadStep({
                   {documents[index]?.selfie_url ? (
                     <div className="relative">
                       <img
-                        src={documents[index].selfie_url}
+                        src={documentPreviewSrc(documents[index].selfie_url)}
                         alt="Selfie"
                         className="w-full h-32 object-cover rounded border"
                       />

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import type { StorageConfig } from "@/lib/storageConfig";
 
 export interface SiteSettings {
   id: string;
@@ -16,6 +17,7 @@ export interface SiteSettings {
   web_checkin_public_base_url?: string | null;
   console_logs_enabled?: boolean;
   robots_txt?: string | null;
+  storage_config?: StorageConfig | null;
   features_enabled?: {
     api_integrations?: boolean;
     stripe?: boolean;

@@ -1,10 +1,11 @@
-import { All, Controller, Get, Req, Res } from "@nestjs/common";
+import { All, Controller, Get, Post, Req, Res } from "@nestjs/common";
 import { Request, Response } from "express";
 import { AuthService, SessionUser } from "../auth/auth.service";
 import { StaffIdentityService } from "../auth/staff-identity.service";
 import { DataService } from "./data.service";
 import { QueryRequest } from "./query-compiler";
 import { StorageService } from "./storage.service";
+import { parseStorageConfig } from "./storage.types";
 
 @Controller()
 export class DataController {
@@ -17,7 +18,7 @@ export class DataController {
 
   @All("rest/v1/query")
   async query(@Req() req: Request, @Res() res: Response) {
-    const user = await this.user(req, res);
+    const user = await this.authenticatedUser(req, res);
     if (user === undefined) return;
     const body = (req.body ?? {}) as QueryRequest;
     if (!body.table || !body.action) {
@@ -30,7 +31,7 @@ export class DataController {
 
   @All("rest/v1/rpc/:name")
   async rpc(@Req() req: Request, @Res() res: Response) {
-    const user = await this.user(req, res);
+    const user = await this.authenticatedUser(req, res);
     if (user === undefined) return;
     const name = String(req.params.name || "");
     const result = await this.data.rpc(name, (req.body ?? {}) as Record<string, unknown>, user);
@@ -40,6 +41,24 @@ export class DataController {
   @Get("storage/v1/bucket")
   async buckets(@Res() res: Response) {
     res.json({ data: await this.storage.list(), error: null });
+  }
+
+  @Post("storage/v1/admin/connection-test")
+  async storageConnectionTest(@Req() req: Request, @Res() res: Response) {
+    const user = await this.authenticatedUser(req, res);
+    if (user === undefined) return;
+    if (!user) {
+      res.status(401).json({ ok: false, message: "Não autenticado" });
+      return;
+    }
+    if (!user.isSuperAdmin) {
+      res.status(403).json({ ok: false, message: "Apenas super admin" });
+      return;
+    }
+    const body = (req.body ?? {}) as { storage_config?: unknown };
+    const override = body.storage_config ? parseStorageConfig(body.storage_config) : undefined;
+    const result = await this.storage.testConnection(override);
+    res.status(result.ok ? 200 : 400).json(result);
   }
 
   @All("storage/v1/object/*")
@@ -101,7 +120,7 @@ export class DataController {
     res.status(404).json({ error: { message: "Object not found" } });
   }
 
-  private async user(req: Request, res: Response): Promise<SessionUser | null | undefined> {
+  private async authenticatedUser(req: Request, res: Response): Promise<SessionUser | null | undefined> {
     const header = req.headers.authorization;
     if (!header) return null;
     const userId = await this.identity.resolve(header);
