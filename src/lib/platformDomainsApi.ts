@@ -1,4 +1,4 @@
-import { resolvePmsApiUrl } from "@/lib/runtimeConfig";
+import { browserApiBase } from "@/lib/browserApiBase";
 import { supabase } from "@/integrations/supabase/client";
 
 async function authHeaders(): Promise<HeadersInit> {
@@ -11,7 +11,7 @@ async function authHeaders(): Promise<HeadersInit> {
 }
 
 function apiBase(): string {
-  return resolvePmsApiUrl().replace(/\/$/, "");
+  return browserApiBase();
 }
 
 export type PlatformDomainRecord = {

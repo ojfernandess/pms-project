@@ -112,10 +112,12 @@ services:
       context: "https://github.com/ojfernandess/pms-project.git#PMS-Backend"
       dockerfile: Dockerfile
       args:
-        VITE_PMS_API_URL: ${VITE_PMS_API_URL:-https://localhost}
+        # Modo proxy (recomendado): mesma URL do SPA — evita mixed content e myapi desnecessário
+        VITE_PMS_API_URL: ${VITE_PMS_API_URL:-${PUBLIC_APP_URL:-https://localhost}}
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
-        VITE_APP_URL: ${VITE_APP_URL:-https://localhost}
+        VITE_APP_URL: ${VITE_APP_URL:-${PUBLIC_APP_URL:-https://localhost}}
+        VITE_WEB_CHECKIN_PUBLIC_HOST: ${WEB_CHECKIN_PUBLIC_HOST:-}
     image: pms-staysos-frontend
     restart: unless-stopped
     environment:

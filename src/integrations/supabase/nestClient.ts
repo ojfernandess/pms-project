@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
+import { browserApiBase, isLocalDevHostname } from "@/lib/browserApiBase";
 import { resolvePmsApiUrl } from "@/lib/runtimeConfig";
 
 const SESSION_KEY = "pms.auth.session";
@@ -25,6 +26,9 @@ type ChangeHandler = {
 const DEFAULT_FETCH_TIMEOUT_MS = 25_000;
 
 function apiBase(): string {
+  if (typeof window !== "undefined" && !isLocalDevHostname()) {
+    return browserApiBase();
+  }
   return resolvePmsApiUrl();
 }
 

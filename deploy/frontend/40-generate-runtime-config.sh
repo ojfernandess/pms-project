@@ -69,4 +69,8 @@ escape_js() {
   echo '};'
 } > "$OUT"
 
+if ! grep -q pmsApiUrl "$OUT" 2>/dev/null; then
+  echo "AVISO: runtime-config.js sem pmsApiUrl — confira Environment do serviço frontend no Dokploy (PUBLIC_APP_URL, VITE_PMS_API_URL)" >&2
+fi
+
 echo "runtime-config.js gerado (pmsApiUrl=${API_URL:-<vazio>}, appUrl=${APP_URL:-<vazio>}, webCheckinPublicHost=${WEB_CHECKIN_HOST:-<vazio>})"

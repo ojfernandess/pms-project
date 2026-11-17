@@ -49,6 +49,7 @@ export function WebCheckinDeployChecklist({ webCheckinBaseUrl, pmsBaseUrl }: Pro
       const withoutWww = pms.replace(/^https:\/\/www\./i, "https://");
       const checkin = webCheckinBaseUrl.trim().replace(/\/+$/, "");
       lines.push(
+        `# Use a MESMA URL do painel (proxy nginx). Não use subdomínio api/myapi separado no StayOS Dokploy.`,
         `VITE_PMS_API_URL=${withoutWww}`,
         `VITE_APP_URL=${withoutWww}`,
         `PUBLIC_APP_URL=${withoutWww}`,
