@@ -6,7 +6,14 @@ import { ConfigService } from "@nestjs/config";
 
 type BucketMeta = { public: boolean };
 
-const PUBLIC_BY_DEFAULT = new Set(["hotel-assets", "site-assets", "public", "logos", "avatars"]);
+const PUBLIC_BY_DEFAULT = new Set([
+  "documents",
+  "hotel-assets",
+  "site-assets",
+  "public",
+  "logos",
+  "avatars",
+]);
 
 @Injectable()
 export class StorageService {

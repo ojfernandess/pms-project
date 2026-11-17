@@ -120,6 +120,8 @@ function originOf(req: Request): string {
 }
 
 function readBody(req: Request): Promise<Buffer> {
+  const raw = (req as Request & { rawBody?: Buffer }).rawBody;
+  if (Buffer.isBuffer(raw) && raw.length > 0) return Promise.resolve(raw);
   if (Buffer.isBuffer(req.body)) return Promise.resolve(req.body);
   if (!req.readable || req.readableEnded) return Promise.resolve(Buffer.alloc(0));
   return new Promise((resolve, reject) => {

@@ -153,7 +153,8 @@ export function DocumentUploadStep({
       // Verificar se o bucket é público ou privado
       const { data: buckets } = await supabase.storage.listBuckets();
       const documentsBucket = buckets?.find((b) => b.name === "documents");
-      const isPublic = documentsBucket?.public ?? false;
+      // Postgres/Nest: bucket documents é público por padrão (evita sign 400 se ficheiro ainda não indexado)
+      const isPublic = documentsBucket?.public ?? true;
       
       if (isPublic) {
         const {
