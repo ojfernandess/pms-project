@@ -12,3 +12,4 @@ END;
 $ext$;
 
 GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA extensions TO anon, authenticated, service_role;

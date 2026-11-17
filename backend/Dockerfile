@@ -48,9 +48,10 @@ COPY scripts/migration ./scripts/migration
 COPY scripts/apply-bundled-rpcs.sh ./scripts/apply-bundled-rpcs.sh
 COPY scripts/ensure-bundled-rpcs.mjs ./scripts/ensure-bundled-rpcs.mjs
 COPY scripts/apply-db-grants.mjs ./scripts/apply-db-grants.mjs
+COPY scripts/apply-guest-checkin-db.sh ./scripts/apply-guest-checkin-db.sh
 COPY scripts/sync-foreign-keys-from-supabase.mjs ./scripts/sync-foreign-keys-from-supabase.mjs
 COPY scripts/sync-public-functions-from-supabase.mjs ./scripts/sync-public-functions-from-supabase.mjs
-RUN chmod +x ./scripts/docker-entrypoint.sh ./scripts/docker-entrypoint-worker.sh ./scripts/import-supabase-data.sh ./scripts/import-supabase-schema.sh ./scripts/apply-bundled-rpcs.sh
+RUN chmod +x ./scripts/docker-entrypoint.sh ./scripts/docker-entrypoint-worker.sh ./scripts/import-supabase-data.sh ./scripts/import-supabase-schema.sh ./scripts/apply-bundled-rpcs.sh ./scripts/apply-guest-checkin-db.sh
 
 EXPOSE 3000
 
