@@ -54,4 +54,4 @@ COMMENT ON FUNCTION public.log_activity IS 'Registra entrada em activity_logs (b
 
 GRANT EXECUTE ON FUNCTION public.log_activity(
   UUID, UUID, TEXT, TEXT, TEXT, UUID, TEXT, JSONB, JSONB, JSONB
-) TO authenticated, service_role;
+) TO anon, authenticated, service_role;
