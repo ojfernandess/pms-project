@@ -48,6 +48,7 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
   const [locator, setLocator] = useState(initialLocator || "");
   const [showAuthForm, setShowAuthForm] = useState(!!initialLocator); // Se tem localizador inicial, mostrar formulário direto
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [showGuestlessPanel, setShowGuestlessPanel] = useState(false);
 
   // Atualizar localizador quando initialLocator mudar
   useEffect(() => {
@@ -94,7 +95,6 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
     setShowAuthForm(true);
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
   const openGuestless = () => {
     if (!locator.trim() && !initialLocator?.trim()) {
       toast.error(t("webCheckin.auth.errors.enterLocator"));
@@ -106,6 +106,7 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
     setShowGuestlessPanel(true);
   };
 
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginEmail || !loginPassword) {
       toast.error(t("webCheckin.auth.errors.fillEmailPassword"));
