@@ -106,8 +106,8 @@ export class DataController {
     if (!header) return null;
     const userId = await this.identity.resolve(header);
     if (!userId) {
-      res.status(401).json({ data: null, error: { message: "Invalid login credentials" }, count: null });
-      return undefined;
+      // JWT expirado/inválido no check-in público: seguir como anon (evita falha de rede/CORS no hóspede).
+      return null;
     }
     return this.auth.me(userId);
   }

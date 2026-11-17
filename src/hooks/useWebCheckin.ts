@@ -974,141 +974,63 @@ export const useWebCheckin = () => {
       const skipFnrhInvoke =
         typeof arg === "object" && arg.skipFnrhInvoke === true;
 
-      const { data: webCheckin } = await supabase
-        .from("web_checkin")
-        .select(`
-          *,
-          reservation:reservations(
-            id,
-            reservation_code,
-            guest:clients!guest_id(id, full_name),
-            financial_responsible:clients!client_id(id, full_name)
-          )
-        `)
-        .eq("token", token)
-        .single();
+      const { data: raw, error: rpcError } = await supabase.rpc("complete_web_checkin_by_token", {
+        p_token: token,
+      });
 
-      if (!webCheckin) throw new Error("Web check-in não encontrado");
+      if (rpcError) throw rpcError;
 
-      const reservation = webCheckin.reservation as any;
-      const reservationId = reservation?.id;
-      const reservationCode = reservation?.reservation_code;
-      const guestName = reservation?.guest?.full_name || reservation?.financial_responsible?.full_name || "Hóspede";
+      const payload = (Array.isArray(raw) ? raw[0] : raw) as {
+        success?: boolean;
+        code?: string;
+        message?: string;
+        id?: string;
+        reservation_id?: string;
+        token?: string;
+        locator?: string;
+        establishment_id?: string;
+        completed_at?: string;
+      } | null;
 
-      // Buscar nome do hóspede principal do web check-in
-      let mainGuestName = guestName;
+      if (!payload?.success) {
+        throw new Error(payload?.message || "Não foi possível concluir o check-in.");
+      }
+
+      const data = {
+        id: payload.id,
+        reservation_id: payload.reservation_id,
+        token: payload.token ?? token,
+        locator: payload.locator,
+        establishment_id: payload.establishment_id,
+        completed_at: payload.completed_at,
+        status: "completed" as const,
+      };
+
+      const reservationId = payload.reservation_id;
+
+      // FNRH só se habilitado no estabelecimento (evita 400 no console quando desligado).
       try {
-        const { data: mainGuest } = await supabase
-          .from("web_checkin_guests")
-          .select("name")
-          .eq("web_checkin_id", webCheckin.id)
-          .eq("is_main_guest", true)
-          .maybeSingle();
-        
-        if (mainGuest?.name) {
-          mainGuestName = mainGuest.name;
-        }
-      } catch (error) {
-        console.warn("⚠️ Erro ao buscar nome do hóspede principal:", error);
-      }
+        if (reservationId && !skipFnrhInvoke && payload.establishment_id) {
+          const { data: fnrhRows } = await supabase.rpc("get_fnrh_settings_public", {
+            p_establishment_id: payload.establishment_id,
+          });
+          const fnrhOpt = (Array.isArray(fnrhRows) ? fnrhRows[0] : fnrhRows) as
+            | { enabled?: boolean; auto_submit_on_web_checkin?: boolean }
+            | null
+            | undefined;
 
-      // Atualizar status do web check-in
-      const { data, error } = await supabase
-        .from("web_checkin")
-        .update({
-          status: "completed",
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", webCheckin.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // Atualizar status da reserva para "confirmed" se ainda estiver pendente
-      if (reservationId) {
-        await supabase
-          .from("reservations")
-          .update({ status: "confirmed" })
-          .eq("id", reservationId)
-          .in("status", ["pending", "preregistration"]);
-      }
-
-      // Registrar log de atividade
-      if (reservationId) {
-        try {
-          // Buscar establishment_id da reserva se não estiver no web_checkin
-          let establishmentId = webCheckin.establishment_id;
-          if (!establishmentId && reservationId) {
-            const { data: reservationData } = await supabase
-              .from("reservations")
-              .select("establishment_id")
-              .eq("id", reservationId)
-              .single();
-            establishmentId = reservationData?.establishment_id || null;
-          }
-
-          if (establishmentId) {
-            // Usar a função RPC diretamente para garantir que o log seja criado
-            // mesmo durante o web check-in (quando não há usuário logado no sistema)
-            const { error: logError } = await supabase.rpc("log_activity", {
-              p_establishment_id: establishmentId,
-              p_user_id: null, // Web check-in é feito pelo hóspede, não por usuário do sistema
-              p_action_type: "checked_in",
-              p_entity_type: "reservation",
-              p_description: `Check-in web concluído${reservationCode ? ` para reserva ${reservationCode}` : ""} - Realizado pelo hóspede: ${mainGuestName}`,
-              p_entity_id: reservationId,
-              p_entity_code: reservationCode || null,
-              p_old_values: { status: "pending" },
-              p_new_values: {
-                status: "confirmed",
-                checkin_method: "web",
-                web_checkin_id: webCheckin.id,
-                completed_at: new Date().toISOString(),
-                performed_by: mainGuestName,
-                performed_by_type: "guest",
-              },
-              p_metadata: {
-                web_checkin_id: webCheckin.id,
-                locator: webCheckin.locator,
-                ip_address: webCheckin.ip_address,
-                user_agent: webCheckin.user_agent,
-                guest_name: mainGuestName,
-                performed_by: "guest",
-              },
-            });
-
-            if (logError) {
-              console.error("❌ Erro ao registrar log de atividade do web check-in:", logError);
-            } else {
-              console.log("✅ Log de atividade do web check-in registrado com sucesso");
-            }
-          } else {
-            console.warn("⚠️ Não foi possível registrar log: establishment_id não encontrado");
-          }
-        } catch (logError) {
-          console.error("❌ Erro ao registrar log de atividade do web check-in:", logError);
-          // Não lançar erro para não interromper o fluxo principal
-        }
-      }
-
-      // FNRH: fluxo hóspede (web). Exige auto_submit_on_web_checkin na Edge.
-      // Check-in manual na recepção usa skipFnrhInvoke e dispara fnrh-submit com source staff depois.
-      try {
-        if (reservationId && !skipFnrhInvoke) {
-          const { error: fnrhInvokeErr } = await invokePmsFunction(
-            "fnrh-submit",
-            {
+          if (fnrhOpt?.enabled && fnrhOpt?.auto_submit_on_web_checkin) {
+            const { error: fnrhInvokeErr } = await invokePmsFunction("fnrh-submit", {
               body: {
                 reservation_id: reservationId,
                 source: "web",
                 web_checkin_token: token,
                 commit_checkin: false,
               },
-            },
-          );
-          if (fnrhInvokeErr) {
-            console.warn("FNRH após web check-in:", fnrhInvokeErr);
+            });
+            if (fnrhInvokeErr) {
+              console.warn("FNRH após web check-in:", fnrhInvokeErr);
+            }
           }
         }
       } catch (fnrhCatch) {

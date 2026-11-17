@@ -11,6 +11,7 @@ const RPCS = new Set([
   "calculate_category_availability",
   "calculate_rate_price",
   "cancel_expired_preregistrations",
+  "complete_web_checkin_by_token",
   "cancel_expired_quote",
   "company_has_feature_access",
   "create_guest_account",

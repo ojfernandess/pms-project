@@ -30,6 +30,9 @@ psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/guest_ac
 echo "=== web_checkin_guestless_access.sql ==="
 psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/web_checkin_guestless_access.sql
 
+echo "=== complete_web_checkin_by_token.sql ==="
+psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/complete_web_checkin_by_token.sql
+
 echo "=== grant-web-checkin-anon.sql ==="
 psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/grant-web-checkin-anon.sql
 

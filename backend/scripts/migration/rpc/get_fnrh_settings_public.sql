@@ -199,7 +199,7 @@ $$;
 COMMENT ON FUNCTION public.upsert_fnrh_settings IS
   'Atualiza configuração FNRH; senha da API só é alterada quando p_api_password não é vazio.';
 
-GRANT EXECUTE ON FUNCTION public.get_fnrh_settings_public(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_fnrh_settings_public(UUID) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.upsert_fnrh_settings(
   UUID, BOOLEAN, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, BOOLEAN, TEXT, UUID[]
 ) TO authenticated;
