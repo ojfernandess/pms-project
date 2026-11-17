@@ -106,6 +106,39 @@ export function isWebCheckinPublicHostname(settings?: WebCheckinUrlSettings | nu
  * Aguardar site_settings antes de montar rotas PMS em host ≠ URL base do PMS
  * (evita redirect / → /login no domínio check-in quando env/runtime está vazio).
  */
+/** Host atual é um dos domínios do painel PMS (nunca bloquear Super Admin aqui). */
+export function isKnownPmsHostname(settings?: WebCheckinUrlSettings | null): boolean {
+  if (typeof window === "undefined") return true;
+  const current = window.location.hostname.toLowerCase().replace(/^www\./, "");
+  const checkinHost = getWebCheckinPublicHostname(settings);
+  if (checkinHost && current === checkinHost) return false;
+
+  const hosts = new Set<string>();
+  const add = (raw?: string | null) => {
+    const h = raw ? hostnameFromUrlOrHost(raw) : null;
+    if (h) hosts.add(h);
+  };
+  add(window.__RUNTIME_CONFIG__?.appUrl);
+  try {
+    add(resolveAppUrl());
+  } catch {
+    /* ok */
+  }
+  add(settings?.pms_base_url);
+  const builtApp = import.meta.env.VITE_APP_URL as string | undefined;
+  if (builtApp) add(builtApp);
+
+  if (hosts.has(current)) return true;
+
+  // URL base desatualizada no banco: host atual ≠ domínio dedicado do check-in → painel PMS
+  if (!checkinHost || current !== checkinHost) {
+    const runtimeCheckin = getRuntimeWebCheckinPublicHostname();
+    if (!runtimeCheckin || current !== runtimeCheckin) return true;
+  }
+
+  return false;
+}
+
 export function shouldWaitForWebCheckinHostDetection(
   isLoading: boolean,
   settings?: WebCheckinUrlSettings | null,

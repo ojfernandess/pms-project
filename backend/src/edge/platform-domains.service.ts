@@ -87,6 +87,20 @@ export class PlatformDomainsService {
     return this.resolveHostname(hostname);
   }
 
+  /** Todos os hostnames do painel PMS (evita bloquear pms.* quando site_settings tem URL antiga). */
+  private collectPmsHostnames(pmsBaseUrl?: string | null): Set<string> {
+    const hosts = new Set<string>();
+    const add = (raw?: string | null) => {
+      const h = hostnameFromUrlOrHost(raw);
+      if (h) hosts.add(h);
+    };
+    add(pmsBaseUrl);
+    add(this.config.get<string>("PUBLIC_APP_URL"));
+    add(this.config.get<string>("SITE_URL"));
+    add(this.config.get<string>("VITE_APP_URL"));
+    return hosts;
+  }
+
   async resolveHostname(hostnameInput: string): Promise<HostnameResolution> {
     const hostname = normalizeHostname(hostnameInput);
     if (!hostname) {
@@ -103,14 +117,10 @@ export class PlatformDomainsService {
       select: { pms_base_url: true, web_checkin_public_base_url: true },
     });
 
-    const pmsHost =
-      hostnameFromUrlOrHost(settings?.pms_base_url) ||
-      hostnameFromUrlOrHost(this.config.get<string>("PUBLIC_APP_URL")) ||
-      hostnameFromUrlOrHost(this.config.get<string>("SITE_URL"));
-
+    const pmsHosts = this.collectPmsHostnames(settings?.pms_base_url);
     const legacyCheckinHost = hostnameFromUrlOrHost(settings?.web_checkin_public_base_url);
 
-    if (pmsHost && hostname === pmsHost) {
+    if (pmsHosts.has(hostname)) {
       return {
         hostname,
         mode: "pms",
@@ -119,7 +129,7 @@ export class PlatformDomainsService {
       };
     }
 
-  if (legacyCheckinHost && hostname === legacyCheckinHost) {
+    if (legacyCheckinHost && hostname === legacyCheckinHost) {
       return {
         hostname,
         mode: "web_checkin",
@@ -198,7 +208,15 @@ export class PlatformDomainsService {
       }
     }
 
-    if (pmsHost && hostname !== pmsHost) {
+    // Host desconhecido que chegou ao mesmo frontend/nginx — não expor o PMS
+    const hasDedicatedCheckin =
+      Boolean(legacyCheckinHost) ||
+      (tableOk &&
+        (await this.prisma.platform_custom_domains.count({
+          where: { service_type: "web_checkin" },
+        })) > 0);
+
+    if (pmsHosts.size > 0 && hasDedicatedCheckin) {
       return {
         hostname,
         mode: "unconfigured",
@@ -272,6 +290,16 @@ export class PlatformDomainsService {
     const hostname = normalizeHostname(input.hostname);
     if (!hostname || !/^[a-z0-9.-]+$/.test(hostname) || !hostname.includes(".")) {
       throw new BadRequestException("Informe um hostname válido (ex.: checkin.hotel.com.br)");
+    }
+
+    const settings = await this.prisma.site_settings.findUnique({
+      where: { id: SITE_SETTINGS_ID },
+      select: { pms_base_url: true },
+    });
+    if (this.collectPmsHostnames(settings?.pms_base_url).has(hostname)) {
+      throw new BadRequestException(
+        "Este hostname é do painel PMS. Cadastre apenas domínios do Web Check-in (ex.: checkin.seudominio.com).",
+      );
     }
 
     const service_type = input.service_type ?? "web_checkin";

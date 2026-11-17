@@ -19,6 +19,7 @@ import ReservationDetails from "./pages/ReservationDetails";
 import WebCheckin from "./pages/WebCheckin";
 import {
   getWebCheckinRoutePrefix,
+  isKnownPmsHostname,
   isWebCheckinPublicHostname,
   shouldWaitForWebCheckinHostDetection,
 } from "./lib/webCheckinPublicUrl";
@@ -162,6 +163,7 @@ const AppRoutesWithMeta = () => {
   const foreignHostBlocked =
     !hostResolutionError &&
     resolution &&
+    !isKnownPmsHostname(settings) &&
     (resolution.mode === "unconfigured" ||
       resolution.mode === "suspended" ||
       (resolution.mode === "pending" && !resolution.active));
