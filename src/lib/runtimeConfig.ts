@@ -3,6 +3,8 @@ declare global {
     __RUNTIME_CONFIG__?: {
       pmsApiUrl?: string;
       appUrl?: string;
+      /** Hostname do domínio dedicado do Web Check-in (ex. checkin.seudominio.com) */
+      webCheckinPublicHost?: string;
     };
   }
 }

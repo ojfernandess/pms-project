@@ -20,66 +20,94 @@ export function WebCheckinDomainHelp() {
           <CircleHelp className="h-4 w-4" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="max-w-md max-h-[min(70vh,520px)] overflow-y-auto text-sm" align="start">
+      <PopoverContent className="max-w-lg max-h-[min(75vh,560px)] overflow-y-auto text-sm" align="start">
         <div className="space-y-4">
-          <div className="space-y-1">
-            <p className="font-semibold text-foreground">O que informar aqui</p>
-            <p className="text-muted-foreground">
-              Apenas o domínio (URL base), <strong>sem</strong> o localizador da reserva. Exemplo:{" "}
-              <code className="text-xs">https://checkin.seudominio.com</code>. O sistema gera links como{" "}
-              <code className="text-xs">https://checkin.seudominio.com/RSV154684</code> para o hóspede.
+          <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-950">
+            <p className="font-semibold">Não use caminho no DNS</p>
+            <p className="mt-1 text-muted-foreground text-red-900/90">
+              O destino do CNAME é <strong>só o hostname</strong>, por exemplo{" "}
+              <code className="text-xs">pms.stayos.com.br</code>. Valores como{" "}
+              <code className="text-xs">pms.stayos.com.br/web-checkin</code> são inválidos (Cloudflare 1016 ou
+              aviso de barra no nome). O localizador (<code className="text-xs">RSV154684</code>) entra só no link
+              gerado pelo sistema: <code className="text-xs">https://checkin.seudominio.com/RSV154684</code>.
             </p>
           </div>
 
           <div className="space-y-1">
-            <p className="font-semibold text-foreground">Visão geral do DNS</p>
+            <p className="font-semibold text-foreground">Passo 1 — Super Admin</p>
             <p className="text-muted-foreground">
-              Crie um subdomínio (ex. <code className="text-xs">checkin</code>) apontando para o{" "}
-              <strong>mesmo servidor ou serviço</strong> que publica o frontend do PMS, com HTTPS válido.
-              No painel de hospedagem, adicione esse domínio como <strong>domínio personalizado</strong> do
-              frontend (além do domínio principal do PMS).
+              Campo <strong>URL pública do Web Check-in</strong>: <code className="text-xs">https://checkin.seudominio.com</code>{" "}
+              (sem código de reserva no final).
             </p>
           </div>
 
           <div className="space-y-1">
-            <p className="font-semibold text-foreground">Cloudflare</p>
-            <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
-              <li>Acesse o site → <strong>DNS</strong> → <strong>Records</strong>.</li>
-              <li>
-                <strong>CNAME</strong> (recomendado): nome <code className="text-xs">checkin</code>, destino o
-                hostname do seu frontend (ex. o domínio principal do app ou o host fornecido pela hospedagem).
-              </li>
-              <li>
-                Ou <strong>A</strong>: mesmo nome, IP público do servidor — se o provedor exigir IP fixo.
-              </li>
-              <li>Ative <strong>Proxied</strong> (nuvem laranja) se quiser CDN/WAF; o SSL pode ser Full (strict) com certificado válido na origem.</li>
-              <li>Aguarde a propagação (minutos a algumas horas) e teste <code className="text-xs">https://checkin.seudominio.com</code>.</li>
-            </ol>
+            <p className="font-semibold text-foreground">Passo 2 — Hospedagem (evita 404)</p>
+            <p className="text-muted-foreground">
+              No painel onde o <strong>frontend do PMS</strong> está publicado, adicione{" "}
+              <code className="text-xs">checkin.seudominio.com</code> como <strong>domínio extra</strong> no mesmo
+              serviço de <code className="text-xs">pms.seudominio.com</code>, com HTTPS. Sem isso, A ou CNAME
+              corretos ainda retornam <strong>404 page not found</strong> (proxy não reconhece o host).
+            </p>
           </div>
 
-          <div className="space-y-1">
-            <p className="font-semibold text-foreground">Registro.br / NIC.br</p>
+          <div className="space-y-2">
+            <p className="font-semibold text-foreground">Passo 3 — Cloudflare (escolha uma)</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left p-1">Tipo</th>
+                    <th className="text-left p-1">Nome</th>
+                    <th className="text-left p-1">Destino</th>
+                  </tr>
+                </thead>
+                <tbody className="text-muted-foreground">
+                  <tr className="border-b">
+                    <td className="p-1 font-medium text-foreground">CNAME</td>
+                    <td className="p-1">checkin</td>
+                    <td className="p-1">
+                      <code>pms.stayos.com.br</code> (somente isso)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="p-1 font-medium text-foreground">A</td>
+                    <td className="p-1">checkin</td>
+                    <td className="p-1">mesmo IP do registro A de <code>pms</code></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             <p className="text-muted-foreground">
-              Em <strong>DNS</strong> do domínio, crie entrada <strong>CNAME</strong>: host{" "}
-              <code className="text-xs">checkin</code> → alvo informado pela sua hospedagem. Salve e aguarde
-              propagação (TTL do registro).
+              Proxy (nuvem laranja): ok se o SSL da origem estiver válido. Erro <strong>1016</strong>: confira destino
+              sem barra, propagação DNS e domínio cadastrado na hospedagem.
             </p>
           </div>
 
           <div className="space-y-1">
-            <p className="font-semibold text-foreground">GoDaddy, Hostinger, Locaweb e outros</p>
+            <p className="font-semibold text-foreground">Registro.br / GoDaddy / Hostinger</p>
             <p className="text-muted-foreground">
-              No gerenciador de DNS, adicione <strong>CNAME</strong> ou <strong>A</strong> para o subdomínio{" "}
-              <code className="text-xs">checkin</code> conforme a documentação do seu plano. Depois vincule o
-              domínio no painel onde o frontend do PMS está publicado e emita/renove o certificado SSL.
+              Mesma lógica: CNAME <code className="text-xs">checkin</code> → hostname do PMS, ou A → mesmo IP. Depois
+              vincule o subdomínio no frontend e no Super Admin.
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <p className="font-semibold text-foreground">Variável opcional no frontend</p>
+            <p className="text-muted-foreground">
+              <code className="text-xs">WEB_CHECKIN_PUBLIC_HOST=checkin.seudominio.com</code> no container do frontend
+              ajuda a reconhecer o domínio antes das configurações do site carregarem. Se a API for outro host, no
+              backend use <code className="text-xs">WEB_CHECKIN_PUBLIC_URL=https://checkin.seudominio.com</code> ou{" "}
+              <code className="text-xs">CORS_ORIGINS</code>.
             </p>
           </div>
 
           <div className="space-y-1">
             <p className="font-semibold text-foreground">Teste</p>
             <p className="text-muted-foreground">
-              Após salvar esta configuração e propagar o DNS, abra um link de teste com um localizador real. Se
-              abrir o fluxo de check-in, o domínio está correto.
+              Abra <code className="text-xs">https://checkin.seudominio.com</code> — deve aparecer o Web Check-in, não
+              o login do PMS. Documentação: <code className="text-xs">docs/WEB_CHECKIN_CUSTOM_DOMAIN.md</code> no
+              repositório.
             </p>
           </div>
         </div>

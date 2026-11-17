@@ -20,7 +20,8 @@ export function buildCorsOptions(config: ConfigService): CorsOptions {
   const explicit = parseOriginList(config.get<string>("CORS_ORIGINS"));
   const publicApp = normalizeOrigin(config.get<string>("PUBLIC_APP_URL"));
   const siteUrl = normalizeOrigin(config.get<string>("SITE_URL"));
-  const allowlist = [...new Set([...explicit, publicApp, siteUrl].filter(Boolean))];
+  const webCheckin = normalizeOrigin(config.get<string>("WEB_CHECKIN_PUBLIC_URL"));
+  const allowlist = [...new Set([...explicit, publicApp, siteUrl, webCheckin].filter(Boolean))];
 
   const base: CorsOptions = {
     credentials: true,

@@ -38,16 +38,35 @@ export function buildWebCheckinLocatorUrl(
   return `${resolveWebCheckinPublicBase(settings, fallbackOrigin)}/${encodeURIComponent(code)}`;
 }
 
-/** Hostname configurado em web_checkin_public_base_url (sem www). */
-export function getWebCheckinPublicHostname(settings?: WebCheckinUrlSettings | null): string | null {
-  const custom = settings?.web_checkin_public_base_url?.trim();
-  if (!custom) return null;
+function hostnameFromUrlOrHost(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
   try {
-    const withScheme = /^https?:\/\//i.test(custom) ? custom : `https://${custom}`;
+    const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
     return new URL(withScheme).hostname.toLowerCase().replace(/^www\./, "");
   } catch {
-    return null;
+    return trimmed.toLowerCase().replace(/^www\./, "").split("/")[0] || null;
   }
+}
+
+/** Hostname de env/runtime (painel de hospedagem), usado antes de site_settings carregar. */
+export function getRuntimeWebCheckinPublicHostname(): string | null {
+  if (typeof window === "undefined") return null;
+  const raw =
+    window.__RUNTIME_CONFIG__?.webCheckinPublicHost?.trim() ||
+    (import.meta.env.VITE_WEB_CHECKIN_PUBLIC_HOST as string | undefined)?.trim() ||
+    "";
+  return hostnameFromUrlOrHost(raw);
+}
+
+/** Hostname configurado em site_settings ou WEB_CHECKIN_PUBLIC_HOST (sem www). */
+export function getWebCheckinPublicHostname(settings?: WebCheckinUrlSettings | null): string | null {
+  const custom = settings?.web_checkin_public_base_url?.trim();
+  if (custom) {
+    const h = hostnameFromUrlOrHost(custom);
+    if (h) return h;
+  }
+  return getRuntimeWebCheckinPublicHostname();
 }
 
 /** O visitante está no domínio dedicado do Web Check-in (ex.: checkin.seudominio.com). */
@@ -55,6 +74,7 @@ export function isWebCheckinPublicHostname(settings?: WebCheckinUrlSettings | nu
   if (typeof window === "undefined") return false;
   const configured = getWebCheckinPublicHostname(settings);
   if (!configured) return false;
+  // settings ainda carregando: reconhecer host só via env evita 404 de rota no domínio checkin
   const current = window.location.hostname.toLowerCase().replace(/^www\./, "");
   return current === configured;
 }

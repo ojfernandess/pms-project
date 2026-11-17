@@ -6,6 +6,7 @@ OUT="${HTML_ROOT}/runtime-config.js"
 
 API_URL="${VITE_PMS_API_URL:-${PMS_API_URL:-}}"
 APP_URL="${VITE_APP_URL:-${PMS_APP_URL:-}}"
+WEB_CHECKIN_HOST="${WEB_CHECKIN_PUBLIC_HOST:-${VITE_WEB_CHECKIN_PUBLIC_HOST:-}}"
 
 escape_js() {
   printf '%s' "$1" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g"
@@ -13,11 +14,13 @@ escape_js() {
 
 API_ESC=$(escape_js "$API_URL")
 APP_ESC=$(escape_js "$APP_URL")
+WEB_ESC=$(escape_js "$WEB_CHECKIN_HOST")
 
 cat > "$OUT" <<EOF
 window.__RUNTIME_CONFIG__ = {
   pmsApiUrl: '${API_ESC}',
   appUrl: '${APP_ESC}',
+  webCheckinPublicHost: '${WEB_ESC}',
 };
 EOF
 
