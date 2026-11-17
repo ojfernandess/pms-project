@@ -8,6 +8,7 @@ import {
   reservationGuestContactFields,
   reservationGuestDisplayName,
 } from "@/lib/reservationChannelDisplay";
+import { computeWebCheckinExpiresAt } from "@/lib/webCheckinExpiry";
 
 export const useWebCheckin = () => {
   const queryClient = useQueryClient();
@@ -86,16 +87,15 @@ export const useWebCheckin = () => {
               // Buscar establishment_id da reserva
               const { data: reservationFull } = await supabase
                 .from("reservations")
-                .select("establishment_id, checkin_date")
+                .select("establishment_id, checkin_date, checkout_date")
                 .eq("id", reservationData.id)
                 .single();
 
-              const checkinDate = reservationFull?.checkin_date ? new Date(reservationFull.checkin_date) : new Date();
-              const expiresAt = new Date();
-              expiresAt.setDate(expiresAt.getDate() + 7);
-              if (checkinDate < expiresAt) {
-                expiresAt.setTime(checkinDate.getTime());
-              }
+              const checkinDate = reservationFull?.checkin_date ?? new Date().toISOString();
+              const expiresAt = computeWebCheckinExpiresAt(
+                checkinDate,
+                reservationFull?.checkout_date ?? null
+              );
 
               const { data: newWebCheckin, error: createError } = await supabase
                 .from("web_checkin")
@@ -104,7 +104,7 @@ export const useWebCheckin = () => {
                   establishment_id: reservationFull?.establishment_id || null,
                   token: token,
                   locator: locator.trim(),
-                  expires_at: expiresAt.toISOString(),
+                  expires_at: expiresAt,
                   status: "pending",
                 })
                 .select()
@@ -1356,7 +1356,7 @@ export const useWebCheckin = () => {
       // Buscar reserva
       const { data: reservation } = await supabase
         .from("reservations")
-        .select("checkin_date, reservation_code")
+        .select("checkin_date, checkout_date, reservation_code")
         .eq("id", reservationId)
         .single();
 
@@ -1368,14 +1368,10 @@ export const useWebCheckin = () => {
       // Gerar token
       const token = locatorService.generateWebCheckinToken(reservationId, locator);
 
-      // Calcular data de expiração (7 dias antes do check-in ou 30 dias, o que for menor)
-      const checkinDate = new Date(reservation.checkin_date);
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 7);
-      
-      if (checkinDate < expiresAt) {
-        expiresAt.setTime(checkinDate.getTime());
-      }
+      const expiresAt = computeWebCheckinExpiresAt(
+        reservation.checkin_date,
+        reservation.checkout_date ?? null
+      );
 
       const { data, error } = await supabase
         .from("web_checkin")
@@ -1384,7 +1380,7 @@ export const useWebCheckin = () => {
           establishment_id: establishmentId,
           token,
           locator,
-          expires_at: expiresAt.toISOString(),
+          expires_at: expiresAt,
           status: "pending",
         })
         .select()

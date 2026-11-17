@@ -12,6 +12,7 @@ import {
   type ota_channels,
 } from "@prisma/client";
 import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
+import { computeWebCheckinExpiresAt } from "../lib/web-checkin-expiry";
 import { AuthService } from "../auth/auth.service";
 import { StaffIdentityService } from "../auth/staff-identity.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -1627,10 +1628,9 @@ export class AiosellReservationsService {
     const code = reservation.reservation_code ? String(reservation.reservation_code) : "";
     if (!code) return;
     const token = Buffer.from(`${reservationId}:${code}:${Date.now()}`).toString("base64").replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
-    const checkin = reservation.checkin_date ? new Date(String(reservation.checkin_date)) : new Date();
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-    if (checkin < expiresAt) expiresAt.setTime(checkin.getTime());
+    const checkin = reservation.checkin_date ? String(reservation.checkin_date) : new Date().toISOString();
+    const checkout = reservation.checkout_date ? String(reservation.checkout_date) : null;
+    const expiresAt = computeWebCheckinExpiresAt(checkin, checkout);
     await this.prisma.web_checkin.create({ data: { reservation_id: reservationId, establishment_id: establishmentId, token, locator: code, expires_at: expiresAt, status: "pending" } });
   }
 

@@ -7,6 +7,7 @@ import { StaffIdentityService } from "../auth/staff-identity.service";
 import { CheckinChargeService } from "./checkin-charge.service";
 import { ChannexOtaService } from "./channex-ota.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { computeWebCheckinExpiresAt } from "../lib/web-checkin-expiry";
 
 type AnyObj = Record<string, unknown>;
 type Result = { status: number; body: unknown };
@@ -1015,7 +1016,13 @@ export class ChannexReservationsService {
           source: "channex_channel",
         },
       });
-      await this.ensureWebCheckin(reservationId, stay.establishmentId, reservationRow?.reservation_code ?? null, reservationRow?.checkin_date ?? null);
+      await this.ensureWebCheckin(
+        reservationId,
+        stay.establishmentId,
+        reservationRow?.reservation_code ?? null,
+        reservationRow?.checkin_date ?? null,
+        reservationRow?.checkout_date ?? null
+      );
       await this.queueChannelReservationEmail({
         reservationId,
         establishmentId: stay.establishmentId,
@@ -1132,7 +1139,13 @@ export class ChannexReservationsService {
       });
       if (ensureString(reservationRow?.notes).toLowerCase().includes("overbooking")) reservationIsOverbooking = true;
       await this.notifyLifecycle(stay, reservationId, reservationRow?.reservation_code ?? null, "reservation_modified");
-      await this.ensureWebCheckin(reservationId, stay.establishmentId, reservationRow?.reservation_code ?? null, reservationRow?.checkin_date ?? null);
+      await this.ensureWebCheckin(
+        reservationId,
+        stay.establishmentId,
+        reservationRow?.reservation_code ?? null,
+        reservationRow?.checkin_date ?? null,
+        reservationRow?.checkout_date ?? null
+      );
       await this.queueChannelReservationEmail({
         reservationId,
         establishmentId: stay.establishmentId,
@@ -1711,14 +1724,18 @@ export class ChannexReservationsService {
     return others.some((other) => overlapReservationStayDates(start, end, dateOnlyString(other.checkin_date), dateOnlyString(other.checkout_date)));
   }
 
-  private async ensureWebCheckin(reservationId: string, establishmentId: string, code: string | null, checkinDate: Date | null): Promise<void> {
+  private async ensureWebCheckin(
+    reservationId: string,
+    establishmentId: string,
+    code: string | null,
+    checkinDate: Date | null,
+    checkoutDate: Date | null
+  ): Promise<void> {
     const existing = await this.prisma.web_checkin.findFirst({ where: { reservation_id: reservationId }, select: { id: true } });
     if (existing?.id || !code) return;
     const token = Buffer.from(`${reservationId}:${code}:${Date.now()}`, "utf8").toString("base64").replace(/[^a-zA-Z0-9]/g, "").substring(0, 64);
-    const checkinDateObj = checkinDate ? new Date(checkinDate) : new Date();
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-    if (checkinDateObj < expiresAt) expiresAt.setTime(checkinDateObj.getTime());
+    const checkin = checkinDate ?? new Date();
+    const expiresAt = computeWebCheckinExpiresAt(checkin, checkoutDate);
     await this.prisma.web_checkin.create({
       data: { reservation_id: reservationId, establishment_id: establishmentId, token, locator: code, expires_at: expiresAt, status: "pending" },
     });

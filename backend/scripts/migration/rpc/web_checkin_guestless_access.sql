@@ -71,17 +71,34 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'code', 'locator_not_found', 'message', 'Localizador não encontrado.');
   END IF;
 
-  IF v_wc.expires_at IS NOT NULL AND v_wc.expires_at < NOW() THEN
-    RETURN jsonb_build_object('success', false, 'code', 'expired', 'message', 'O prazo deste check-in online expirou.');
-  END IF;
-
-  SELECT r.id, r.guest_id, r.client_id
+  SELECT r.id, r.guest_id, r.client_id, r.checkin_date, r.checkout_date, r.status
   INTO v_res
   FROM public.reservations r
   WHERE r.id = v_wc.reservation_id;
 
   IF v_res.id IS NULL THEN
     RETURN jsonb_build_object('success', false, 'code', 'reservation_not_found', 'message', 'Reserva não encontrada.');
+  END IF;
+
+  IF lower(COALESCE(v_res.status::text, '')) IN ('cancelled', 'canceled', 'no_show', 'no-show') THEN
+    RETURN jsonb_build_object('success', false, 'code', 'expired', 'message', 'O prazo deste check-in online expirou.');
+  END IF;
+
+  IF v_wc.status = 'expired' THEN
+    RETURN jsonb_build_object('success', false, 'code', 'expired', 'message', 'O prazo deste check-in online expirou.');
+  END IF;
+
+  -- Alinhado ao fluxo autenticado: não bloquear só porque expires_at foi gravado na meia-noite do check-in.
+  IF v_res.checkout_date IS NOT NULL AND CURRENT_DATE > (v_res.checkout_date::date + 1) THEN
+    RETURN jsonb_build_object('success', false, 'code', 'expired', 'message', 'O prazo deste check-in online expirou.');
+  ELSIF v_res.checkout_date IS NULL AND v_res.checkin_date IS NOT NULL
+        AND CURRENT_DATE > (v_res.checkin_date::date + 31) THEN
+    RETURN jsonb_build_object('success', false, 'code', 'expired', 'message', 'O prazo deste check-in online expirou.');
+  ELSIF v_wc.expires_at IS NOT NULL
+        AND v_wc.expires_at < NOW()
+        AND v_res.checkout_date IS NULL
+        AND v_res.checkin_date IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'code', 'expired', 'message', 'O prazo deste check-in online expirou.');
   END IF;
 
   IF v_res.guest_id IS NOT NULL THEN
