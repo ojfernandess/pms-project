@@ -230,10 +230,10 @@ export class FnrhService {
           error_message: error.slice(0, 800),
           response_summary: {
             status: response.status,
-            mensagem: detail.mensagem,
-            mensagem_interna: detail.mensagem_interna,
-            ip_locked: detail.ip_locked,
-          },
+            mensagem: typeof detail.mensagem === "string" ? detail.mensagem : null,
+            mensagem_interna: typeof detail.mensagem_interna === "string" ? detail.mensagem_interna : null,
+            ip_locked: detail.ip_locked === true,
+          } satisfies Prisma.InputJsonValue,
         });
         return ok({
           success: false,
