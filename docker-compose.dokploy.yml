@@ -116,8 +116,23 @@ services:
     restart: unless-stopped
     environment:
       BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:3000}
+      # Hostname sem https:// — runtime-config + rotas SPA no domínio checkin
+      WEB_CHECKIN_PUBLIC_HOST: ${WEB_CHECKIN_PUBLIC_HOST:-}
     expose:
       - "80"
+    networks:
+      - default
+      - dokploy-network
+    # Traefik (Dokploy): rota extra para checkin.*. Defina WEB_CHECKIN_PUBLIC_HOST=checkin.seudominio.com
+    # Alternativa oficial: painel Dokploy → Domains → Create Domain (frontend, porta 80).
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.pms-webcheckin.rule=Host(`${WEB_CHECKIN_PUBLIC_HOST:-web-checkin-host-disabled.invalid}`)
+      - traefik.http.routers.pms-webcheckin.entrypoints=web,websecure
+      - traefik.http.routers.pms-webcheckin.tls.certresolver=letsencrypt
+      - traefik.http.routers.pms-webcheckin.service=pms-webcheckin
+      - traefik.http.services.pms-webcheckin.loadbalancer.server.port=80
     depends_on:
       backend:
         condition: service_healthy
@@ -127,6 +142,10 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+networks:
+  dokploy-network:
+    external: true
 
 volumes:
   pms_postgres:

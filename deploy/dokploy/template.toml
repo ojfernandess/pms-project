@@ -1,6 +1,8 @@
 # Dokploy template — StayOS PMS (import via pms-install.json)
 [variables]
 main_domain = "${domain}"
+# Opcional: subdomínio do Web Check-in (ex. checkin.seudominio.com) — sem https://
+web_checkin_domain = "${web_checkin_domain}"
 postgres_password = "${password}"
 jwt_secret = "${password:48}"
 internal_api_token = "${password:32}"
@@ -25,6 +27,7 @@ env = [
   "SITE_URL=https://${main_domain}",
   "VITE_PMS_API_URL=https://${main_domain}",
   "VITE_APP_URL=https://${main_domain}",
+  "WEB_CHECKIN_PUBLIC_HOST=${web_checkin_domain}",
   "BACKEND_UPSTREAM=http://backend:3000",
   "PRISMA_MIGRATE_ON_START=false",
   "PASSWORD_RESET_DEBUG=false",

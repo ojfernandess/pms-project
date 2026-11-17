@@ -42,12 +42,18 @@ export function WebCheckinDomainHelp() {
           </div>
 
           <div className="space-y-1">
-            <p className="font-semibold text-foreground">Passo 2 — Hospedagem (evita 404)</p>
+            <p className="font-semibold text-foreground">Passo 2 — Dokploy (obrigatório para parar o 404)</p>
             <p className="text-muted-foreground">
-              No painel onde o <strong>frontend do PMS</strong> está publicado, adicione{" "}
-              <code className="text-xs">checkin.seudominio.com</code> como <strong>domínio extra</strong> no mesmo
-              serviço de <code className="text-xs">pms.seudominio.com</code>, com HTTPS. Sem isso, A ou CNAME
-              corretos ainda retornam <strong>404 page not found</strong> (proxy não reconhece o host).
+              O CNAME só aponta o DNS; o <strong>Traefik</strong> precisa de uma rota para{" "}
+              <code className="text-xs">checkin</code>. No projeto Compose: aba <strong>Domains</strong> →{" "}
+              <strong>Create Domain</strong> → host <code className="text-xs">checkin.seudominio.com</code>, path{" "}
+              <code className="text-xs">/</code>, porta do contentor <strong>80</strong> (serviço{" "}
+              <strong>frontend</strong>, não o backend 3000). Redeploy.
+            </p>
+            <p className="text-muted-foreground">
+              Ou no Environment do compose:{" "}
+              <code className="text-xs">WEB_CHECKIN_PUBLIC_HOST=checkin.seudominio.com</code> (branch atual com labels
+              Traefik no <code className="text-xs">docker-compose.dokploy.yml</code>).
             </p>
           </div>
 
