@@ -12,10 +12,7 @@ async function fetchHostnameResolution(): Promise<HostnameResolution> {
   const response = await fetch(url, {
     method: "GET",
     credentials: "omit",
-    headers: {
-      Accept: "application/json",
-      "X-PMS-Visitor-Host": visitorHost,
-    },
+    headers: { Accept: "application/json" },
   });
   if (!response.ok) {
     throw new Error(`resolve-hostname: ${response.status}`);

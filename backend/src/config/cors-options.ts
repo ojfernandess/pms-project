@@ -14,6 +14,7 @@ const ALLOWED_HEADERS = [
   "X-Client-Info",
   "Prefer",
   "Range",
+  "X-PMS-Visitor-Host",
 ];
 
 export function buildCorsOptions(config: ConfigService): CorsOptions {
