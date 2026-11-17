@@ -4,30 +4,51 @@ set -eu
 HTML_ROOT="${NGINX_HTML_ROOT:-/usr/share/nginx/html}"
 OUT="${HTML_ROOT}/runtime-config.js"
 
-API_URL="${VITE_PMS_API_URL:-${PMS_API_URL:-}}"
-APP_URL="${VITE_APP_URL:-${PMS_APP_URL:-}}"
+# VITE_* no estágio final da imagem vêm do Environment do compose (não do build).
+API_URL="${VITE_PMS_API_URL:-${PMS_API_URL:-${PUBLIC_APP_URL:-${SITE_URL:-}}}}"
+APP_URL="${VITE_APP_URL:-${PMS_APP_URL:-${PUBLIC_APP_URL:-${SITE_URL:-}}}}"
+
 WEB_CHECKIN_HOST="${WEB_CHECKIN_PUBLIC_HOST:-${VITE_WEB_CHECKIN_PUBLIC_HOST:-}}"
+WEB_CHECKIN_URL="${WEB_CHECKIN_PUBLIC_URL:-}"
+
+host_from_url() {
+  printf '%s' "$1" \
+    | sed -e 's|^[^:]*://||' -e 's|/.*||' -e 's|:.*||' \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/^www\.//'
+}
+
+if [ -z "$WEB_CHECKIN_HOST" ] && [ -n "$WEB_CHECKIN_URL" ]; then
+  WEB_CHECKIN_HOST=$(host_from_url "$WEB_CHECKIN_URL")
+fi
 
 escape_js() {
   printf '%s' "$1" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g"
 }
 
-API_ESC=$(escape_js "$API_URL")
-APP_ESC=$(escape_js "$APP_URL")
-WEB_CHECKIN_ESC=$(escape_js "$WEB_CHECKIN_HOST")
+# Monta runtime-config.js só com chaves não vazias (evita sobrescrever fallback do bundle Vite).
+{
+  echo 'window.__RUNTIME_CONFIG__ = {'
+  first=1
+  append_field() {
+    key="$1"
+    val="$2"
+    if [ -n "$val" ]; then
+      esc=$(escape_js "$val")
+      if [ "$first" -eq 1 ]; then
+        first=0
+      else
+        echo ','
+      fi
+      printf '  %s: '\''%s'\''' "$key" "$esc"
+    fi
+  }
+  append_field 'pmsApiUrl' "$API_URL"
+  append_field 'appUrl' "$APP_URL"
+  append_field 'webCheckinPublicHost' "$WEB_CHECKIN_HOST"
+  append_field 'webCheckinPublicUrl' "$WEB_CHECKIN_URL"
+  echo ''
+  echo '};'
+} > "$OUT"
 
-if [ -n "$WEB_CHECKIN_HOST" ]; then
-  WEB_CHECKIN_LINE="  webCheckinPublicHost: '${WEB_CHECKIN_ESC}',"
-else
-  WEB_CHECKIN_LINE=""
-fi
-
-cat > "$OUT" <<EOF
-window.__RUNTIME_CONFIG__ = {
-  pmsApiUrl: '${API_ESC}',
-  appUrl: '${APP_ESC}',
-${WEB_CHECKIN_LINE}
-};
-EOF
-
-echo "runtime-config.js gerado (pmsApiUrl=${API_URL:-<vazio>}, webCheckinPublicHost=${WEB_CHECKIN_HOST:-<vazio>})"
+echo "runtime-config.js gerado (pmsApiUrl=${API_URL:-<vazio>}, appUrl=${APP_URL:-<vazio>}, webCheckinPublicHost=${WEB_CHECKIN_HOST:-<vazio>})"

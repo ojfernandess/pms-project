@@ -118,8 +118,16 @@ services:
     restart: unless-stopped
     environment:
       BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:3000}
-      # Hostname do portal check-in (rotas SPA + runtime-config)
+      # Runtime → deploy/frontend/40-generate-runtime-config.sh (repasse as mesmas vars do painel Dokploy)
+      VITE_PMS_API_URL: ${VITE_PMS_API_URL:-}
+      VITE_APP_URL: ${VITE_APP_URL:-}
+      PMS_API_URL: ${PMS_API_URL:-}
+      PMS_APP_URL: ${PMS_APP_URL:-}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+      SITE_URL: ${SITE_URL:-}
       WEB_CHECKIN_PUBLIC_HOST: ${WEB_CHECKIN_PUBLIC_HOST:-}
+      WEB_CHECKIN_PUBLIC_URL: ${WEB_CHECKIN_PUBLIC_URL:-}
+      VITE_WEB_CHECKIN_PUBLIC_HOST: ${VITE_WEB_CHECKIN_PUBLIC_HOST:-}
     expose:
       - "80"
     networks:

@@ -38,12 +38,16 @@ export function WebCheckinDeployChecklist({ webCheckinBaseUrl, pmsBaseUrl }: Pro
     if (hosts.length === 0) return "";
     const primary = hosts[0];
     const rule = buildTraefikRule(hosts);
+    const pms = pmsBaseUrl.trim().replace(/\/+$/, "");
     const lines = [
-      `# Cole no Environment do Docker Compose (Dokploy) e redeploy`,
+      `# Cole no Environment do Docker Compose (Dokploy) e redeploy (frontend + backend)`,
       `WEB_CHECKIN_PUBLIC_HOST=${primary}`,
       `WEB_CHECKIN_TRAEFIK_RULE=${rule}`,
       `WEB_CHECKIN_PUBLIC_URL=${webCheckinBaseUrl.trim().replace(/\/+$/, "")}`,
     ];
+    if (pms) {
+      lines.push(`VITE_PMS_API_URL=${pms}`, `VITE_APP_URL=${pms}`, `PUBLIC_APP_URL=${pms}`);
+    }
     if (hosts.length > 1) {
       lines.push(`WEB_CHECKIN_PUBLIC_HOSTS=${hosts.join(",")}`);
     }

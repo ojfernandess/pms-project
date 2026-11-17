@@ -1,3 +1,5 @@
+import { resolveAppUrl } from "./runtimeConfig";
+
 export type WebCheckinUrlSettings = {
   web_checkin_public_base_url?: string | null;
   pms_base_url?: string | null;
@@ -52,11 +54,15 @@ function hostnameFromUrlOrHost(raw: string): string | null {
 /** Hostname de env/runtime (painel de hospedagem), usado antes de site_settings carregar. */
 export function getRuntimeWebCheckinPublicHostname(): string | null {
   if (typeof window === "undefined") return null;
-  const raw =
+  const fromHost =
     window.__RUNTIME_CONFIG__?.webCheckinPublicHost?.trim() ||
     (import.meta.env.VITE_WEB_CHECKIN_PUBLIC_HOST as string | undefined)?.trim() ||
     "";
-  return hostnameFromUrlOrHost(raw);
+  const fromHostParsed = hostnameFromUrlOrHost(fromHost);
+  if (fromHostParsed) return fromHostParsed;
+
+  const fromUrl = window.__RUNTIME_CONFIG__?.webCheckinPublicUrl?.trim() || "";
+  return hostnameFromUrlOrHost(fromUrl);
 }
 
 /** Hostname configurado em site_settings ou WEB_CHECKIN_PUBLIC_HOST (sem www). */
@@ -97,10 +103,33 @@ export function isWebCheckinPublicHostname(settings?: WebCheckinUrlSettings | nu
 }
 
 /**
+ * Aguardar site_settings antes de montar rotas PMS em host ≠ URL base do PMS
+ * (evita redirect / → /login no domínio check-in quando env/runtime está vazio).
+ */
+export function shouldWaitForWebCheckinHostDetection(
+  isLoading: boolean,
+  settings?: WebCheckinUrlSettings | null,
+): boolean {
+  if (typeof window === "undefined" || !isLoading) return false;
+  if (isWebCheckinPublicHostname(settings)) return false;
+  if (getRuntimeWebCheckinPublicHostname()) return false;
+
+  const current = window.location.hostname.toLowerCase().replace(/^www\./, "");
+  const fromSettings = settings?.pms_base_url?.trim()
+    ? hostnameFromUrlOrHost(settings.pms_base_url)
+    : null;
+  const app = resolveAppUrl();
+  const pmsHost = fromSettings ?? (app ? hostnameFromUrlOrHost(app) : null);
+
+  return Boolean(pmsHost && current !== pmsHost);
+}
+
+/**
  * Segmento de rota SPA quando o check-in usa subcaminho no mesmo host do PMS.
  * Retorna "" quando a base é só o domínio (localizador na raiz: /RSV123).
  * Retorna "web-checkin" no padrão do PMS.
  */
+
 export function getWebCheckinRoutePrefix(settings?: WebCheckinUrlSettings | null): string {
   const custom = settings?.web_checkin_public_base_url?.trim();
   if (!custom) return "web-checkin";

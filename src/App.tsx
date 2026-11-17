@@ -17,7 +17,11 @@ import PendingReservations from "./pages/PendingReservations";
 import ActivityLogs from "./pages/ActivityLogs";
 import ReservationDetails from "./pages/ReservationDetails";
 import WebCheckin from "./pages/WebCheckin";
-import { getWebCheckinRoutePrefix, isWebCheckinPublicHostname } from "./lib/webCheckinPublicUrl";
+import {
+  getWebCheckinRoutePrefix,
+  isWebCheckinPublicHostname,
+  shouldWaitForWebCheckinHostDetection,
+} from "./lib/webCheckinPublicUrl";
 import { useSiteSettings } from "./hooks/useSiteSettings";
 import { WebCheckinDedicatedAppRoutes } from "./components/routing/WebCheckinDedicatedAppRoutes";
 import GuestDashboard from "./pages/GuestDashboard";
@@ -128,11 +132,19 @@ const AppContent = () => {
 
 const AppRoutesWithMeta = () => {
   useSiteMeta();
-  const { settings } = useSiteSettings();
+  const { settings, isLoading: siteSettingsLoading } = useSiteSettings();
   const onWebCheckinHost = isWebCheckinPublicHostname(settings);
   const webCheckinPrefix = getWebCheckinRoutePrefix(settings);
   const extraWebCheckinPath =
     webCheckinPrefix && webCheckinPrefix !== "web-checkin" ? webCheckinPrefix : null;
+
+  if (shouldWaitForWebCheckinHostDetection(siteSettingsLoading, settings)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Carregando…</p>
+      </div>
+    );
+  }
 
   if (onWebCheckinHost) {
     return <WebCheckinDedicatedAppRoutes />;

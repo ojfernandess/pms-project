@@ -5,6 +5,8 @@ declare global {
       appUrl?: string;
       /** Hostname do domínio dedicado do Web Check-in (ex. checkin.seudominio.com) */
       webCheckinPublicHost?: string;
+      /** URL pública do Web Check-in (ex. https://checkin.seudominio.com) */
+      webCheckinPublicUrl?: string;
     };
   }
 }

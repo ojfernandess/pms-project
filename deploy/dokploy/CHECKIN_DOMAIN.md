@@ -45,11 +45,17 @@ WEB_CHECKIN_PUBLIC_URL=https://checkin.stayos.com.br
 
 3. **Domains** (já deve existir `pms` no frontend):
    - **Create Domain** → `checkin.stayos.com.br` → service **`frontend`** → port **80** → HTTPS ON
-4. **Redeploy**
+4. **Redeploy** (recriar o container `frontend` para o entrypoint regenerar `runtime-config.js`)
 5. Super Admin: URL Base PMS + URL pública Web Check-in
+
+As variáveis `VITE_*`, `PUBLIC_APP_URL`, `WEB_CHECKIN_*` do painel **precisam chegar no serviço `frontend`** (não só no backend). O `docker-compose.dokploy.yml` repassa isso em `environment:` — após o deploy, confira `https://checkin.../runtime-config.js`: deve listar `pmsApiUrl`, `appUrl` e `webCheckinPublicHost` **com valor** (não string vazia).
+
+Se faltar só o host do check-in, basta `WEB_CHECKIN_PUBLIC_URL=https://checkin.stayos.com.br` (o script extrai o hostname).
 
 ---
 
 ## Teste
 
 `curl -k -sI https://checkin.stayos.com.br/` → `200` e `Server: nginx`
+
+`curl -s https://checkin.stayos.com.br/runtime-config.js` → `webCheckinPublicHost: 'checkin.stayos.com.br'`
