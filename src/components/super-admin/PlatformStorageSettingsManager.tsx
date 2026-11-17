@@ -24,6 +24,10 @@ type EnvStorageTestResult = {
   source?: string;
   provider?: string;
   storageProviderEnv?: string;
+  envDiagnostics?: {
+    process?: Record<string, boolean>;
+    configService?: Record<string, boolean>;
+  };
   endpoint?: string;
   port?: number;
   useSSL?: boolean;
@@ -109,6 +113,21 @@ export function PlatformStorageSettingsManager() {
             </div>
           )}
           {lastResult.bucket && <div>bucket: {lastResult.bucket}</div>}
+          {lastResult.envDiagnostics && (
+            <div className="pt-2 space-y-1 text-[10px] leading-relaxed">
+              <div className="font-sans font-semibold text-muted-foreground">Diagnóstico (container da API):</div>
+              <div>
+                process.env STORAGE_PROVIDER:{" "}
+                {lastResult.envDiagnostics.process?.STORAGE_PROVIDER ? "sim" : "não"}
+                {" · "}
+                MINIO_ENDPOINT: {lastResult.envDiagnostics.process?.MINIO_ENDPOINT ? "sim" : "não"}
+              </div>
+              <div>
+                ConfigService STORAGE_PROVIDER:{" "}
+                {lastResult.envDiagnostics.configService?.STORAGE_PROVIDER ? "sim" : "não"}
+              </div>
+            </div>
+          )}
           <div className={lastResult.ok ? "text-green-700" : "text-red-700"}>{lastResult.message}</div>
         </div>
       )}

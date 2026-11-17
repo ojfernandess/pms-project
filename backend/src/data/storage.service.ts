@@ -18,6 +18,7 @@ import {
   parseStorageConfig,
   type StorageConfig,
 } from "./storage.types";
+import { readStorageEnv, storageEnvDiagnostics, type StorageEnvDiagnostics } from "./storage-env";
 
 export type StorageConnectionTestResult = {
   ok: boolean;
@@ -26,6 +27,7 @@ export type StorageConnectionTestResult = {
   provider?: StorageConfig["provider"];
   /** Valor bruto de STORAGE_PROVIDER no env (diagnóstico). */
   storageProviderEnv?: string;
+  envDiagnostics?: StorageEnvDiagnostics;
   endpoint?: string;
   port?: number;
   useSSL?: boolean;
@@ -54,7 +56,7 @@ export class StorageService implements OnModuleInit {
   private s3Bucket: string = "pms";
 
   constructor(private readonly config: ConfigService) {
-    this.root = resolve(config.get<string>("STORAGE_DIR") || join(process.cwd(), "storage"));
+    this.root = resolve(readStorageEnv(config, "STORAGE_DIR") || join(process.cwd(), "storage"));
   }
 
   async onModuleInit(): Promise<void> {
@@ -73,10 +75,11 @@ export class StorageService implements OnModuleInit {
 
   /** Testa somente variáveis de ambiente do container da API (ignora site_settings). */
   async testConnectionFromEnv(): Promise<StorageConnectionTestResult> {
+    const diagnostics = storageEnvDiagnostics(this.config);
     const cfg = this.resolveConfigFromEnv();
-    const rawProvider = this.config.get<string>("STORAGE_PROVIDER");
-    const provider = (rawProvider || "").trim().toLowerCase() || "local";
-    const storageProviderEnv = rawProvider?.trim() || "(vazio)";
+    const rawProvider = readStorageEnv(this.config, "STORAGE_PROVIDER");
+    const provider = (rawProvider || "local").trim().toLowerCase();
+    const storageProviderEnv = rawProvider || "(vazio)";
 
     if (cfg.provider === "minio" && cfg.minio) {
       const m = cfg.minio;
@@ -86,6 +89,7 @@ export class StorageService implements OnModuleInit {
         source: "env",
         provider: "minio",
         storageProviderEnv,
+        envDiagnostics: diagnostics,
         endpoint: m.endPoint,
         port: m.port ?? 9000,
         useSSL: m.useSSL === true,
@@ -99,20 +103,25 @@ export class StorageService implements OnModuleInit {
         source: "env",
         provider: "minio",
         storageProviderEnv,
+        envDiagnostics: diagnostics,
         message:
-          "STORAGE_PROVIDER=minio mas faltam MINIO_ENDPOINT, MINIO_ACCESS_KEY ou MINIO_SECRET_KEY no env do backend.",
+          "STORAGE_PROVIDER=minio mas faltam MINIO_ENDPOINT, MINIO_ACCESS_KEY ou MINIO_SECRET_KEY no env do container da API.",
       };
     }
 
     try {
       await mkdir(this.root, { recursive: true });
       await access(this.root, constants.W_OK);
+      const hint = diagnostics.process.STORAGE_PROVIDER
+        ? "STORAGE_PROVIDER existe no process.env mas não foi reconhecido — verifique o valor."
+        : "STORAGE_PROVIDER ausente no process.env do container myapi — configure no painel do backend e recrie o container.";
       return {
         ok: true,
         source: "env",
         provider: "local",
         storageProviderEnv,
-        message: `Armazenamento local (STORAGE_PROVIDER=${storageProviderEnv}). Defina STORAGE_PROVIDER=minio no serviço da API e reinicie.`,
+        envDiagnostics: diagnostics,
+        message: `Armazenamento local (STORAGE_PROVIDER=${storageProviderEnv}). ${hint}`,
       };
     } catch (error) {
       return {
@@ -120,6 +129,7 @@ export class StorageService implements OnModuleInit {
         source: "env",
         provider: "local",
         storageProviderEnv,
+        envDiagnostics: diagnostics,
         message: error instanceof Error ? error.message : "Armazenamento local indisponível",
       };
     }
@@ -257,22 +267,22 @@ export class StorageService implements OnModuleInit {
    * Provedor de storage só via env do backend (site_settings.storage_config não é mais usado).
    */
   private resolveConfigFromEnv(): StorageConfig {
-    const provider = (this.config.get<string>("STORAGE_PROVIDER") || "local").trim().toLowerCase();
+    const provider = (readStorageEnv(this.config, "STORAGE_PROVIDER") || "local").trim().toLowerCase();
     if (provider !== "minio") {
       return { ...DEFAULT_STORAGE_CONFIG };
     }
 
-    const endPoint = normalizeMinioHost(this.config.get<string>("MINIO_ENDPOINT") || "");
-    const accessKey = (this.config.get<string>("MINIO_ACCESS_KEY") || "").trim();
-    const secretKey = (this.config.get<string>("MINIO_SECRET_KEY") || "").trim();
+    const endPoint = normalizeMinioHost(readStorageEnv(this.config, "MINIO_ENDPOINT"));
+    const accessKey = readStorageEnv(this.config, "MINIO_ACCESS_KEY");
+    const secretKey = readStorageEnv(this.config, "MINIO_SECRET_KEY");
     if (!endPoint || !accessKey || !secretKey) {
       return { ...DEFAULT_STORAGE_CONFIG };
     }
 
-    const useSSL = envTruthy(this.config.get<string>("MINIO_USE_SSL"));
-    const portRaw = this.config.get<string>("MINIO_PORT");
+    const useSSL = envTruthy(readStorageEnv(this.config, "MINIO_USE_SSL"));
+    const portRaw = readStorageEnv(this.config, "MINIO_PORT");
     const port =
-      portRaw != null && String(portRaw).trim() !== ""
+      portRaw !== ""
         ? Number(portRaw)
         : useSSL
           ? 443
@@ -286,8 +296,8 @@ export class StorageService implements OnModuleInit {
         useSSL,
         accessKey,
         secretKey,
-        region: this.config.get<string>("MINIO_REGION") || "us-east-1",
-        bucket: this.config.get<string>("MINIO_BUCKET") || "pms",
+        region: readStorageEnv(this.config, "MINIO_REGION") || "us-east-1",
+        bucket: readStorageEnv(this.config, "MINIO_BUCKET") || "pms",
       },
     });
   }

@@ -16,7 +16,10 @@ import { validateEnv } from "./config/env.validation";
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      validate: validateEnv,
+      validate: (config: Record<string, unknown>) => ({
+        ...config,
+        ...validateEnv(config),
+      }),
     }),
     PrismaModule,
     RedisModule,

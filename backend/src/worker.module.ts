@@ -11,7 +11,13 @@ import { SystemProcessor } from "./queues/system.processor";
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validate: (config: Record<string, unknown>) => ({
+        ...config,
+        ...validateEnv(config),
+      }),
+    }),
     PrismaModule,
     RedisModule,
     EdgeModule,
