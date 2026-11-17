@@ -11,13 +11,24 @@ import { access, constants, mkdir, readFile, readdir, stat, writeFile } from "fs
 import { join, normalize, resolve, sep } from "path";
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { PrismaService } from "../prisma/prisma.service";
 import {
   DEFAULT_STORAGE_CONFIG,
+  envTruthy,
+  normalizeMinioHost,
   parseStorageConfig,
-  SITE_SETTINGS_ID,
   type StorageConfig,
 } from "./storage.types";
+
+export type StorageConnectionTestResult = {
+  ok: boolean;
+  message: string;
+  source: "env";
+  provider?: StorageConfig["provider"];
+  endpoint?: string;
+  port?: number;
+  useSSL?: boolean;
+  bucket?: string;
+};
 
 type BucketMeta = { public: boolean };
 
@@ -40,10 +51,7 @@ export class StorageService implements OnModuleInit {
   private s3: S3Client | null = null;
   private s3Bucket: string = "pms";
 
-  constructor(
-    private readonly config: ConfigService,
-    private readonly prisma: PrismaService,
-  ) {
+  constructor(private readonly config: ConfigService) {
     this.root = resolve(config.get<string>("STORAGE_DIR") || join(process.cwd(), "storage"));
   }
 
@@ -61,38 +69,73 @@ export class StorageService implements OnModuleInit {
     await access(this.root, constants.W_OK);
   }
 
-  async testConnection(override?: StorageConfig): Promise<{ ok: boolean; message: string }> {
-    const cfg = override ?? (await this.loadConfig());
+  /** Testa somente variáveis de ambiente do container da API (ignora site_settings). */
+  async testConnectionFromEnv(): Promise<StorageConnectionTestResult> {
+    const cfg = this.resolveConfigFromEnv();
+    const provider = (this.config.get<string>("STORAGE_PROVIDER") || "local").trim().toLowerCase();
+
     if (cfg.provider === "minio" && cfg.minio) {
-      const client = this.buildS3(cfg.minio);
-      const bucket = cfg.minio.bucket || "pms";
-      try {
-        await client.send(new HeadBucketCommand({ Bucket: bucket }));
-        return { ok: true, message: `Conexão MinIO OK (bucket "${bucket}")` };
-      } catch (err: unknown) {
-        try {
-          await client.send(new CreateBucketCommand({ Bucket: bucket }));
-          return { ok: true, message: `Bucket "${bucket}" criado no MinIO` };
-        } catch (createErr) {
-          const msg =
-            createErr instanceof Error
-              ? createErr.message
-              : err instanceof Error
-                ? err.message
-                : "Falha ao conectar no MinIO";
-          return { ok: false, message: msg };
-        }
-      }
+      const m = cfg.minio;
+      const base = await this.runMinioConnectionTest(cfg);
+      return {
+        ...base,
+        source: "env",
+        provider: "minio",
+        endpoint: m.endPoint,
+        port: m.port ?? 9000,
+        useSSL: m.useSSL === true,
+        bucket: m.bucket || "pms",
+      };
     }
+
+    if (provider === "minio") {
+      return {
+        ok: false,
+        source: "env",
+        provider: "minio",
+        message:
+          "STORAGE_PROVIDER=minio mas faltam MINIO_ENDPOINT, MINIO_ACCESS_KEY ou MINIO_SECRET_KEY no env do backend.",
+      };
+    }
+
     try {
       await mkdir(this.root, { recursive: true });
       await access(this.root, constants.W_OK);
-      return { ok: true, message: "Armazenamento local acessível" };
+      return {
+        ok: true,
+        source: "env",
+        provider: "local",
+        message: "Armazenamento local acessível (STORAGE_PROVIDER=local ou não definido).",
+      };
     } catch (error) {
       return {
         ok: false,
+        source: "env",
+        provider: "local",
         message: error instanceof Error ? error.message : "Armazenamento local indisponível",
       };
+    }
+  }
+
+  private async runMinioConnectionTest(cfg: StorageConfig): Promise<{ ok: boolean; message: string }> {
+    if (!cfg.minio) return { ok: false, message: "MinIO não configurado" };
+    const client = this.buildS3(cfg.minio);
+    const bucket = cfg.minio.bucket || "pms";
+    const target = `${cfg.minio.useSSL ? "https" : "http"}://${cfg.minio.endPoint}:${cfg.minio.port ?? 9000}`;
+    try {
+      await client.send(new HeadBucketCommand({ Bucket: bucket }));
+      return { ok: true, message: `Conexão MinIO OK em ${target} (bucket "${bucket}")` };
+    } catch (err: unknown) {
+      try {
+        await client.send(new CreateBucketCommand({ Bucket: bucket }));
+        return { ok: true, message: `Bucket "${bucket}" criado no MinIO (${target})` };
+      } catch {
+        const msg = err instanceof Error ? err.message : "Falha ao conectar no MinIO";
+        return {
+          ok: false,
+          message: `${msg} — alvo: ${target}. Confira env (MINIO_ENDPOINT, MINIO_PORT, MINIO_USE_SSL).`,
+        };
+      }
     }
   }
 
@@ -199,39 +242,46 @@ export class StorageService implements OnModuleInit {
   }
 
   private async loadConfig(): Promise<StorageConfig> {
-    const envProvider = this.config.get<string>("STORAGE_PROVIDER");
-    if (envProvider === "minio") {
-      const endPoint = this.config.get<string>("MINIO_ENDPOINT");
-      const accessKey = this.config.get<string>("MINIO_ACCESS_KEY");
-      const secretKey = this.config.get<string>("MINIO_SECRET_KEY");
-      if (endPoint && accessKey && secretKey) {
-        return parseStorageConfig({
-          provider: "minio",
-          minio: {
-            endPoint,
-            port: Number(this.config.get<string>("MINIO_PORT") || 9000),
-            useSSL: this.config.get<string>("MINIO_USE_SSL") === "true",
-            accessKey,
-            secretKey,
-            region: this.config.get<string>("MINIO_REGION") || "us-east-1",
-            bucket: this.config.get<string>("MINIO_BUCKET") || "pms",
-          },
-        });
-      }
+    return this.resolveConfigFromEnv();
+  }
+
+  /**
+   * Provedor de storage só via env do backend (site_settings.storage_config não é mais usado).
+   */
+  private resolveConfigFromEnv(): StorageConfig {
+    const provider = (this.config.get<string>("STORAGE_PROVIDER") || "local").trim().toLowerCase();
+    if (provider !== "minio") {
+      return { ...DEFAULT_STORAGE_CONFIG };
     }
 
-    try {
-      const row = await this.prisma.site_settings.findUnique({
-        where: { id: SITE_SETTINGS_ID },
-        select: { storage_config: true },
-      });
-      if (row?.storage_config) {
-        return parseStorageConfig(row.storage_config);
-      }
-    } catch {
-      /* schema pode não ter coluna ainda */
+    const endPoint = normalizeMinioHost(this.config.get<string>("MINIO_ENDPOINT") || "");
+    const accessKey = (this.config.get<string>("MINIO_ACCESS_KEY") || "").trim();
+    const secretKey = (this.config.get<string>("MINIO_SECRET_KEY") || "").trim();
+    if (!endPoint || !accessKey || !secretKey) {
+      return { ...DEFAULT_STORAGE_CONFIG };
     }
-    return { ...DEFAULT_STORAGE_CONFIG };
+
+    const useSSL = envTruthy(this.config.get<string>("MINIO_USE_SSL"));
+    const portRaw = this.config.get<string>("MINIO_PORT");
+    const port =
+      portRaw != null && String(portRaw).trim() !== ""
+        ? Number(portRaw)
+        : useSSL
+          ? 443
+          : 9000;
+
+    return parseStorageConfig({
+      provider: "minio",
+      minio: {
+        endPoint,
+        port,
+        useSSL,
+        accessKey,
+        secretKey,
+        region: this.config.get<string>("MINIO_REGION") || "us-east-1",
+        bucket: this.config.get<string>("MINIO_BUCKET") || "pms",
+      },
+    });
   }
 
   private buildS3(minio: NonNullable<StorageConfig["minio"]>): S3Client {

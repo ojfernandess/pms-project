@@ -5,7 +5,6 @@ import { StaffIdentityService } from "../auth/staff-identity.service";
 import { DataService } from "./data.service";
 import { QueryRequest } from "./query-compiler";
 import { StorageService } from "./storage.service";
-import { parseStorageConfig } from "./storage.types";
 
 @Controller()
 export class DataController {
@@ -55,9 +54,7 @@ export class DataController {
       res.status(403).json({ ok: false, message: "Apenas super admin" });
       return;
     }
-    const body = (req.body ?? {}) as { storage_config?: unknown };
-    const override = body.storage_config ? parseStorageConfig(body.storage_config) : undefined;
-    const result = await this.storage.testConnection(override);
+    const result = await this.storage.testConnectionFromEnv();
     res.status(result.ok ? 200 : 400).json(result);
   }
 

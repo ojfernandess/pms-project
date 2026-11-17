@@ -20,6 +20,27 @@ export const SITE_SETTINGS_ID = "00000000-0000-0000-0000-000000000001";
 
 export const DEFAULT_STORAGE_CONFIG: StorageConfig = { provider: "local" };
 
+/** Hostname sem protocolo, porta ou path (ex.: s3.stayos.com.br). */
+export function normalizeMinioHost(endPoint: string): string {
+  let h = (endPoint || "").trim();
+  if (!h) return "";
+  h = h.replace(/^https?:\/\//i, "");
+  const slash = h.indexOf("/");
+  if (slash >= 0) h = h.slice(0, slash);
+  const colon = h.lastIndexOf(":");
+  if (colon > 0 && !h.includes("]")) {
+    const maybePort = h.slice(colon + 1);
+    if (/^\d+$/.test(maybePort)) h = h.slice(0, colon);
+  }
+  return h;
+}
+
+export function envTruthy(value: string | undefined): boolean {
+  if (!value) return false;
+  const s = value.trim().toLowerCase();
+  return s === "true" || s === "1" || s === "yes" || s === "on";
+}
+
 export function parseStorageConfig(raw: unknown): StorageConfig {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_STORAGE_CONFIG };
   const obj = raw as Record<string, unknown>;
@@ -29,7 +50,7 @@ export function parseStorageConfig(raw: unknown): StorageConfig {
     return { provider: "local" };
   }
   const m = minioRaw as Record<string, unknown>;
-  const endPoint = String(m.endPoint || "").trim();
+  const endPoint = normalizeMinioHost(String(m.endPoint || ""));
   const accessKey = String(m.accessKey || "").trim();
   const secretKey = String(m.secretKey || "").trim();
   if (!endPoint || !accessKey || !secretKey) {
