@@ -46,7 +46,13 @@ export function WebCheckinDeployChecklist({ webCheckinBaseUrl, pmsBaseUrl }: Pro
       `WEB_CHECKIN_PUBLIC_URL=${webCheckinBaseUrl.trim().replace(/\/+$/, "")}`,
     ];
     if (pms) {
-      lines.push(`VITE_PMS_API_URL=${pms}`, `VITE_APP_URL=${pms}`, `PUBLIC_APP_URL=${pms}`);
+      const withoutWww = pms.replace(/^https:\/\/www\./i, "https://");
+      lines.push(
+        `VITE_PMS_API_URL=${withoutWww}`,
+        `VITE_APP_URL=${withoutWww}`,
+        `PUBLIC_APP_URL=${withoutWww}`,
+        `PLATFORM_DNS_CNAME_TARGET=${withoutWww.replace(/^https:\/\//, "").replace(/\/+$/, "")}`,
+      );
     }
     if (hosts.length > 1) {
       lines.push(`WEB_CHECKIN_PUBLIC_HOSTS=${hosts.join(",")}`);

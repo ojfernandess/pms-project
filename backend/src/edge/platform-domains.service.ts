@@ -73,13 +73,16 @@ export class PlatformDomainsService {
 
   infrastructureHints() {
     const publicApp = this.config.get<string>("PUBLIC_APP_URL") || this.config.get<string>("SITE_URL");
-    const pmsHost = hostnameFromUrlOrHost(publicApp);
-    const cnameTarget =
+    const pmsHosts = this.collectPmsHostnames(null);
+    const fromEnv =
       this.config.get<string>("PLATFORM_DNS_CNAME_TARGET")?.trim() ||
-      pmsHost ||
-      null;
+      hostnameFromUrlOrHost(publicApp);
+    const cnameTarget =
+      fromEnv && pmsHosts.has(normalizeHostname(fromEnv))
+        ? fromEnv
+        : [...pmsHosts].find((h) => !h.startsWith("www.")) || fromEnv || null;
     const aTarget = this.config.get<string>("PLATFORM_DNS_A_TARGET")?.trim() || null;
-    return { cnameTarget, aTarget, pmsPublicUrl: publicApp?.trim() || null };
+    return { cnameTarget, aTarget, pmsPublicUrl: publicApp?.trim() || null, pmsHosts };
   }
 
   async resolveFromRequest(req: Request): Promise<HostnameResolution> {
@@ -514,33 +517,24 @@ export class PlatformDomainsService {
       details.push(`TXT ${txtName} não resolvido (propagação DNS ou registro ausente)`);
     }
 
-    if (hints.cnameTarget) {
-      try {
-        const cnames = await dns.resolveCname(hostname);
-        const normalizedTarget = hints.cnameTarget.toLowerCase();
-        dnsPointsOk = cnames.some((c) => normalizeHostname(c) === normalizedTarget);
-        if (!dnsPointsOk) {
-          const cname = cnames[0];
-          details.push(
-            cname
-              ? `CNAME aponta para ${cname}, esperado ${hints.cnameTarget}`
-              : `Sem CNAME; esperado apontar para ${hints.cnameTarget}`,
-          );
-        }
-      } catch {
-        try {
-          const ips = await dns.resolve4(hostname);
-          dnsPointsOk = ips.length > 0;
-          if (hints.aTarget) {
-            dnsPointsOk = ips.includes(hints.aTarget);
-          }
-          if (!dnsPointsOk) {
-            details.push("Registro A/AAAA não coincide com o IP esperado da infraestrutura");
-          }
-        } catch {
-          details.push("Hostname não resolve (A/CNAME)");
-        }
-      }
+    const acceptableTargets = new Set<string>();
+    const addTarget = (h: string | null | undefined) => {
+      if (!h) return;
+      const n = normalizeHostname(h);
+      acceptableTargets.add(n);
+      if (n.startsWith("www.")) acceptableTargets.add(n.slice(4));
+      else acceptableTargets.add(`www.${n}`);
+    };
+    addTarget(hints.cnameTarget);
+    for (const h of hints.pmsHosts ?? []) addTarget(h);
+
+    dnsPointsOk = await this.hostResolvesToTargets(hostname, acceptableTargets, hints.aTarget);
+    if (!dnsPointsOk) {
+      details.push(
+        hints.cnameTarget
+          ? `DNS de ${hostname} não aponta para ${hints.cnameTarget} (ou hostname equivalente do PMS)`
+          : `Hostname ${hostname} não resolve para a infraestrutura do PMS`,
+      );
     }
 
     try {
@@ -559,5 +553,40 @@ export class PlatformDomainsService {
     }
 
     return { txtOk, dnsPointsOk, sslOk, details };
+  }
+
+  /** CNAME (ou mesmo IP que o PMS) — compatível com Cloudflare proxy. */
+  private async hostResolvesToTargets(
+    hostname: string,
+    targets: Set<string>,
+    aTarget: string | null,
+  ): Promise<boolean> {
+    try {
+      const cnames = await dns.resolveCname(hostname);
+      if (cnames.some((c) => targets.has(normalizeHostname(c)))) return true;
+    } catch {
+      /* flatten / proxy — tentar A */
+    }
+
+    let hostIps: string[] = [];
+    try {
+      hostIps = await dns.resolve4(hostname);
+    } catch {
+      return false;
+    }
+
+    if (aTarget && hostIps.includes(aTarget)) return true;
+
+    for (const targetHost of targets) {
+      if (!targetHost || targetHost.includes(" ")) continue;
+      try {
+        const targetIps = await dns.resolve4(targetHost);
+        if (targetIps.some((ip) => hostIps.includes(ip))) return true;
+      } catch {
+        continue;
+      }
+    }
+
+    return hostIps.length > 0 && targets.size === 0;
   }
 }
