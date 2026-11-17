@@ -23,11 +23,18 @@ export function buildCorsOptions(config: ConfigService): CorsOptions {
   const webCheckin = normalizeOrigin(config.get<string>("WEB_CHECKIN_PUBLIC_URL"));
   const webCheckinHosts = originsFromHostnames(config.get<string>("WEB_CHECKIN_PUBLIC_HOST"));
   const extraWebCheckinHosts = originsFromHostnames(config.get<string>("WEB_CHECKIN_PUBLIC_HOSTS"));
+  const apiPublic = normalizeOrigin(config.get<string>("VITE_PMS_API_URL"));
   const allowlist = [
     ...new Set(
-      [...explicit, publicApp, siteUrl, webCheckin, ...webCheckinHosts, ...extraWebCheckinHosts].filter(
-        Boolean,
-      ),
+      [
+        ...explicit,
+        publicApp,
+        siteUrl,
+        webCheckin,
+        apiPublic,
+        ...webCheckinHosts,
+        ...extraWebCheckinHosts,
+      ].filter(Boolean),
     ),
   ];
 

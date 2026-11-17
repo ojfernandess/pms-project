@@ -112,7 +112,7 @@ services:
       context: "https://github.com/ojfernandess/pms-project.git#PMS-Backend"
       dockerfile: Dockerfile
       args:
-        # Modo proxy (recomendado): mesma URL do SPA — evita mixed content e myapi desnecessário
+        # Modo B: myapi.* (StayOS) ou Modo A: mesma URL do SPA (PUBLIC_APP_URL)
         VITE_PMS_API_URL: ${VITE_PMS_API_URL:-${PUBLIC_APP_URL:-https://localhost}}
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
@@ -124,8 +124,9 @@ services:
       BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:3000}
       # Runtime → deploy/frontend/40-generate-runtime-config.sh (repasse as mesmas vars do painel Dokploy)
       VITE_PMS_API_URL: ${VITE_PMS_API_URL:-}
+      PMS_API_URL: ${VITE_PMS_API_URL:-${PMS_API_URL:-}}
       VITE_APP_URL: ${VITE_APP_URL:-}
-      PMS_API_URL: ${PMS_API_URL:-}
+      PMS_APP_URL: ${PMS_APP_URL:-}
       PMS_APP_URL: ${PMS_APP_URL:-}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
       SITE_URL: ${SITE_URL:-}

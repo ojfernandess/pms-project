@@ -5,7 +5,8 @@ HTML_ROOT="${NGINX_HTML_ROOT:-/usr/share/nginx/html}"
 OUT="${HTML_ROOT}/runtime-config.js"
 
 # VITE_* no estágio final da imagem vêm do Environment do compose (não do build).
-API_URL="${VITE_PMS_API_URL:-${PMS_API_URL:-${PUBLIC_APP_URL:-${SITE_URL:-}}}}"
+# API: subdomínio dedicado (myapi.*) — não usar PUBLIC_APP_URL como fallback da API
+API_URL="${VITE_PMS_API_URL:-${PMS_API_URL:-}}"
 APP_URL="${VITE_APP_URL:-${PMS_APP_URL:-${PUBLIC_APP_URL:-${SITE_URL:-}}}}"
 
 WEB_CHECKIN_HOST="${WEB_CHECKIN_PUBLIC_HOST:-${VITE_WEB_CHECKIN_PUBLIC_HOST:-}}"

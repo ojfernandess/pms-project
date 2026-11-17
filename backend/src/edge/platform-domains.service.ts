@@ -85,9 +85,19 @@ export class PlatformDomainsService {
     return { cnameTarget, aTarget, pmsPublicUrl: publicApp?.trim() || null, pmsHosts };
   }
 
-  async resolveFromRequest(req: Request): Promise<HostnameResolution> {
-    const hostname = resolveRequestHostname(req);
+  async resolveFromRequest(req: Request, visitorHostname?: string): Promise<HostnameResolution> {
+    const fromQuery = visitorHostname?.trim();
+    const fromHeader = req.header("x-pms-visitor-host")?.trim();
+    const hostname =
+      (fromQuery && this.isPlausibleHostname(fromQuery) ? fromQuery : null) ||
+      (fromHeader && this.isPlausibleHostname(fromHeader) ? fromHeader : null) ||
+      resolveRequestHostname(req);
     return this.resolveHostname(hostname);
+  }
+
+  private isPlausibleHostname(value: string): boolean {
+    const h = normalizeHostname(value);
+    return Boolean(h && h.length <= 253 && /^[a-z0-9.-]+$/.test(h) && h.includes("."));
   }
 
   /** Todos os hostnames do painel PMS (evita bloquear pms.* quando site_settings tem URL antiga). */

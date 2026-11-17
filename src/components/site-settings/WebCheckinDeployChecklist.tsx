@@ -48,9 +48,17 @@ export function WebCheckinDeployChecklist({ webCheckinBaseUrl, pmsBaseUrl }: Pro
     if (pms) {
       const withoutWww = pms.replace(/^https:\/\/www\./i, "https://");
       const checkin = webCheckinBaseUrl.trim().replace(/\/+$/, "");
+      let myapi = "https://myapi.seudominio.com";
+      try {
+        const apex = new URL(withoutWww).hostname.split(".").slice(-2).join(".");
+        myapi = `https://myapi.${apex}`;
+      } catch {
+        /* keep placeholder */
+      }
       lines.push(
-        `# Use a MESMA URL do painel (proxy nginx). Não use subdomínio api/myapi separado no StayOS Dokploy.`,
-        `VITE_PMS_API_URL=${withoutWww}`,
+        `# SPA (frontend) vs API (backend Dokploy Domains)`,
+        `VITE_PMS_API_URL=${myapi}`,
+        `PMS_API_URL=${myapi}`,
         `VITE_APP_URL=${withoutWww}`,
         `PUBLIC_APP_URL=${withoutWww}`,
         `PLATFORM_DNS_CNAME_TARGET=${withoutWww.replace(/^https:\/\//, "").replace(/\/+$/, "")}`,

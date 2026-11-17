@@ -90,8 +90,12 @@ export class FunctionsCompatController {
 
   /** Roteamento SPA por hostname (público). Deve ser chamado na mesma origem do visitante (proxy nginx). */
   @Get("resolve-hostname")
-  async resolveHostname(@Req() req: Request, @Res() res: Response) {
-    const body = await this.platformDomains.resolveFromRequest(req);
+  async resolveHostname(
+    @Req() req: Request,
+    @Query("hostname") hostname: string | undefined,
+    @Res() res: Response,
+  ) {
+    const body = await this.platformDomains.resolveFromRequest(req, hostname);
     res.status(200).setHeader("Cache-Control", "public, max-age=60").json(body);
   }
 
