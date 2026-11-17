@@ -189,7 +189,6 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
     );
   };
 
-  return (
   if (showGuestlessPanel) {
     return (
       <div className="min-h-screen flex">
@@ -227,6 +226,7 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
     );
   }
 
+  return (
     <div className="min-h-screen flex">
       {/* Lado Esquerdo - Imagem Grande */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
