@@ -19,6 +19,7 @@ import { ReuseDataDialog } from "@/components/webcheckin/ReuseDataDialog";
 import { useGuestAccount } from "@/hooks/useGuestAccount";
 import {
   clearGuestlessCheckinSession,
+  getGuestlessVerifiedContacts,
   hasGuestlessCheckinSession,
 } from "@/lib/guestlessCheckinSession";
 import { supabase } from "@/integrations/supabase/client";
@@ -121,10 +122,15 @@ export default function WebCheckin() {
 
   // Buscar dados de check-ins anteriores quando estiver na etapa de guests
   // Tentar obter email/CPF/document_number dos dados já preenchidos ou da reserva
-  const mainGuestEmail = webCheckinData?.guests?.[0]?.email || 
-                         currentWebCheckin?.reservation?.guest?.email || 
-                         currentWebCheckin?.reservation?.financial_responsible?.email || null;
-  const mainGuestCpf = webCheckinData?.guests?.[0]?.cpf || null;
+  const guestlessContacts = guestlessMode ? getGuestlessVerifiedContacts() : {};
+  const mainGuestEmail =
+    webCheckinData?.guests?.[0]?.email ||
+    guestlessContacts.email ||
+    currentWebCheckin?.reservation?.guest?.email ||
+    currentWebCheckin?.reservation?.financial_responsible?.email ||
+    null;
+  const mainGuestCpf =
+    webCheckinData?.guests?.[0]?.cpf || guestlessContacts.cpf || null;
   const mainGuestDocumentNumber = webCheckinData?.guests?.[0]?.document_number || null;
   
   const { data: previousCheckinData, refetch: refetchPreviousCheckinData } = getPreviousCheckinData(

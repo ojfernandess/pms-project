@@ -46,18 +46,6 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'code', 'invalid_locator', 'message', 'Localizador inválido.');
   END IF;
 
-  IF p_is_brazilian THEN
-    v_digits := normalize_identifier_digits(v_identifier);
-    IF length(v_digits) <> 11 THEN
-      RETURN jsonb_build_object('success', false, 'code', 'invalid_cpf', 'message', 'Informe um CPF válido (11 dígitos).');
-    END IF;
-  ELSE
-    v_email := lower(v_identifier);
-    IF v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN
-      RETURN jsonb_build_object('success', false, 'code', 'invalid_email', 'message', 'Informe um e-mail válido.');
-    END IF;
-  END IF;
-
   SELECT wc.id, wc.reservation_id, wc.status, wc.expires_at
   INTO v_wc
   FROM public.web_checkin wc
@@ -94,7 +82,6 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'code', 'expired', 'message', 'O prazo deste check-in online expirou.');
   END IF;
 
-  -- Alinhado ao fluxo autenticado: não bloquear só porque expires_at foi gravado na meia-noite do check-in.
   IF v_res.checkout_date IS NOT NULL AND CURRENT_DATE > (v_res.checkout_date::date + 1) THEN
     RETURN jsonb_build_object('success', false, 'code', 'expired', 'message', 'O prazo deste check-in online expirou.');
   ELSIF v_res.checkout_date IS NULL AND v_res.checkin_date IS NOT NULL
@@ -131,9 +118,39 @@ BEGIN
   ORDER BY ota.created_at DESC NULLS LAST
   LIMIT 1;
 
+  SELECT gsh.guest_account_id
+  INTO v_stay_account
+  FROM public.guest_stay_history gsh
+  WHERE gsh.reservation_id = v_res.id
+  LIMIT 1;
+
+  -- Pré-validação só pelo localizador (painel sem CPF/e-mail ainda)
+  IF v_identifier = '' THEN
+    IF v_stay_account IS NOT NULL THEN
+      RETURN jsonb_build_object(
+        'success', false,
+        'code', 'reservation_requires_login',
+        'has_linked_account', true,
+        'message', 'Esta reserva está vinculada a uma conta. Faça login para acessar as informações.'
+      );
+    END IF;
+    RETURN jsonb_build_object('success', true, 'code', 'awaiting_identifier', 'has_linked_account', false);
+  END IF;
+
+  IF p_is_brazilian THEN
+    v_digits := normalize_identifier_digits(v_identifier);
+    IF length(v_digits) <> 11 THEN
+      RETURN jsonb_build_object('success', false, 'code', 'invalid_cpf', 'message', 'Informe um CPF válido (11 dígitos).');
+    END IF;
+  ELSE
+    v_email := lower(v_identifier);
+    IF v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN
+      RETURN jsonb_build_object('success', false, 'code', 'invalid_email', 'message', 'Informe um e-mail válido.');
+    END IF;
+  END IF;
+
   IF NOT p_is_brazilian THEN
-    IF lower(COALESCE(v_guest.email, '')) = v_email
-       OR lower(COALESCE(v_client.email, '')) = v_email THEN
+    IF v_res_guest_email = v_email OR v_res_client_email = v_email THEN
       v_reservation_email_match := TRUE;
     ELSE
       SELECT EXISTS (
@@ -151,45 +168,34 @@ BEGIN
     END IF;
   END IF;
 
+  IF (p_is_brazilian AND NOT v_reservation_cpf_match) OR (NOT p_is_brazilian AND NOT v_reservation_email_match) THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'code', 'verification_failed',
+      'message', 'Os dados informados não conferem com esta reserva. Verifique o localizador e tente novamente.'
+    );
+  END IF;
+
   v_account_id := NULL;
   v_account_birth := NULL;
-  v_stay_account := NULL;
 
-  SELECT gsh.guest_account_id
-  INTO v_stay_account
-  FROM public.guest_stay_history gsh
-  WHERE gsh.reservation_id = v_res.id
-  LIMIT 1;
-
-  IF v_stay_account IS NOT NULL THEN
+  IF p_is_brazilian THEN
     SELECT ga.id, ga.birth_date
     INTO v_account_id, v_account_birth
     FROM public.guest_accounts ga
-    WHERE ga.id = v_stay_account
-      AND ga.is_active IS DISTINCT FROM FALSE
+    WHERE ga.is_active IS DISTINCT FROM FALSE
+      AND normalize_identifier_digits(COALESCE(ga.document_number, '')) = v_digits
+    LIMIT 1;
+  ELSE
+    SELECT ga.id, ga.birth_date
+    INTO v_account_id, v_account_birth
+    FROM public.guest_accounts ga
+    WHERE ga.is_active IS DISTINCT FROM FALSE
+      AND lower(trim(ga.email)) = v_email
     LIMIT 1;
   END IF;
 
-  IF v_account_id IS NULL THEN
-    IF p_is_brazilian THEN
-      SELECT ga.id, ga.birth_date
-      INTO v_account_id, v_account_birth
-      FROM public.guest_accounts ga
-      WHERE ga.is_active IS DISTINCT FROM FALSE
-        AND normalize_identifier_digits(COALESCE(ga.document_number, '')) = v_digits
-      LIMIT 1;
-    ELSE
-      SELECT ga.id, ga.birth_date
-      INTO v_account_id, v_account_birth
-      FROM public.guest_accounts ga
-      WHERE ga.is_active IS DISTINCT FROM FALSE
-        AND lower(trim(ga.email)) = v_email
-      LIMIT 1;
-    END IF;
-  END IF;
-
-  -- Cadastros de hóspede costumam ter só e-mail; com CPF da reserva conferido, localizar conta pelo e-mail da reserva.
-  IF v_account_id IS NULL AND p_is_brazilian AND v_reservation_cpf_match THEN
+  IF v_account_id IS NULL AND p_is_brazilian THEN
     SELECT ga.id, ga.birth_date
     INTO v_account_id, v_account_birth
     FROM public.guest_accounts ga
@@ -203,16 +209,58 @@ BEGIN
     LIMIT 1;
   END IF;
 
-  IF v_account_id IS NOT NULL THEN
+  -- Mesma estratégia do check-in manual: check-ins completos em web_checkin_guests
+  IF v_account_id IS NULL AND p_is_brazilian THEN
+    SELECT ga.id, ga.birth_date
+    INTO v_account_id, v_account_birth
+    FROM public.web_checkin_guests wcg
+    JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+    JOIN public.guest_accounts ga ON ga.is_active IS DISTINCT FROM FALSE
+      AND lower(trim(ga.email)) = lower(trim(COALESCE(wcg.email, '')))
+    WHERE normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+    ORDER BY wc.completed_at DESC NULLS LAST
+    LIMIT 1;
+  END IF;
+
+  IF v_account_id IS NULL AND NOT p_is_brazilian THEN
+    SELECT ga.id, ga.birth_date
+    INTO v_account_id, v_account_birth
+    FROM public.web_checkin_guests wcg
+    JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+    JOIN public.guest_accounts ga ON ga.is_active IS DISTINCT FROM FALSE
+      AND lower(trim(ga.email)) = v_email
+    WHERE lower(trim(COALESCE(wcg.email, ''))) = v_email
+    ORDER BY wc.completed_at DESC NULLS LAST
+    LIMIT 1;
+  END IF;
+
+  IF v_stay_account IS NOT NULL THEN
+    IF v_account_id IS NULL THEN
+      RETURN jsonb_build_object(
+        'success', false,
+        'code', 'reservation_requires_login',
+        'has_linked_account', true,
+        'message', 'Esta reserva está vinculada a uma conta. Faça login para acessar as informações.'
+      );
+    END IF;
+
+    IF v_account_id <> v_stay_account THEN
+      RETURN jsonb_build_object(
+        'success', false,
+        'code', 'reservation_linked_other_account',
+        'message', 'Esta reserva está vinculada a outra conta. Faça login com a conta correta.'
+      );
+    END IF;
+
+    v_account_for_stay := TRUE;
+  ELSIF v_account_id IS NOT NULL THEN
     SELECT lower(trim(COALESCE(ga.email, ''))),
            normalize_identifier_digits(COALESCE(ga.document_number, ''))
     INTO v_account_email, v_account_doc_digits
     FROM public.guest_accounts ga
     WHERE ga.id = v_account_id;
 
-    IF v_stay_account IS NOT NULL AND v_stay_account = v_account_id THEN
-      v_account_for_stay := TRUE;
-    ELSIF p_is_brazilian AND v_reservation_cpf_match THEN
+    IF p_is_brazilian THEN
       IF v_account_doc_digits = v_digits THEN
         v_account_for_stay := TRUE;
       ELSIF v_res_guest_email <> '' AND v_account_email = v_res_guest_email THEN
@@ -222,7 +270,7 @@ BEGIN
       ELSIF v_ota_email <> '' AND v_account_email = v_ota_email THEN
         v_account_for_stay := TRUE;
       END IF;
-    ELSIF NOT p_is_brazilian AND v_reservation_email_match AND v_account_email = v_email THEN
+    ELSIF v_account_email = v_email THEN
       v_account_for_stay := TRUE;
     END IF;
 
@@ -234,13 +282,16 @@ BEGIN
         'message', 'Já existe uma conta com estes dados, mas ela não corresponde a esta reserva. Faça login com e-mail e senha.'
       );
     END IF;
+  END IF;
 
+  -- Data de nascimento só quando há conta de hóspede a confirmar (sem login)
+  IF v_account_id IS NOT NULL AND v_account_for_stay THEN
     IF p_birth_date IS NULL THEN
       RETURN jsonb_build_object(
         'success', false,
         'code', 'birth_date_required',
         'account_matched', true,
-        'message', 'Encontramos um cadastro com estes dados. Informe sua data de nascimento para continuar.'
+        'message', 'Encontramos um cadastro com estes dados. Informe sua data de nascimento para continuar sem login.'
       );
     END IF;
 
@@ -260,14 +311,6 @@ BEGIN
       );
     END IF;
 
-    IF v_stay_account IS NOT NULL AND v_stay_account <> v_account_id THEN
-      RETURN jsonb_build_object(
-        'success', false,
-        'code', 'reservation_linked_other_account',
-        'message', 'Esta reserva está vinculada a outra conta. Faça login com a conta correta.'
-      );
-    END IF;
-
     RETURN jsonb_build_object(
       'success', true,
       'code', 'ok',
@@ -275,14 +318,6 @@ BEGIN
       'guest_account_id', v_account_id,
       'reservation_id', v_res.id,
       'web_checkin_id', v_wc.id
-    );
-  END IF;
-
-  IF (p_is_brazilian AND NOT v_reservation_cpf_match) OR (NOT p_is_brazilian AND NOT v_reservation_email_match) THEN
-    RETURN jsonb_build_object(
-      'success', false,
-      'code', 'verification_failed',
-      'message', 'Os dados informados não conferem com esta reserva. Verifique o localizador e tente novamente.'
     );
   END IF;
 

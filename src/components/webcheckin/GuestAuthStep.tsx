@@ -48,7 +48,6 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
   const [locator, setLocator] = useState(initialLocator || "");
   const [showAuthForm, setShowAuthForm] = useState(!!initialLocator); // Se tem localizador inicial, mostrar formulário direto
   const [emailError, setEmailError] = useState<string | null>(null);
-  const [showGuestlessPanel, setShowGuestlessPanel] = useState(false);
 
   // Atualizar localizador quando initialLocator mudar
   useEffect(() => {
@@ -95,6 +94,7 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
     setShowAuthForm(true);
   };
 
+  const handleLogin = async (e: React.FormEvent) => {
   const openGuestless = () => {
     if (!locator.trim() && !initialLocator?.trim()) {
       toast.error(t("webCheckin.auth.errors.enterLocator"));
@@ -106,7 +106,6 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
     setShowGuestlessPanel(true);
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginEmail || !loginPassword) {
       toast.error(t("webCheckin.auth.errors.fillEmailPassword"));
@@ -190,6 +189,7 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
     );
   };
 
+  return (
   if (showGuestlessPanel) {
     return (
       <div className="min-h-screen flex">
@@ -215,6 +215,11 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
                 onNext({ guestlessVerified: true, locator: loc });
               }}
               onBack={() => setShowGuestlessPanel(false)}
+              onRequestLogin={() => {
+                setShowGuestlessPanel(false);
+                setShowAuthForm(true);
+                setIsLogin(true);
+              }}
             />
           </div>
         </div>
@@ -222,7 +227,6 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
     );
   }
 
-  return (
     <div className="min-h-screen flex">
       {/* Lado Esquerdo - Imagem Grande */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
@@ -385,6 +389,7 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
               >
                 {t("webCheckin.auth.alreadyHaveAccount")}
               </Button>
+            </>
 
               <Button
                 type="button"
@@ -408,7 +413,6 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
             </Button>
           ) : null}
 
-          {/* Tabs - Só mostrar se já inseriu o localizador */}
           {showAuthForm && (
           <Tabs value={isLogin ? "login" : "register"} onValueChange={(v) => setIsLogin(v === "login")}>
             <TabsList className="grid w-full grid-cols-2 bg-gray-100 dark:bg-gray-700 rounded-xl p-1">

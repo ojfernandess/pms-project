@@ -162,7 +162,7 @@ export const useWebCheckin = () => {
         if (reservationFullData.guest_id) {
           const { data: guestData } = await supabase
             .from("clients")
-            .select("full_name, email, phone")
+            .select("full_name, email, phone, document_number, document_type")
             .eq("id", reservationFullData.guest_id)
             .single();
           guest = guestData;
@@ -173,7 +173,7 @@ export const useWebCheckin = () => {
         if (reservationFullData.client_id) {
           const { data: financialData } = await supabase
             .from("clients")
-            .select("full_name, email, phone")
+            .select("full_name, email, phone, document_number, document_type")
             .eq("id", reservationFullData.client_id)
             .single();
           financialResponsible = financialData;

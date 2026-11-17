@@ -1,9 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Loader2, ArrowLeft, ArrowRight, ShieldCheck, Hash, Fingerprint, Mail, Globe2 } from "lucide-react";
+import { Loader2, ArrowLeft, ArrowRight, ShieldCheck, Hash, Fingerprint, Mail, Globe2, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { setGuestlessCheckinSession } from "@/lib/guestlessCheckinSession";
@@ -14,6 +14,7 @@ type Props = {
   locator: string;
   onVerified: (locator: string) => void;
   onBack: () => void;
+  onRequestLogin?: () => void;
 };
 
 type VerifyResult = {
@@ -32,13 +33,93 @@ function formatCpfInput(value: string): string {
   return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
 }
 
-export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack }: Props) {
+function parseVerifyPayload(data: unknown): VerifyResult | null {
+  const raw = data as VerifyResult | VerifyResult[] | null;
+  const payload = (Array.isArray(raw) ? raw[0] : raw) as VerifyResult | null;
+  return payload && typeof payload === "object" ? payload : null;
+}
+
+export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack, onRequestLogin }: Props) {
   const { t } = useTranslation();
   const [isBrazilian, setIsBrazilian] = useState(true);
   const [identifier, setIdentifier] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [needsBirthDate, setNeedsBirthDate] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [precheckLoading, setPrecheckLoading] = useState(false);
+  const [linkedAccountNotice, setLinkedAccountNotice] = useState(false);
+  const [forceIdentityForm, setForceIdentityForm] = useState(false);
+
+  const runPrecheck = useCallback(async () => {
+    const loc = locator.trim();
+    if (!loc) return;
+    setPrecheckLoading(true);
+    try {
+      const { data, error } = await supabase.rpc("verify_web_checkin_guest_access", {
+        p_locator: loc,
+        p_is_brazilian: true,
+        p_identifier: "",
+      });
+      if (error) return;
+      const payload = parseVerifyPayload(data);
+      if (payload?.code === "reservation_requires_login") {
+        setLinkedAccountNotice(true);
+      } else {
+        setLinkedAccountNotice(false);
+      }
+    } finally {
+      setPrecheckLoading(false);
+    }
+  }, [locator]);
+
+  useEffect(() => {
+    void runPrecheck();
+    setForceIdentityForm(false);
+    setNeedsBirthDate(false);
+    setBirthDate("");
+    setIdentifier("");
+  }, [locator, runPrecheck]);
+
+  const handleVerifyPayload = (payload: VerifyResult): boolean => {
+    if (payload.code === "birth_date_required") {
+      setNeedsBirthDate(true);
+      toast.message(payload.message || t("webCheckin.guestless.birthPrompt"));
+      return true;
+    }
+
+    if (
+      payload.code === "birth_date_missing_on_account" ||
+      payload.code === "birth_date_mismatch" ||
+      payload.code === "reservation_linked_other_account"
+    ) {
+      toast.error(payload.message || t("webCheckin.guestless.verifyFailed"));
+      return true;
+    }
+
+    if (payload.code === "account_exists_use_login" || payload.code === "reservation_requires_login") {
+      setLinkedAccountNotice(payload.code === "reservation_requires_login");
+      toast.error(payload.message || t("webCheckin.guestless.reservationRequiresLogin"));
+      return true;
+    }
+
+    if (payload.success === true) {
+      const loc = locator.trim();
+      const contacts = isBrazilian
+        ? { cpf: identifier.replace(/\D/g, "") }
+        : { email: identifier.trim().toLowerCase() };
+      setGuestlessCheckinSession(loc, contacts);
+      toast.success(
+        payload.account_matched
+          ? t("webCheckin.guestless.verifiedWithAccount")
+          : t("webCheckin.guestless.verified"),
+      );
+      onVerified(loc);
+      return true;
+    }
+
+    toast.error(payload.message || t("webCheckin.guestless.verifyFailed"));
+    return true;
+  };
 
   const callVerify = async (includeBirth: boolean) => {
     const loc = locator.trim();
@@ -78,45 +159,12 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack }: Pro
         return;
       }
 
-      const raw = data as VerifyResult | VerifyResult[] | null;
-      const payload = (Array.isArray(raw) ? raw[0] : raw) as VerifyResult | null;
-      if (!payload || typeof payload !== "object") {
+      const payload = parseVerifyPayload(data);
+      if (!payload) {
         toast.error(t("webCheckin.guestless.verifyFailed"));
         return;
       }
-
-      if (payload.code === "birth_date_required") {
-        setNeedsBirthDate(true);
-        toast.message(payload.message || t("webCheckin.guestless.birthPrompt"));
-        return;
-      }
-
-      if (
-        payload.code === "birth_date_missing_on_account" ||
-        payload.code === "birth_date_mismatch" ||
-        payload.code === "reservation_linked_other_account"
-      ) {
-        toast.error(payload.message || t("webCheckin.guestless.verifyFailed"));
-        return;
-      }
-
-      if (payload.code === "account_exists_use_login") {
-        toast.error(payload.message || t("webCheckin.guestless.useLoginInstead"));
-        return;
-      }
-
-      if (payload.success === true) {
-        setGuestlessCheckinSession(loc);
-        toast.success(
-          payload.account_matched
-            ? t("webCheckin.guestless.verifiedWithAccount")
-            : t("webCheckin.guestless.verified"),
-        );
-        onVerified(loc);
-        return;
-      }
-
-      toast.error(payload.message || t("webCheckin.guestless.verifyFailed"));
+      handleVerifyPayload(payload);
     } finally {
       setLoading(false);
     }
@@ -147,6 +195,38 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack }: Pro
         </div>
       </Card>
 
+      {precheckLoading ? (
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t("webCheckin.guestless.checkingReservation")}
+        </div>
+      ) : null}
+
+      {linkedAccountNotice && !forceIdentityForm ? (
+        <Card className="border-indigo-200 bg-indigo-50/90 p-4 shadow-sm space-y-3">
+          <p className="text-sm font-medium text-indigo-950">{t("webCheckin.guestless.reservationRequiresLoginTitle")}</p>
+          <p className="text-xs text-indigo-900/90 leading-relaxed">{t("webCheckin.guestless.reservationRequiresLogin")}</p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {onRequestLogin ? (
+              <Button type="button" className="h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700" onClick={onRequestLogin}>
+                <LogIn className="h-4 w-4 mr-2" />
+                {t("webCheckin.auth.login")}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-xl border-indigo-300"
+              onClick={() => setForceIdentityForm(true)}
+            >
+              {t("webCheckin.guestless.continueProveIdentity")}
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
+      {(!linkedAccountNotice || forceIdentityForm) && (
+        <>
       <div className="flex gap-2 text-xs text-slate-500">
         <StepPill active={!needsBirthDate} label={t("webCheckin.guestless.stepIdentity")} />
         <StepPill active={needsBirthDate} label={t("webCheckin.guestless.stepSecurity")} />
@@ -244,6 +324,8 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack }: Pro
           {needsBirthDate ? t("webCheckin.guestless.confirmBirth") : t("webCheckin.guestless.continue")}
         </Button>
       </div>
+        </>
+      )}
     </div>
   );
 }
