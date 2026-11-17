@@ -26,6 +26,9 @@ psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/guest_ve
 echo "=== guest_account_rpcs.sql ==="
 psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/guest_account_rpcs.sql
 
+echo "=== web_checkin_guestless_access.sql ==="
+psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/web_checkin_guestless_access.sql
+
 echo "=== grant-web-checkin-anon.sql ==="
 psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/grant-web-checkin-anon.sql
 

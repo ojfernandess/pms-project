@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { clearGuestlessCheckinSession } from "@/lib/guestlessCheckinSession";
 
 export interface GuestAccount {
   id: string;
@@ -134,6 +135,7 @@ export const useGuestAccount = () => {
       // Armazenar token no localStorage
       localStorage.setItem("guest_session_token", sessionToken);
       localStorage.setItem("guest_account_id", updatedAccount?.id || account.id);
+      clearGuestlessCheckinSession();
 
       return { account: updatedAccount || account, token: sessionToken };
     },
@@ -520,6 +522,7 @@ export const useGuestAccount = () => {
   const logout = () => {
     localStorage.removeItem("guest_session_token");
     localStorage.removeItem("guest_account_id");
+    clearGuestlessCheckinSession();
     queryClient.clear();
     toast.success("Logout realizado com sucesso!");
   };

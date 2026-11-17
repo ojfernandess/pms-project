@@ -11,9 +11,10 @@ import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { toast } from "sonner";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
+import { GuestlessCheckinAccessPanel } from "@/components/webcheckin/GuestlessCheckinAccessPanel";
 
 interface GuestAuthStepProps {
-  onNext: (data: { accountId: string; locator?: string }) => void;
+  onNext: (data: { accountId?: string; locator?: string; guestlessVerified?: boolean }) => void;
   onBack: () => void;
   isFirstStep: boolean;
   isLastStep: boolean;
@@ -47,6 +48,7 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
   const [locator, setLocator] = useState(initialLocator || "");
   const [showAuthForm, setShowAuthForm] = useState(!!initialLocator); // Se tem localizador inicial, mostrar formulário direto
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [showGuestlessPanel, setShowGuestlessPanel] = useState(false);
 
   // Atualizar localizador quando initialLocator mudar
   useEffect(() => {
@@ -91,6 +93,17 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
       return;
     }
     setShowAuthForm(true);
+  };
+
+  const openGuestless = () => {
+    if (!locator.trim() && !initialLocator?.trim()) {
+      toast.error(t("webCheckin.auth.errors.enterLocator"));
+      return;
+    }
+    if (!locator.trim() && initialLocator) {
+      setLocator(initialLocator);
+    }
+    setShowGuestlessPanel(true);
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -176,6 +189,38 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
       }
     );
   };
+
+  if (showGuestlessPanel) {
+    return (
+      <div className="min-h-screen flex">
+        <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
+          <div
+            className="absolute inset-0 bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600"
+            style={{
+              backgroundImage: `url("https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80")`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }}
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/60 to-black/70" />
+        </div>
+        <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white relative">
+          <div className="absolute top-6 right-6">
+            <LanguageSelector />
+          </div>
+          <div className="w-full max-w-md">
+            <GuestlessCheckinAccessPanel
+              locator={locator.trim() || initialLocator || ""}
+              onVerified={(loc) => {
+                onNext({ guestlessVerified: true, locator: loc });
+              }}
+              onBack={() => setShowGuestlessPanel(false)}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex">
@@ -340,8 +385,28 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
               >
                 {t("webCheckin.auth.alreadyHaveAccount")}
               </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={openGuestless}
+                className="w-full h-12 text-blue-700 hover:text-blue-800 hover:bg-blue-50"
+              >
+                {t("webCheckin.guestless.continueWithoutSignup", "Continuar sem cadastro")}
+              </Button>
             </>
           )}
+
+          {showAuthForm && locator.trim() ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={openGuestless}
+              className="w-full h-12 border-dashed border-blue-300 text-blue-700 hover:bg-blue-50"
+            >
+              {t("webCheckin.guestless.continueWithoutSignup", "Check-in sem cadastro")}
+            </Button>
+          ) : null}
 
           {/* Tabs - Só mostrar se já inseriu o localizador */}
           {showAuthForm && (

@@ -18,3 +18,4 @@ generate_rate_recommendations.sql
 apply_recommendation_price.sql
 rate_calendar_unique_constraint.sql
 guest_account_rpcs.sql
+web_checkin_guestless_access.sql

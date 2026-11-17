@@ -17,6 +17,10 @@ import { ReviewAndConfirmStep } from "@/components/webcheckin/ReviewAndConfirmSt
 import { CheckinCompleteStep } from "@/components/webcheckin/CheckinCompleteStep";
 import { ReuseDataDialog } from "@/components/webcheckin/ReuseDataDialog";
 import { useGuestAccount } from "@/hooks/useGuestAccount";
+import {
+  clearGuestlessCheckinSession,
+  hasGuestlessCheckinSession,
+} from "@/lib/guestlessCheckinSession";
 import { supabase } from "@/integrations/supabase/client";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
@@ -58,10 +62,19 @@ export default function WebCheckin() {
   const session = getCurrentSession();
   const isAuthenticated = !!session.accountId;
   const accountId = session.accountId;
-  
+  const [guestAccountId, setGuestAccountId] = useState<string | null>(session.accountId || null);
+  const [guestlessMode, setGuestlessMode] = useState(() =>
+    hasGuestlessCheckinSession(locatorFromUrl || ""),
+  );
+  const checkinAccessGranted =
+    (!!guestAccountId && isAuthenticated) || guestlessMode;
+
   // Buscar dados da conta do hóspede
   const { data: accountData } = getCurrentAccount(accountId || "");
   const [currentStep, setCurrentStep] = useState(() => {
+    if (hasGuestlessCheckinSession(locatorFromUrl || "")) {
+      return 2;
+    }
     // Se já está autenticado, começar na etapa de localizador (1)
     if (isAuthenticated && session.accountId) {
       return locatorFromUrl ? 1 : 1; // Sempre etapa 1 se autenticado
@@ -70,7 +83,6 @@ export default function WebCheckin() {
   });
   const [webCheckinData, setWebCheckinData] = useState<any>({});
   const [token, setToken] = useState<string | null>(null);
-  const [guestAccountId, setGuestAccountId] = useState<string | null>(session.accountId || null);
   const [showLocatorInput, setShowLocatorInput] = useState(false);
   const [reservationLinkedToOtherUser, setReservationLinkedToOtherUser] = useState(false);
   const [showReuseDataDialog, setShowReuseDataDialog] = useState(false);
@@ -87,16 +99,21 @@ export default function WebCheckin() {
   // SEGURANÇA: Buscar informações iniciais pelo localizador APENAS se estiver autenticado
   // Isso previne que dados da reserva sejam expostos sem autenticação
   // IMPORTANTE: Buscar automaticamente quando estiver na etapa 1 (inserir localizador) e tiver um localizador válido
-  const shouldFetchLocator = isAuthenticated && !!guestAccountId && locator && locator.trim() !== "" && (currentStep === 1 || !showLocatorInput);
+  const requireGuestAccountForFetch = isAuthenticated && !!guestAccountId && !guestlessMode;
+  const shouldFetchLocator =
+    checkinAccessGranted &&
+    !!locator &&
+    locator.trim() !== "" &&
+    (currentStep === 1 || !showLocatorInput);
   const { data: webCheckinInfo, isLoading: isLoadingInfo, refetch: refetchWebCheckin } = getWebCheckinByLocator(
     locator || "",
-    shouldFetchLocator // Só buscar se autenticado e tiver localizador válido
+    requireGuestAccountForFetch,
   );
 
-  // Buscar dados completos pelo token (após iniciar) - também só se autenticado
+  // Buscar dados completos pelo token (após iniciar)
   const { data: webCheckin, isLoading: isLoadingCheckin, refetch: refetchWebCheckinByToken } = getWebCheckinByToken(
     token || "",
-    isAuthenticated && !!guestAccountId // Só buscar se autenticado
+    requireGuestAccountForFetch,
   );
   
   // Usar webCheckin se disponível, senão usar webCheckinInfo
@@ -190,7 +207,11 @@ export default function WebCheckin() {
   useEffect(() => {
     const checkReservationOwnership = async () => {
       // Só verificar se estiver autenticado e tiver dados da reserva
-      if (!isAuthenticated || !guestAccountId || !webCheckinInfo?.reservation?.id) {
+      if (guestlessMode || !checkinAccessGranted || !webCheckinInfo?.reservation?.id) {
+        setReservationLinkedToOtherUser(false);
+        return;
+      }
+      if (!guestAccountId) {
         setReservationLinkedToOtherUser(false);
         return;
       }
@@ -221,10 +242,10 @@ export default function WebCheckin() {
   // Isso garante que ao recarregar a página, reservas concluídas vão direto para a etapa de conclusão
   useEffect(() => {
     // Só verificar se estiver autenticado e tiver dados do web check-in
-    if (!isAuthenticated || !guestAccountId) {
+    if (!checkinAccessGranted) {
       return;
     }
-    
+
     // Verificar tanto webCheckinInfo quanto webCheckin (dados completos)
     const checkinToVerify = webCheckin || webCheckinInfo;
     
@@ -250,10 +271,10 @@ export default function WebCheckin() {
   
   useEffect(() => {
     // BLOQUEAR: Não processar nada sem autenticação
-    if (!isAuthenticated || !guestAccountId) {
+    if (!checkinAccessGranted) {
       return;
     }
-    
+
     // BLOQUEAR: Não processar se o usuário está inserindo um novo localizador
     if (showLocatorInput || !locator || locator.trim() === "") {
       return;
@@ -392,8 +413,19 @@ export default function WebCheckin() {
   const handleNext = (stepData: any) => {
     setWebCheckinData((prev: any) => ({ ...prev, ...stepData }));
     
+    if (currentStep === 0 && stepData.guestlessVerified && stepData.locator?.trim()) {
+      setGuestlessMode(true);
+      setLocator(stepData.locator.trim());
+      setShowLocatorInput(false);
+      setCurrentStep(2);
+      void refetchWebCheckin();
+      return;
+    }
+
     // Se é a etapa de autenticação e tem accountId
     if (currentStep === 0 && stepData.accountId) {
+      clearGuestlessCheckinSession();
+      setGuestlessMode(false);
       setGuestAccountId(stepData.accountId);
       
       // Se tem localizador vindo do auth, usar e ir direto para verificação
@@ -512,7 +544,7 @@ export default function WebCheckin() {
     navigate(`/web-checkin/${locator.trim()}`, { replace: true });
     
     // Vincular reserva à conta do hóspede
-    if (guestAccountId) {
+    if (guestAccountId && !guestlessMode) {
       try {
         await linkReservationToAccount.mutateAsync({
           accountId: guestAccountId,
@@ -573,7 +605,15 @@ export default function WebCheckin() {
       return;
     }
     
-    if (locatorFromUrl && !isAuthenticated) {
+    if (locatorFromUrl && hasGuestlessCheckinSession(locatorFromUrl)) {
+      setGuestlessMode(true);
+      setLocator(locatorFromUrl);
+      setCurrentStep(2);
+      hasInitializedRef.current = true;
+      return;
+    }
+
+    if (locatorFromUrl && !checkinAccessGranted) {
       // Se tem localizador na URL mas não está autenticado, garantir que está na etapa de autenticação
       setCurrentStep(0); // Forçar etapa de autenticação
       setLocator(locatorFromUrl); // Guardar o localizador para usar após autenticação
@@ -642,6 +682,8 @@ export default function WebCheckin() {
                   setReservationLinkedToOtherUser(false);
                   setShowLocatorInput(true);
                   setWebCheckinData({});
+                  clearGuestlessCheckinSession();
+                  setGuestlessMode(false);
                   setCurrentStep(1); // Voltar para etapa de inserir localizador
                   
                   // Invalidar queries do React Query para forçar nova busca
@@ -664,7 +706,7 @@ export default function WebCheckin() {
 
   // SEGURANÇA: Etapa 0: Autenticação (obrigatória se não estiver autenticado)
   // Se tem localizador na URL mas não está autenticado, mostrar tela de autenticação
-  if (!isAuthenticated || !guestAccountId) {
+  if (!checkinAccessGranted) {
     return (
       <GuestAuthStep
         onNext={handleNext}
@@ -676,8 +718,8 @@ export default function WebCheckin() {
     );
   }
 
-  // Etapa 1: Inserir localizador (após autenticação)
-  if (currentStep === 1) {
+  // Etapa 1: Inserir localizador (após login/cadastro — não no fluxo sem cadastro)
+  if (currentStep === 1 && !guestlessMode) {
     return (
       <div className="min-h-screen flex">
         {/* Lado Esquerdo - Imagem Grande */}
@@ -892,6 +934,8 @@ export default function WebCheckin() {
                   onClick={() => {
                     // Logout e voltar para autenticação
                     logout();
+                    clearGuestlessCheckinSession();
+                    setGuestlessMode(false);
                     setCurrentStep(0);
                     setGuestAccountId(null);
                     setLocator("");
@@ -1120,25 +1164,14 @@ export default function WebCheckin() {
 
   // SEGURANÇA: Bloquear exibição de dados da reserva sem autenticação
   // Se não estiver autenticado, não mostrar informações da reserva
-  if (!isAuthenticated || !guestAccountId) {
-    // Se tem localizador na URL mas não está autenticado, mostrar apenas tela de autenticação
-    if (locatorFromUrl) {
-      return (
-        <GuestAuthStep
-          onNext={handleNext}
-          onBack={handleBack}
-          isFirstStep={true}
-          isLastStep={false}
-        />
-      );
-    }
-    // Se não tem localizador, mostrar tela de autenticação normalmente
-    return (
+  if (!checkinAccessGranted) {
+  return (
       <GuestAuthStep
         onNext={handleNext}
         onBack={handleBack}
         isFirstStep={true}
         isLastStep={false}
+        initialLocator={locatorFromUrl || locator}
       />
     );
   }
@@ -1425,13 +1458,14 @@ export default function WebCheckin() {
   }
 
   // SEGURANÇA: Verificação final - garantir que está autenticado antes de renderizar
-  if (!isAuthenticated || !guestAccountId) {
+  if (!checkinAccessGranted) {
     return (
       <GuestAuthStep
         onNext={handleNext}
         onBack={handleBack}
         isFirstStep={true}
         isLastStep={false}
+        initialLocator={locatorFromUrl || locator}
       />
     );
   }
