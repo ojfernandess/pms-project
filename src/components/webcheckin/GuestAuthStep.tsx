@@ -389,7 +389,6 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
               >
                 {t("webCheckin.auth.alreadyHaveAccount")}
               </Button>
-            </>
 
               <Button
                 type="button"
