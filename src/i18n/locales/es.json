@@ -175,6 +175,7 @@
       "birthLabel": "Fecha de nacimiento",
       "verified": "Identidad confirmada. Puede continuar el check-in.",
       "verifiedWithAccount": "Identidad confirmada con su cuenta existente. Puede continuar el check-in.",
+      "verifiedNoRegisteredAccount": "Datos de la reserva confirmados. No hay cuenta de huésped — puede continuar sin registrarse.",
       "useLoginInstead": "Ya existe una cuenta con estos datos. Inicie sesión con correo y contraseña.",
       "reservationRequiresLoginTitle": "Reserva vinculada a una cuenta",
       "reservationRequiresLogin": "Este check-in se inició con una cuenta registrada. Inicie sesión para ver y continuar.",

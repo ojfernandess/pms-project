@@ -21,6 +21,7 @@ type VerifyResult = {
   success?: boolean;
   code?: string;
   account_matched?: boolean;
+  registered_guest?: boolean;
   guest_account_id?: string;
   message?: string;
 };
@@ -108,11 +109,11 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack, onReq
         ? { cpf: identifier.replace(/\D/g, "") }
         : { email: identifier.trim().toLowerCase() };
       setGuestlessCheckinSession(loc, contacts);
-      toast.success(
-        payload.account_matched
-          ? t("webCheckin.guestless.verifiedWithAccount")
-          : t("webCheckin.guestless.verified"),
-      );
+      if (payload.account_matched || payload.registered_guest) {
+        toast.success(t("webCheckin.guestless.verifiedWithAccount"));
+      } else {
+        toast.success(t("webCheckin.guestless.verifiedNoRegisteredAccount"));
+      }
       onVerified(loc);
       return true;
     }

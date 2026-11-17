@@ -20,7 +20,6 @@ import { useGuestAccount } from "@/hooks/useGuestAccount";
 import {
   clearGuestlessCheckinSession,
   getGuestlessVerifiedContacts,
-  hasGuestlessCheckinSession,
 } from "@/lib/guestlessCheckinSession";
 import { supabase } from "@/integrations/supabase/client";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
@@ -64,23 +63,17 @@ export default function WebCheckin() {
   const isAuthenticated = !!session.accountId;
   const accountId = session.accountId;
   const [guestAccountId, setGuestAccountId] = useState<string | null>(session.accountId || null);
-  const [guestlessMode, setGuestlessMode] = useState(() =>
-    hasGuestlessCheckinSession(locatorFromUrl || ""),
-  );
+  const [guestlessMode, setGuestlessMode] = useState(false);
   const checkinAccessGranted =
     (!!guestAccountId && isAuthenticated) || guestlessMode;
 
   // Buscar dados da conta do hóspede
   const { data: accountData } = getCurrentAccount(accountId || "");
   const [currentStep, setCurrentStep] = useState(() => {
-    if (hasGuestlessCheckinSession(locatorFromUrl || "")) {
-      return 2;
-    }
-    // Se já está autenticado, começar na etapa de localizador (1)
     if (isAuthenticated && session.accountId) {
-      return locatorFromUrl ? 1 : 1; // Sempre etapa 1 se autenticado
+      return locatorFromUrl ? 1 : 1;
     }
-    return 0; // Etapa de autenticação se não autenticado
+    return 0;
   });
   const [webCheckinData, setWebCheckinData] = useState<any>({});
   const [token, setToken] = useState<string | null>(null);
@@ -105,7 +98,7 @@ export default function WebCheckin() {
     checkinAccessGranted &&
     !!locator &&
     locator.trim() !== "" &&
-    (currentStep === 1 || !showLocatorInput);
+    (currentStep === 1 || currentStep === 2 || !showLocatorInput);
   const { data: webCheckinInfo, isLoading: isLoadingInfo, refetch: refetchWebCheckin } = getWebCheckinByLocator(
     locator || "",
     requireGuestAccountForFetch,
@@ -611,14 +604,6 @@ export default function WebCheckin() {
       return;
     }
     
-    if (locatorFromUrl && hasGuestlessCheckinSession(locatorFromUrl)) {
-      setGuestlessMode(true);
-      setLocator(locatorFromUrl);
-      setCurrentStep(2);
-      hasInitializedRef.current = true;
-      return;
-    }
-
     if (locatorFromUrl && !checkinAccessGranted) {
       // Se tem localizador na URL mas não está autenticado, garantir que está na etapa de autenticação
       setCurrentStep(0); // Forçar etapa de autenticação

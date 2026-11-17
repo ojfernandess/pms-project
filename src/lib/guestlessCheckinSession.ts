@@ -1,57 +1,65 @@
-const MODE_KEY = "guest_checkin_mode";
-const LOCATOR_KEY = "guest_checkin_verified_locator";
-const EXPIRES_KEY = "guest_checkin_verified_expires";
-const EMAIL_KEY = "guest_checkin_verified_email";
-const CPF_KEY = "guest_checkin_verified_cpf";
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+/** Limpa sessão antiga (24h em localStorage) de versões anteriores. */
+const LEGACY_KEYS = [
+  "guest_checkin_mode",
+  "guest_checkin_verified_locator",
+  "guest_checkin_verified_expires",
+  "guest_checkin_verified_email",
+  "guest_checkin_verified_cpf",
+] as const;
+if (typeof localStorage !== "undefined") {
+  for (const key of LEGACY_KEYS) localStorage.removeItem(key);
+}
+
+/** Acesso guestless só na aba atual — F5 exige CPF/e-mail de novo (não persiste 24h no localStorage). */
+type GuestlessAccess = {
+  locator: string;
+  email?: string;
+  cpf?: string;
+  expiresAt: number;
+};
+
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+let activeAccess: GuestlessAccess | null = null;
+
+function normalizeLocator(locator: string): string {
+  return locator.trim().toUpperCase();
+}
 
 export function setGuestlessCheckinSession(
   locator: string,
   contacts?: { email?: string; cpf?: string },
 ): void {
-  const trimmed = locator.trim().toUpperCase();
-  localStorage.setItem(MODE_KEY, "guestless");
-  localStorage.setItem(LOCATOR_KEY, trimmed);
-  localStorage.setItem(EXPIRES_KEY, new Date(Date.now() + SESSION_TTL_MS).toISOString());
-  if (contacts?.email) {
-    localStorage.setItem(EMAIL_KEY, contacts.email.trim().toLowerCase());
-  } else {
-    localStorage.removeItem(EMAIL_KEY);
-  }
-  if (contacts?.cpf) {
-    localStorage.setItem(CPF_KEY, contacts.cpf.replace(/\D/g, ""));
-  } else {
-    localStorage.removeItem(CPF_KEY);
-  }
+  const trimmed = normalizeLocator(locator);
+  activeAccess = {
+    locator: trimmed,
+    expiresAt: Date.now() + SESSION_TTL_MS,
+    email: contacts?.email?.trim().toLowerCase(),
+    cpf: contacts?.cpf?.replace(/\D/g, ""),
+  };
 }
 
 export function getGuestlessVerifiedContacts(): { email?: string; cpf?: string } {
   if (!isGuestlessCheckinMode()) return {};
-  const email = localStorage.getItem(EMAIL_KEY) || undefined;
-  const cpf = localStorage.getItem(CPF_KEY) || undefined;
-  return { email, cpf };
+  return { email: activeAccess?.email, cpf: activeAccess?.cpf };
 }
 
 export function clearGuestlessCheckinSession(): void {
-  localStorage.removeItem(MODE_KEY);
-  localStorage.removeItem(LOCATOR_KEY);
-  localStorage.removeItem(EXPIRES_KEY);
-  localStorage.removeItem(EMAIL_KEY);
-  localStorage.removeItem(CPF_KEY);
+  activeAccess = null;
 }
 
 export function isGuestlessCheckinMode(): boolean {
-  if (localStorage.getItem(MODE_KEY) !== "guestless") return false;
-  const expires = localStorage.getItem(EXPIRES_KEY);
-  if (!expires) return false;
-  return new Date(expires).getTime() > Date.now();
+  if (!activeAccess) return false;
+  if (activeAccess.expiresAt <= Date.now()) {
+    activeAccess = null;
+    return false;
+  }
+  return true;
 }
 
 /** Sessão válida para o localizador informado (ou qualquer, se omitido). */
 export function hasGuestlessCheckinSession(locator?: string): boolean {
   if (!isGuestlessCheckinMode()) return false;
-  const stored = localStorage.getItem(LOCATOR_KEY);
-  if (!stored) return false;
-  if (locator && stored !== locator.trim().toUpperCase()) return false;
+  if (!activeAccess?.locator) return false;
+  if (locator && activeAccess.locator !== normalizeLocator(locator)) return false;
   return true;
 }

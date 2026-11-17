@@ -176,6 +176,7 @@
       "birthLabel": "Date of birth",
       "verified": "Identity confirmed. You can continue check-in.",
       "verifiedWithAccount": "Identity confirmed with your existing account. You can continue check-in.",
+      "verifiedNoRegisteredAccount": "Reservation details confirmed. No guest account found — you may continue without signing up.",
       "useLoginInstead": "An account already exists with these details. Please sign in with email and password.",
       "reservationRequiresLoginTitle": "Reservation linked to an account",
       "reservationRequiresLogin": "This check-in was started with a registered account. Sign in with email and password to view and continue.",

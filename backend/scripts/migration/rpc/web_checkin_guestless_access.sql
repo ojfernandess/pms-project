@@ -166,6 +166,16 @@ BEGIN
        OR normalize_identifier_digits(COALESCE(v_client.document_number, '')) = v_digits THEN
       v_reservation_cpf_match := TRUE;
     END IF;
+
+    IF NOT v_reservation_cpf_match THEN
+      SELECT EXISTS (
+        SELECT 1
+        FROM public.web_checkin_guests wcg
+        WHERE wcg.web_checkin_id = v_wc.id
+          AND normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+      )
+      INTO v_reservation_cpf_match;
+    END IF;
   END IF;
 
   IF (p_is_brazilian AND NOT v_reservation_cpf_match) OR (NOT p_is_brazilian AND NOT v_reservation_email_match) THEN
@@ -218,7 +228,24 @@ BEGIN
     JOIN public.guest_accounts ga ON ga.is_active IS DISTINCT FROM FALSE
       AND lower(trim(ga.email)) = lower(trim(COALESCE(wcg.email, '')))
     WHERE normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+      AND trim(COALESCE(wcg.email, '')) <> ''
     ORDER BY wc.completed_at DESC NULLS LAST
+    LIMIT 1;
+  END IF;
+
+  IF v_account_id IS NULL AND p_is_brazilian THEN
+    SELECT ga.id, ga.birth_date
+    INTO v_account_id, v_account_birth
+    FROM public.guest_accounts ga
+    WHERE ga.is_active IS DISTINCT FROM FALSE
+      AND lower(trim(ga.email)) IN (
+        SELECT DISTINCT lower(trim(wcg.email))
+        FROM public.web_checkin_guests wcg
+        JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+        WHERE normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+          AND trim(COALESCE(wcg.email, '')) <> ''
+      )
+    ORDER BY ga.created_at DESC
     LIMIT 1;
   END IF;
 
@@ -291,6 +318,7 @@ BEGIN
         'success', false,
         'code', 'birth_date_required',
         'account_matched', true,
+        'registered_guest', true,
         'message', 'Encontramos um cadastro com estes dados. Informe sua data de nascimento para continuar sem login.'
       );
     END IF;
@@ -315,6 +343,7 @@ BEGIN
       'success', true,
       'code', 'ok',
       'account_matched', true,
+      'registered_guest', true,
       'guest_account_id', v_account_id,
       'reservation_id', v_res.id,
       'web_checkin_id', v_wc.id
@@ -325,6 +354,7 @@ BEGIN
     'success', true,
     'code', 'ok',
     'account_matched', false,
+    'registered_guest', false,
     'reservation_id', v_res.id,
     'web_checkin_id', v_wc.id
   );
