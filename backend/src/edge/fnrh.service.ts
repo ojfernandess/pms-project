@@ -80,7 +80,23 @@ export class FnrhService {
       if (cpf.length !== 11 || !isValidCpf(cpf)) return fail(400, "CPF do solicitante (auditoria FNRH) inválido. Ajuste nas configurações do estabelecimento.");
       const baseUrl = fnrhBase(settings.environment, settings.base_url_override);
       const idempotencyKey = sha256(`${establishmentId}:${reservationId}:hospedagem_registrar`);
-      const previous = await this.prisma.fnrh_submission_log.findUnique({ where: { idempotency_key: idempotencyKey }, select: { status: true } });
+      const previous = await this.prisma.fnrh_submission_log.findUnique({
+        where: { idempotency_key: idempotencyKey },
+        select: { status: true, fnrh_reserva_id: true },
+      });
+      if (previous?.status === "success" && confirmExplicit && commitCheckin) {
+        const confirmResult = await this.confirmFnrhPhysicalCheckin({
+          establishmentId,
+          reservationId,
+          webCheckinId,
+          fnrhReservaId: previous.fnrh_reserva_id,
+          baseUrl,
+          apiUser,
+          apiPass: secret.api_password,
+          cpf,
+        });
+        if (confirmResult) return confirmResult;
+      }
       if (previous?.status === "success") {
         await this.markRegistered(webCheckinId);
         return ok({ success: true, skipped: true, reason: "already_synced", idempotency_key: idempotencyKey });
@@ -200,7 +216,7 @@ export class FnrhService {
       const parsed = await readBody(response);
       const reservaId = String(((parsed.dados as GuestJson | undefined)?.reserva as GuestJson | undefined)?.reserva_id ?? "");
       if (!response.ok) {
-        const error = String(parsed.mensagem || parsed.erro || "").slice(0, 400);
+        const error = fnrhHttpErrorMessage(response.status, parsed);
         await this.finish(idempotencyKey, { status: "failed", http_status: response.status, error_message: error, response_summary: { status: response.status, keys: Object.keys(parsed) } });
         return ok({ success: false, error, http_status: response.status, idempotency_key: idempotencyKey });
       }
@@ -295,6 +311,98 @@ export class FnrhService {
     return ok({ success: true, action, idempotency_key: key });
   }
 
+  /** Após pré-check-in na FNRH (hospedagem/registrar), confirma check-in presencial na API Serpro. */
+  private async confirmFnrhPhysicalCheckin(input: {
+    establishmentId: string;
+    reservationId: string;
+    webCheckinId: string | null;
+    fnrhReservaId: string | null;
+    baseUrl: string;
+    apiUser: string;
+    apiPass: string;
+    cpf: string;
+  }): Promise<Result | null> {
+    const checkInEm = new Date(Date.now() - CHECKIN_SKEW_MS).toISOString();
+    const opKey = sha256(`${input.establishmentId}:${input.reservationId}:reserva_checkin`);
+    const prevConfirm = await this.prisma.fnrh_submission_log.findFirst({
+      where: { idempotency_key: opKey, status: "success" },
+      select: { id: true },
+    });
+    if (prevConfirm) {
+      await this.markRegistered(input.webCheckinId);
+      return ok({ success: true, skipped: true, reason: "checkin_already_confirmed", idempotency_key: opKey });
+    }
+    await this.prisma.fnrh_submission_log.deleteMany({ where: { idempotency_key: opKey } });
+    await this.prisma.fnrh_submission_log.create({
+      data: {
+        establishment_id: input.establishmentId,
+        reservation_id: input.reservationId,
+        web_checkin_id: input.webCheckinId,
+        operation: "reserva_checkin",
+        idempotency_key: opKey,
+        status: "pending",
+      },
+    });
+
+    const fnrhReservaId = input.fnrhReservaId?.trim() || "";
+    let response: Response;
+    if (fnrhReservaId) {
+      response = await fetch(`${input.baseUrl}/reservas/${encodeURIComponent(fnrhReservaId)}/checkin`, {
+        method: "POST",
+        headers: {
+          Authorization: basic(input.apiUser, input.apiPass),
+          cpf_solicitante: input.cpf,
+          "Content-Type": "text/plain",
+        },
+        body: checkInEm,
+      });
+    } else if (input.webCheckinId) {
+      const guests = await this.prisma.web_checkin_guests.findMany({
+        where: { web_checkin_id: input.webCheckinId, fnrh_hospede_id: { not: null } },
+        select: { fnrh_hospede_id: true },
+      });
+      const ids = guests.map((g) => g.fnrh_hospede_id?.trim()).filter((id): id is string => Boolean(id));
+      if (!ids.length) return null;
+      for (const hid of ids) {
+        const patchRes = await fetch(`${input.baseUrl}/hospedes/${encodeURIComponent(hid)}/checkin`, {
+          method: "PATCH",
+          headers: {
+            Authorization: basic(input.apiUser, input.apiPass),
+            cpf_solicitante: input.cpf,
+            "Content-Type": "text/plain",
+          },
+          body: checkInEm,
+        });
+        if (!patchRes.ok) {
+          const parsed = await readBody(patchRes);
+          const error = fnrhHttpErrorMessage(patchRes.status, parsed);
+          await this.finish(opKey, { status: "failed", http_status: patchRes.status, error_message: error });
+          return ok({ success: false, error, http_status: patchRes.status, idempotency_key: opKey });
+        }
+      }
+      await this.finish(opKey, { status: "success", http_status: 200, fnrh_reserva_id: fnrhReservaId || null, error_message: null });
+      await this.markRegistered(input.webCheckinId);
+      return ok({ success: true, idempotency_key: opKey, action: "hospedes_checkin" });
+    } else {
+      return null;
+    }
+
+    const parsed = await readBody(response);
+    if (!response.ok) {
+      const error = fnrhHttpErrorMessage(response.status, parsed);
+      await this.finish(opKey, { status: "failed", http_status: response.status, error_message: error });
+      return ok({ success: false, error, http_status: response.status, idempotency_key: opKey });
+    }
+    await this.finish(opKey, {
+      status: "success",
+      http_status: response.status,
+      fnrh_reserva_id: fnrhReservaId || null,
+      error_message: null,
+    });
+    await this.markRegistered(input.webCheckinId);
+    return ok({ success: true, fnrh_reserva_id: fnrhReservaId || null, idempotency_key: opKey });
+  }
+
   private async patchOnce(input: { establishmentId: string; reservationId: string; webCheckinId: string | null; baseUrl: string; path: string; operation: string; extra: string; fnrhReservaId: string; apiUser: string; apiPass: string; cpf: string }) {
     const key = sha256(`${input.establishmentId}:${input.reservationId}:${input.operation}:${input.extra}`);
     const previous = await this.prisma.fnrh_submission_log.findFirst({ where: { idempotency_key: key, status: "success" }, select: { id: true } });
@@ -347,6 +455,17 @@ function sha256(value: string): string {
 
 function basic(user: string, pass: string): string {
   return `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
+}
+
+function fnrhHttpErrorMessage(status: number, parsed: Record<string, unknown>): string {
+  const api = String(parsed.mensagem || parsed.erro || "").slice(0, 400);
+  if (status === 401) {
+    return (
+      api ||
+      "FNRH recusou autenticação (401). Verifique usuário/senha da API, ambiente (homologação x produção) e CPF do solicitante nas configurações FNRH do hotel."
+    );
+  }
+  return api || `FNRH respondeu HTTP ${status}`;
 }
 
 function fnrhBase(environment: string, override: string | null): string {

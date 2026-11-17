@@ -153,6 +153,17 @@ const statusConfig: Record<string, {
   },
 };
 
+/** Bolinha no mapa: web check-in concluído (pré check-in), antes do check-in no hotel */
+const PRE_CHECKIN_DOT_COLOR = "#a855f7";
+
+function isWebCheckinCompleted(webCheckin: unknown): boolean {
+  if (!webCheckin) return false;
+  if (Array.isArray(webCheckin)) {
+    return webCheckin.some((entry) => (entry as { status?: string })?.status === "completed");
+  }
+  return (webCheckin as { status?: string })?.status === "completed";
+}
+
 export const ReservationCalendarMap = ({ 
   onSelectReservation,
   onCreateReservation,
@@ -3018,6 +3029,15 @@ export const ReservationCalendarMap = ({
                 </span>
               </div>
             ))}
+          <div className="flex items-center gap-1.5">
+            <span
+              className="h-2 w-2 rounded-full flex-shrink-0 ring-2 ring-white shadow-sm"
+              style={{ backgroundColor: PRE_CHECKIN_DOT_COLOR }}
+            />
+            <span className="text-[10px] sm:text-[11px] text-slate-600 whitespace-nowrap">
+              Pré check-in (web)
+            </span>
+          </div>
         </div>
 
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5">
@@ -3586,6 +3606,9 @@ export const ReservationCalendarMap = ({
                             // - Não Pago (vermelho): quando não há pagamento (paid_amount === 0)
                             let statusColor;
                             let showCheckinDot = false;
+                            const showPreCheckinDot =
+                              isWebCheckinCompleted(reservation.web_checkin) &&
+                              reservation.status !== "checkedin";
                             const paidAmount = Number(reservation.paid_amount || 0);
                             const baseTotalAmount = Number(reservation.total_amount || 0);
                             
@@ -3734,6 +3757,13 @@ export const ReservationCalendarMap = ({
                               >
                                 {viewDays <= 30 && <GripVertical className="h-3 w-3 opacity-50 flex-shrink-0" />}
                                 <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                                  {showPreCheckinDot && (
+                                    <span
+                                      className="h-2 w-2 rounded-full flex-shrink-0 ring-2 ring-white/70 shadow-sm"
+                                      style={{ backgroundColor: PRE_CHECKIN_DOT_COLOR }}
+                                      title="Pré check-in online concluído"
+                                    />
+                                  )}
                                   {showCheckinDot && (
                                     <span
                                       className="h-2 w-2 rounded-full flex-shrink-0 ring-2 ring-white/70 shadow-sm"
@@ -3764,7 +3794,11 @@ export const ReservationCalendarMap = ({
                                       <div className="text-[8px] sm:text-[9px] opacity-80 truncate leading-tight">
                                         {[
                                           reservation.channel,
-                                          showCheckinDot ? "Check-in" : statusColor.label,
+                                          showPreCheckinDot && reservation.status !== "checkedin"
+                                            ? "Pré check-in"
+                                            : showCheckinDot
+                                              ? "Check-in"
+                                              : statusColor.label,
                                         ].filter(Boolean).join(" · ")}
                                       </div>
                                     )}

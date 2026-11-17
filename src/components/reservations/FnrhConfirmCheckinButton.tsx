@@ -118,11 +118,13 @@ export function FnrhConfirmCheckinButton({
         reason?: string;
       };
       if (payload?.skipped) {
-        toast.message(
-          payload.reason === "already_synced"
-            ? "Check-in já registrado na FNRH para esta reserva."
-            : (payload.error || "Envio ignorado pelas configurações."),
-        );
+        const reasonMsg =
+          payload.reason === "checkin_already_confirmed"
+            ? "Check-in presencial já confirmado na FNRH."
+            : payload.reason === "already_synced"
+              ? "Pré check-in já enviado à FNRH. Tentando confirmar check-in presencial…"
+              : payload.error || "Envio ignorado pelas configurações.";
+        toast.message(reasonMsg);
         queryClient.invalidateQueries({
           queryKey: ["fnrh_submission_success", reservationId],
         });
@@ -136,7 +138,14 @@ export function FnrhConfirmCheckinButton({
         return;
       }
       if (payload?.success === false && payload?.error) {
-        toast.error(payload.error);
+        const httpStatus = (payload as { http_status?: number }).http_status;
+        if (httpStatus === 401) {
+          toast.error(
+            "FNRH recusou o login (401). Confira usuário, senha da API, ambiente homologação/produção e CPF do solicitante em Configurações → FNRH.",
+          );
+        } else {
+          toast.error(payload.error);
+        }
         return;
       }
       toast.success("Check-in confirmado na FNRH.");
