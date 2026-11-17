@@ -34,10 +34,13 @@ export function WebCheckinDomainHelp() {
           </div>
 
           <div className="space-y-1">
-            <p className="font-semibold text-foreground">Passo 1 — Super Admin</p>
+            <p className="font-semibold text-foreground">Dois domínios, funções diferentes</p>
             <p className="text-muted-foreground">
-              Campo <strong>URL pública do Web Check-in</strong>: <code className="text-xs">https://checkin.seudominio.com</code>{" "}
-              (sem código de reserva no final).
+              <strong>URL Base do PMS</strong> → equipe (ex. <code className="text-xs">https://pms.stayos.com.br</code>): login,
+              Super Admin, operação.{" "}
+              <strong>URL pública do Web Check-in</strong> → hóspedes (ex.{" "}
+              <code className="text-xs">https://checkin.stayos.com.br</code>). Quem tentar abrir login/admin no domínio
+              check-in é redirecionado para o PMS.
             </p>
           </div>
 

@@ -1,5 +1,14 @@
 # Domínio dedicado do Web Check-in (ex. checkin.seudominio.com)
 
+## PMS vs Web Check-in
+
+| Uso | Configuração Super Admin | Exemplo |
+|-----|--------------------------|---------|
+| Equipe, Super Admin, operação | **URL Base do PMS** | `https://pms.stayos.com.br` |
+| Links para hóspedes | **URL pública do Web Check-in** | `https://checkin.stayos.com.br` |
+
+O domínio `checkin` serve só o fluxo do hóspede. Rotas administrativas redirecionam para `pms_base_url`.
+
 ## Regra de ouro do DNS
 
 **CNAME e registro A apontam só para servidor ou hostname — nunca para URL com caminho.**

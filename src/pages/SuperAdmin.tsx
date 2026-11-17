@@ -471,8 +471,8 @@ const SiteSettingsManager = () => {
             <Label className="text-base font-semibold">URL Base do PMS</Label>
           </div>
           <p className="text-sm text-muted-foreground">
-            URL base do sistema PMS usada para gerar links de check-in online e políticas nos emails.
-            Esta URL é diferente da URL do site do estabelecimento, que pode variar por estabelecimento.
+            URL onde a <strong>equipe</strong> acessa o PMS (login, dashboard, Super Admin). Também usada em links de{" "}
+            <strong>políticas</strong> nos e-mails. Não substitua pelo domínio do Web Check-in dos hóspedes.
           </p>
           <div className="space-y-2">
             <div>
@@ -505,9 +505,10 @@ const SiteSettingsManager = () => {
             <WebCheckinDomainHelp />
           </div>
           <p className="text-sm text-muted-foreground">
-            Domínio usado nos links enviados aos hóspedes (e-mail, pagamento, etc.). Informe só a URL base —{" "}
-            <strong>não</strong> inclua o localizador (código da reserva).
-            Se vazio, o sistema usa <code className="text-xs">URL Base do PMS</code> + <code className="text-xs">/web-checkin</code>.
+            Domínio <strong>somente para hóspedes</strong> (links em e-mail, pagamento, etc.). O staff continua em{" "}
+            <code className="text-xs">URL Base do PMS</code>. Informe só a base — <strong>sem</strong> o localizador.
+            Se vazio, os links usam <code className="text-xs">URL Base do PMS</code> +{" "}
+            <code className="text-xs">/web-checkin</code>.
           </p>
           <div className="space-y-2">
             <Label htmlFor="web_checkin_public_base_url">Domínio do Web Check-in</Label>
