@@ -26,6 +26,8 @@ export function WebCheckinDedicatedAppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<WebCheckin />} />
+      <Route path="/login" element={<RedirectStaffToPms />} />
+      <Route path="/login/*" element={<RedirectStaffToPms />} />
       <Route path="/:locator" element={<WebCheckin />} />
       <Route path="/web-checkin" element={<WebCheckin />} />
       <Route path="/web-checkin/:locator" element={<WebCheckin />} />

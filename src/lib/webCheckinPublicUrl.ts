@@ -69,13 +69,30 @@ export function getWebCheckinPublicHostname(settings?: WebCheckinUrlSettings | n
   return getRuntimeWebCheckinPublicHostname();
 }
 
+function getExtraRuntimeWebCheckinHosts(): string[] {
+  const raw =
+    (import.meta.env.VITE_WEB_CHECKIN_PUBLIC_HOSTS as string | undefined)?.trim() || "";
+  if (!raw) return [];
+  return raw
+    .split(/[,;\s]+/)
+    .map((h) => hostnameFromUrlOrHost(h))
+    .filter((h): h is string => Boolean(h));
+}
+
 /** O visitante está no domínio dedicado do Web Check-in (ex.: checkin.seudominio.com). */
 export function isWebCheckinPublicHostname(settings?: WebCheckinUrlSettings | null): boolean {
   if (typeof window === "undefined") return false;
+  const current = window.location.hostname.toLowerCase().replace(/^www\./, "");
+
+  // Env/runtime tem prioridade: evita roteamento PMS (/ → /login) antes do site_settings carregar
+  const runtimeHost = getRuntimeWebCheckinPublicHostname();
+  if (runtimeHost && current === runtimeHost) return true;
+  for (const h of getExtraRuntimeWebCheckinHosts()) {
+    if (current === h) return true;
+  }
+
   const configured = getWebCheckinPublicHostname(settings);
   if (!configured) return false;
-  // settings ainda carregando: reconhecer host só via env evita 404 de rota no domínio checkin
-  const current = window.location.hostname.toLowerCase().replace(/^www\./, "");
   return current === configured;
 }
 

@@ -14,14 +14,20 @@ escape_js() {
 
 API_ESC=$(escape_js "$API_URL")
 APP_ESC=$(escape_js "$APP_URL")
-WEB_ESC=$(escape_js "$WEB_CHECKIN_HOST")
+WEB_CHECKIN_ESC=$(escape_js "$WEB_CHECKIN_HOST")
+
+if [ -n "$WEB_CHECKIN_HOST" ]; then
+  WEB_CHECKIN_LINE="  webCheckinPublicHost: '${WEB_CHECKIN_ESC}',"
+else
+  WEB_CHECKIN_LINE=""
+fi
 
 cat > "$OUT" <<EOF
 window.__RUNTIME_CONFIG__ = {
   pmsApiUrl: '${API_ESC}',
   appUrl: '${APP_ESC}',
-  webCheckinPublicHost: '${WEB_ESC}',
+${WEB_CHECKIN_LINE}
 };
 EOF
 
-echo "runtime-config.js gerado (pmsApiUrl=${API_URL:-<vazio>})"
+echo "runtime-config.js gerado (pmsApiUrl=${API_URL:-<vazio>}, webCheckinPublicHost=${WEB_CHECKIN_HOST:-<vazio>})"
