@@ -31,9 +31,24 @@ export class SchemaReadinessService implements OnModuleInit {
         return;
       }
       this.logger.log(`Schema PMS validado (public.companies presente; ${this.publicTableCount} tabelas).`);
+      await this.applyIncrementalSiteSettingsColumns();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(`Validacao de schema falhou: ${message}`);
+    }
+  }
+
+  /** DDL idempotente para colunas novas em site_settings (Data API valida information_schema). */
+  private async applyIncrementalSiteSettingsColumns(): Promise<void> {
+    if (!this.schemaReady) return;
+    try {
+      await this.prisma.$executeRawUnsafe(`
+        ALTER TABLE public.site_settings
+        ADD COLUMN IF NOT EXISTS web_checkin_public_base_url TEXT
+      `);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Não foi possível garantir coluna site_settings.web_checkin_public_base_url: ${message}`);
     }
   }
 }
