@@ -49,10 +49,13 @@ export class StorageService {
   }
 
   async sign(bucket: string, path: string, expiresIn: number, origin: string): Promise<string> {
+    const encoded = path.split("/").map(encodeURIComponent).join("/");
+    if (await this.isPublic(bucket)) {
+      return `${origin}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encoded}`;
+    }
     await stat(this.locate(bucket, path));
     const exp = Math.floor(Date.now() / 1000) + Math.min(Math.max(expiresIn, 1), 60 * 60 * 24 * 365);
     const token = this.mac(bucket, path, exp);
-    const encoded = path.split("/").map(encodeURIComponent).join("/");
     return `${origin}/storage/v1/object/sign-get/${encodeURIComponent(bucket)}/${encoded}?exp=${exp}&token=${token}`;
   }
 
@@ -77,11 +80,12 @@ export class StorageService {
     return [...all].filter((name) => name !== ".buckets.json").map((name) => ({
       id: name,
       name,
-      public: meta[name]?.public === true,
+      public: PUBLIC_BY_DEFAULT.has(name) || meta[name]?.public === true,
     }));
   }
 
   async isPublic(bucket: string): Promise<boolean> {
+    if (PUBLIC_BY_DEFAULT.has(bucket)) return true;
     const meta = await this.meta();
     return meta[bucket]?.public === true;
   }

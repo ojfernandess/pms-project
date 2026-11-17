@@ -147,37 +147,10 @@ export function DocumentUploadStep({
         throw uploadError;
       }
 
-      // Obter URL pública (ou signed URL se o bucket for privado)
-      let fileUrl: string;
-      
-      // Verificar se o bucket é público ou privado
-      const { data: buckets } = await supabase.storage.listBuckets();
-      const documentsBucket = buckets?.find((b) => b.name === "documents");
-      // Postgres/Nest: bucket documents é público por padrão (evita sign 400 se ficheiro ainda não indexado)
-      const isPublic = documentsBucket?.public ?? true;
-      
-      if (isPublic) {
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("documents").getPublicUrl(filePath);
-        fileUrl = publicUrl;
-      } else {
-        // Se o bucket for privado, gerar uma signed URL válida por 1 ano
-        const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-          .from("documents")
-          .createSignedUrl(filePath, 31536000); // 1 ano em segundos
-        
-        if (signedUrlError) {
-          console.error("Erro ao gerar signed URL:", signedUrlError);
-          // Fallback: tentar usar public URL mesmo sendo privado
-          const {
-            data: { publicUrl },
-          } = supabase.storage.from("documents").getPublicUrl(filePath);
-          fileUrl = publicUrl;
-        } else {
-          fileUrl = signedUrlData.signedUrl;
-        }
-      }
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
+      const fileUrl = publicUrl;
 
       // Atualizar documentos - garantir que o documento seja associado ao hóspede correto
       const updatedDocuments = [...documents];

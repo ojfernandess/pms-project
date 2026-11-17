@@ -478,7 +478,15 @@ export function createNestSupabase(): SupabaseClient<Database> {
             return { data: { publicUrl: `${apiBase()}/storage/v1/object/public/${encoded}/${target}` } };
           },
           async createSignedUrl(path: string, expiresIn: number) {
-            const target = normalizeStorageObjectPath(path).split("/").map(encodeURIComponent).join("/");
+            const cleanPath = normalizeStorageObjectPath(path);
+            if (bucket === "documents") {
+              const target = cleanPath.split("/").map(encodeURIComponent).join("/");
+              return {
+                data: { signedUrl: `${apiBase()}/storage/v1/object/public/${encoded}/${target}` },
+                error: null,
+              };
+            }
+            const target = cleanPath.split("/").map(encodeURIComponent).join("/");
             const response = await fetch(`${apiBase()}/storage/v1/object/sign/${encoded}/${target}`, {
               method: "POST",
               headers: await authHeaders(),
