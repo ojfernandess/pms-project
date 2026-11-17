@@ -20,6 +20,7 @@ type VerifyResult = {
   success?: boolean;
   code?: string;
   account_matched?: boolean;
+  guest_account_id?: string;
   message?: string;
 };
 
@@ -90,9 +91,27 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack }: Pro
         return;
       }
 
-      if (payload.success) {
+      if (
+        payload.code === "birth_date_missing_on_account" ||
+        payload.code === "birth_date_mismatch" ||
+        payload.code === "reservation_linked_other_account"
+      ) {
+        toast.error(payload.message || t("webCheckin.guestless.verifyFailed"));
+        return;
+      }
+
+      if (payload.code === "account_exists_use_login") {
+        toast.error(payload.message || t("webCheckin.guestless.useLoginInstead"));
+        return;
+      }
+
+      if (payload.success === true) {
         setGuestlessCheckinSession(loc);
-        toast.success(t("webCheckin.guestless.verified"));
+        toast.success(
+          payload.account_matched
+            ? t("webCheckin.guestless.verifiedWithAccount")
+            : t("webCheckin.guestless.verified"),
+        );
         onVerified(loc);
         return;
       }

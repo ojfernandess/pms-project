@@ -175,6 +175,8 @@
       "birthTitle": "Confirmação de segurança",
       "birthLabel": "Data de nascimento",
       "verified": "Identidade confirmada. Você pode continuar o check-in.",
+      "verifiedWithAccount": "Identidade confirmada com seu cadastro. Você pode continuar o check-in.",
+      "useLoginInstead": "Já existe uma conta com estes dados. Faça login com e-mail e senha.",
       "verifyFailed": "Não foi possível validar os dados. Verifique o localizador e tente novamente.",
       "serviceUnavailable": "Validação indisponível no servidor. Peça ao hotel para atualizar o sistema ou use login com conta.",
       "back": "Voltar",

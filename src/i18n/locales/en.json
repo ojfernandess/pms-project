@@ -175,6 +175,8 @@
       "birthTitle": "Security confirmation",
       "birthLabel": "Date of birth",
       "verified": "Identity confirmed. You can continue check-in.",
+      "verifiedWithAccount": "Identity confirmed with your existing account. You can continue check-in.",
+      "useLoginInstead": "An account already exists with these details. Please sign in with email and password.",
       "verifyFailed": "We could not verify your details. Check the locator and try again.",
       "serviceUnavailable": "Verification is unavailable on the server. Ask the hotel to update the system or sign in with an account.",
       "back": "Back",

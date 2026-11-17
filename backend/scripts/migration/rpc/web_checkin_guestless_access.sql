@@ -30,6 +30,12 @@ DECLARE
   v_account_birth DATE;
   v_stay_account UUID;
   v_email TEXT;
+  v_res_guest_email TEXT;
+  v_res_client_email TEXT;
+  v_ota_email TEXT;
+  v_account_email TEXT;
+  v_account_doc_digits TEXT;
+  v_account_for_stay BOOLEAN := FALSE;
   v_reservation_email_match BOOLEAN := FALSE;
   v_reservation_cpf_match BOOLEAN := FALSE;
 BEGIN
@@ -115,6 +121,16 @@ BEGIN
     WHERE c.id = v_res.client_id;
   END IF;
 
+  v_res_guest_email := lower(trim(COALESCE(v_guest.email, '')));
+  v_res_client_email := lower(trim(COALESCE(v_client.email, '')));
+  v_ota_email := '';
+  SELECT lower(trim(COALESCE(ota.ota_guest_email, '')))
+  INTO v_ota_email
+  FROM public.ota_reservations ota
+  WHERE ota.reservation_id = v_res.id
+  ORDER BY ota.created_at DESC NULLS LAST
+  LIMIT 1;
+
   IF NOT p_is_brazilian THEN
     IF lower(COALESCE(v_guest.email, '')) = v_email
        OR lower(COALESCE(v_client.email, '')) = v_email THEN
@@ -137,24 +153,88 @@ BEGIN
 
   v_account_id := NULL;
   v_account_birth := NULL;
+  v_stay_account := NULL;
 
-  IF p_is_brazilian THEN
+  SELECT gsh.guest_account_id
+  INTO v_stay_account
+  FROM public.guest_stay_history gsh
+  WHERE gsh.reservation_id = v_res.id
+  LIMIT 1;
+
+  IF v_stay_account IS NOT NULL THEN
     SELECT ga.id, ga.birth_date
     INTO v_account_id, v_account_birth
     FROM public.guest_accounts ga
-    WHERE ga.is_active IS DISTINCT FROM FALSE
-      AND normalize_identifier_digits(COALESCE(ga.document_number, '')) = v_digits
+    WHERE ga.id = v_stay_account
+      AND ga.is_active IS DISTINCT FROM FALSE
     LIMIT 1;
-  ELSE
+  END IF;
+
+  IF v_account_id IS NULL THEN
+    IF p_is_brazilian THEN
+      SELECT ga.id, ga.birth_date
+      INTO v_account_id, v_account_birth
+      FROM public.guest_accounts ga
+      WHERE ga.is_active IS DISTINCT FROM FALSE
+        AND normalize_identifier_digits(COALESCE(ga.document_number, '')) = v_digits
+      LIMIT 1;
+    ELSE
+      SELECT ga.id, ga.birth_date
+      INTO v_account_id, v_account_birth
+      FROM public.guest_accounts ga
+      WHERE ga.is_active IS DISTINCT FROM FALSE
+        AND lower(trim(ga.email)) = v_email
+      LIMIT 1;
+    END IF;
+  END IF;
+
+  -- Cadastros de hóspede costumam ter só e-mail; com CPF da reserva conferido, localizar conta pelo e-mail da reserva.
+  IF v_account_id IS NULL AND p_is_brazilian AND v_reservation_cpf_match THEN
     SELECT ga.id, ga.birth_date
     INTO v_account_id, v_account_birth
     FROM public.guest_accounts ga
     WHERE ga.is_active IS DISTINCT FROM FALSE
-      AND lower(trim(ga.email)) = v_email
+      AND (
+        (v_res_guest_email <> '' AND lower(trim(ga.email)) = v_res_guest_email)
+        OR (v_res_client_email <> '' AND lower(trim(ga.email)) = v_res_client_email)
+        OR (v_ota_email <> '' AND lower(trim(ga.email)) = v_ota_email)
+      )
+    ORDER BY ga.created_at DESC
     LIMIT 1;
   END IF;
 
   IF v_account_id IS NOT NULL THEN
+    SELECT lower(trim(COALESCE(ga.email, ''))),
+           normalize_identifier_digits(COALESCE(ga.document_number, ''))
+    INTO v_account_email, v_account_doc_digits
+    FROM public.guest_accounts ga
+    WHERE ga.id = v_account_id;
+
+    IF v_stay_account IS NOT NULL AND v_stay_account = v_account_id THEN
+      v_account_for_stay := TRUE;
+    ELSIF p_is_brazilian AND v_reservation_cpf_match THEN
+      IF v_account_doc_digits = v_digits THEN
+        v_account_for_stay := TRUE;
+      ELSIF v_res_guest_email <> '' AND v_account_email = v_res_guest_email THEN
+        v_account_for_stay := TRUE;
+      ELSIF v_res_client_email <> '' AND v_account_email = v_res_client_email THEN
+        v_account_for_stay := TRUE;
+      ELSIF v_ota_email <> '' AND v_account_email = v_ota_email THEN
+        v_account_for_stay := TRUE;
+      END IF;
+    ELSIF NOT p_is_brazilian AND v_reservation_email_match AND v_account_email = v_email THEN
+      v_account_for_stay := TRUE;
+    END IF;
+
+    IF NOT v_account_for_stay THEN
+      RETURN jsonb_build_object(
+        'success', false,
+        'code', 'account_exists_use_login',
+        'account_matched', true,
+        'message', 'Já existe uma conta com estes dados, mas ela não corresponde a esta reserva. Faça login com e-mail e senha.'
+      );
+    END IF;
+
     IF p_birth_date IS NULL THEN
       RETURN jsonb_build_object(
         'success', false,
@@ -180,12 +260,6 @@ BEGIN
       );
     END IF;
 
-    SELECT gsh.guest_account_id
-    INTO v_stay_account
-    FROM public.guest_stay_history gsh
-    WHERE gsh.reservation_id = v_res.id
-    LIMIT 1;
-
     IF v_stay_account IS NOT NULL AND v_stay_account <> v_account_id THEN
       RETURN jsonb_build_object(
         'success', false,
@@ -198,6 +272,7 @@ BEGIN
       'success', true,
       'code', 'ok',
       'account_matched', true,
+      'guest_account_id', v_account_id,
       'reservation_id', v_res.id,
       'web_checkin_id', v_wc.id
     );
