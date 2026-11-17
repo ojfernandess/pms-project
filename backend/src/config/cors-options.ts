@@ -21,7 +21,15 @@ export function buildCorsOptions(config: ConfigService): CorsOptions {
   const publicApp = normalizeOrigin(config.get<string>("PUBLIC_APP_URL"));
   const siteUrl = normalizeOrigin(config.get<string>("SITE_URL"));
   const webCheckin = normalizeOrigin(config.get<string>("WEB_CHECKIN_PUBLIC_URL"));
-  const allowlist = [...new Set([...explicit, publicApp, siteUrl, webCheckin].filter(Boolean))];
+  const webCheckinHosts = originsFromHostnames(config.get<string>("WEB_CHECKIN_PUBLIC_HOST"));
+  const extraWebCheckinHosts = originsFromHostnames(config.get<string>("WEB_CHECKIN_PUBLIC_HOSTS"));
+  const allowlist = [
+    ...new Set(
+      [...explicit, publicApp, siteUrl, webCheckin, ...webCheckinHosts, ...extraWebCheckinHosts].filter(
+        Boolean,
+      ),
+    ),
+  ];
 
   const base: CorsOptions = {
     credentials: true,
@@ -67,4 +75,15 @@ function normalizeOrigin(value: string | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/** Hostnames sem esquema → https://origin (check-in dedicado no nginx). */
+function originsFromHostnames(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return raw
+    .split(/[,;\s]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((host) => normalizeOrigin(host.includes("://") ? host : `https://${host.replace(/^www\./i, "")}`))
+    .filter((o): o is string => Boolean(o));
 }
