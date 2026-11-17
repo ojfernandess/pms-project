@@ -73,6 +73,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
       MINIO_BUCKET: ${MINIO_BUCKET:-}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      PMS_STORAGE_JSON: ${PMS_STORAGE_JSON:-}
     volumes:
       - pms_storage:/app/storage
     depends_on:

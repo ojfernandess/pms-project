@@ -79,6 +79,16 @@ MINIO_REGION=us-east-1
    env | grep -E '^STORAGE_|^MINIO_'
    ```
 
+## Alternativa: uma única variável (se MINIO_* não aparecem no container)
+
+No **Environment** do Compose PMS, adicione **só** esta linha (JSON numa linha, sem quebras):
+
+```env
+PMS_STORAGE_JSON={"provider":"minio","endpoint":"s3.stayos.com.br","port":443,"useSSL":true,"accessKey":"SUA_KEY","secretKey":"SUA_SECRET","bucket":"stayospms","region":"us-east-1"}
+```
+
+No Dokploy, pode ser mais fácil que oito variáveis `MINIO_*`. Após deploy, `/health?deep=1` deve mostrar `pmsStorageJson: true` e `processEnv.STORAGE_PROVIDER: true`.
+
 ## Checklist Dokploy
 
 | Passo | Verificar |

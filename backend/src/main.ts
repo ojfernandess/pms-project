@@ -8,8 +8,11 @@ import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { buildCorsOptions } from "./config/cors-options";
 import { registerSocketRedisAdapter } from "./realtime/redis-adapter.shutdown";
 import { RedisIoAdapter } from "./realtime/redis-io.adapter";
+import { hydrateStorageEnvFromJson, logStorageEnvBootHint } from "./data/storage-env";
 
 async function bootstrap() {
+  hydrateStorageEnvFromJson();
+  logStorageEnvBootHint();
   const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true, bodyParser: false });
   const config = app.get(ConfigService);
   const logger = new Logger("Bootstrap");

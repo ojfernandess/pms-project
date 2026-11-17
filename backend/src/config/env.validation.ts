@@ -22,6 +22,7 @@ export interface AppEnv {
   MINIO_SECRET_KEY: string;
   MINIO_BUCKET: string;
   MINIO_REGION: string;
+  PMS_STORAGE_JSON: string;
 }
 
 export function validateEnv(config: Record<string, unknown>): AppEnv {
@@ -63,6 +64,7 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
     MINIO_SECRET_KEY: optionalString(config, "MINIO_SECRET_KEY"),
     MINIO_BUCKET: optionalString(config, "MINIO_BUCKET"),
     MINIO_REGION: optionalString(config, "MINIO_REGION"),
+    PMS_STORAGE_JSON: optionalString(config, "PMS_STORAGE_JSON"),
   };
 }
 
