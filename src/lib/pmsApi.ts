@@ -1,11 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
+import { resolvePmsApiUrl } from "@/lib/runtimeConfig";
 
 function apiBase(): string {
-  const base = import.meta.env.VITE_PMS_API_URL;
-  if (!base) {
-    throw new Error("VITE_PMS_API_URL não está configurada");
-  }
-  return String(base).replace(/\/$/, "");
+  return resolvePmsApiUrl().replace(/\/$/, "");
 }
 
 async function authHeaders(): Promise<HeadersInit> {

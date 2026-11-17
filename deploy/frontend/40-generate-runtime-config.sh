@@ -44,9 +44,9 @@ escape_js() {
   printf '%s' "$1" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g"
 }
 
-# Monta runtime-config.js só com chaves não vazias (evita sobrescrever fallback do bundle Vite).
+# Monta runtime-config.js (chaves vazias omitidas; browser preenche via index.html se necessário).
 {
-  echo 'window.__RUNTIME_CONFIG__ = {'
+  echo 'window.__RUNTIME_CONFIG__ = window.__RUNTIME_CONFIG__ || {'
   first=1
   append_field() {
     key="$1"

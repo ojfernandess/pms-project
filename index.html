@@ -22,6 +22,14 @@
     <!-- twitter:image será adicionado dinamicamente apenas se houver imagem configurada -->
 
     <script src="/runtime-config.js"></script>
+    <script>
+      (function () {
+        var c = (window.__RUNTIME_CONFIG__ = window.__RUNTIME_CONFIG__ || {});
+        var origin = window.location.origin.replace(/\/$/, "");
+        if (!c.pmsApiUrl || !String(c.pmsApiUrl).trim()) c.pmsApiUrl = origin;
+        if (!c.appUrl || !String(c.appUrl).trim()) c.appUrl = origin;
+      })();
+    </script>
 
     <script>
       // Script para buscar e injetar meta tags Open Graph ANTES do React carregar

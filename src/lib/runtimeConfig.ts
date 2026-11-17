@@ -90,19 +90,49 @@ function alignApiOriginWithPage(apiOrigin: string): string {
   return apiOrigin.replace(/\/$/, "");
 }
 
-export function resolvePmsApiUrl(): string {
-  const runtime = window.__RUNTIME_CONFIG__?.pmsApiUrl?.trim();
-  const built = import.meta.env.VITE_PMS_API_URL;
-  const raw = runtime || built;
-  if (!raw) throw new Error("VITE_PMS_API_URL não está configurada");
-  let apiOrigin = canonicalizePmsApiOrigin(String(raw));
+function isLocalDevHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h.endsWith(".local");
+}
 
-  if (typeof window !== "undefined" && shouldUseCheckinSameOriginApi(apiOrigin)) {
-    return window.location.origin.replace(/\/$/, "");
+export function resolvePmsApiUrl(): string {
+  const built = import.meta.env.VITE_PMS_API_URL;
+  const runtime =
+    typeof window !== "undefined" ? window.__RUNTIME_CONFIG__?.pmsApiUrl?.trim() : undefined;
+  const raw = runtime || built;
+
+  if (typeof window === "undefined") {
+    if (!raw) throw new Error("VITE_PMS_API_URL não está configurada");
+    return canonicalizePmsApiOrigin(String(raw));
   }
 
-  apiOrigin = alignApiOriginWithPage(apiOrigin);
-  return apiOrigin;
+  const pageOrigin = window.location.origin.replace(/\/$/, "");
+
+  if (isLocalDevHost(window.location.hostname)) {
+    if (!raw) throw new Error("VITE_PMS_API_URL não está configurada");
+    return canonicalizePmsApiOrigin(String(raw));
+  }
+
+  // Dokploy/Easypanel: nginx faz proxy na mesma origem — ignora http:// no build/runtime vazio
+  if (!raw) {
+    return pageOrigin;
+  }
+
+  const apiOrigin = canonicalizePmsApiOrigin(String(raw));
+
+  if (shouldUseCheckinSameOriginApi(apiOrigin)) {
+    return pageOrigin;
+  }
+
+  try {
+    if (normalizeHost(new URL(apiOrigin).hostname) === normalizeHost(window.location.hostname)) {
+      return pageOrigin;
+    }
+  } catch {
+    return pageOrigin;
+  }
+
+  return alignApiOriginWithPage(apiOrigin);
 }
 
 export function resolveAppUrl(): string | null {
