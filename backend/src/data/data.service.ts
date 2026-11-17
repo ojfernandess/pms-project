@@ -43,6 +43,7 @@ const RPCS = new Set([
   "upsert_fnrh_settings",
   "validate_and_apply_discount",
   "verify_guest_password",
+  "verify_web_checkin_guest_access",
 ]);
 
 type QueryResult = { data: unknown; error: { message: string; code?: string } | null; count: number | null };

@@ -392,7 +392,7 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
                 onClick={openGuestless}
                 className="w-full h-12 text-blue-700 hover:text-blue-800 hover:bg-blue-50"
               >
-                {t("webCheckin.guestless.continueWithoutSignup", "Continuar sem cadastro")}
+                {t("webCheckin.guestless.continueWithoutSignup")}
               </Button>
             </>
           )}
@@ -404,7 +404,7 @@ export function GuestAuthStep({ onNext, initialLocator }: GuestAuthStepProps) {
               onClick={openGuestless}
               className="w-full h-12 border-dashed border-blue-300 text-blue-700 hover:bg-blue-50"
             >
-              {t("webCheckin.guestless.continueWithoutSignup", "Check-in sem cadastro")}
+              {t("webCheckin.guestless.continueWithoutSignup")}
             </Button>
           ) : null}
 

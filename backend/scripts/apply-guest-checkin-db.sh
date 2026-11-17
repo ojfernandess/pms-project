@@ -1,5 +1,6 @@
 #!/bin/sh
-# Aplica pgcrypto + RPCs de Web Check-in (use no terminal do container backend, cwd irrelevante).
+# Aplica pgcrypto + RPCs de Web Check-in (use no terminal do container *backend*, não no Postgres).
+# DATABASE_URL com ?schema= não serve no psql: use PSQL_DATABASE_URL abaixo (sem query ?schema=).
 set -eu
 
 APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
