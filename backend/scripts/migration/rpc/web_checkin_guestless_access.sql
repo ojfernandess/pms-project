@@ -37,6 +37,7 @@ DECLARE
   v_account_doc_digits TEXT;
   v_account_for_stay BOOLEAN := FALSE;
   v_prior_checkin BOOLEAN := FALSE;
+  v_prior_birth DATE;
   v_reservation_email_match BOOLEAN := FALSE;
   v_reservation_cpf_match BOOLEAN := FALSE;
 BEGIN
@@ -379,6 +380,48 @@ BEGIN
       'reservation_id', v_res.id,
       'web_checkin_id', v_wc.id
     );
+  END IF;
+
+  -- Histórico em web_checkin_guests (sem conta): exige data de nascimento para confirmar identidade
+  IF v_prior_checkin THEN
+    v_prior_birth := NULL;
+    IF p_is_brazilian THEN
+      SELECT wcg.birth_date
+      INTO v_prior_birth
+      FROM public.web_checkin_guests wcg
+      JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+      WHERE normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+      ORDER BY wc.completed_at DESC NULLS LAST, wcg.birth_date IS NOT NULL DESC
+      LIMIT 1;
+    ELSE
+      SELECT wcg.birth_date
+      INTO v_prior_birth
+      FROM public.web_checkin_guests wcg
+      JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+      WHERE lower(trim(COALESCE(wcg.email, ''))) = v_email
+      ORDER BY wc.completed_at DESC NULLS LAST, wcg.birth_date IS NOT NULL DESC
+      LIMIT 1;
+    END IF;
+
+    IF p_birth_date IS NULL THEN
+      RETURN jsonb_build_object(
+        'success', false,
+        'code', 'birth_date_required',
+        'account_matched', false,
+        'registered_guest', false,
+        'prior_checkin_found', true,
+        'message', 'Encontramos seus dados de um check-in anterior. Informe sua data de nascimento para continuar.'
+      );
+    END IF;
+
+    IF v_prior_birth IS NOT NULL AND v_prior_birth <> p_birth_date THEN
+      RETURN jsonb_build_object(
+        'success', false,
+        'code', 'birth_date_mismatch',
+        'prior_checkin_found', true,
+        'message', 'Data de nascimento não confere com o check-in anterior.'
+      );
+    END IF;
   END IF;
 
   RETURN jsonb_build_object(

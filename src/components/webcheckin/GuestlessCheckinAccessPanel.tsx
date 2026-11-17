@@ -47,6 +47,7 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack, onReq
   const [identifier, setIdentifier] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [needsBirthDate, setNeedsBirthDate] = useState(false);
+  const [birthConfirmPriorCheckin, setBirthConfirmPriorCheckin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [precheckLoading, setPrecheckLoading] = useState(false);
   const [linkedAccountNotice, setLinkedAccountNotice] = useState(false);
@@ -78,6 +79,7 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack, onReq
     void runPrecheck();
     setForceIdentityForm(false);
     setNeedsBirthDate(false);
+    setBirthConfirmPriorCheckin(false);
     setBirthDate("");
     setIdentifier("");
   }, [locator, runPrecheck]);
@@ -85,7 +87,12 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack, onReq
   const handleVerifyPayload = (payload: VerifyResult): boolean => {
     if (payload.code === "birth_date_required") {
       setNeedsBirthDate(true);
-      toast.message(payload.message || t("webCheckin.guestless.birthPrompt"));
+      setBirthConfirmPriorCheckin(!!payload.prior_checkin_found);
+      toast.message(
+        payload.prior_checkin_found
+          ? t("webCheckin.guestless.birthPromptPriorCheckin")
+          : payload.message || t("webCheckin.guestless.birthPrompt"),
+      );
       return true;
     }
 
@@ -113,7 +120,7 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack, onReq
       if (payload.account_matched || payload.registered_guest) {
         toast.success(t("webCheckin.guestless.verifiedWithAccount"));
       } else if (payload.prior_checkin_found) {
-        toast.success(t("webCheckin.guestless.verifiedPriorCheckinNoAccount"));
+        toast.success(t("webCheckin.guestless.verifiedPriorCheckinConfirmed"));
       } else {
         toast.success(t("webCheckin.guestless.verifiedNoRegisteredAccount"));
       }
@@ -292,7 +299,11 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack, onReq
             <ShieldCheck className="h-5 w-5 shrink-0 mt-0.5" />
             <div>
               <p className="font-medium text-sm">{t("webCheckin.guestless.birthTitle")}</p>
-              <p className="text-xs text-amber-900/80 mt-1">{t("webCheckin.guestless.birthPrompt")}</p>
+              <p className="text-xs text-amber-900/80 mt-1">
+                {birthConfirmPriorCheckin
+                  ? t("webCheckin.guestless.birthPromptPriorCheckin")
+                  : t("webCheckin.guestless.birthPrompt")}
+              </p>
             </div>
           </div>
           <Label htmlFor="guestless-birth">{t("webCheckin.guestless.birthLabel")}</Label>
