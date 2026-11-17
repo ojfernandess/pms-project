@@ -118,47 +118,24 @@ services:
     restart: unless-stopped
     environment:
       BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:3000}
-    expose:
-      - "80"
-    networks:
-      - default
-      - dokploy-network
-    depends_on:
-      backend:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
-  # Mesma SPA do PMS, rota Traefik separada — domínio só para hóspedes (check-in).
-  # Dokploy: Domains → host checkin.* → serviço webcheckin → porta 80
-  # Ou defina WEB_CHECKIN_PUBLIC_HOST + WEB_CHECKIN_TRAEFIK_RULE (veja Super Admin / deploy/dokploy/CHECKIN_DOMAIN.md)
-  webcheckin:
-    image: pms-staysos-frontend
-    restart: unless-stopped
-    environment:
-      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:3000}
+      # Hostname do portal check-in (rotas SPA + runtime-config)
       WEB_CHECKIN_PUBLIC_HOST: ${WEB_CHECKIN_PUBLIC_HOST:-}
     expose:
       - "80"
     networks:
       - default
       - dokploy-network
+    # Rota Traefik extra para checkin.* (PMS continua no domínio principal via Domains do Dokploy)
     labels:
       - traefik.enable=true
       - traefik.docker.network=dokploy-network
-      - "traefik.http.routers.pms-webcheckin.rule=${WEB_CHECKIN_TRAEFIK_RULE:-Host(`web-checkin-route-disabled.invalid`)}"
-      - traefik.http.routers.pms-webcheckin.entrypoints=web,websecure
-      - traefik.http.routers.pms-webcheckin.tls=true
-      - traefik.http.routers.pms-webcheckin.tls.certresolver=letsencrypt
-      - traefik.http.routers.pms-webcheckin.service=pms-webcheckin-svc
-      - traefik.http.services.pms-webcheckin-svc.loadbalancer.server.port=80
+      - "traefik.http.routers.pms-frontend-checkin.rule=${WEB_CHECKIN_TRAEFIK_RULE:-Host(`web-checkin-route-disabled.invalid`)}"
+      - traefik.http.routers.pms-frontend-checkin.entrypoints=web,websecure
+      - traefik.http.routers.pms-frontend-checkin.tls=true
+      - traefik.http.routers.pms-frontend-checkin.tls.certresolver=letsencrypt
+      - traefik.http.routers.pms-frontend-checkin.service=pms-frontend-checkin-svc
+      - traefik.http.services.pms-frontend-checkin-svc.loadbalancer.server.port=80
     depends_on:
-      frontend:
-        condition: service_healthy
       backend:
         condition: service_healthy
     healthcheck:

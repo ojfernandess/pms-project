@@ -48,12 +48,14 @@ Link para o hóspede: `https://checkin.seudominio.com/RSV154684` (configurado no
 
 O compose inclui dois serviços de SPA:
 
-| Serviço | Domínio típico | Quem acessa |
-|---------|----------------|-------------|
-| `frontend` | `pms.stayos.com.br` | Equipe / Super Admin |
-| `webcheckin` | `checkin.stayos.com.br` | Hóspedes |
+Um único serviço **`frontend`**, dois domínios no Dokploy:
 
-1. **Domains** → Create Domain → host `checkin...` → serviço **`webcheckin`** → porta **80**.
+| Domínio | Quem acessa |
+|---------|-------------|
+| `pms.stayos.com.br` | Equipe / Super Admin |
+| `checkin.stayos.com.br` | Hóspedes |
+
+1. **Domains** → Create Domain → host `checkin...` → serviço **`frontend`** → porta **80**.
 2. Defina `WEB_CHECKIN_PUBLIC_HOST` e `WEB_CHECKIN_TRAEFIK_RULE` (veja checklist no Super Admin).
 3. Redeploy.
 

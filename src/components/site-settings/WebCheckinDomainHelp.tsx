@@ -50,8 +50,8 @@ export function WebCheckinDomainHelp() {
               O CNAME só aponta o DNS; o <strong>Traefik</strong> precisa de uma rota para{" "}
               <code className="text-xs">checkin</code>. No projeto Compose: aba <strong>Domains</strong> →{" "}
               <strong>Create Domain</strong> → host <code className="text-xs">checkin.seudominio.com</code>, path{" "}
-              <code className="text-xs">/</code>, porta <strong>80</strong>, serviço <strong>webcheckin</strong> (o
-              PMS permanece no serviço <strong>frontend</strong>). Redeploy.
+              <code className="text-xs">/</code>, porta <strong>80</strong>, serviço <strong>frontend</strong> (o mesmo
+              do PMS — são dois domínios, um serviço). Redeploy após Pull do compose.
             </p>
             <p className="text-muted-foreground">
               Ou no Environment do compose:{" "}

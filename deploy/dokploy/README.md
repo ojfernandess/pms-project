@@ -39,6 +39,12 @@ Get-Content deploy\dokploy\pms-install.base64 -Raw | Set-Clipboard
 5. Ative **HTTPS** no domínio do `frontend`.
 6. Primeiro Postgres vazio: `PRISMA_MIGRATE_ON_START=true` → deploy → depois `false`.
 
+### Domínio check-in (`checkin.*`) — 404
+
+Use **dois domínios** no serviço **`frontend`** (não precisa de serviço extra). Veja [CHECKIN_DOMAIN.md](./CHECKIN_DOMAIN.md).
+
+Se o compose no painel não reflete o GitHub: confira **Compose file** = `docker-compose.dokploy.yml`, faça **Pull** + **Deploy**; regenere `pms-install.base64` com `node deploy/dokploy/scripts/export-pms-install.mjs` só se instalou via Import antigo.
+
 ### Erro `.../code/backend not found`
 
 O log usa `code/docker-compose.yml` quando o Dokploy **não clonou** o monorepo (só ficou o YAML do import).
