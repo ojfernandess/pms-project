@@ -30,11 +30,11 @@ import { StripeWebhookService } from "./stripe-webhook.service";
 import { HealthCheckService } from "./health-check.service";
 import { RobotsService } from "./robots.service";
 import { SiteSettingsService } from "./site-settings.service";
+import { PlatformDomainsService } from "./platform-domains.service";
 
 @Module({
   imports: [AuthModule, DataModule],
   controllers: [FunctionsCompatController],
-  exports: [DailyDigestService, CheckoutRemindersService],
   providers: [
     HealthCheckService,
     RobotsService,
@@ -64,6 +64,8 @@ import { SiteSettingsService } from "./site-settings.service";
     AiosellSyncService,
     AiosellReservationsService,
     ApplyDynamicPricingRulesService,
+    PlatformDomainsService,
   ],
+  exports: [DailyDigestService, CheckoutRemindersService, PlatformDomainsService],
 })
 export class EdgeModule {}

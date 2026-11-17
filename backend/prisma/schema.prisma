@@ -1297,6 +1297,7 @@ model companies {
   booking_engine_enabled                    Boolean?                                    @default(false)
   booking_engine_theme                      String?                                     @default("default")
   booking_engine_custom_domain              String?                                     @unique
+  platform_custom_domains                   platform_custom_domains[]
   booking_engine_hero_image                 String?
   booking_engine_hero_title                 String?
   booking_engine_hero_subtitle              String?
@@ -3310,6 +3311,30 @@ model simplified_pricing {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model platform_custom_domains {
+  id                    String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  hostname              String     @unique
+  company_id            String?    @db.Uuid
+  service_type          String     @default("web_checkin")
+  status                String     @default("pending_dns")
+  verification_token    String
+  ownership_verified_at   DateTime?  @db.Timestamptz(6)
+  dns_last_checked_at   DateTime?  @db.Timestamptz(6)
+  dns_status            String?
+  ssl_status            String?
+  ssl_expires_at        DateTime?  @db.Timestamptz(6)
+  last_error            String?
+  infra_cname_target    String?
+  infra_a_target        String?
+  verification_history  Json?      @default("[]")
+  created_at            DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime   @default(now()) @db.Timestamptz(6)
+  companies             companies? @relation(fields: [company_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([service_type, status], map: "idx_platform_custom_domains_service_status")
+  @@schema("public")
+}
+
 model site_settings {
   id                   String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   favicon_url          String?

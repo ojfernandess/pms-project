@@ -70,6 +70,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { invalidateLogConfigCache } from "@/lib/logger";
 import { WebCheckinDomainHelp } from "@/components/site-settings/WebCheckinDomainHelp";
+import { PlatformCustomDomainsManager } from "@/components/super-admin/PlatformCustomDomainsManager";
 import { WebCheckinDeployChecklist } from "@/components/site-settings/WebCheckinDeployChecklist";
 import {
   DropdownMenu,
@@ -529,6 +530,7 @@ const SiteSettingsManager = () => {
               webCheckinBaseUrl={formData.web_checkin_public_base_url}
               pmsBaseUrl={formData.pms_base_url}
             />
+            <PlatformCustomDomainsManager />
           </div>
         </div>
 

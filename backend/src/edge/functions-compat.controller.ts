@@ -28,6 +28,7 @@ import { StripeWebhookService } from "./stripe-webhook.service";
 import { HealthCheckService } from "./health-check.service";
 import { RobotsService } from "./robots.service";
 import { SiteSettingsService } from "./site-settings.service";
+import { PlatformDomainsService } from "./platform-domains.service";
 
 @Controller("functions/v1")
 export class FunctionsCompatController {
@@ -60,6 +61,7 @@ export class FunctionsCompatController {
     private readonly aiosellSync: AiosellSyncService,
     private readonly aiosellReservations: AiosellReservationsService,
     private readonly applyDynamicPricing: ApplyDynamicPricingRulesService,
+    private readonly platformDomains: PlatformDomainsService,
   ) {}
 
   @Get("health-check")
@@ -84,6 +86,13 @@ export class FunctionsCompatController {
   async settings(@Res() res: Response) {
     const body = await this.siteSettings.get();
     res.status(200).setHeader("Cache-Control", "public, max-age=300").json(body);
+  }
+
+  /** Roteamento SPA por hostname (público). Deve ser chamado na mesma origem do visitante (proxy nginx). */
+  @Get("resolve-hostname")
+  async resolveHostname(@Req() req: Request, @Res() res: Response) {
+    const body = await this.platformDomains.resolveFromRequest(req);
+    res.status(200).setHeader("Cache-Control", "public, max-age=60").json(body);
   }
 
   @Get("get-reservation")

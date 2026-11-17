@@ -23,7 +23,9 @@ import {
   shouldWaitForWebCheckinHostDetection,
 } from "./lib/webCheckinPublicUrl";
 import { useSiteSettings } from "./hooks/useSiteSettings";
+import { useHostnameResolution } from "./hooks/useHostnameResolution";
 import { WebCheckinDedicatedAppRoutes } from "./components/routing/WebCheckinDedicatedAppRoutes";
+import UnconfiguredHostname from "./pages/UnconfiguredHostname";
 import GuestDashboard from "./pages/GuestDashboard";
 import GuestResetPassword from "./pages/GuestResetPassword";
 import PublicPolicies from "./pages/PublicPolicies";
@@ -133,12 +135,17 @@ const AppContent = () => {
 const AppRoutesWithMeta = () => {
   useSiteMeta();
   const { settings, isLoading: siteSettingsLoading } = useSiteSettings();
+  const { resolution, isLoading: hostResolutionLoading, isError: hostResolutionError } =
+    useHostnameResolution();
   const onWebCheckinHost = isWebCheckinPublicHostname(settings);
   const webCheckinPrefix = getWebCheckinRoutePrefix(settings);
   const extraWebCheckinPath =
     webCheckinPrefix && webCheckinPrefix !== "web-checkin" ? webCheckinPrefix : null;
 
-  if (shouldWaitForWebCheckinHostDetection(siteSettingsLoading, settings)) {
+  const waitingLegacy = shouldWaitForWebCheckinHostDetection(siteSettingsLoading, settings);
+  const waitingHostApi = hostResolutionLoading && !onWebCheckinHost;
+
+  if (waitingLegacy || waitingHostApi) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <p className="text-sm text-muted-foreground">Carregando…</p>
@@ -146,8 +153,33 @@ const AppRoutesWithMeta = () => {
     );
   }
 
-  if (onWebCheckinHost) {
+  const serverCheckin =
+    !hostResolutionError &&
+    resolution?.mode === "web_checkin" &&
+    resolution.active !== false;
+  const checkinHost = serverCheckin || onWebCheckinHost;
+
+  const foreignHostBlocked =
+    !hostResolutionError &&
+    resolution &&
+    (resolution.mode === "unconfigured" ||
+      resolution.mode === "suspended" ||
+      (resolution.mode === "pending" && !resolution.active));
+
+  if (foreignHostBlocked) {
+    return <UnconfiguredHostname resolution={resolution} />;
+  }
+
+  if (checkinHost) {
     return <WebCheckinDedicatedAppRoutes />;
+  }
+
+  if (!hostResolutionError && resolution?.mode === "booking_engine" && resolution.active) {
+    return (
+      <Routes>
+        <Route path="/*" element={<BookingEnginePage />} />
+      </Routes>
+    );
   }
 
   return (
