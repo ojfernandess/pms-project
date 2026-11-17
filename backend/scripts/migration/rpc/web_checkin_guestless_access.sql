@@ -36,6 +36,7 @@ DECLARE
   v_account_email TEXT;
   v_account_doc_digits TEXT;
   v_account_for_stay BOOLEAN := FALSE;
+  v_prior_checkin BOOLEAN := FALSE;
   v_reservation_email_match BOOLEAN := FALSE;
   v_reservation_cpf_match BOOLEAN := FALSE;
 BEGIN
@@ -176,6 +177,17 @@ BEGIN
       )
       INTO v_reservation_cpf_match;
     END IF;
+
+    IF NOT v_reservation_cpf_match THEN
+      SELECT EXISTS (
+        SELECT 1
+        FROM public.web_checkin wc
+        JOIN public.web_checkin_guests wcg ON wcg.web_checkin_id = wc.id
+        WHERE wc.reservation_id = v_res.id
+          AND normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+      )
+      INTO v_reservation_cpf_match;
+    END IF;
   END IF;
 
   IF (p_is_brazilian AND NOT v_reservation_cpf_match) OR (NOT p_is_brazilian AND NOT v_reservation_email_match) THEN
@@ -311,6 +323,24 @@ BEGIN
     END IF;
   END IF;
 
+  IF p_is_brazilian THEN
+    SELECT EXISTS (
+      SELECT 1
+      FROM public.web_checkin_guests wcg
+      JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+      WHERE normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+    )
+    INTO v_prior_checkin;
+  ELSE
+    SELECT EXISTS (
+      SELECT 1
+      FROM public.web_checkin_guests wcg
+      JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+      WHERE lower(trim(COALESCE(wcg.email, ''))) = v_email
+    )
+    INTO v_prior_checkin;
+  END IF;
+
   -- Data de nascimento só quando há conta de hóspede a confirmar (sem login)
   IF v_account_id IS NOT NULL AND v_account_for_stay THEN
     IF p_birth_date IS NULL THEN
@@ -344,6 +374,7 @@ BEGIN
       'code', 'ok',
       'account_matched', true,
       'registered_guest', true,
+      'prior_checkin_found', v_prior_checkin,
       'guest_account_id', v_account_id,
       'reservation_id', v_res.id,
       'web_checkin_id', v_wc.id
@@ -355,6 +386,7 @@ BEGIN
     'code', 'ok',
     'account_matched', false,
     'registered_guest', false,
+    'prior_checkin_found', v_prior_checkin,
     'reservation_id', v_res.id,
     'web_checkin_id', v_wc.id
   );

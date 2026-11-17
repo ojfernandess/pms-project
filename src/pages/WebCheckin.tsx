@@ -105,8 +105,9 @@ export default function WebCheckin() {
   );
 
   // Buscar dados completos pelo token (após iniciar)
+  const effectiveCheckinToken = token || webCheckinInfo?.token || "";
   const { data: webCheckin, isLoading: isLoadingCheckin, refetch: refetchWebCheckinByToken } = getWebCheckinByToken(
-    token || "",
+    effectiveCheckinToken,
     requireGuestAccountForFetch,
   );
   
@@ -267,6 +268,19 @@ export default function WebCheckin() {
   // OTIMIZAÇÃO: Usar useRef para evitar processamento duplicado
   const processedWebCheckinId = useRef<string | null>(null);
   const isProcessingRef = useRef(false);
+
+  useEffect(() => {
+    const wcToken = webCheckinInfo?.token;
+    if (
+      checkinAccessGranted &&
+      wcToken &&
+      !token &&
+      webCheckinInfo &&
+      (webCheckinInfo.status === "pending" || webCheckinInfo.status === "in_progress")
+    ) {
+      setToken(wcToken);
+    }
+  }, [checkinAccessGranted, webCheckinInfo?.token, webCheckinInfo?.status, webCheckinInfo?.id, token]);
   
   useEffect(() => {
     // BLOQUEAR: Não processar nada sem autenticação
@@ -286,8 +300,12 @@ export default function WebCheckin() {
       return;
     }
     
-    // OTIMIZAÇÃO: Se já processou este web check-in, não processar novamente
-    if (processedWebCheckinId.current === webCheckinInfo.id) {
+    const shouldAdvanceFromLocatorStep =
+      (currentStep === 1 || (guestlessMode && currentStep === 2)) && !!webCheckinInfo?.reservation;
+    const hasSessionToken = !!(token || webCheckinInfo.token);
+
+    // Se já concluiu o processamento deste check-in e já há token, não repetir
+    if (processedWebCheckinId.current === webCheckinInfo.id && hasSessionToken) {
       return;
     }
     
@@ -335,8 +353,7 @@ export default function WebCheckin() {
       // Se já está in_progress, usar o token existente
       if (webCheckinInfo.status === "in_progress" && webCheckinInfo.token) {
         setToken(webCheckinInfo.token);
-        // Avançar para etapa de verificação se ainda estiver na etapa de localizador
-        if (currentStep === 1 && webCheckinInfo.reservation) {
+        if (shouldAdvanceFromLocatorStep && currentStep < 2) {
           setTimeout(() => {
             setCurrentStep(2);
             isProcessingRef.current = false;
@@ -348,7 +365,7 @@ export default function WebCheckin() {
       }
       
       // Iniciar o check-in apenas se estiver pending e ainda não tiver token
-      if (webCheckinInfo.status === "pending" && !token && !startWebCheckin.isPending) {
+      if (webCheckinInfo.status === "pending" && !hasSessionToken && !startWebCheckin.isPending) {
         const ipAddress = "";
         const userAgent = navigator.userAgent;
         
@@ -361,8 +378,7 @@ export default function WebCheckin() {
               } else if (webCheckinInfo.token) {
                 setToken(webCheckinInfo.token);
               }
-              // Avançar para etapa de verificação após iniciar o check-in
-              if (currentStep === 1 && webCheckinInfo.reservation) {
+              if (shouldAdvanceFromLocatorStep && currentStep < 2) {
                 setTimeout(() => {
                   setCurrentStep(2);
                   isProcessingRef.current = false;
@@ -373,12 +389,10 @@ export default function WebCheckin() {
             },
             onError: (error) => {
               console.error("Erro ao iniciar web check-in:", error);
-              // Mesmo com erro, tentar usar o token existente
               if (webCheckinInfo.token) {
                 setToken(webCheckinInfo.token);
               }
-              // Avançar mesmo com erro se tiver dados da reserva
-              if (currentStep === 1 && webCheckinInfo.reservation) {
+              if (shouldAdvanceFromLocatorStep && currentStep < 2) {
                 setTimeout(() => {
                   setCurrentStep(2);
                   isProcessingRef.current = false;
@@ -391,9 +405,8 @@ export default function WebCheckin() {
         );
         return;
       } else if (webCheckinInfo.status === "pending" && webCheckinInfo.token) {
-        // Se já tem token mas ainda está pending, usar o token e avançar
         setToken(webCheckinInfo.token);
-        if (currentStep === 1 && webCheckinInfo.reservation) {
+        if (shouldAdvanceFromLocatorStep && currentStep < 2) {
           setTimeout(() => {
             setCurrentStep(2);
             isProcessingRef.current = false;
@@ -407,12 +420,14 @@ export default function WebCheckin() {
     
     // Se chegou aqui, não processou nada, resetar flag
     isProcessingRef.current = false;
-  }, [webCheckinInfo?.id, webCheckinInfo?.status, webCheckinInfo?.token, webCheckinInfo?.reservation, locator, token, startWebCheckin.isPending, isAuthenticated, guestAccountId, showLocatorInput]);
+  }, [webCheckinInfo?.id, webCheckinInfo?.status, webCheckinInfo?.token, webCheckinInfo?.reservation, locator, token, startWebCheckin.isPending, checkinAccessGranted, guestlessMode, currentStep, showLocatorInput, reservationLinkedToOtherUser]);
 
   const handleNext = (stepData: any) => {
     setWebCheckinData((prev: any) => ({ ...prev, ...stepData }));
     
     if (currentStep === 0 && stepData.guestlessVerified && stepData.locator?.trim()) {
+      processedWebCheckinId.current = null;
+      isProcessingRef.current = false;
       setGuestlessMode(true);
       setLocator(stepData.locator.trim());
       setShowLocatorInput(false);
@@ -1433,9 +1448,11 @@ export default function WebCheckin() {
     }
   }
 
+  const checkinSessionToken = token || webCheckinInfo?.token || checkinToCheck?.token || null;
+
   // SEGURANÇA: Só mostrar conteúdo do check-in se estiver autenticado e tiver token
   // EXCEÇÃO: Se está concluído, pode mostrar mesmo sem token (o token será definido acima)
-  if (!token && checkinToCheck?.status !== "completed") {
+  if (!checkinSessionToken && checkinToCheck?.status !== "completed") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <Card className="p-8">

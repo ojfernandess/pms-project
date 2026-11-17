@@ -9,6 +9,8 @@ import {
   reservationGuestDisplayName,
 } from "@/lib/reservationChannelDisplay";
 import { computeWebCheckinExpiresAt } from "@/lib/webCheckinExpiry";
+import { cpfSearchVariants } from "@/lib/cpfVariants";
+import { resolveWebCheckinByLocator } from "@/lib/resolveWebCheckinByLocator";
 
 export const useWebCheckin = () => {
   const queryClient = useQueryClient();
@@ -36,19 +38,7 @@ export const useWebCheckin = () => {
           }
         }
         
-        // Primeiro buscar o web_checkin básico pelo locator
-        let webCheckinData = null;
-        const { data: webCheckinByLocator, error: webCheckinError } = await supabase
-          .from("web_checkin")
-          .select("*")
-          .eq("locator", locator.trim())
-          .maybeSingle();
-
-        if (webCheckinError) {
-          console.error("Erro ao buscar web_checkin pelo locator:", webCheckinError);
-        } else if (webCheckinByLocator) {
-          webCheckinData = webCheckinByLocator;
-        }
+        let webCheckinData = await resolveWebCheckinByLocator(locator);
 
         // Se não encontrou pelo locator, tentar buscar pela reserva usando o reservation_code
         if (!webCheckinData) {
@@ -727,17 +717,7 @@ export const useWebCheckin = () => {
   // Iniciar web check-in
   const startWebCheckin = useMutation({
     mutationFn: async ({ locator, ipAddress, userAgent }: { locator: string; ipAddress?: string; userAgent?: string }) => {
-      // Buscar web check-in existente
-      const { data: existing, error: fetchError } = await supabase
-        .from("web_checkin")
-        .select("*")
-        .eq("locator", locator)
-        .single();
-
-      if (fetchError) {
-        console.error("Erro ao buscar web check-in:", fetchError);
-        throw new Error("Localizador não encontrado");
-      }
+      const existing = await resolveWebCheckinByLocator(locator);
 
       if (!existing) {
         throw new Error("Localizador não encontrado");
@@ -1488,7 +1468,12 @@ export const useWebCheckin = () => {
           if (guestEmail) {
             query = query.eq("email", guestEmail.trim());
           } else if (guestCpf) {
-            query = query.eq("cpf", guestCpf.trim());
+            const cpfVariants = cpfSearchVariants(guestCpf);
+            if (cpfVariants.length === 1) {
+              query = query.eq("cpf", cpfVariants[0]);
+            } else if (cpfVariants.length > 1) {
+              query = query.in("cpf", cpfVariants);
+            }
           } else if (guestDocumentNumber) {
             query = query.eq("document_number", guestDocumentNumber.trim());
           }
