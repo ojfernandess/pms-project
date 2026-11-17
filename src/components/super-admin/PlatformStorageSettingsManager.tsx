@@ -23,6 +23,7 @@ type EnvStorageTestResult = {
   message?: string;
   source?: string;
   provider?: string;
+  storageProviderEnv?: string;
   endpoint?: string;
   port?: number;
   useSSL?: boolean;
@@ -97,7 +98,10 @@ export function PlatformStorageSettingsManager() {
       {lastResult && (
         <div className="rounded-lg border bg-muted/40 p-3 text-xs space-y-1 font-mono">
           <div>source: {lastResult.source ?? "env"}</div>
-          {lastResult.provider && <div>provider: {lastResult.provider}</div>}
+          {lastResult.storageProviderEnv != null && (
+            <div>STORAGE_PROVIDER (env): {lastResult.storageProviderEnv}</div>
+          )}
+          {lastResult.provider && <div>provider efetivo: {lastResult.provider}</div>}
           {lastResult.endpoint != null && (
             <div>
               endpoint: {lastResult.endpoint}:{lastResult.port ?? "?"}

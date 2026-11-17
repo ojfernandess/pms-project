@@ -13,12 +13,19 @@ export interface AppEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   PUBLIC_APP_URL: string;
+  STORAGE_PROVIDER: string;
+  STORAGE_DIR: string;
+  MINIO_ENDPOINT: string;
+  MINIO_PORT: string;
+  MINIO_USE_SSL: string;
+  MINIO_ACCESS_KEY: string;
+  MINIO_SECRET_KEY: string;
+  MINIO_BUCKET: string;
+  MINIO_REGION: string;
 }
 
 export function validateEnv(config: Record<string, unknown>): AppEnv {
-  const databaseUrl = normalizePooledDatabaseUrl(
-    sanitizeDatabaseUrlValue(requiredString(config, "DATABASE_URL")),
-  );
+  const databaseUrl = normalizePooledDatabaseUrl(requiredString(config, "DATABASE_URL"));
   const redisUrl = requiredString(config, "REDIS_URL");
   const jwtSecret = requiredString(config, "JWT_SECRET");
   if (jwtSecret.length < 32) {
@@ -47,6 +54,15 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
     SUPABASE_URL: optionalString(config, "SUPABASE_URL"),
     SUPABASE_ANON_KEY: optionalString(config, "SUPABASE_ANON_KEY"),
     PUBLIC_APP_URL: optionalString(config, "PUBLIC_APP_URL"),
+    STORAGE_PROVIDER: optionalString(config, "STORAGE_PROVIDER"),
+    STORAGE_DIR: optionalString(config, "STORAGE_DIR"),
+    MINIO_ENDPOINT: optionalString(config, "MINIO_ENDPOINT"),
+    MINIO_PORT: optionalString(config, "MINIO_PORT"),
+    MINIO_USE_SSL: optionalString(config, "MINIO_USE_SSL"),
+    MINIO_ACCESS_KEY: optionalString(config, "MINIO_ACCESS_KEY"),
+    MINIO_SECRET_KEY: optionalString(config, "MINIO_SECRET_KEY"),
+    MINIO_BUCKET: optionalString(config, "MINIO_BUCKET"),
+    MINIO_REGION: optionalString(config, "MINIO_REGION"),
   };
 }
 

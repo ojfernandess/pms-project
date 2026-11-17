@@ -24,6 +24,8 @@ export type StorageConnectionTestResult = {
   message: string;
   source: "env";
   provider?: StorageConfig["provider"];
+  /** Valor bruto de STORAGE_PROVIDER no env (diagnóstico). */
+  storageProviderEnv?: string;
   endpoint?: string;
   port?: number;
   useSSL?: boolean;
@@ -72,7 +74,9 @@ export class StorageService implements OnModuleInit {
   /** Testa somente variáveis de ambiente do container da API (ignora site_settings). */
   async testConnectionFromEnv(): Promise<StorageConnectionTestResult> {
     const cfg = this.resolveConfigFromEnv();
-    const provider = (this.config.get<string>("STORAGE_PROVIDER") || "local").trim().toLowerCase();
+    const rawProvider = this.config.get<string>("STORAGE_PROVIDER");
+    const provider = (rawProvider || "").trim().toLowerCase() || "local";
+    const storageProviderEnv = rawProvider?.trim() || "(vazio)";
 
     if (cfg.provider === "minio" && cfg.minio) {
       const m = cfg.minio;
@@ -81,6 +85,7 @@ export class StorageService implements OnModuleInit {
         ...base,
         source: "env",
         provider: "minio",
+        storageProviderEnv,
         endpoint: m.endPoint,
         port: m.port ?? 9000,
         useSSL: m.useSSL === true,
@@ -93,6 +98,7 @@ export class StorageService implements OnModuleInit {
         ok: false,
         source: "env",
         provider: "minio",
+        storageProviderEnv,
         message:
           "STORAGE_PROVIDER=minio mas faltam MINIO_ENDPOINT, MINIO_ACCESS_KEY ou MINIO_SECRET_KEY no env do backend.",
       };
@@ -105,13 +111,15 @@ export class StorageService implements OnModuleInit {
         ok: true,
         source: "env",
         provider: "local",
-        message: "Armazenamento local acessível (STORAGE_PROVIDER=local ou não definido).",
+        storageProviderEnv,
+        message: `Armazenamento local (STORAGE_PROVIDER=${storageProviderEnv}). Defina STORAGE_PROVIDER=minio no serviço da API e reinicie.`,
       };
     } catch (error) {
       return {
         ok: false,
         source: "env",
         provider: "local",
+        storageProviderEnv,
         message: error instanceof Error ? error.message : "Armazenamento local indisponível",
       };
     }
