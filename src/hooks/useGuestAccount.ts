@@ -2,6 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { clearGuestlessCheckinSession } from "@/lib/guestlessCheckinSession";
+import {
+  readGuestlessCompletedFlag,
+  RESERVATION_GUESTLESS_NO_LINK_MESSAGE,
+} from "@/lib/reservationGuestlessLink";
 
 export interface GuestAccount {
   id: string;
@@ -277,6 +281,19 @@ export const useGuestAccount = () => {
       }
 
       console.log("✅ Reserva encontrada com sucesso:", reservation.id);
+
+      const { data: webCheckinForLink } = await supabase
+        .from("web_checkin")
+        .select("status, guest_data")
+        .eq("reservation_id", finalReservationId)
+        .maybeSingle();
+
+      if (
+        webCheckinForLink?.status === "completed" &&
+        readGuestlessCompletedFlag(webCheckinForLink.guest_data)
+      ) {
+        throw new Error(RESERVATION_GUESTLESS_NO_LINK_MESSAGE);
+      }
 
       // Verificar se já existe histórico para esta reserva
       const { data: existingHistory } = await (supabase as any)

@@ -1,5 +1,8 @@
 -- Conclui pré check-in web por token (hóspede anon/guestless; bypass RLS de forma controlada).
-CREATE OR REPLACE FUNCTION public.complete_web_checkin_by_token(p_token TEXT)
+CREATE OR REPLACE FUNCTION public.complete_web_checkin_by_token(
+  p_token TEXT,
+  p_without_guest_account BOOLEAN DEFAULT FALSE
+)
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -51,7 +54,12 @@ BEGIN
   SET
     status = 'completed',
     completed_at = COALESCE(v_wc.completed_at, NOW()),
-    updated_at = NOW()
+    updated_at = NOW(),
+    guest_data = CASE
+      WHEN p_without_guest_account THEN
+        COALESCE(guest_data, '{}'::jsonb) || jsonb_build_object('completed_without_guest_account', true)
+      ELSE guest_data
+    END
   WHERE id = v_wc.id
   RETURNING * INTO v_wc;
 
@@ -136,4 +144,4 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.complete_web_checkin_by_token(TEXT) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.complete_web_checkin_by_token(TEXT, BOOLEAN) TO anon, authenticated, service_role;

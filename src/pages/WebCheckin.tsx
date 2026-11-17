@@ -21,6 +21,11 @@ import {
   clearGuestlessCheckinSession,
   getGuestlessVerifiedContacts,
 } from "@/lib/guestlessCheckinSession";
+import {
+  readGuestlessCompletedFlag,
+  RESERVATION_GUESTLESS_NO_LINK_MESSAGE,
+  isReservationBlockedFromAccountLink,
+} from "@/lib/reservationGuestlessLink";
 import { supabase } from "@/integrations/supabase/client";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
@@ -89,6 +94,7 @@ export default function WebCheckin() {
   } | null>(null);
   const [isSearchingLocator, setIsSearchingLocator] = useState(false);
   const [showAllStepsMobile, setShowAllStepsMobile] = useState(false);
+  const [reservationGuestlessNoLink, setReservationGuestlessNoLink] = useState(false);
 
   // SEGURANÇA: Buscar informações iniciais pelo localizador APENAS se estiver autenticado
   // Isso previne que dados da reserva sejam expostos sem autenticação
@@ -237,6 +243,13 @@ export default function WebCheckin() {
 
     checkReservationOwnership();
   }, [webCheckinInfo?.reservation?.id, guestAccountId, isAuthenticated]);
+
+  useEffect(() => {
+    const wc = webCheckinInfo || webCheckin;
+    const guestlessDone =
+      wc?.status === "completed" && readGuestlessCompletedFlag(wc?.guest_data);
+    setReservationGuestlessNoLink(!!guestlessDone);
+  }, [webCheckinInfo?.status, webCheckinInfo?.guest_data, webCheckin?.status, webCheckin?.guest_data]);
 
   // VERIFICAÇÃO PRIORITÁRIA: Verificar se o check-in já está concluído ANTES de processar qualquer coisa
   // Isso garante que ao recarregar a página, reservas concluídas vão direto para a etapa de conclusão
@@ -445,8 +458,22 @@ export default function WebCheckin() {
       // Se tem localizador vindo do auth, usar e ir direto para verificação
       if (stepData.locator && stepData.locator.trim()) {
         setLocator(stepData.locator.trim());
-        // Vincular reserva à conta
-        if (linkReservationToAccount) {
+        void (async () => {
+          const blocked = await isReservationBlockedFromAccountLink(
+            supabase,
+            undefined,
+            stepData.locator.trim(),
+          );
+          if (blocked) {
+            setReservationGuestlessNoLink(true);
+            setCurrentStep(2);
+            await refetchWebCheckin();
+            return;
+          }
+          if (!linkReservationToAccount) {
+            setCurrentStep(2);
+            return;
+          }
           linkReservationToAccount.mutate(
             {
               accountId: stepData.accountId,
@@ -455,23 +482,15 @@ export default function WebCheckin() {
             {
               onSuccess: async () => {
                 await refetchWebCheckin();
-                // Aguardar um pouco e ir para etapa de verificação
-                setTimeout(() => {
-                  setCurrentStep(2); // Ir para etapa de verificação
-                }, 500);
+                setTimeout(() => setCurrentStep(2), 500);
               },
               onError: (error) => {
                 console.error("Erro ao vincular reserva:", error);
-                // Continuar mesmo se houver erro (pode já estar vinculada)
-                refetchWebCheckin().then(() => {
-                  setCurrentStep(2);
-                });
+                refetchWebCheckin().then(() => setCurrentStep(2));
               },
-            }
+            },
           );
-        } else {
-          setCurrentStep(2); // Ir direto para verificação se não precisar vincular
-        }
+        })();
         return;
       }
       
@@ -556,31 +575,38 @@ export default function WebCheckin() {
     // Atualizar URL com novo localizador (sem causar atualização de página)
     hasNavigatedRef.current = true;
     navigate(`/web-checkin/${locator.trim()}`, { replace: true });
-    
-    // Vincular reserva à conta do hóspede
-    if (guestAccountId && !guestlessMode) {
-      try {
-        await linkReservationToAccount.mutateAsync({
-          accountId: guestAccountId,
-          locator: locator.trim(),
-        });
-        // Resetar flag de reserva vinculada a outro usuário após vinculação bem-sucedida
-        setReservationLinkedToOtherUser(false);
-      } catch (error: any) {
-        console.error("Erro ao vincular reserva:", error);
-        // Se o erro for sobre reserva já vinculada, não continuar
-        if (error?.message?.includes("já está vinculada a outra conta")) {
-          setReservationLinkedToOtherUser(true);
-          setIsSearchingLocator(false);
-          return;
-        }
-        // Continuar mesmo se houver outro tipo de erro na vinculação
-      }
-    }
-    
-    // Refazer a busca uma única vez após limpar o cache
+
     try {
       await refetchWebCheckin();
+
+      const wcAfterFetch = queryClient.getQueryData(["web_checkin", locator.trim()]) as
+        | { status?: string; guest_data?: unknown }
+        | undefined;
+      const guestlessBlocked =
+        reservationGuestlessNoLink ||
+        (wcAfterFetch?.status === "completed" &&
+          readGuestlessCompletedFlag(wcAfterFetch?.guest_data)) ||
+        (await isReservationBlockedFromAccountLink(supabase, undefined, locator.trim()));
+
+      if (guestlessBlocked) {
+        setReservationGuestlessNoLink(true);
+      } else if (guestAccountId && !guestlessMode) {
+        try {
+          await linkReservationToAccount.mutateAsync({
+            accountId: guestAccountId,
+            locator: locator.trim(),
+          });
+          setReservationLinkedToOtherUser(false);
+        } catch (error: any) {
+          console.error("Erro ao vincular reserva:", error);
+          if (error?.message === RESERVATION_GUESTLESS_NO_LINK_MESSAGE) {
+            setReservationGuestlessNoLink(true);
+          } else if (error?.message?.includes("já está vinculada a outra conta")) {
+            setReservationLinkedToOtherUser(true);
+            return;
+          }
+        }
+      }
     } catch (error) {
       console.error("Erro ao buscar reserva:", error);
     } finally {
@@ -1861,6 +1887,7 @@ export default function WebCheckin() {
               onBack={handleBack}
               isFirstStep={currentStep === 0}
               isLastStep={currentStep === STEPS.length - 1}
+              guestlessMode={guestlessMode}
             />
           )}
         </Card>

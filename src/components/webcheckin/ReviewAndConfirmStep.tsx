@@ -19,6 +19,7 @@ interface ReviewAndConfirmStepProps {
   onBack: () => void;
   isFirstStep: boolean;
   isLastStep: boolean;
+  guestlessMode?: boolean;
 }
 
 export function ReviewAndConfirmStep({
@@ -28,6 +29,7 @@ export function ReviewAndConfirmStep({
   onNext,
   onBack,
   isFirstStep,
+  guestlessMode = false,
 }: ReviewAndConfirmStepProps) {
   const { t, i18n } = useTranslation();
   const { acceptTerms, completeWebCheckin } = useWebCheckin();
@@ -64,8 +66,8 @@ export function ReviewAndConfirmStep({
       // Aceitar termos primeiro
       await acceptTerms.mutateAsync(token);
 
-      // Vincular reserva à conta do hóspede (se ainda não estiver vinculada)
-      if (guestAccountId && webCheckin.locator) {
+      // Vincular reserva à conta do hóspede (check-in com login/cadastro — não no fluxo sem cadastro)
+      if (guestAccountId && webCheckin.locator && !guestlessMode) {
         try {
           await linkReservationToAccount.mutateAsync({
             accountId: guestAccountId,
@@ -79,7 +81,11 @@ export function ReviewAndConfirmStep({
       }
 
       // Pré check-in web: FNRH na recepção, salvo auto_submit_on_web_checkin no estabelecimento.
-      await completeWebCheckin.mutateAsync({ token, skipFnrhInvoke: false });
+      await completeWebCheckin.mutateAsync({
+        token,
+        skipFnrhInvoke: false,
+        withoutGuestAccount: guestlessMode,
+      });
 
       // Invalidar queries para garantir atualização
       queryClient.invalidateQueries({ queryKey: ["web_checkin"] });

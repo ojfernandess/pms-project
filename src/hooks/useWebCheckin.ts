@@ -968,14 +968,19 @@ export const useWebCheckin = () => {
   // Completar web check-in
   const completeWebCheckin = useMutation({
     mutationFn: async (
-      arg: string | { token: string; skipFnrhInvoke?: boolean },
+      arg:
+        | string
+        | { token: string; skipFnrhInvoke?: boolean; withoutGuestAccount?: boolean },
     ) => {
       const token = typeof arg === "string" ? arg : arg.token;
       const skipFnrhInvoke =
         typeof arg === "object" && arg.skipFnrhInvoke === true;
+      const withoutGuestAccount =
+        typeof arg === "object" && arg.withoutGuestAccount === true;
 
       const { data: raw, error: rpcError } = await supabase.rpc("complete_web_checkin_by_token", {
         p_token: token,
+        p_without_guest_account: withoutGuestAccount,
       });
 
       if (rpcError) throw rpcError;
