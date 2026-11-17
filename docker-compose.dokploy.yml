@@ -39,6 +39,9 @@ services:
       dockerfile: Dockerfile
     image: pms-staysos-api
     restart: unless-stopped
+    # Dokploy: .env do projeto → env_file repassa todas as vars ao container backend
+    env_file:
+      - .env
     expose:
       - "3000"
     environment:

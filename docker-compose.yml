@@ -35,6 +35,8 @@ services:
   backend:
     build:
       context: ./backend
+    env_file:
+      - .env
     expose:
       - "3000"
     healthcheck:

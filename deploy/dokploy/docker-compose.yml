@@ -41,6 +41,8 @@ services:
       context: ../../backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    env_file:
+      - .env
     expose:
       - "3000"
     environment:

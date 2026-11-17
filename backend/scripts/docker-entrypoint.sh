@@ -17,6 +17,13 @@ if [ "${PMS_RUN_MODE:-api}" = "worker" ]; then
   exec node dist/worker.js
 fi
 
+# Diagnóstico storage (sem segredos) — se vazio, o compose não injetou o .env no backend
+if [ -n "${STORAGE_PROVIDER:-}" ]; then
+  echo "Storage env: STORAGE_PROVIDER=${STORAGE_PROVIDER} MINIO_ENDPOINT=${MINIO_ENDPOINT:-}(unset) MINIO_BUCKET=${MINIO_BUCKET:-}(unset)"
+else
+  echo "WARN: STORAGE_PROVIDER ausente no container — no Dokploy, defina vars no Environment do Compose PMS e use docker-compose.dokploy.yml com env_file/.env (ver deploy/dokploy/STORAGE-MINIO-ENV.md)"
+fi
+
 if [ "${PRISMA_MIGRATE_ON_START:-false}" = "true" ]; then
   echo "Running prisma migrate deploy..."
   npx prisma migrate deploy
@@ -64,6 +71,11 @@ fi
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/cleaning_fee_configuration.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/cleaning_fee_configuration.sql \
     || echo "WARN: cleaning_fee_configuration.sql falhou" >&2
+fi
+
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/site_settings_storage_config.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/site_settings_storage_config.sql \
+    || echo "WARN: site_settings_storage_config.sql falhou" >&2
 fi
 
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/rpc/rate_calendar_unique_constraint.sql ]; then

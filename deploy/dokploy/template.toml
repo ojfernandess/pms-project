@@ -36,6 +36,16 @@ env = [
   "VITE_SUPABASE_PUBLISHABLE_KEY=",
   "SUPABASE_URL=",
   "SUPABASE_ANON_KEY=",
+  # MinIO — preencha no Environment do Dokploy (serviço Compose PMS, não o stack MinIO)
+  "STORAGE_PROVIDER=minio",
+  "STORAGE_DIR=/app/storage",
+  "MINIO_ENDPOINT=",
+  "MINIO_PORT=443",
+  "MINIO_USE_SSL=true",
+  "MINIO_ACCESS_KEY=",
+  "MINIO_SECRET_KEY=",
+  "MINIO_BUCKET=stayospms",
+  "MINIO_REGION=us-east-1",
 ]
 
 [[config.domains]]

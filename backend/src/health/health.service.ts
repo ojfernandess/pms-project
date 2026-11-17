@@ -1,7 +1,9 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchemaReadinessService } from "../prisma/schema-readiness.service";
 import { RedisService } from "../redis/redis.service";
+import { storageEnvDiagnostics } from "../data/storage-env";
 
 export interface HealthReport {
   status: "ok" | "degraded";
@@ -9,6 +11,7 @@ export interface HealthReport {
   redis: "ok";
   timestamp: string;
   schema?: { ready: boolean; publicTables: number; hint?: string };
+  storageEnv?: ReturnType<typeof storageEnvDiagnostics>;
 }
 
 @Injectable()
@@ -17,6 +20,7 @@ export class HealthService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly schema: SchemaReadinessService,
+    private readonly config: ConfigService,
   ) {}
 
   async check(deep = false): Promise<HealthReport> {
@@ -47,6 +51,10 @@ export class HealthService {
           : {}),
       };
       if (!this.schema.schemaReady) report.status = "degraded";
+    }
+
+    if (deep) {
+      report.storageEnv = storageEnvDiagnostics(this.config);
     }
 
     return report;

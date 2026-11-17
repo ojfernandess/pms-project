@@ -72,4 +72,6 @@ O backend sobe, mas o **schema PMS** (centenas de tabelas `public.*`) não vem d
 - Diagnostico: `GET https://myapi.../health?deep=1` → `schema.ready: false`.
 - Opcional: `PMS_REQUIRE_PUBLIC_SCHEMA=true` para falhar o container sem schema (apos import).
 
+**MinIO / STORAGE:** variáveis no Environment do Compose PMS (não só no stack MinIO). Ver [STORAGE-MINIO-ENV.md](./STORAGE-MINIO-ENV.md).
+
 Documentação geral: [../README.md](../README.md). [../../docs/migration/easypanel-postgres-cutover.md](../../docs/migration/easypanel-postgres-cutover.md).
