@@ -44,15 +44,20 @@ Link para o hóspede: `https://checkin.seudominio.com/RSV154684` (configurado no
 
 ---
 
-## Hospedagem (obrigatório)
+## Hospedagem — Dokploy (obrigatório)
 
-No painel onde o **frontend do PMS** está publicado:
+O compose inclui dois serviços de SPA:
 
-1. Abra o serviço/app do **frontend** (o mesmo de `pms.stayos.com.br`).
-2. **Domínios** → adicione `checkin.seudominio.com` (HTTPS).
-3. Redeploy ou recarregue o proxy se necessário.
+| Serviço | Domínio típico | Quem acessa |
+|---------|----------------|-------------|
+| `frontend` | `pms.stayos.com.br` | Equipe / Super Admin |
+| `webcheckin` | `checkin.stayos.com.br` | Hóspedes |
 
-Sem esse passo, A e CNAME chegam ao servidor, mas o proxy responde **404** antes do nginx da SPA.
+1. **Domains** → Create Domain → host `checkin...` → serviço **`webcheckin`** → porta **80**.
+2. Defina `WEB_CHECKIN_PUBLIC_HOST` e `WEB_CHECKIN_TRAEFIK_RULE` (veja checklist no Super Admin).
+3. Redeploy.
+
+Guia detalhada: [deploy/dokploy/CHECKIN_DOMAIN.md](../deploy/dokploy/CHECKIN_DOMAIN.md).
 
 ---
 

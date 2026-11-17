@@ -1,80 +1,77 @@
-# checkin.seudominio.com — 404 page not found (Dokploy + Cloudflare)
+# checkin.seudominio.com — 404 page not found (solução robusta)
 
-## Diagnóstico
+## Por que dá 404?
 
-Se `https://pms.stayos.com.br` abre o PMS (nginx) e `https://checkin.stayos.com.br` devolve só **`404 page not found`** (texto curto, `text/plain`), o DNS está a chegar ao servidor, mas o **Traefik do Dokploy não tem rota** para o header `Host: checkin.stayos.com.br`.
+O DNS (CNAME/A) chega ao servidor, mas o **Traefik do Dokploy** só encaminha hosts que estão **cadastrados**.  
+`404 page not found` (texto curto, `text/plain`) = **sem rota** para `Host: checkin.stayos.com.br` — não é erro do React.
 
-CNAME `checkin` → `pms.stayos.com.br` no Cloudflare está correto. **Não** use `/web-checkin` no DNS.
+O PMS (`pms.stayos.com.br`) usa o serviço **`frontend`**.  
+O Web Check-in dedicado usa o serviço **`webcheckin`** (mesma imagem, rota Traefik própria).
 
 ---
 
-## Solução A — Domains no Dokploy (recomendado)
+## Solução recomendada (Dokploy UI)
 
-1. Abra o projeto **Docker Compose** do PMS no Dokploy.
-2. Aba **Domains** → **Create Domain**.
-3. Preencha:
+1. **DNS (Cloudflare):** CNAME `checkin` → `pms.stayos.com.br` (só hostname, sem `/web-checkin`).
+2. Dokploy → projeto PMS → **Domains** → **Create Domain**
    - **Host:** `checkin.stayos.com.br`
-   - **Path:** `/`
-   - **Container port:** `80` (serviço **frontend**, nginx — **não** use 3000 do backend)
-   - **HTTPS:** ON
-   - **Certificate:** Let's Encrypt (ou None se SSL só no Cloudflare)
-4. Salve e faça **Redeploy** do compose.
-5. Aguarde ~1 minuto e teste `https://checkin.stayos.com.br`.
-
-Documentação Dokploy: [Domains](https://docs.dokploy.com/docs/core/domains/cloudflare), [Others](https://docs.dokploy.com/docs/core/domains/others).
-
----
-
-## Solução B — Variável no compose (Git)
-
-No **Environment** do compose no Dokploy:
+   - **Service:** `webcheckin` ← **não** use `frontend`
+   - **Container port:** `80`
+   - **HTTPS:** ON (Let's Encrypt ou None se SSL só no Cloudflare)
+3. **Redeploy** o compose (branch com serviço `webcheckin` no `docker-compose.dokploy.yml`).
+4. Super Admin:
+   - **URL Base do PMS:** `https://pms.stayos.com.br`
+   - **URL pública Web Check-in:** `https://checkin.stayos.com.br`
+5. Environment (frontend **e** webcheckin):
 
 ```env
 WEB_CHECKIN_PUBLIC_HOST=checkin.stayos.com.br
-```
-
-(O valor é só o hostname, sem `https://`.)
-
-O `docker-compose.dokploy.yml` na branch `PMS-Backend` inclui labels Traefik para esse host. Depois: **Redeploy**.
-
-Também no serviço **frontend** (runtime):
-
-```env
-WEB_CHECKIN_PUBLIC_HOST=checkin.stayos.com.br
-```
-
-No **backend** (se a API for outro domínio, ex. `myapi.*`):
-
-```env
+WEB_CHECKIN_TRAEFIK_RULE=Host(`checkin.stayos.com.br`)
 WEB_CHECKIN_PUBLIC_URL=https://checkin.stayos.com.br
 ```
 
----
+Gere a regra com vários domínios:
 
-## Cloudflare
-
-| Tipo | Nome | Destino |
-|------|------|---------|
-| CNAME | checkin | `pms.stayos.com.br` |
-
-- **SSL/TLS:** Full (strict) se a origem tiver certificado para `checkin` (após Solução A ou B).
-- **Error 1016:** destino CNAME inválido (nunca use barra no nome).
+```bash
+node deploy/dokploy/scripts/web-checkin-traefik-rule.mjs https://checkin.stayos.com.br https://checkin2.outro.com
+```
 
 ---
 
-## Super Admin
+## Solução B — só variáveis (labels Traefik)
 
-**URL pública do Web Check-in:** `https://checkin.stayos.com.br`
-
-Link exemplo: `https://checkin.stayos.com.br/RSV154684`
+Se não usar a aba Domains, defina `WEB_CHECKIN_TRAEFIK_RULE` e `WEB_CHECKIN_PUBLIC_HOST` no Environment e redeploy.  
+Os labels ficam no serviço **`webcheckin`** no compose.
 
 ---
 
-## Teste rápido
+## Solução C — Cloudflare (sem segundo domínio no Dokploy)
+
+Regra de **Origin** / Transform: para hostname `checkin.stayos.com.br`, enviar à origem com header **Host: pms.stayos.com.br**.  
+O browser continua em `checkin.*`; configure `WEB_CHECKIN_PUBLIC_HOST` no frontend para as rotas SPA.
+
+---
+
+## Teste
 
 ```bash
 curl -k -sI https://checkin.stayos.com.br/
 ```
 
-- **200** + `Server: nginx` → OK  
-- **404** + `text/plain` → falta rota Traefik (Solução A ou B)
+| Resultado | Significado |
+|-----------|-------------|
+| `200` + `Server: nginx` | OK |
+| `404` + `text/plain` | Falta domínio no Dokploy (serviço **webcheckin**) ou env/rule |
+
+---
+
+## Vários domínios de check-in
+
+Use:
+
+```env
+WEB_CHECKIN_TRAEFIK_RULE=Host(`checkin.hotel-a.com`) || Host(`checkin.hotel-b.com`)
+WEB_CHECKIN_PUBLIC_HOST=checkin.hotel-a.com
+```
+
+Cada host precisa de entrada DNS + certificado (ou Domains no Dokploy por host).

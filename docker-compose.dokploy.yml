@@ -55,6 +55,7 @@ services:
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
       SITE_URL: ${SITE_URL:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      WEB_CHECKIN_PUBLIC_URL: ${WEB_CHECKIN_PUBLIC_URL:-}
       PASSWORD_RESET_DEBUG: ${PASSWORD_RESET_DEBUG:-false}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
@@ -113,27 +114,51 @@ services:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
         VITE_APP_URL: ${VITE_APP_URL:-https://localhost}
+    image: pms-staysos-frontend
     restart: unless-stopped
     environment:
       BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:3000}
-      # Hostname sem https:// — runtime-config + rotas SPA no domínio checkin
+    expose:
+      - "80"
+    networks:
+      - default
+      - dokploy-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Mesma SPA do PMS, rota Traefik separada — domínio só para hóspedes (check-in).
+  # Dokploy: Domains → host checkin.* → serviço webcheckin → porta 80
+  # Ou defina WEB_CHECKIN_PUBLIC_HOST + WEB_CHECKIN_TRAEFIK_RULE (veja Super Admin / deploy/dokploy/CHECKIN_DOMAIN.md)
+  webcheckin:
+    image: pms-staysos-frontend
+    restart: unless-stopped
+    environment:
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:3000}
       WEB_CHECKIN_PUBLIC_HOST: ${WEB_CHECKIN_PUBLIC_HOST:-}
     expose:
       - "80"
     networks:
       - default
       - dokploy-network
-    # Traefik (Dokploy): rota extra para checkin.*. Defina WEB_CHECKIN_PUBLIC_HOST=checkin.seudominio.com
-    # Alternativa oficial: painel Dokploy → Domains → Create Domain (frontend, porta 80).
     labels:
       - traefik.enable=true
       - traefik.docker.network=dokploy-network
-      - traefik.http.routers.pms-webcheckin.rule=Host(`${WEB_CHECKIN_PUBLIC_HOST:-web-checkin-host-disabled.invalid}`)
+      - "traefik.http.routers.pms-webcheckin.rule=${WEB_CHECKIN_TRAEFIK_RULE:-Host(`web-checkin-route-disabled.invalid`)}"
       - traefik.http.routers.pms-webcheckin.entrypoints=web,websecure
+      - traefik.http.routers.pms-webcheckin.tls=true
       - traefik.http.routers.pms-webcheckin.tls.certresolver=letsencrypt
-      - traefik.http.routers.pms-webcheckin.service=pms-webcheckin
-      - traefik.http.services.pms-webcheckin.loadbalancer.server.port=80
+      - traefik.http.routers.pms-webcheckin.service=pms-webcheckin-svc
+      - traefik.http.services.pms-webcheckin-svc.loadbalancer.server.port=80
     depends_on:
+      frontend:
+        condition: service_healthy
       backend:
         condition: service_healthy
     healthcheck:

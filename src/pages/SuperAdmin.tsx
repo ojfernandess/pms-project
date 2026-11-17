@@ -70,6 +70,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { invalidateLogConfigCache } from "@/lib/logger";
 import { WebCheckinDomainHelp } from "@/components/site-settings/WebCheckinDomainHelp";
+import { WebCheckinDeployChecklist } from "@/components/site-settings/WebCheckinDeployChecklist";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -524,19 +525,10 @@ const SiteSettingsManager = () => {
             <p className="text-xs text-muted-foreground mt-1">
               Exemplo de link enviado ao hóspede: https://checkin.seudominio.com/RSV154684
             </p>
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
-              <p className="text-sm text-blue-900">
-                <strong>DNS:</strong> CNAME <code className="text-xs">checkin</code> →{" "}
-                <code className="text-xs">pms.stayos.com.br</code> (hostname apenas,{" "}
-                <strong>sem</strong> <code className="text-xs">/web-checkin</code>). Ou registro A com o{" "}
-                <strong>mesmo IP</strong> do PMS.
-              </p>
-              <p className="text-sm text-blue-900">
-                <strong>Hospedagem:</strong> cadastre <code className="text-xs">checkin.seudominio.com</code> como
-                domínio adicional no <strong>mesmo serviço frontend</strong> do PMS — senão aparece{" "}
-                <strong>404 page not found</strong>. Guia completo no ícone (?).
-              </p>
-            </div>
+            <WebCheckinDeployChecklist
+              webCheckinBaseUrl={formData.web_checkin_public_base_url}
+              pmsBaseUrl={formData.pms_base_url}
+            />
           </div>
         </div>
 
