@@ -69,6 +69,7 @@ import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { invalidateLogConfigCache } from "@/lib/logger";
+import { WebCheckinDomainHelp } from "@/components/site-settings/WebCheckinDomainHelp";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -501,13 +502,15 @@ const SiteSettingsManager = () => {
           <div className="flex items-center gap-2">
             <Globe className="h-4 w-4" />
             <Label className="text-base font-semibold">URL pública do Web Check-in</Label>
+            <WebCheckinDomainHelp />
           </div>
           <p className="text-sm text-muted-foreground">
-            Domínio e caminho usados nos links enviados aos hóspedes (e-mail, pagamento, etc.). Não inclua o localizador no final.
+            Domínio usado nos links enviados aos hóspedes (e-mail, pagamento, etc.). Informe só a URL base —{" "}
+            <strong>não</strong> inclua o localizador (código da reserva).
             Se vazio, o sistema usa <code className="text-xs">URL Base do PMS</code> + <code className="text-xs">/web-checkin</code>.
           </p>
           <div className="space-y-2">
-            <Label htmlFor="web_checkin_public_base_url">Base do Web Check-in</Label>
+            <Label htmlFor="web_checkin_public_base_url">Domínio do Web Check-in</Label>
             <Input
               id="web_checkin_public_base_url"
               type="url"
@@ -515,15 +518,16 @@ const SiteSettingsManager = () => {
               onChange={(e) =>
                 setFormData({ ...formData, web_checkin_public_base_url: e.target.value })
               }
-              placeholder="https://checkin.seudominio.com/Localizador"
+              placeholder="https://checkin.seudominio.com"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              Exemplo de link gerado: https://checkin.seudominio.com/Localizador/RSV123456
+              Exemplo de link enviado ao hóspede: https://checkin.seudominio.com/RSV154684
             </p>
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-              <p className="text-sm text-amber-900">
-                <strong>DNS / Dokploy:</strong> o domínio configurado (ex. checkin.seudominio.com) deve apontar para o
-                <strong> mesmo frontend</strong> do PMS. No Dokploy, acrescente o domínio extra no serviço do frontend com HTTPS.
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <p className="text-sm text-blue-900">
+                <strong>DNS:</strong> o subdomínio (ex. <code className="text-xs">checkin.seudominio.com</code>) deve
+                apontar para o mesmo frontend do PMS e estar com HTTPS ativo. Detalhes por provedor (Cloudflare,
+                Registro.br, etc.) no ícone de ajuda (?) ao lado do título.
               </p>
             </div>
           </div>

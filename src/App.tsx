@@ -17,7 +17,7 @@ import PendingReservations from "./pages/PendingReservations";
 import ActivityLogs from "./pages/ActivityLogs";
 import ReservationDetails from "./pages/ReservationDetails";
 import WebCheckin from "./pages/WebCheckin";
-import { getWebCheckinRoutePrefix } from "./lib/webCheckinPublicUrl";
+import { getWebCheckinRoutePrefix, isWebCheckinPublicHostname } from "./lib/webCheckinPublicUrl";
 import { useSiteSettings } from "./hooks/useSiteSettings";
 import GuestDashboard from "./pages/GuestDashboard";
 import GuestResetPassword from "./pages/GuestResetPassword";
@@ -128,6 +128,7 @@ const AppContent = () => {
 const AppRoutesWithMeta = () => {
   useSiteMeta();
   const { settings } = useSiteSettings();
+  const onWebCheckinHost = isWebCheckinPublicHostname(settings);
   const webCheckinPrefix = getWebCheckinRoutePrefix(settings);
   const extraWebCheckinPath =
     webCheckinPrefix && webCheckinPrefix !== "web-checkin" ? webCheckinPrefix : null;
@@ -140,7 +141,10 @@ const AppRoutesWithMeta = () => {
             <Route path="/auth/reset-password" element={<Navigate to="/login/reset-password" replace />} />
             <Route path="/logout" element={<Navigate to="/login" replace />} />
             {/* Rota raiz - verificar se é domínio personalizado do booking engine (deve ser processada primeiro) */}
-            <Route path="/" element={<CustomDomainDetector />} />
+            <Route path="/" element={onWebCheckinHost ? <WebCheckin /> : <CustomDomainDetector />} />
+            {onWebCheckinHost ? (
+              <Route path="/:locator" element={<WebCheckin />} />
+            ) : null}
             <Route path="/admin-dashboard" element={<SuperAdminRoute><AppLayout><SuperAdmin /></AppLayout></SuperAdminRoute>} />
             <Route path="/super-admin" element={<SuperAdminRoute><AppLayout><SuperAdmin /></AppLayout></SuperAdminRoute>} />
             <Route path="/user-dashboard" element={<ProtectedRoute><AppLayout><UserDashboard /></AppLayout></ProtectedRoute>} />

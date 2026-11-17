@@ -1,5 +1,4 @@
--- URL pública do Web Check-in (domínio e caminho opcionais), sem o localizador no final.
--- Ex.: https://checkin.seudominio.com/Localizador  → link: .../Localizador/RSV123456
+-- URL pública do Web Check-in (domínio, sem localizador). Ex.: https://checkin.seudominio.com → .../RSV154684
 ALTER TABLE public.site_settings
   ADD COLUMN IF NOT EXISTS web_checkin_public_base_url TEXT;
 

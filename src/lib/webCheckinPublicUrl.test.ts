@@ -6,13 +6,21 @@ import {
 } from "./webCheckinPublicUrl";
 
 describe("webCheckinPublicUrl", () => {
-  it("usa base customizada com path alternativo", () => {
-    const settings = { web_checkin_public_base_url: "https://checkin.stayos.com.br/Localizador" };
-    expect(resolveWebCheckinPublicBase(settings)).toBe("https://checkin.stayos.com.br/Localizador");
-    expect(buildWebCheckinLocatorUrl("RSV123", settings)).toBe(
-      "https://checkin.stayos.com.br/Localizador/RSV123",
+  it("usa domínio dedicado sem subcaminho", () => {
+    const settings = { web_checkin_public_base_url: "https://checkin.stayos.com.br" };
+    expect(resolveWebCheckinPublicBase(settings)).toBe("https://checkin.stayos.com.br");
+    expect(buildWebCheckinLocatorUrl("RSV154684", settings)).toBe(
+      "https://checkin.stayos.com.br/RSV154684",
     );
-    expect(getWebCheckinRoutePrefix(settings)).toBe("Localizador");
+    expect(getWebCheckinRoutePrefix(settings)).toBe("");
+  });
+
+  it("suporta subcaminho opcional no mesmo host", () => {
+    const settings = { web_checkin_public_base_url: "https://pms.stayos.com.br/entrada-checkin" };
+    expect(buildWebCheckinLocatorUrl("RSV123", settings)).toBe(
+      "https://pms.stayos.com.br/entrada-checkin/RSV123",
+    );
+    expect(getWebCheckinRoutePrefix(settings)).toBe("entrada-checkin");
   });
 
   it("fallback para pms_base_url/web-checkin", () => {
