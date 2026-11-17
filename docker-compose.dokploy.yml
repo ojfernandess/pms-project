@@ -61,6 +61,15 @@ services:
       PASSWORD_RESET_DEBUG: ${PASSWORD_RESET_DEBUG:-false}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      STORAGE_DIR: ${STORAGE_DIR:-/app/storage}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-}
+      MINIO_PORT: ${MINIO_PORT:-}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
+      MINIO_BUCKET: ${MINIO_BUCKET:-}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
     volumes:
       - pms_storage:/app/storage
     depends_on:
