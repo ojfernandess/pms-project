@@ -157,6 +157,12 @@ const INCREMENTAL_PATCHES = [
       },
     ],
   },
+  {
+    sql: "guest_account_rpcs.sql",
+    checks: [
+      { name: "verify_guest_password", args: "p_account_id uuid, p_password text" },
+    ],
+  },
 ];
 
 async function applyIncrementalPatches(client, url, rpcDir) {
@@ -174,7 +180,7 @@ async function applyIncrementalPatches(client, url, rpcDir) {
       console.error(`Patch em falta: ${filePath}`);
       continue;
     }
-    console.log(`=== Patch incremental: ${patch.sql} (RPC de credenciais API ausente) ===`);
+    console.log(`=== Patch incremental: ${patch.sql} (RPC obrigatória ausente) ===`);
     const ok = applySqlFileWithPsql(url, filePath, { stopOnError: true });
     if (!ok) {
       console.error(`Patch ${patch.sql} falhou — veja erros psql acima.`);
