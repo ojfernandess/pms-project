@@ -53,6 +53,10 @@ function shouldUseCheckinSameOriginApi(pmsApiOrigin: string): boolean {
   }
 }
 
+function normalizeHost(hostname: string): string {
+  return hostname.toLowerCase().replace(/^www\./, "");
+}
+
 /** Remove www. quando o painel usa o apex (ex.: pms.stayos.com.br sem registro www). */
 export function canonicalizePmsApiOrigin(url: string): string {
   const trimmed = url.replace(/\/$/, "");
@@ -67,25 +71,44 @@ export function canonicalizePmsApiOrigin(url: string): string {
   }
 }
 
+/** Evita mixed content (HTTPS + http:// na config) e usa a origem real do browser no mesmo host. */
+function alignApiOriginWithPage(apiOrigin: string): string {
+  if (typeof window === "undefined") return apiOrigin;
+  try {
+    const api = new URL(apiOrigin.includes("://") ? apiOrigin : `https://${apiOrigin}`);
+    const page = window.location;
+    if (normalizeHost(api.hostname) === normalizeHost(page.hostname)) {
+      return page.origin.replace(/\/$/, "");
+    }
+    if (page.protocol === "https:" && api.protocol === "http:") {
+      api.protocol = "https:";
+      return api.origin.replace(/\/$/, "");
+    }
+  } catch {
+    /* ignore */
+  }
+  return apiOrigin.replace(/\/$/, "");
+}
+
 export function resolvePmsApiUrl(): string {
   const runtime = window.__RUNTIME_CONFIG__?.pmsApiUrl?.trim();
   const built = import.meta.env.VITE_PMS_API_URL;
   const raw = runtime || built;
   if (!raw) throw new Error("VITE_PMS_API_URL não está configurada");
-  const apiOrigin = canonicalizePmsApiOrigin(String(raw));
+  let apiOrigin = canonicalizePmsApiOrigin(String(raw));
 
   if (typeof window !== "undefined" && shouldUseCheckinSameOriginApi(apiOrigin)) {
     return window.location.origin.replace(/\/$/, "");
   }
 
+  apiOrigin = alignApiOriginWithPage(apiOrigin);
   return apiOrigin;
 }
 
 export function resolveAppUrl(): string | null {
   const runtime = window.__RUNTIME_CONFIG__?.appUrl?.trim();
-  if (runtime) return runtime.replace(/\/$/, "");
-
   const built = import.meta.env.VITE_APP_URL;
-  if (!built) return null;
-  return String(built).replace(/\/$/, "");
+  const raw = runtime || built;
+  if (!raw) return null;
+  return alignApiOriginWithPage(canonicalizePmsApiOrigin(String(raw)));
 }

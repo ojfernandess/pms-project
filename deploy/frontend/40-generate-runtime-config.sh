@@ -22,6 +22,24 @@ if [ -z "$WEB_CHECKIN_HOST" ] && [ -n "$WEB_CHECKIN_URL" ]; then
   WEB_CHECKIN_HOST=$(host_from_url "$WEB_CHECKIN_URL")
 fi
 
+# Produção (Traefik/HTTPS): evita pmsApiUrl http:// no runtime-config
+force_https_url() {
+  url="$1"
+  if [ -z "$url" ]; then
+    printf '%s' "$url"
+    return
+  fi
+  case "$url" in
+    http://*) printf 'https://%s' "${url#http://}" ;;
+    https://*) printf '%s' "$url" ;;
+    *) printf 'https://%s' "$url" ;;
+  esac
+}
+
+API_URL=$(force_https_url "$API_URL")
+APP_URL=$(force_https_url "$APP_URL")
+WEB_CHECKIN_URL=$(force_https_url "$WEB_CHECKIN_URL")
+
 escape_js() {
   printf '%s' "$1" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g"
 }
