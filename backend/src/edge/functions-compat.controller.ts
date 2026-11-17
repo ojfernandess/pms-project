@@ -255,6 +255,11 @@ export class FunctionsCompatController {
     await this.reply(res, () => this.fnrh.lifecycle(authorization, body || {}));
   }
 
+  @Post("fnrh-test-connection")
+  async fnrhTestConnection(@Headers("authorization") authorization: string | undefined, @Body() body: Record<string, unknown>, @Res() res: Response) {
+    await this.reply(res, () => this.fnrh.testConnection(authorization, body || {}));
+  }
+
   @Post("stripe-webhook")
   async stripeHook(@Req() req: Request & { rawBody?: Buffer }, @Headers("stripe-signature") signature: string | undefined, @Res() res: Response) {
     const raw = req.rawBody?.toString("utf8") || JSON.stringify(req.body ?? {});

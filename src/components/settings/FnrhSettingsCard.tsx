@@ -24,7 +24,9 @@ import { useFnrhSettings } from "@/hooks/useFnrhSettings";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { FNRH_DEFAULTS_STAFF, FNRH_SITUACOES_HOSPEDE } from "@/lib/fnrh/domainOptions";
-import { Loader2, Shield, Save } from "lucide-react";
+import { invokePmsFunction } from "@/lib/pmsApi";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Loader2, Shield, Save, PlugZap, CheckCircle2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 type Props = {
@@ -35,6 +37,27 @@ type CategoryRow = {
   id: string;
   name: string;
   building_id: string | null;
+};
+
+type FnrhTestConnectionResult = {
+  success?: boolean;
+  phase?: string;
+  error?: string;
+  message?: string;
+  http_status?: number | null;
+  mensagem?: string | null;
+  mensagem_interna?: string | null;
+  ip_locked?: boolean;
+  hints?: string[];
+  environment?: string;
+  environment_label?: string;
+  base_url?: string;
+  portal_url?: string;
+  request_method?: string;
+  request_url?: string;
+  api_username_masked?: string;
+  cpf_solicitante_masked?: string;
+  dominio_sample_count?: number;
 };
 
 export function FnrhSettingsCard({ establishmentId }: Props) {
@@ -52,6 +75,8 @@ export function FnrhSettingsCard({ establishmentId }: Props) {
   const [autoManual, setAutoManual] = useState(true);
   const [categoryScopeAll, setCategoryScopeAll] = useState(true);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [testLoading, setTestLoading] = useState(false);
+  const [testResult, setTestResult] = useState<FnrhTestConnectionResult | null>(null);
 
   useEffect(() => {
     if (!row) return;
@@ -108,6 +133,57 @@ export function FnrhSettingsCard({ establishmentId }: Props) {
     setSelectedCategoryIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
+  };
+
+  const handleTestConnection = async () => {
+    if (!establishmentId) return;
+    if (!apiUsername.trim()) {
+      toast.error("Informe o usuário da API antes de testar.");
+      return;
+    }
+    if (!apiPassword.trim() && !row?.password_configured) {
+      toast.error("Informe a senha da API (ou salve uma senha) antes de testar.");
+      return;
+    }
+    setTestLoading(true);
+    setTestResult(null);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const access = sess?.session?.access_token;
+      if (!access) {
+        toast.error("Sessão expirada. Faça login novamente.");
+        return;
+      }
+      const { data, error } = await invokePmsFunction<FnrhTestConnectionResult>("fnrh-test-connection", {
+        body: {
+          establishment_id: establishmentId,
+          environment,
+          base_url_override: baseUrlOverride,
+          api_username: apiUsername,
+          api_password: apiPassword.trim() || undefined,
+          cpf_solicitante: cpfSolicitante.replace(/\D/g, ""),
+        },
+        headers: { Authorization: `Bearer ${access}` },
+      });
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      const payload = data ?? {};
+      setTestResult(payload);
+      if (payload.success) {
+        toast.success(payload.message || "Conexão FNRH OK.");
+      } else if (payload.ip_locked) {
+        toast.error("IP bloqueado na FNRH por tentativas falhas. Aguarde antes de testar de novo.");
+      } else {
+        toast.error(payload.error || "Falha no teste de conexão FNRH.");
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Erro ao testar conexão";
+      toast.error(msg);
+    } finally {
+      setTestLoading(false);
+    }
   };
 
   const handleSave = async () => {
@@ -372,14 +448,120 @@ export function FnrhSettingsCard({ establishmentId }: Props) {
               </div>
             </div>
 
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Save className="h-4 w-4 mr-2" />
-              )}
-              Salvar configuração FNRH
-            </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={handleSave} disabled={isSaving}>
+                {isSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                Salvar configuração FNRH
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleTestConnection}
+                disabled={testLoading || isSaving}
+                title="Chama GET /dominios/fnrh/meios_transporte (não registra hospedagem)"
+              >
+                {testLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <PlugZap className="h-4 w-4 mr-2" />
+                )}
+                Testar conexão FNRH
+              </Button>
+            </div>
+
+            {testResult ? (
+              <Alert variant={testResult.success ? "default" : "destructive"} className={testResult.success ? "border-emerald-500/40 bg-emerald-50/50 dark:bg-emerald-950/20" : undefined}>
+                {testResult.success ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4" />
+                )}
+                <AlertTitle>
+                  {testResult.success ? "Conexão autenticada" : testResult.ip_locked ? "IP bloqueado na FNRH" : "Falha na conexão"}
+                </AlertTitle>
+                <AlertDescription className="space-y-2 text-sm">
+                  <p>{testResult.success ? testResult.message : testResult.error}</p>
+                  <ul className="list-none space-y-1 text-xs text-muted-foreground">
+                    {testResult.environment_label ? (
+                      <li>
+                        <span className="font-medium text-foreground">Ambiente:</span> {testResult.environment_label}
+                      </li>
+                    ) : null}
+                    {testResult.base_url ? (
+                      <li>
+                        <span className="font-medium text-foreground">URL base:</span>{" "}
+                        <code className="text-[11px] break-all">{testResult.base_url}</code>
+                      </li>
+                    ) : null}
+                    {testResult.request_url ? (
+                      <li>
+                        <span className="font-medium text-foreground">Requisição de teste:</span>{" "}
+                        <code className="text-[11px] break-all">
+                          {testResult.request_method ?? "GET"} {testResult.request_url}
+                        </code>
+                      </li>
+                    ) : null}
+                    {testResult.http_status != null ? (
+                      <li>
+                        <span className="font-medium text-foreground">HTTP:</span> {testResult.http_status}
+                      </li>
+                    ) : null}
+                    {testResult.mensagem ? (
+                      <li>
+                        <span className="font-medium text-foreground">Mensagem FNRH:</span> {testResult.mensagem}
+                      </li>
+                    ) : null}
+                    {testResult.mensagem_interna ? (
+                      <li>
+                        <span className="font-medium text-foreground">Mensagem interna:</span> {testResult.mensagem_interna}
+                      </li>
+                    ) : null}
+                    {testResult.api_username_masked ? (
+                      <li>
+                        <span className="font-medium text-foreground">Usuário testado:</span> {testResult.api_username_masked}
+                      </li>
+                    ) : null}
+                    {testResult.cpf_solicitante_masked ? (
+                      <li>
+                        <span className="font-medium text-foreground">CPF solicitante:</span> {testResult.cpf_solicitante_masked}
+                      </li>
+                    ) : null}
+                    {testResult.success && testResult.dominio_sample_count != null ? (
+                      <li>
+                        <span className="font-medium text-foreground">Domínios retornados:</span> {testResult.dominio_sample_count}
+                      </li>
+                    ) : null}
+                    {testResult.portal_url ? (
+                      <li>
+                        <span className="font-medium text-foreground">Portal para chaves:</span>{" "}
+                        <a
+                          href={testResult.portal_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline break-all"
+                        >
+                          {testResult.portal_url}
+                        </a>
+                      </li>
+                    ) : null}
+                  </ul>
+                  {(testResult.hints?.length ?? 0) > 0 ? (
+                    <div className="pt-1">
+                      <p className="text-xs font-medium text-foreground mb-1">Orientações</p>
+                      <ul className="list-disc pl-4 text-xs space-y-1">
+                        {testResult.hints!.map((hint) => (
+                          <li key={hint}>{hint}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </AlertDescription>
+              </Alert>
+            ) : null}
           </>
         )}
       </Card>

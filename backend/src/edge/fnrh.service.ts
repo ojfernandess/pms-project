@@ -216,9 +216,35 @@ export class FnrhService {
       const parsed = await readBody(response);
       const reservaId = String(((parsed.dados as GuestJson | undefined)?.reserva as GuestJson | undefined)?.reserva_id ?? "");
       if (!response.ok) {
-        const error = fnrhHttpErrorMessage(response.status, parsed);
-        await this.finish(idempotencyKey, { status: "failed", http_status: response.status, error_message: error, response_summary: { status: response.status, keys: Object.keys(parsed) } });
-        return ok({ success: false, error, http_status: response.status, idempotency_key: idempotencyKey });
+        const detail = fnrhApiFailureDetail(response.status, parsed, {
+          environment: settings.environment,
+          baseUrl,
+          requestMethod: "POST",
+          requestUrl: `${baseUrl}/hospedagem/registrar`,
+          apiUsername: apiUser,
+        });
+        const error = String(detail.error ?? fnrhHttpErrorMessage(response.status, parsed));
+        await this.finish(idempotencyKey, {
+          status: "failed",
+          http_status: response.status,
+          error_message: error.slice(0, 800),
+          response_summary: {
+            status: response.status,
+            mensagem: detail.mensagem,
+            mensagem_interna: detail.mensagem_interna,
+            ip_locked: detail.ip_locked,
+          },
+        });
+        return ok({
+          success: false,
+          error,
+          http_status: response.status,
+          idempotency_key: idempotencyKey,
+          ip_locked: detail.ip_locked,
+          mensagem: detail.mensagem,
+          mensagem_interna: detail.mensagem_interna,
+          hints: detail.hints,
+        });
       }
       const hospedeIds = extractHospedeIds(parsed);
       for (let index = 0; index < rows.length && index < hospedeIds.length; index += 1) {
@@ -439,6 +465,123 @@ export class FnrhService {
   private async finish(key: string, data: Prisma.fnrh_submission_logUpdateInput) {
     await this.prisma.fnrh_submission_log.update({ where: { idempotency_key: key }, data });
   }
+
+  /** Diagnóstico de credenciais/ambiente sem registrar hospedagem (GET domínio leve). */
+  async testConnection(authorization: string | undefined, body: Record<string, unknown>): Promise<Result> {
+    const establishmentId = String(body.establishment_id ?? "").trim();
+    if (!establishmentId) return fail(400, "establishment_id é obrigatório.");
+    if (!authorization?.replace(/^Bearer\s+/i, "").trim()) return fail(401, "Autenticação obrigatória (equipe).");
+    if (!(await this.canAccess(authorization, establishmentId))) return fail(403, "Sem acesso a este estabelecimento.");
+
+    const settings = await this.prisma.establishment_fnrh_settings.findUnique({
+      where: { establishment_id: establishmentId },
+      select: {
+        enabled: true,
+        environment: true,
+        base_url_override: true,
+        api_username: true,
+        cpf_solicitante: true,
+      },
+    });
+    const secret = await this.prisma.establishment_fnrh_secrets.findUnique({
+      where: { establishment_id: establishmentId },
+      select: { api_password: true },
+    });
+
+    const environment = String(body.environment ?? settings?.environment ?? "production").trim();
+    const baseUrlOverride =
+      body.base_url_override !== undefined ? String(body.base_url_override ?? "").trim() : settings?.base_url_override;
+    const baseUrl = fnrhBase(environment, baseUrlOverride ?? null);
+    const apiUser = String(body.api_username ?? settings?.api_username ?? "").trim();
+    const draftPassword = String(body.api_password ?? "").trim();
+    const apiPass = draftPassword || secret?.api_password?.trim() || "";
+    const cpf = onlyDigits(body.cpf_solicitante ?? settings?.cpf_solicitante ?? "");
+
+    const preflight: string[] = [];
+    if (!apiUser) preflight.push("Informe o usuário da API (Basic Auth).");
+    if (!apiPass) preflight.push("Informe a senha da API ou salve uma senha antes de testar.");
+    if (cpf.length !== 11 || !isValidCpf(cpf)) preflight.push("CPF do solicitante inválido (11 dígitos, válido).");
+    if (preflight.length) {
+      return ok({
+        success: false,
+        phase: "preflight",
+        error: preflight.join(" "),
+        hints: preflight,
+        environment,
+        environment_label: fnrhEnvironmentLabel(environment),
+        base_url: baseUrl,
+        portal_url: fnrhPortalUrl(environment),
+      });
+    }
+
+    const path = "/dominios/fnrh/meios_transporte";
+    const requestUrl = `${baseUrl}${path}`;
+    let response: Response;
+    try {
+      response = await fetch(requestUrl, {
+        method: "GET",
+        headers: {
+          Authorization: basic(apiUser, apiPass),
+          cpf_solicitante: cpf,
+          Accept: "application/json",
+        },
+      });
+    } catch (cause) {
+      const msg = cause instanceof Error ? cause.message : String(cause);
+      return ok({
+        success: false,
+        phase: "network",
+        http_status: null,
+        error: `Não foi possível contactar a API FNRH: ${msg}`,
+        request_method: "GET",
+        request_url: requestUrl,
+        environment,
+        environment_label: fnrhEnvironmentLabel(environment),
+        base_url: baseUrl,
+        portal_url: fnrhPortalUrl(environment),
+        hints: ["Verifique firewall/DNS do servidor e se a URL base está correta."],
+      });
+    }
+
+    const parsed = await readBody(response);
+    const detail = fnrhApiFailureDetail(response.status, parsed, {
+      environment,
+      baseUrl,
+      requestMethod: "GET",
+      requestUrl,
+      apiUsername: apiUser,
+    });
+
+    if (response.ok) {
+      const dados = parsed.dados;
+      const itemCount = Array.isArray(dados) ? dados.length : dados && typeof dados === "object" ? 1 : 0;
+      return ok({
+        success: true,
+        phase: "api",
+        http_status: response.status,
+        request_method: "GET",
+        request_url: requestUrl,
+        environment,
+        environment_label: fnrhEnvironmentLabel(environment),
+        base_url: baseUrl,
+        portal_url: fnrhPortalUrl(environment),
+        api_username_masked: maskApiUsername(apiUser),
+        cpf_solicitante_masked: maskCpf(cpf),
+        dominio_sample_count: itemCount,
+        message: "Conexão com a API FNRH autenticada com sucesso.",
+        hints: [
+          "Credenciais e CPF do solicitante aceitos neste ambiente.",
+          `Chaves de API devem ser geradas no portal ${fnrhEnvironmentLabel(environment)}.`,
+        ],
+      });
+    }
+
+    return ok({
+      success: false,
+      phase: "api",
+      ...detail,
+    });
+  }
 }
 
 function ok(body: Record<string, unknown>): Result {
@@ -457,15 +600,135 @@ function basic(user: string, pass: string): string {
   return `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
 }
 
-function fnrhHttpErrorMessage(status: number, parsed: Record<string, unknown>): string {
-  const api = String(parsed.mensagem || parsed.erro || "").slice(0, 400);
-  if (status === 401) {
-    return (
-      api ||
-      "FNRH recusou autenticação (401). Verifique usuário/senha da API, ambiente (homologação x produção) e CPF do solicitante nas configurações FNRH do hotel."
-    );
+function extractFnrhMessages(parsed: Record<string, unknown>): { mensagem: string; mensagemInterna: string; extra: string[] } {
+  const bag: Record<string, unknown> = { ...parsed };
+  if (parsed.error && typeof parsed.error === "object" && !Array.isArray(parsed.error)) {
+    Object.assign(bag, parsed.error as Record<string, unknown>);
   }
-  return api || `FNRH respondeu HTTP ${status}`;
+  const pick = (...keys: string[]) => {
+    for (const key of keys) {
+      const value = bag[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+  };
+  const mensagem = pick("mensagem", "erro", "error", "message");
+  const mensagemInterna = pick(
+    "mensagem_interna",
+    "mensagemInterna",
+    "mensagem_interna_erro",
+    "internal_message",
+    "detalhe",
+    "detalhes",
+  );
+  const raw = typeof bag.raw === "string" ? bag.raw.trim() : "";
+  const extra = raw && raw !== mensagem && raw !== mensagemInterna ? [raw.slice(0, 500)] : [];
+  return { mensagem, mensagemInterna, extra };
+}
+
+function fnrhIpLocked(text: string): boolean {
+  return /ip has been locked|too many failed attempts|muitas tentativas/i.test(text);
+}
+
+function fnrhApiFailureDetail(
+  status: number,
+  parsed: Record<string, unknown>,
+  meta: {
+    environment: string;
+    baseUrl: string;
+    requestMethod?: string;
+    requestUrl?: string;
+    apiUsername?: string;
+  },
+): Record<string, unknown> {
+  const { mensagem, mensagemInterna, extra } = extractFnrhMessages(parsed);
+  const combined = [mensagem, mensagemInterna, ...extra].filter(Boolean).join(" — ");
+  const ipLocked = fnrhIpLocked(combined);
+  const hints: string[] = [];
+
+  if (ipLocked) {
+    hints.push(
+      "O IP do servidor que chama a API FNRH foi temporariamente bloqueado por excesso de tentativas com credenciais inválidas.",
+      "Aguarde o desbloqueio (pode levar 15–60 minutos) antes de testar de novo; cada novo POST hospedagem/registrar piora o bloqueio.",
+      "Gere chave nova apenas no portal do MESMO ambiente (homologação x produção) e confira usuário + senha no FNRH_SRH.",
+    );
+  } else if (status === 401) {
+    hints.push(
+      `Confira se o ambiente selecionado (${fnrhEnvironmentLabel(meta.environment)}) corresponde ao portal onde a chave foi criada.`,
+      `Portal: ${fnrhPortalUrl(meta.environment)} → menu Chaves de API.`,
+      "Usuário e senha são do par Hash/Secret da API, não o login Gov.br do portal.",
+      "CPF do solicitante deve ser o responsável FNRH cadastrado (11 dígitos válidos).",
+    );
+    if (meta.environment === "homologation" && /fnrh\.turismo\.serpro/i.test(meta.baseUrl)) {
+      hints.push("A URL base aponta para produção, mas o ambiente está em Homologação — alinhe ambos.");
+    }
+    if (meta.environment === "production" && /hom-lowcode/i.test(meta.baseUrl)) {
+      hints.push("A URL base aponta para homologação, mas o ambiente está em Produção — alinhe ambos.");
+    }
+  } else if (status >= 500) {
+    hints.push("Erro no lado Serpro/FNRH; tente novamente mais tarde ou abra chamado no canal MTur.");
+  }
+
+  const summary =
+    fnrhHttpErrorMessage(status, parsed) ||
+    combined ||
+    `FNRH respondeu HTTP ${status}`;
+
+  return {
+    http_status: status,
+    error: summary,
+    mensagem: mensagem || null,
+    mensagem_interna: mensagemInterna || null,
+    response_excerpt: extra[0] || (typeof parsed.raw === "string" ? parsed.raw.slice(0, 500) : null),
+    ip_locked: ipLocked,
+    hints,
+    request_method: meta.requestMethod ?? null,
+    request_url: meta.requestUrl ?? null,
+    environment: meta.environment,
+    environment_label: fnrhEnvironmentLabel(meta.environment),
+    base_url: meta.baseUrl,
+    portal_url: fnrhPortalUrl(meta.environment),
+    api_username_masked: meta.apiUsername ? maskApiUsername(meta.apiUsername) : null,
+    response_keys: Object.keys(parsed).slice(0, 20),
+  };
+}
+
+function fnrhHttpErrorMessage(status: number, parsed: Record<string, unknown>): string {
+  const { mensagem, mensagemInterna, extra } = extractFnrhMessages(parsed);
+  const parts = [mensagem, mensagemInterna, ...extra].filter(Boolean);
+  if (parts.length) {
+    const text = parts.join(" — ").slice(0, 800);
+    if (fnrhIpLocked(text)) {
+      return `${text} Interrompa novas tentativas até o IP ser liberado.`;
+    }
+    return text;
+  }
+  if (status === 401) {
+    return "FNRH recusou autenticação (401). Verifique usuário/senha da API, ambiente (homologação x produção) e CPF do solicitante nas configurações FNRH do hotel.";
+  }
+  return `FNRH respondeu HTTP ${status}`;
+}
+
+function fnrhEnvironmentLabel(environment: string): string {
+  return environment === "homologation" ? "Homologação" : "Produção";
+}
+
+function fnrhPortalUrl(environment: string): string {
+  return environment === "homologation"
+    ? "https://hom-lowcode.serpro.gov.br/FNRH_SRH/Login"
+    : "https://fnrh.turismo.serpro.gov.br/FNRH_SRH/Login";
+}
+
+function maskApiUsername(username: string): string {
+  const u = username.trim();
+  if (u.length <= 4) return "****";
+  return `${u.slice(0, 3)}…${u.slice(-2)}`;
+}
+
+function maskCpf(cpf: string): string {
+  const d = onlyDigits(cpf);
+  if (d.length !== 11) return "—";
+  return `***.***.***-${d.slice(-2)}`;
 }
 
 function fnrhBase(environment: string, override: string | null): string {

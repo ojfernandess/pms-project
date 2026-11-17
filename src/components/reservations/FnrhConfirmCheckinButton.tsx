@@ -138,13 +138,22 @@ export function FnrhConfirmCheckinButton({
         return;
       }
       if (payload?.success === false && payload?.error) {
-        const httpStatus = (payload as { http_status?: number }).http_status;
-        if (httpStatus === 401) {
+        const extended = payload as {
+          http_status?: number;
+          ip_locked?: boolean;
+          mensagem_interna?: string;
+          hints?: string[];
+        };
+        if (extended.ip_locked) {
           toast.error(
-            "FNRH recusou o login (401). Confira usuário, senha da API, ambiente homologação/produção e CPF do solicitante em Configurações → FNRH.",
+            "FNRH bloqueou o IP do servidor por tentativas falhas. Aguarde antes de enviar de novo e use «Testar conexão FNRH» nas configurações.",
+            { duration: 12_000 },
           );
         } else {
-          toast.error(payload.error);
+          toast.error(payload.error, { duration: extended.hints?.length ? 10_000 : 5000 });
+        }
+        if (extended.mensagem_interna && extended.mensagem_interna !== payload.error) {
+          toast.message(`Detalhe FNRH: ${extended.mensagem_interna}`);
         }
         return;
       }
