@@ -33,7 +33,7 @@ async function main() {
     return;
   }
 
-  const url = databaseUrlForLibpq(process.env.DATABASE_URL ?? "");
+  const url = process.env.DATABASE_URL?.trim();
   if (!url) {
     console.error("DATABASE_URL obrigatória");
     process.exit(1);
@@ -60,7 +60,13 @@ async function main() {
     for (const stmt of statements) {
       await withRetry("GRANT", () => client.query(`${stmt};`));
     }
-    console.log("GRANTs aplicados (authenticated / anon / service_role).");
+    const webCheckinGrants = path.join(__dirname, "migration", "grant-web-checkin-anon.sql");
+    if (fs.existsSync(webCheckinGrants)) {
+      await withRetry("GRANT web-checkin", () =>
+        client.query(fs.readFileSync(webCheckinGrants, "utf8")),
+      );
+    }
+    console.log("GRANTs aplicados (authenticated / anon / service_role + web check-in).");
   } finally {
     await releaseMigrationLock(client);
     await client.end();

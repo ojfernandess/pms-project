@@ -26,6 +26,9 @@ psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/guest_ve
 echo "=== guest_account_rpcs.sql ==="
 psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/guest_account_rpcs.sql
 
+echo "=== grant-web-checkin-anon.sql ==="
+psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/grant-web-checkin-anon.sql
+
 echo "=== verificar crypt ==="
 psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
   "SELECT n.nspname, p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE p.proname = 'crypt';"

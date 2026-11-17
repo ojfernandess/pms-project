@@ -45,6 +45,12 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/rpc/guest_verify_pass
     || echo "WARN: guest_verify_password_hotfix.sql falhou" >&2
 fi
 
+# Web Check-in: anon precisa DML (42501 permission denied for table web_checkin_*)
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/grant-web-checkin-anon.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/grant-web-checkin-anon.sql \
+    || echo "WARN: grant-web-checkin-anon.sql falhou" >&2
+fi
+
 # DDL incremental (colunas usadas pelo frontend / DataService)
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/cleaning_fee_configuration.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/cleaning_fee_configuration.sql \
