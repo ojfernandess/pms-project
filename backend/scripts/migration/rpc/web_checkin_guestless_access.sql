@@ -37,7 +37,8 @@ DECLARE
   v_account_doc_digits TEXT;
   v_account_for_stay BOOLEAN := FALSE;
   v_prior_checkin BOOLEAN := FALSE;
-  v_prior_birth DATE;
+  v_has_stored_birth BOOLEAN := FALSE;
+  v_birth_matches BOOLEAN := FALSE;
   v_reservation_email_match BOOLEAN := FALSE;
   v_reservation_cpf_match BOOLEAN := FALSE;
 BEGIN
@@ -355,19 +356,69 @@ BEGIN
     END IF;
 
     IF v_account_birth IS NULL THEN
-      RETURN jsonb_build_object(
-        'success', false,
-        'code', 'birth_date_missing_on_account',
-        'message', 'Não foi possível validar sua identidade. Faça login com e-mail e senha ou entre em contato com o hotel.'
-      );
-    END IF;
+      v_birth_matches := FALSE;
+      IF p_is_brazilian THEN
+        SELECT EXISTS (
+          SELECT 1
+          FROM public.web_checkin_guests wcg
+          JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+          WHERE normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+            AND wcg.birth_date IS NOT NULL
+            AND wcg.birth_date::date = p_birth_date::date
+        )
+        INTO v_birth_matches;
+      ELSE
+        SELECT EXISTS (
+          SELECT 1
+          FROM public.web_checkin_guests wcg
+          JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+          WHERE lower(trim(COALESCE(wcg.email, ''))) = v_email
+            AND wcg.birth_date IS NOT NULL
+            AND wcg.birth_date::date = p_birth_date::date
+        )
+        INTO v_birth_matches;
+      END IF;
 
-    IF v_account_birth <> p_birth_date THEN
-      RETURN jsonb_build_object(
-        'success', false,
-        'code', 'birth_date_mismatch',
-        'message', 'Data de nascimento não confere com o cadastro encontrado.'
-      );
+      IF NOT v_birth_matches THEN
+        RETURN jsonb_build_object(
+          'success', false,
+          'code', 'birth_date_missing_on_account',
+          'message', 'Não foi possível validar sua identidade. Faça login com e-mail e senha ou entre em contato com o hotel.'
+        );
+      END IF;
+    ELSIF v_account_birth::date = p_birth_date::date THEN
+      NULL;
+    ELSE
+      v_birth_matches := FALSE;
+      IF p_is_brazilian THEN
+        SELECT EXISTS (
+          SELECT 1
+          FROM public.web_checkin_guests wcg
+          JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+          WHERE normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+            AND wcg.birth_date IS NOT NULL
+            AND wcg.birth_date::date = p_birth_date::date
+        )
+        INTO v_birth_matches;
+      ELSE
+        SELECT EXISTS (
+          SELECT 1
+          FROM public.web_checkin_guests wcg
+          JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+          WHERE lower(trim(COALESCE(wcg.email, ''))) = v_email
+            AND wcg.birth_date IS NOT NULL
+            AND wcg.birth_date::date = p_birth_date::date
+        )
+        INTO v_birth_matches;
+      END IF;
+
+      IF NOT v_birth_matches THEN
+        RETURN jsonb_build_object(
+          'success', false,
+          'code', 'birth_date_mismatch',
+          'message', 'Data de nascimento não confere com o cadastro encontrado.'
+        );
+      END IF;
     END IF;
 
     RETURN jsonb_build_object(
@@ -382,27 +433,8 @@ BEGIN
     );
   END IF;
 
-  -- Histórico em web_checkin_guests (sem conta): exige data de nascimento para confirmar identidade
+  -- Histórico (sem conta): confere nascimento em web_checkin_guests, guest_accounts ou clients da reserva
   IF v_prior_checkin THEN
-    v_prior_birth := NULL;
-    IF p_is_brazilian THEN
-      SELECT wcg.birth_date
-      INTO v_prior_birth
-      FROM public.web_checkin_guests wcg
-      JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
-      WHERE normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
-      ORDER BY wc.completed_at DESC NULLS LAST, wcg.birth_date IS NOT NULL DESC
-      LIMIT 1;
-    ELSE
-      SELECT wcg.birth_date
-      INTO v_prior_birth
-      FROM public.web_checkin_guests wcg
-      JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
-      WHERE lower(trim(COALESCE(wcg.email, ''))) = v_email
-      ORDER BY wc.completed_at DESC NULLS LAST, wcg.birth_date IS NOT NULL DESC
-      LIMIT 1;
-    END IF;
-
     IF p_birth_date IS NULL THEN
       RETURN jsonb_build_object(
         'success', false,
@@ -414,12 +446,112 @@ BEGIN
       );
     END IF;
 
-    IF v_prior_birth IS NOT NULL AND v_prior_birth <> p_birth_date THEN
+  IF p_is_brazilian THEN
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.web_checkin_guests wcg
+        JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+        WHERE normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+          AND wcg.birth_date IS NOT NULL
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.guest_accounts ga
+        WHERE ga.is_active IS DISTINCT FROM FALSE
+          AND normalize_identifier_digits(COALESCE(ga.document_number, '')) = v_digits
+          AND ga.birth_date IS NOT NULL
+      )
+      OR (
+        v_res.guest_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM public.clients c
+          WHERE c.id = v_res.guest_id
+            AND normalize_identifier_digits(COALESCE(c.document_number, '')) = v_digits
+            AND c.birth_date IS NOT NULL
+        )
+      )
+      OR (
+        v_res.client_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM public.clients c
+          WHERE c.id = v_res.client_id
+            AND normalize_identifier_digits(COALESCE(c.document_number, '')) = v_digits
+            AND c.birth_date IS NOT NULL
+        )
+      )
+      INTO v_has_stored_birth;
+
+      SELECT EXISTS (
+        SELECT 1
+        FROM public.web_checkin_guests wcg
+        JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+        WHERE normalize_identifier_digits(COALESCE(wcg.cpf, wcg.document_number, '')) = v_digits
+          AND wcg.birth_date IS NOT NULL
+          AND wcg.birth_date::date = p_birth_date::date
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.guest_accounts ga
+        WHERE ga.is_active IS DISTINCT FROM FALSE
+          AND normalize_identifier_digits(COALESCE(ga.document_number, '')) = v_digits
+          AND ga.birth_date IS NOT NULL
+          AND ga.birth_date::date = p_birth_date::date
+      )
+      OR (
+        v_res.guest_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM public.clients c
+          WHERE c.id = v_res.guest_id
+            AND normalize_identifier_digits(COALESCE(c.document_number, '')) = v_digits
+            AND c.birth_date IS NOT NULL
+            AND c.birth_date::date = p_birth_date::date
+        )
+      )
+      OR (
+        v_res.client_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM public.clients c
+          WHERE c.id = v_res.client_id
+            AND normalize_identifier_digits(COALESCE(c.document_number, '')) = v_digits
+            AND c.birth_date IS NOT NULL
+            AND c.birth_date::date = p_birth_date::date
+        )
+      )
+      INTO v_birth_matches;
+    ELSE
+      SELECT EXISTS (
+        SELECT 1
+        FROM public.web_checkin_guests wcg
+        JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+        WHERE lower(trim(COALESCE(wcg.email, ''))) = v_email
+          AND wcg.birth_date IS NOT NULL
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.guest_accounts ga
+        WHERE ga.is_active IS DISTINCT FROM FALSE
+          AND lower(trim(ga.email)) = v_email
+          AND ga.birth_date IS NOT NULL
+      )
+      INTO v_has_stored_birth;
+
+      SELECT EXISTS (
+        SELECT 1
+        FROM public.web_checkin_guests wcg
+        JOIN public.web_checkin wc ON wc.id = wcg.web_checkin_id AND wc.status = 'completed'
+        WHERE lower(trim(COALESCE(wcg.email, ''))) = v_email
+          AND wcg.birth_date IS NOT NULL
+          AND wcg.birth_date::date = p_birth_date::date
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.guest_accounts ga
+        WHERE ga.is_active IS DISTINCT FROM FALSE
+          AND lower(trim(ga.email)) = v_email
+          AND ga.birth_date IS NOT NULL
+          AND ga.birth_date::date = p_birth_date::date
+      )
+      INTO v_birth_matches;
+    END IF;
+
+    IF v_has_stored_birth AND NOT v_birth_matches THEN
       RETURN jsonb_build_object(
         'success', false,
         'code', 'birth_date_mismatch',
         'prior_checkin_found', true,
-        'message', 'Data de nascimento não confere com o check-in anterior.'
+        'message', 'Data de nascimento não confere com nossos registros (check-in anterior ou cadastro).'
       );
     END IF;
   END IF;

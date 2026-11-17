@@ -156,7 +156,7 @@ export function GuestlessCheckinAccessPanel({ locator, onVerified, onBack, onReq
         p_identifier: isBrazilian ? id.replace(/\D/g, "") : id.toLowerCase(),
       };
       if (needsBirthDate && includeBirth && birthDate) {
-        body.p_birth_date = birthDate;
+        body.p_birth_date = birthDate.trim().slice(0, 10);
       }
 
       const { data, error } = await supabase.rpc("verify_web_checkin_guest_access", body);
