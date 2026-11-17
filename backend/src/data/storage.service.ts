@@ -112,7 +112,7 @@ export class StorageService implements OnModuleInit {
     try {
       await mkdir(this.root, { recursive: true });
       await access(this.root, constants.W_OK);
-      const hint = diagnostics.process.STORAGE_PROVIDER
+      const hint = diagnostics.processEnv.STORAGE_PROVIDER
         ? "STORAGE_PROVIDER existe no process.env mas não foi reconhecido — verifique o valor."
         : "STORAGE_PROVIDER ausente no process.env do container myapi — configure no painel do backend e recrie o container.";
       return {

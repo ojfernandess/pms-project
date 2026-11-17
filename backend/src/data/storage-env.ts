@@ -13,7 +13,7 @@ const STORAGE_KEYS = [
 ] as const;
 
 export type StorageEnvDiagnostics = {
-  process: Record<string, boolean>;
+  processEnv: Record<string, boolean>;
   configService: Record<string, boolean>;
 };
 
@@ -31,13 +31,13 @@ export function readStorageEnv(config: ConfigService, key: string): string {
 }
 
 export function storageEnvDiagnostics(config: ConfigService): StorageEnvDiagnostics {
-  const process: Record<string, boolean> = {};
+  const processEnv: Record<string, boolean> = {};
   const configService: Record<string, boolean> = {};
   for (const key of STORAGE_KEYS) {
     const p = process.env[key];
-    process[key] = typeof p === "string" && p.trim() !== "";
+    processEnv[key] = typeof p === "string" && p.trim() !== "";
     const c = config.get<string>(key);
     configService[key] = typeof c === "string" && c.trim() !== "";
   }
-  return { process, configService };
+  return { processEnv, configService };
 }

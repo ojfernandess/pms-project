@@ -25,7 +25,7 @@ type EnvStorageTestResult = {
   provider?: string;
   storageProviderEnv?: string;
   envDiagnostics?: {
-    process?: Record<string, boolean>;
+    processEnv?: Record<string, boolean>;
     configService?: Record<string, boolean>;
   };
   endpoint?: string;
@@ -118,9 +118,9 @@ export function PlatformStorageSettingsManager() {
               <div className="font-sans font-semibold text-muted-foreground">Diagnóstico (container da API):</div>
               <div>
                 process.env STORAGE_PROVIDER:{" "}
-                {lastResult.envDiagnostics.process?.STORAGE_PROVIDER ? "sim" : "não"}
+                {lastResult.envDiagnostics.processEnv?.STORAGE_PROVIDER ? "sim" : "não"}
                 {" · "}
-                MINIO_ENDPOINT: {lastResult.envDiagnostics.process?.MINIO_ENDPOINT ? "sim" : "não"}
+                MINIO_ENDPOINT: {lastResult.envDiagnostics.processEnv?.MINIO_ENDPOINT ? "sim" : "não"}
               </div>
               <div>
                 ConfigService STORAGE_PROVIDER:{" "}
