@@ -122,6 +122,17 @@ async function hasPublicFunction(client, name, identityArgs) {
   return signatures.some((args) => normalizeIdentityArgTypes(args) === expected);
 }
 
+async function hasPgcryptoCrypt(client) {
+  const { rows } = await client.query(
+    `SELECT 1
+     FROM pg_proc p
+     JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE p.proname = 'crypt' AND n.nspname IN ('public', 'extensions')
+     LIMIT 1`,
+  );
+  return rows.length > 0;
+}
+
 async function bundledRpcsComplete(client) {
   for (const rpc of REQUIRED_RPCS) {
     if (!(await hasPublicFunction(client, rpc.name, rpc.args))) return false;
@@ -159,6 +170,7 @@ const INCREMENTAL_PATCHES = [
   },
   {
     sql: "guest_account_rpcs.sql",
+    requiresPgcrypto: true,
     checks: [
       { name: "verify_guest_password", args: "p_account_id uuid, p_password text" },
     ],
@@ -166,6 +178,8 @@ const INCREMENTAL_PATCHES = [
 ];
 
 async function applyIncrementalPatches(client, url, rpcDir) {
+  const migrationDir = path.join(__dirname, "migration");
+  const pgcryptoBootstrap = path.join(migrationDir, "pgcrypto-bootstrap.sql");
   for (const patch of INCREMENTAL_PATCHES) {
     let needs = false;
     for (const check of patch.checks) {
@@ -174,7 +188,14 @@ async function applyIncrementalPatches(client, url, rpcDir) {
         break;
       }
     }
+    if (patch.requiresPgcrypto && !(await hasPgcryptoCrypt(client))) {
+      needs = true;
+    }
     if (!needs) continue;
+    if (patch.requiresPgcrypto && fs.existsSync(pgcryptoBootstrap)) {
+      console.log("=== Patch incremental: pgcrypto-bootstrap.sql (crypt ausente) ===");
+      applySqlFileWithPsql(url, pgcryptoBootstrap, { stopOnError: true });
+    }
     const filePath = path.normalize(path.join(rpcDir, patch.sql));
     if (!fs.existsSync(filePath)) {
       console.error(`Patch em falta: ${filePath}`);

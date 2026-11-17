@@ -34,6 +34,11 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/auth-compat.sql ]; th
     || echo "WARN: auth-compat.sql falhou" >&2
 fi
 
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/pgcrypto-bootstrap.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/pgcrypto-bootstrap.sql \
+    || echo "WARN: pgcrypto-bootstrap.sql falhou (precisa superuser no Postgres para CREATE EXTENSION)" >&2
+fi
+
 # DDL incremental (colunas usadas pelo frontend / DataService)
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/cleaning_fee_configuration.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/cleaning_fee_configuration.sql \

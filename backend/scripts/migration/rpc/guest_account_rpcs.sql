@@ -1,5 +1,14 @@
 -- Web Check-in: contas de hóspede (pgcrypto + RPCs públicas para anon)
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+DO $ext$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END;
+$ext$;
+GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;
 
 ALTER TABLE public.guest_accounts
   ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
@@ -32,7 +41,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_password_hash TEXT;
@@ -42,7 +51,7 @@ BEGIN
     RAISE EXCEPTION 'Este email já está cadastrado';
   END IF;
 
-  v_password_hash := crypt(p_password, gen_salt('bf', 10));
+  v_password_hash := extensions.crypt(p_password, extensions.gen_salt('bf', 10));
 
   INSERT INTO public.guest_accounts (
     email,
@@ -92,7 +101,7 @@ CREATE OR REPLACE FUNCTION public.verify_guest_password(
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_password_hash TEXT;
@@ -117,7 +126,7 @@ BEGIN
     RAISE EXCEPTION 'Conta temporariamente bloqueada. Tente novamente mais tarde.';
   END IF;
 
-  IF crypt(p_password, v_password_hash) = v_password_hash THEN
+  IF extensions.crypt(p_password, v_password_hash) = v_password_hash THEN
     UPDATE public.guest_accounts
     SET
       failed_login_attempts = 0,
@@ -157,7 +166,7 @@ CREATE OR REPLACE FUNCTION public.update_guest_password(
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_password_hash TEXT;
@@ -166,7 +175,7 @@ BEGIN
     RAISE EXCEPTION 'Conta não encontrada';
   END IF;
 
-  v_password_hash := crypt(p_new_password, gen_salt('bf', 10));
+  v_password_hash := extensions.crypt(p_new_password, extensions.gen_salt('bf', 10));
 
   UPDATE public.guest_accounts ga
   SET
@@ -184,7 +193,7 @@ CREATE OR REPLACE FUNCTION public.deactivate_guest_account(
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_account_exists BOOLEAN;
