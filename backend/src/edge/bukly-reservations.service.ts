@@ -40,6 +40,8 @@ type ParsedReservation = {
   resStatus: "Book" | "Modify" | "Cancel";
   reservationId: string;
   messageId: string;
+  /** ResID_Type 24 — ID da reserva no canal upstream (ex. Booking.com). */
+  partnerReservationId: string | null;
   createDateTime: string | null;
   lastModifyDateTime: string | null;
   sourceChannelCode: string | null;
@@ -167,10 +169,20 @@ function parseHotelReservation(block: string): ParsedReservation | null {
     .filter(Boolean)
     .join("\n");
 
+  let partnerReservationId: string | null = null;
+  for (const idBlock of collectXmlBlocks(global, "HotelReservationID")) {
+    const resType = readXmlAttr(idBlock, "ResID_Type");
+    const resValue = readXmlAttr(idBlock, "ResID_Value");
+    if (resType === "24" && resValue?.trim()) {
+      partnerReservationId = resValue.trim();
+      break;
+    }
+  }
   return {
     resStatus,
     reservationId,
     messageId,
+    partnerReservationId,
     createDateTime: readXmlAttr(block, "CreateDateTime"),
     lastModifyDateTime: readXmlAttr(block, "LastModifyDateTime"),
     sourceChannelCode,
@@ -524,6 +536,7 @@ export class BuklyReservationsService {
         ota_guest_name: item.guestName,
         ota_guest_email: item.guestEmail,
         ota_source_channel_name: item.sourceChannelName,
+        ota_cm_booking_id: item.partnerReservationId,
         ota_special_requests: stay.comments || item.globalComments,
         sync_status: "synced",
         synced_at: new Date().toISOString(),

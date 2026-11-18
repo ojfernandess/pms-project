@@ -23,6 +23,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { formatCurrency, exportToCSV, exportToXLSX } from "@/lib/financialUtils";
 import { formatDate } from "@/lib/reservationUtils";
 import { formatReservationChannelOrigin } from "@/lib/reservationChannelDisplay";
+import { otaPartnerChannelReservationCode, otaChannelManagerMasterRef } from "@/lib/otaReservationCodes";
 import { Loader2, Download, ShoppingBag, ExternalLink } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -55,6 +56,10 @@ export interface SoldReservationReportRow {
   ota_channel_id: string | null;
   ota_channel_name: string | null;
   ota_cm_booking_id: string | null;
+  /** HotelReservationID ResID_Type 24 (ex. Booking.com). */
+  ota_partner_reservation_code: string | null;
+  /** Bukly/CM master (prefixo antes de # no código de sync). */
+  ota_manager_ref: string | null;
 }
 
 function todayIsoDate(): string {
@@ -200,6 +205,12 @@ export const SoldReservationsReport = () => {
           ota_channel_id: ota?.ota_channel_id != null ? String(ota.ota_channel_id) : null,
           ota_channel_name: otaChannels?.name != null ? String(otaChannels.name) : null,
           ota_cm_booking_id: ota?.ota_cm_booking_id != null ? String(ota.ota_cm_booking_id) : null,
+          ota_partner_reservation_code: ota
+            ? otaPartnerChannelReservationCode(ota as Parameters<typeof otaPartnerChannelReservationCode>[0]) || null
+            : null,
+          ota_manager_ref: ota
+            ? otaChannelManagerMasterRef(ota as Parameters<typeof otaChannelManagerMasterRef>[0]) || null
+            : null,
         };
       });
     },
@@ -246,7 +257,9 @@ export const SoldReservationsReport = () => {
       ota: item.is_ota ? "Sim" : "Não",
       bukly: item.is_bukly ? "Sim" : "Não",
       id_ota_registro: item.ota_record_id ?? "",
-      codigo_ota: item.ota_reservation_code ?? "",
+      codigo_reserva_ota: item.ota_partner_reservation_code ?? "",
+      ref_channel_manager: item.ota_manager_ref ?? "",
+      codigo_sync_cm: item.ota_reservation_code ?? "",
       id_canal_ota: item.ota_channel_id ?? "",
       nome_canal: item.ota_channel_name ?? "",
       id_cm_booking: item.ota_cm_booking_id ?? "",
@@ -410,9 +423,20 @@ export const SoldReservationsReport = () => {
                               <span className="text-muted-foreground">ID OTA:</span> {row.ota_record_id}
                             </p>
                           )}
-                          {row.ota_reservation_code && (
-                            <p>
-                              <span className="text-muted-foreground">Cód. OTA:</span> {row.ota_reservation_code}
+                          {row.ota_partner_reservation_code && (
+                            <p className="font-mono">
+                              <span className="text-muted-foreground">Cód. reserva OTA:</span>{" "}
+                              {row.ota_partner_reservation_code}
+                            </p>
+                          )}
+                          {row.ota_manager_ref && (
+                            <p className="font-mono truncate" title={row.ota_manager_ref}>
+                              <span className="text-muted-foreground">Ref. CM:</span> {row.ota_manager_ref}
+                            </p>
+                          )}
+                          {row.ota_reservation_code && row.ota_reservation_code !== row.ota_manager_ref && (
+                            <p className="truncate text-muted-foreground" title={row.ota_reservation_code}>
+                              Sync: {row.ota_reservation_code}
                             </p>
                           )}
                           {row.ota_channel_id && (
@@ -423,11 +447,6 @@ export const SoldReservationsReport = () => {
                           {row.ota_channel_name && (
                             <p className="truncate" title={row.ota_channel_name}>
                               {row.ota_channel_name}
-                            </p>
-                          )}
-                          {row.ota_cm_booking_id && (
-                            <p className="truncate" title={row.ota_cm_booking_id}>
-                              <span className="text-muted-foreground">CM booking:</span> {row.ota_cm_booking_id}
                             </p>
                           )}
                         </div>

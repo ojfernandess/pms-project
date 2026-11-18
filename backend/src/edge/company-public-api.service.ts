@@ -172,7 +172,6 @@ export class CompanyPublicApiService {
     if (action === "list-maintenance") return this.listMaintenance(companyId, query, respond);
     if (action === "list-clients") return this.listClients(companyId, query, respond);
     if (action === "occupancy-map") return this.occupancyMap(companyId, method, query, input.body, respond);
-    if (action === "room-daily-board") return this.roomDailyBoard(companyId, method, query, input.body, respond);
     if (action === "list-stay-reviews") return this.listStayReviews(companyId, query, respond);
     if (action === "stay-review-link") return this.stayReviewLink(companyId, method, query, input.body, respond);
     if (action === "me" || action === "establishments") return this.companyProfile(companyId, action, respond);
@@ -200,6 +199,7 @@ export class CompanyPublicApiService {
       return respond(companyId, 403, { success: false, error: "Estabelecimento inválido para esta empresa." });
     }
 
+    const bookingId = text(query.booking_id);
     const filterResult = this.buildReservationListWhere(query, establishmentId);
     if (filterResult.error) return this.listFailure(companyId, "list-reservations", respond);
 
@@ -225,7 +225,6 @@ export class CompanyPublicApiService {
         total_pages: total > 0 ? Math.ceil(total / paging.perPage) : 0,
         total_bookings: total,
         bookings,
-      });
     } catch (error) {
       console.error("list-reservations failed", error instanceof Error ? error.message : "failed");
       return respond(companyId, 500, { success: false, error: "Erro ao listar reservas" });
@@ -362,6 +361,7 @@ export class CompanyPublicApiService {
     }
     if (!bookingId) return respond(companyId, 400, { success: false, error: "Parâmetro obrigatório ausente: booking_id" });
 
+    const found = await this.findReservation(bookingId, RESERVATION_DETAIL_SELECT);
     const where: Prisma.reservationsWhereInput = isUuid(bookingId)
       ? { OR: [{ id: bookingId }, { reservation_code: bookingId }] }
       : { reservation_code: bookingId };
@@ -393,7 +393,6 @@ export class CompanyPublicApiService {
       success: true,
       action: "get-reservation-by-id",
       booking,
-    });
   }
 
   private async webCheckin(
@@ -750,6 +749,7 @@ export class CompanyPublicApiService {
     });
   }
 
+  private async listStayReviews(companyId: string, query: Query, respond: Respond): Promise<ApiResult> {
   private async roomDailyBoard(
     companyId: string,
     method: string,
@@ -938,7 +938,6 @@ export class CompanyPublicApiService {
     });
   }
 
-  private async listStayReviews(companyId: string, query: Query, respond: Respond): Promise<ApiResult> {
     const paging = pageParams(query, 50);
     let establishmentId = text(query.establishment_id);
     const publishedOnly = query.is_published;
@@ -1171,6 +1170,7 @@ export class CompanyPublicApiService {
     });
   }
 
+  private async listFailure(companyId: string, label: string, respond: Respond, error = "Erro ao listar reservas"): Promise<ApiResult> {
   private buildReservationListWhere(
     query: Query,
     establishmentId: string,
@@ -1461,7 +1461,6 @@ export class CompanyPublicApiService {
     };
   }
 
-  private async listFailure(companyId: string, label: string, respond: Respond, error = "Erro ao listar reservas"): Promise<ApiResult> {
     console.error(`${label} failed`, "invalid filter");
     return respond(companyId, 500, { success: false, error });
   }
@@ -1747,6 +1746,7 @@ function ymd(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
+function isReservationStatus(value: string): value is Exclude<Prisma.reservationsCreateInput["status"], undefined> {
 function parseDateYmd(value: string): Date | null {
   const trimmed = value.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
@@ -1807,7 +1807,6 @@ function groupBy<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
   return map;
 }
 
-function isReservationStatus(value: string): value is Exclude<Prisma.reservationsCreateInput["status"], undefined> {
   return [
     "pending",
     "unpaid",

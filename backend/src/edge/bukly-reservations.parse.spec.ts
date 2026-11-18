@@ -22,5 +22,9 @@ describe("Bukly OTA ResRetrieve parse (group sample)", () => {
     expect(readXmlAttr(type14 || "", "ID")).toBe("6AFAF6EE907C9");
     const total = collectXmlBlocks(collectXmlBlocks(block, "ResGlobalInfo")[0] || "", "Total")[0];
     expect(readXmlAttr(total || "", "AmountAfterTax")).toBe("1924.21");
+    const global = collectXmlBlocks(block, "ResGlobalInfo")[0] || "";
+    const hres = collectXmlBlocks(global, "HotelReservationID");
+    const type24 = hres.find((h) => readXmlAttr(h, "ResID_Type") === "24");
+    expect(readXmlAttr(type24 || "", "ResID_Value")).toBe("6487854946");
   });
 });

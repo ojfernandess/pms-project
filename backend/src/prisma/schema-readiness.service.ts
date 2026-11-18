@@ -47,9 +47,15 @@ export class SchemaReadinessService implements OnModuleInit {
         ALTER TABLE public.site_settings
         ADD COLUMN IF NOT EXISTS web_checkin_public_base_url TEXT
       `);
+      await this.prisma.$executeRawUnsafe(`
+        ALTER TABLE public.site_settings
+        ADD COLUMN IF NOT EXISTS storage_config JSONB DEFAULT '{"provider":"local"}'::jsonb
+      `);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Não foi possível garantir coluna site_settings.web_checkin_public_base_url: ${message}`);
+      this.logger.warn(
+        `Não foi possível garantir colunas incrementais em site_settings (web_checkin_public_base_url / storage_config): ${message}`,
+      );
     }
   }
 
