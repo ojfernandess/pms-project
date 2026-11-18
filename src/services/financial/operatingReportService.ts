@@ -34,6 +34,7 @@ import {
   type SalesAnalyticRow,
   adr,
 } from "@/lib/financial/operatingReportEngine";
+import { PARKING_FEE_KIND } from "@/lib/parkingFeeConfig";
 
 const RESERVATION_SELECT = `
   id,
@@ -121,6 +122,18 @@ function cleaningFeesTotal(
 ): number {
   return (fees || [])
     .filter((f) => String(f.service_fees?.service_kind || "") === "cleaning_fee")
+    .reduce((sum, f) => sum + Number(f.amount || 0) * Number(f.quantity ?? 1), 0);
+}
+
+function parkingFeesTotal(
+  fees?: Array<{
+    amount?: number;
+    quantity?: number;
+    service_fees?: { service_kind?: string | null } | null;
+  }>,
+): number {
+  return (fees || [])
+    .filter((f) => String(f.service_fees?.service_kind || "") === PARKING_FEE_KIND)
     .reduce((sum, f) => sum + Number(f.amount || 0) * Number(f.quantity ?? 1), 0);
 }
 
@@ -331,6 +344,7 @@ async function normalizeReservations(
     totalAmount: Number(r.total_amount || 0),
     serviceFeesTotal: serviceFeesTotal(r.reservation_service_fees),
     cleaningFeeTotal: cleaningFeesTotal(r.reservation_service_fees),
+    parkingFeeTotal: parkingFeesTotal(r.reservation_service_fees),
     paymentStatus: r.payment_status,
     paidAmount: Number(r.paid_amount || 0),
     netPayments: netByReservation.get(r.id) || 0,

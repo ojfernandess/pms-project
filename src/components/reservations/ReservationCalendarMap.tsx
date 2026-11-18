@@ -31,7 +31,7 @@ import { ReservationPaymentModal } from "./ReservationPaymentModal";
 import { BlockViewDialog } from "./BlockViewDialog";
 import { RatePlansModal } from "./RatePlansModal";
 import { toast } from "sonner";
-import { effectiveMapPaidAmount, isParkingSpotMapReservation } from "@/lib/parkingPaymentSync";
+import { effectiveMapPaidAmount, isParkingSpotMapReservation, parkingSpotMapPaymentTone } from "@/lib/parkingPaymentSync";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -3657,13 +3657,13 @@ export const ReservationCalendarMap = ({
                               // Status especiais: usar cor da legenda
                               statusColor = statusConfig[reservation.status] || statusConfig.confirmed;
                             } else if (isParkingSpotMapReservation(reservation) && baseTotalAmount === 0) {
-                              const ps = String(reservation.payment_status ?? "pending");
-                              if (ps === "paid" || paidAmount >= totalWithFees) {
+                              const parkingTone = parkingSpotMapPaymentTone(reservation);
+                              if (parkingTone === "paid") {
                                 statusColor = statusConfig.confirmed;
-                              } else if (ps === "partial" || paidAmount > 0) {
+                              } else if (parkingTone === "partial") {
                                 statusColor = statusConfig.pending;
                               } else {
-                                statusColor = statusConfig.unpaid || statusConfig.confirmed;
+                                statusColor = statusConfig.unpaid;
                               }
                             } else if (paidAmount === 0 || reservation.status === "unpaid") {
                               // Sem pagamento = Não Pago (vermelho)
@@ -4197,13 +4197,13 @@ export const ReservationCalendarMap = ({
               // Status especiais: usar cor da legenda
               previewColor = statusConfig[reservation.status] || statusConfig.confirmed;
             } else if (isParkingSpotMapReservation(reservation) && baseTotalAmount === 0) {
-              const ps = String(reservation.payment_status ?? "pending");
-              if (ps === "paid" || paidAmount >= totalWithFees) {
+              const parkingTone = parkingSpotMapPaymentTone(reservation);
+              if (parkingTone === "paid") {
                 previewColor = statusConfig.confirmed;
-              } else if (ps === "partial" || paidAmount > 0) {
+              } else if (parkingTone === "partial") {
                 previewColor = statusConfig.pending;
               } else {
-                previewColor = statusConfig.unpaid || statusConfig.confirmed;
+                previewColor = statusConfig.unpaid;
               }
             } else if (paidAmount === 0 || reservation.status === "unpaid") {
               // Sem pagamento = Não Pago (vermelho)

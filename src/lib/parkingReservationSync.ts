@@ -7,6 +7,7 @@ import {
   isParkingFeeConfigured,
   syncParkingSpotReservationForLodging,
 } from "@/lib/parkingFeeConfig";
+import { syncLinkedParkingSpotPaymentFromLodging } from "@/lib/parkingPaymentSync";
 
 function dateOnly(value: string): string {
   return String(value).split("T")[0];
@@ -67,6 +68,12 @@ export async function provisionParkingForLodgingReservation(params: {
 
   if (sync.warning) {
     return { warning: sync.warning, parkingReservationId: sync.parkingReservationId };
+  }
+
+  try {
+    await syncLinkedParkingSpotPaymentFromLodging(params.lodgingReservationId);
+  } catch {
+    /* ignore */
   }
 
   return { parkingReservationId: sync.parkingReservationId };

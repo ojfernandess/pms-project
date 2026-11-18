@@ -46,6 +46,7 @@ export type NormalizedReservation = {
   totalAmount: number;
   serviceFeesTotal: number;
   cleaningFeeTotal: number;
+  parkingFeeTotal: number;
   paymentStatus: string;
   paidAmount: number;
   netPayments: number;
@@ -644,6 +645,27 @@ function reservationGrossPaymentMode(r: NormalizedReservation): number {
   return (Number(r.totalAmount) || 0) + (Number(r.serviceFeesTotal) || 0);
 }
 
+/** Taxas extras rateadas por noite da estadia (limpeza sob filtro; estacionamento sempre quando lançado). */
+function lodgingExtraFeesPerNight(
+  nights: string[],
+  fees: { cleaningFeeTotal: number; parkingFeeTotal: number },
+): Map<string, number> {
+  const map = new Map<string, number>();
+  if (nights.length === 0) return map;
+
+  const addAllocated = (feeTotal: number) => {
+    if (feeTotal <= 0) return;
+    const parts = allocateCleaningFeePerNight(feeTotal, nights.length);
+    nights.forEach((d, i) => {
+      map.set(d, (map.get(d) ?? 0) + (parts[i] ?? 0));
+    });
+  };
+
+  addAllocated(Number(fees.cleaningFeeTotal) || 0);
+  addAllocated(Number(fees.parkingFeeTotal) || 0);
+  return map;
+}
+
 export function computePeriodReport(args: {
   reservations: NormalizedReservation[];
   startDate: string;
@@ -684,10 +706,10 @@ export function computePeriodReport(args: {
 
     const nights = enumerateStayNights(r.checkinDate, r.checkoutDate);
     const nightAmounts = nightAmountsForStay(reservationGrossStayMode(r), r.checkinDate, r.checkoutDate);
-    const cleaningPerNight =
-      allocateCleaningInBilling && r.cleaningFeeTotal > 0
-        ? new Map(nights.map((d, i) => [d, allocateCleaningFeePerNight(r.cleaningFeeTotal, nights.length)[i] ?? 0]))
-        : new Map<string, number>();
+    const extraFeesPerNight = lodgingExtraFeesPerNight(nights, {
+      cleaningFeeTotal: allocateCleaningInBilling ? r.cleaningFeeTotal : 0,
+      parkingFeeTotal: r.parkingFeeTotal,
+    });
 
     if (dateInRange(r.createdAtDate, startDate, endDate) && !salesSeen.has(r.id)) {
       salesSeen.add(r.id);
@@ -695,6 +717,7 @@ export function computePeriodReport(args: {
       sales.salesNights += nights.length;
       let saleGross = reservationGrossStayMode(r);
       if (includeCleaningInSales) saleGross += Number(r.cleaningFeeTotal) || 0;
+      saleGross += Number(r.parkingFeeTotal) || 0;
       sales.salesGross += saleGross;
     }
 
@@ -702,7 +725,7 @@ export function computePeriodReport(args: {
       const nightsInRange = nights.filter((n) => dateInRange(n, startDate, endDate));
       if (nightsInRange.length === 0) continue;
       for (const night of nightsInRange) {
-        const nightGross = (nightAmounts.get(night) ?? 0) + (cleaningPerNight.get(night) ?? 0);
+        const nightGross = (nightAmounts.get(night) ?? 0) + (extraFeesPerNight.get(night) ?? 0);
         const split = splitRevenue(nightGross, r.channelCommissionPct, r.ownerPct);
         addSplit(billing, split, 1, r.id, billingSeen);
         const b = ensureBucket(bucketKey(night, groupBy));
@@ -887,6 +910,7 @@ function splitReservationNet(
   cleaningFeeReportMode: CleaningFeeReportMode = "lodging_only",
 ): { gross: number; net: number } {
   let gross = Number(r.totalAmount) || 0;
+  gross += Number(r.parkingFeeTotal) || 0;
   if (cleaningFeeReportMode === "with_cleaning_allocated") gross += Number(r.cleaningFeeTotal) || 0;
   const split = splitRevenue(gross, r.channelCommissionPct, r.ownerPct);
   return { gross, net: split.net };
@@ -934,10 +958,10 @@ export function computeBillingAnalyticRows(
     if (!isRevenueStatus(r.status, r.cancelledAt)) continue;
     const nights = enumerateStayNights(r.checkinDate, r.checkoutDate);
     const nightAmounts = nightAmountsForStay(Number(r.totalAmount) || 0, r.checkinDate, r.checkoutDate);
-    const cleaningPerNight =
-      allocateCleaning && r.cleaningFeeTotal > 0
-        ? new Map(nights.map((d, i) => [d, allocateCleaningFeePerNight(r.cleaningFeeTotal, nights.length)[i] ?? 0]))
-        : new Map<string, number>();
+    const extraFeesPerNight = lodgingExtraFeesPerNight(nights, {
+      cleaningFeeTotal: allocateCleaning ? r.cleaningFeeTotal : 0,
+      parkingFeeTotal: r.parkingFeeTotal,
+    });
     const estLabel =
       r.establishmentNumericId != null
         ? `${r.establishmentName} (#${r.establishmentNumericId})`
@@ -948,7 +972,7 @@ export function computeBillingAnalyticRows(
 
     for (const night of nights) {
       if (!dateInRange(night, startDate, endDate)) continue;
-      const amount = (nightAmounts.get(night) ?? 0) + (cleaningPerNight.get(night) ?? 0);
+      const amount = (nightAmounts.get(night) ?? 0) + (extraFeesPerNight.get(night) ?? 0);
       rows.push({
         key: `${r.id}|${night}`,
         establishmentLabel: estLabel,

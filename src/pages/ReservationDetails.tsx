@@ -59,6 +59,7 @@ import {
   isParkingFeeConfigured,
   PARKING_FEE_KIND,
 } from "@/lib/parkingFeeConfig";
+import { CLEANING_FEE_KIND } from "@/lib/cleaningFeeConfig";
 import { ParkingLinkedBillingCard } from "@/components/reservations/ParkingLinkedBillingCard";
 import { syncLinkedParkingSpotPaymentFromLodging } from "@/lib/parkingPaymentSync";
 import { useServiceFees } from "@/hooks/useServiceFees";
@@ -973,6 +974,25 @@ const ReservationDetails = () => {
     }, 0);
     return baseTotal + feesTotal;
   }, [reservation?.total_amount, reservationServiceFees, isEditingDates, editTotalAmount]);
+
+  const lodgingFeeBreakdown = useMemo(() => {
+    const findKind = (kind: string) =>
+      reservationServiceFees.find(
+        (row: { service_fees?: { service_kind?: string | null } }) => row.service_fees?.service_kind === kind,
+      );
+    const cleaningRow = findKind(CLEANING_FEE_KIND);
+    const parkingRow = findKind(PARKING_FEE_KIND);
+    const lineTotal = (row: { amount?: number; quantity?: number } | undefined) =>
+      row ? Number(row.amount || 0) * Number(row.quantity || 1) : 0;
+    const parkingBillingMode = parkingFeeConfig?.billingMode ?? "period";
+    return {
+      cleaningTotal: lineTotal(cleaningRow),
+      parkingTotal: lineTotal(parkingRow),
+      parkingQuantity: Number(parkingRow?.quantity || 0),
+      parkingUnitAmount: Number(parkingRow?.amount || 0),
+      parkingBillingMode,
+    };
+  }, [reservationServiceFees, parkingFeeConfig?.billingMode]);
 
   // Calcular breakdown de pagamentos para determinar quanto de cada taxa foi pago
   const paymentBreakdown = useMemo(() => {
@@ -3042,6 +3062,37 @@ const ReservationDetails = () => {
                           </span>
                         </div>
                       ))
+                    )}
+                  </div>
+                )}
+                {(lodgingFeeBreakdown.cleaningTotal > 0 || lodgingFeeBreakdown.parkingTotal > 0) && (
+                  <div className="mt-4 pt-3 border-t border-blue-200/80 space-y-1.5">
+                    <p className="text-xs font-medium text-slate-500 mb-1">Taxas e serviços</p>
+                    {lodgingFeeBreakdown.cleaningTotal > 0 && (
+                      <div className="flex justify-between text-xs text-slate-600">
+                        <span>Taxa de limpeza</span>
+                        <span className="font-medium text-blue-800 shrink-0">
+                          {formatCurrency(lodgingFeeBreakdown.cleaningTotal)}{" "}
+                          <span className="text-slate-500 font-normal">(única)</span>
+                        </span>
+                      </div>
+                    )}
+                    {lodgingFeeBreakdown.parkingTotal > 0 && (
+                      <div className="flex justify-between text-xs text-slate-600 gap-2">
+                        <span>Estacionamento</span>
+                        <span className="font-medium text-blue-800 shrink-0 text-right">
+                          {formatCurrency(lodgingFeeBreakdown.parkingTotal)}
+                          {lodgingFeeBreakdown.parkingBillingMode === "daily" &&
+                          lodgingFeeBreakdown.parkingQuantity > 0 ? (
+                            <span className="block text-[10px] text-slate-500 font-normal">
+                              {formatCurrency(lodgingFeeBreakdown.parkingUnitAmount)} ×{" "}
+                              {lodgingFeeBreakdown.parkingQuantity} diária(s)
+                            </span>
+                          ) : (
+                            <span className="block text-[10px] text-slate-500 font-normal">(período)</span>
+                          )}
+                        </span>
+                      </div>
                     )}
                   </div>
                 )}

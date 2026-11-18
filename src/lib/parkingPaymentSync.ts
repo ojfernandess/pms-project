@@ -115,10 +115,21 @@ export function effectiveMapPaidAmount(reservation: {
   const total = Number(reservation.total_amount || 0);
   if (total > 0) return basePaid;
 
-  const ps = String(reservation.payment_status ?? "pending");
-  if (ps === "paid") return 1;
-  if (ps === "partial") return 0.01;
+  const ps = String(reservation.payment_status ?? "pending").toLowerCase();
+  if (ps === "paid" || ps === "pago") return 1;
+  if (ps === "partial" || ps === "parcial") return 0.01;
   return 0;
+}
+
+/** Cor no mapa de vagas: deriva apenas do status sincronizado (evita `0 >= 0` como “pago”). */
+export function parkingSpotMapPaymentTone(reservation: Parameters<typeof effectiveMapPaidAmount>[0]): "paid" | "partial" | "unpaid" {
+  if (!isParkingSpotMapReservation(reservation) || Number(reservation.total_amount || 0) > 0) {
+    return "unpaid";
+  }
+  const marker = effectiveMapPaidAmount(reservation);
+  if (marker >= 1) return "paid";
+  if (marker > 0) return "partial";
+  return "unpaid";
 }
 
 export function parkingFeeDefaultsFromStay(

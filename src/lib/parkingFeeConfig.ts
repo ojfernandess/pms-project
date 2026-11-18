@@ -422,6 +422,12 @@ export async function syncParkingSpotReservationForLodging(params: {
   if (existingId) {
     const { error } = await supabase.from("reservations").update(row).eq("id", existingId);
     if (error) throw error;
+    try {
+      const { syncLinkedParkingSpotPaymentFromLodging } = await import("@/lib/parkingPaymentSync");
+      await syncLinkedParkingSpotPaymentFromLodging(params.lodgingReservationId);
+    } catch {
+      /* ignore */
+    }
     return { parkingReservationId: existingId };
   }
 
@@ -449,7 +455,15 @@ export async function syncParkingSpotReservationForLodging(params: {
     .eq("id", lockResult.reservation_id);
   if (linkError) throw linkError;
 
-  return { parkingReservationId: lockResult.reservation_id };
+  const parkingReservationId = lockResult.reservation_id;
+  try {
+    const { syncLinkedParkingSpotPaymentFromLodging } = await import("@/lib/parkingPaymentSync");
+    await syncLinkedParkingSpotPaymentFromLodging(params.lodgingReservationId);
+  } catch {
+    /* ignore */
+  }
+
+  return { parkingReservationId };
 }
 
 export async function cancelParkingSpotForLodging(lodgingReservationId: string): Promise<void> {
