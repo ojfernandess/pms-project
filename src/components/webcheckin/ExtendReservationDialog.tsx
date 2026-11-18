@@ -673,15 +673,30 @@ export function ExtendReservationDialog({
           .select()
           .single();
         
-        if (extensionError && extensionError.code !== '42P01') { // Ignorar se tabela não existir
+        if (
+          extensionError &&
+          extensionError.code !== "42P01" &&
+          extensionError.code !== "42501"
+        ) {
           throw extensionError;
+        }
+        if (extensionError?.code === "42501") {
+          throw new Error(
+            "Não foi possível registrar a extensão (permissão no servidor). Contate o estabelecimento ou tente novamente mais tarde.",
+          );
         }
         extension = extData;
         console.log("[ExtendReservation] Registro de extensão criado:", extension?.id);
-      } catch (error: any) {
-        // Se a tabela não existir, continuar sem criar registro
-        if (error.code !== '42P01') {
-          console.warn("[ExtendReservation] Tabela reservation_extensions não encontrada, continuando sem registro");
+      } catch (error: unknown) {
+        const code = (error as { code?: string })?.code;
+        const message = error instanceof Error ? error.message : "";
+        if (code === "42501" || message.includes("permissão")) {
+          toast.error(message || "Sem permissão para solicitar extensão. Tente pelo atendimento.");
+          setLoading(false);
+          return;
+        }
+        if (code !== "42P01") {
+          console.warn("[ExtendReservation] Falha ao criar reservation_extensions:", error);
         }
       }
 

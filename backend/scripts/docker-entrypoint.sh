@@ -62,6 +62,11 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/grant-web-checkin-ano
     || echo "WARN: grant-web-checkin-anon.sql falhou" >&2
 fi
 
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/grant_reservation_extensions.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/grant_reservation_extensions.sql \
+    || echo "WARN: grant_reservation_extensions.sql falhou" >&2
+fi
+
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/web-checkin-anon-rls.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=0 -f ./scripts/migration/web-checkin-anon-rls.sql \
     || echo "WARN: web-checkin-anon-rls.sql falhou" >&2

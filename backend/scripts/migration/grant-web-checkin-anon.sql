@@ -20,7 +20,8 @@ DECLARE
     'web_checkin_guests',
     'web_checkin_documents',
     'guest_stay_history',
-    'email_queue'
+    'email_queue',
+    'reservation_extensions'
   ];
   fn record;
 BEGIN
