@@ -193,7 +193,7 @@ export const useWebCheckin = () => {
         if (reservationFullData.room_id) {
           const { data: roomData } = await supabase
             .from("rooms")
-            .select("room_number, name, fixed_password, authentication_type")
+            .select("room_number, name, floor, fixed_password, authentication_type")
             .eq("id", reservationFullData.room_id)
             .single();
           rooms = roomData;
@@ -512,7 +512,7 @@ export const useWebCheckin = () => {
         if (reservationData.room_id) {
           const { data: roomData } = await supabase
             .from("rooms")
-            .select("room_number, name, fixed_password, authentication_type")
+            .select("room_number, name, floor, fixed_password, authentication_type")
             .eq("id", reservationData.room_id)
             .single();
           rooms = roomData;

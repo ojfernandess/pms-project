@@ -30,6 +30,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { LanguageSelector } from "@/components/layout/LanguageSelector";
 import { useTranslation } from "react-i18next";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -675,6 +676,7 @@ export default function WebCheckin() {
   }, [isAuthenticated, session.accountId, locatorFromUrl]);
 
   const CurrentStepComponent = STEPS[currentStep].component;
+  const isCompleteStep = STEPS[currentStep]?.id === "complete";
 
   // VALIDAÇÃO DE SEGURANÇA: Mostrar erro se a reserva está vinculada a outro usuário
   if (reservationLinkedToOtherUser && webCheckinInfo?.reservation) {
@@ -1605,9 +1607,9 @@ export default function WebCheckin() {
       </header>
 
       {/* Conteúdo Principal */}
-      <div className="max-w-4xl mx-auto py-8 px-4">
+      <div className={cn("mx-auto py-8 px-4", isCompleteStep ? "max-w-2xl" : "max-w-4xl")}>
         {/* Saudação Mobile */}
-        {isAuthenticated && accountData && (
+        {isAuthenticated && accountData && !isCompleteStep && (
           <div className="mb-6 md:hidden">
             <h2 className="text-2xl font-bold text-slate-900 mb-1">
               Olá, {getUserName()} 👋
@@ -1616,7 +1618,8 @@ export default function WebCheckin() {
           </div>
         )}
 
-        {/* Progress Stepper - Responsivo: Vertical com cards no mobile, horizontal no desktop */}
+        {/* Progress Stepper - oculto na tela de conclusão */}
+        {!isCompleteStep && (
         <div className="mb-8 overflow-hidden">
           {/* Desktop: Layout horizontal (mantém o original) */}
           <div className="hidden md:block relative py-4">
@@ -1875,9 +1878,16 @@ export default function WebCheckin() {
             })()}
           </div>
         </div>
+        )}
 
         {/* Step Content */}
-        <Card className="p-8 rounded-2xl shadow-sm border-0 bg-white/80 backdrop-blur-sm">
+        <Card
+          className={cn(
+            isCompleteStep
+              ? "border-0 bg-transparent p-0 shadow-none"
+              : "rounded-2xl border-0 bg-white/80 p-8 shadow-sm backdrop-blur-sm",
+          )}
+        >
           {token && (
             <CurrentStepComponent
               webCheckin={currentWebCheckin || webCheckinInfo}

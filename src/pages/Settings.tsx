@@ -32,6 +32,7 @@ import { CompanyApiRequestLogsPanel } from "@/components/settings/CompanyApiRequ
 import { FnrhSettingsCard } from "@/components/settings/FnrhSettingsCard";
 import { CleaningFeeSettingCard } from "@/components/settings/CleaningFeeSettingCard";
 import { ParkingFeeSettingCard } from "@/components/settings/ParkingFeeSettingCard";
+import { CheckinGuestInfoServicesCard } from "@/components/settings/CheckinGuestInfoServicesCard";
 import { useCleaningFeeConfig } from "@/hooks/useCleaningFeeConfig";
 import { useParkingFeeConfig } from "@/hooks/useParkingFeeConfig";
 import { useBuildings } from "@/hooks/useBuildings";
@@ -1115,6 +1116,7 @@ const Settings = () => {
 
 // Componente de Gerenciamento de Serviços
 const ServicesManager = () => {
+  const { selectedEstablishment } = useEstablishment();
   const { services, isLoading, saveServices, isSaving } = useEstablishmentServices();
   const { buildings } = useBuildings();
   const { data: establishmentCleaningConfig, isLoading: isLoadingCleaningConfig } = useCleaningFeeConfig(null);
@@ -1127,12 +1129,18 @@ const ServicesManager = () => {
   // Usar useMemo para criar uma versão estável dos serviços
   const normalizedServices = useMemo(() => {
     if (!services || services.length === 0) return [];
-    return services.map(s => ({
-      id: s.id,
-      name: s.name,
-      description: s.description || "",
-      is_active: s.is_active,
-    }));
+    return services
+      .filter(
+        (s) =>
+          !s.checkin_guest_info_type &&
+          (s.service_kind === "amenity" || !s.service_kind),
+      )
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description || "",
+        is_active: s.is_active,
+      }));
   }, [services]);
 
   // Usar useRef para armazenar o valor anterior e evitar loops
@@ -1227,6 +1235,10 @@ const ServicesManager = () => {
           isLoading={isLoadingParkingConfig}
           establishmentHasBuildings={hasBuildings}
         />
+
+        {selectedEstablishment?.id ? (
+          <CheckinGuestInfoServicesCard scope="establishment" establishmentId={selectedEstablishment.id} />
+        ) : null}
 
         {hasBuildings ? (
           <div className="flex gap-2 rounded-lg border border-sky-200 bg-sky-50/80 p-4 text-sm text-sky-950">

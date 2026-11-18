@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { CleaningFeeSettingCard } from "@/components/settings/CleaningFeeSettingCard";
 import { ParkingFeeSettingCard } from "@/components/settings/ParkingFeeSettingCard";
+import { CheckinGuestInfoServicesCard } from "@/components/settings/CheckinGuestInfoServicesCard";
 import { useCleaningFeeConfig } from "@/hooks/useCleaningFeeConfig";
 import { useParkingFeeConfig } from "@/hooks/useParkingFeeConfig";
 
@@ -1090,12 +1091,18 @@ const BuildingServicesManager = ({
   // Usar useMemo para criar uma versão estável dos serviços
   const normalizedServices = useMemo(() => {
     if (!services || services.length === 0) return [];
-    return services.map(s => ({
-      id: s.id,
-      name: s.name,
-      description: s.description || "",
-      is_active: s.is_active,
-    }));
+    return services
+      .filter(
+        (s) =>
+          !s.checkin_guest_info_type &&
+          (s.service_kind === "amenity" || !s.service_kind),
+      )
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description || "",
+        is_active: s.is_active,
+      }));
   }, [services]);
 
   // Usar useRef para armazenar o valor anterior e evitar loops
@@ -1193,6 +1200,7 @@ const BuildingServicesManager = ({
               initialConfig={parkingConfig}
               isLoading={isLoadingParking}
             />
+            <CheckinGuestInfoServicesCard scope="building" buildingId={buildingId} buildingName={buildingName} />
           </>
         ) : (
           <p className="text-sm text-muted-foreground">

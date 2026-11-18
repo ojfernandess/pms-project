@@ -13,6 +13,10 @@ export interface EstablishmentService {
   created_at: string;
   updated_at: string;
   created_by?: string;
+  service_kind?: string;
+  checkin_guest_info_type?: string | null;
+  checkin_guest_config?: Record<string, unknown> | null;
+  checkin_display_order?: number;
 }
 
 export const useEstablishmentServices = () => {
