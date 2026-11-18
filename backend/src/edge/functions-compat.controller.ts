@@ -50,7 +50,7 @@ export class FunctionsCompatController {
     private readonly dailyDigest: DailyDigestService,
     private readonly employeeAuth: EmployeeAuthService,
     private readonly bukly: BuklySyncService,
-    private readonly buklyReservations: BuklyReservationsService,
+    private readonly buklyReservationsService: BuklyReservationsService,
     private readonly companyApi: CompanyPublicApiService,
     private readonly fnrh: FnrhService,
     private readonly stripeWebhook: StripeWebhookService,
@@ -238,7 +238,7 @@ export class FunctionsCompatController {
 
   @Post("bukly-reservations")
   async buklyReservations(@Body() body: unknown, @Res() res: Response) {
-    await this.reply(res, () => this.buklyReservations.run(body));
+    await this.reply(res, () => this.buklyReservationsService.run(body));
   }
 
   @All("company-public-api")
