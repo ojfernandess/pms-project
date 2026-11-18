@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DollarSign, TrendingUp, TrendingDown, CreditCard, Download, Loader2, FileText, FileSpreadsheet, Plus, Edit, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { DollarSign, TrendingUp, TrendingDown, CreditCard, Download, Loader2, FileText, FileSpreadsheet, Plus, Edit, Trash2, ChevronDown, ChevronUp, ShoppingBag } from "lucide-react";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -85,8 +86,34 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+const FINANCIAL_TAB_QUERY = "tab";
+const FINANCIAL_REPORT_QUERY = "relatorio";
+
 const Financial = () => {
   const { selectedEstablishment } = useEstablishment();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeFinancialTab = searchParams.get(FINANCIAL_TAB_QUERY) || "faturamento_vendas";
+  const activeFinancialReport =
+    searchParams.get(FINANCIAL_REPORT_QUERY) || "reservas_criadas";
+
+  const handleFinancialTabChange = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set(FINANCIAL_TAB_QUERY, value);
+    if (value !== "reports") {
+      next.delete(FINANCIAL_REPORT_QUERY);
+    } else if (!next.get(FINANCIAL_REPORT_QUERY)) {
+      next.set(FINANCIAL_REPORT_QUERY, "reservas_criadas");
+    }
+    setSearchParams(next, { replace: true });
+  };
+
+  const handleFinancialReportChange = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set(FINANCIAL_TAB_QUERY, "reports");
+    next.set(FINANCIAL_REPORT_QUERY, value);
+    setSearchParams(next, { replace: true });
+  };
+
   const [periodType, setPeriodType] = useState<"month" | "week" | "year" | "custom">("month");
   const [customStartDate, setCustomStartDate] = useState("");
   const [customEndDate, setCustomEndDate] = useState("");
@@ -612,9 +639,10 @@ const Financial = () => {
             </Card>
           </div>
 
-          <Tabs defaultValue="faturamento_vendas" className="space-y-4">
+          <Tabs value={activeFinancialTab} onValueChange={handleFinancialTabChange} className="space-y-4">
             <TabsList className="h-auto flex-wrap">
               <TabsTrigger value="faturamento_vendas">Faturamento de vendas</TabsTrigger>
+              <TabsTrigger value="reports">Relatórios</TabsTrigger>
               <TabsTrigger value="operacao">Operação</TabsTrigger>
               <TabsTrigger value="overview">Visão Geral</TabsTrigger>
               <TabsTrigger value="receivables">Contas a Receber</TabsTrigger>
@@ -626,7 +654,6 @@ const Financial = () => {
               <TabsTrigger value="payments">Pagamentos</TabsTrigger>
               <TabsTrigger value="carriers">Portadores</TabsTrigger>
               <TabsTrigger value="service_fees">Taxas</TabsTrigger>
-              <TabsTrigger value="reports">Relatórios</TabsTrigger>
             </TabsList>
 
             <TabsContent value="faturamento_vendas" className="space-y-4">
@@ -1125,81 +1152,80 @@ const Financial = () => {
 
             <TabsContent value="reports">
               <Card className="p-6">
-                <h3 className="text-lg font-semibold mb-4">Relatórios Financeiros</h3>
-                <div className="space-y-6">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer">
-                      <h4 className="font-medium">Relatório de Faturamento</h4>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Análise detalhada do faturamento por período
-                      </p>
-                      <div className="flex gap-2 mt-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                          onClick={() => handleExportRevenue("csv")}
-                      >
-                          <FileText className="h-4 w-4 mr-2" />
-                          CSV
-                      </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleExportRevenue("xlsx")}
-                        >
-                          <FileSpreadsheet className="h-4 w-4 mr-2" />
-                          Excel
-                        </Button>
-                      </div>
-                    </Card>
-                    <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer">
-                      <h4 className="font-medium">Relatório de Pagamentos</h4>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Lista completa de pagamentos recebidos
-                      </p>
-                      <div className="flex gap-2 mt-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                          onClick={() => handleExportPayments("csv")}
-                      >
-                          <FileText className="h-4 w-4 mr-2" />
-                          CSV
-                      </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleExportPayments("xlsx")}
-                        >
-                          <FileSpreadsheet className="h-4 w-4 mr-2" />
-                          Excel
-                        </Button>
-                      </div>
-                    </Card>
-                  </div>
-                  
-                  {/* Relatório de Fechamento */}
-                  <ClosingReport />
-                  
-                  {/* Relatório de Cancelamentos */}
-                  <Card className="p-6">
-                    <h4 className="font-medium mb-4">Relatório de Cancelamentos</h4>
+                <h3 className="text-lg font-semibold mb-2">Relatórios Financeiros</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Escolha o tipo de relatório abaixo. Use <strong>Reservas criadas</strong> para vendas do dia ou
+                  intervalo (data de criação da reserva).
+                </p>
+                <Tabs
+                  value={activeFinancialReport}
+                  onValueChange={handleFinancialReportChange}
+                  className="space-y-4"
+                >
+                  <TabsList className="h-auto flex-wrap">
+                    <TabsTrigger value="reservas_criadas" className="gap-2">
+                      <ShoppingBag className="h-4 w-4" />
+                      Reservas criadas
+                    </TabsTrigger>
+                    <TabsTrigger value="exportacoes">Faturamento e pagamentos</TabsTrigger>
+                    <TabsTrigger value="fechamento">Fechamento</TabsTrigger>
+                    <TabsTrigger value="cancelamentos">Cancelamentos</TabsTrigger>
+                    <TabsTrigger value="noshow">No-show</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="reservas_criadas" className="mt-4 space-y-4">
+                    <SoldReservationsReport />
+                  </TabsContent>
+
+                  <TabsContent value="exportacoes" className="mt-4 space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Card className="p-4 hover:shadow-md transition-shadow">
+                        <h4 className="font-medium">Relatório de Faturamento</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Análise detalhada do faturamento por período
+                        </p>
+                        <div className="flex gap-2 mt-3">
+                          <Button variant="outline" size="sm" onClick={() => handleExportRevenue("csv")}>
+                            <FileText className="h-4 w-4 mr-2" />
+                            CSV
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleExportRevenue("xlsx")}>
+                            <FileSpreadsheet className="h-4 w-4 mr-2" />
+                            Excel
+                          </Button>
+                        </div>
+                      </Card>
+                      <Card className="p-4 hover:shadow-md transition-shadow">
+                        <h4 className="font-medium">Relatório de Pagamentos</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Lista completa de pagamentos recebidos
+                        </p>
+                        <div className="flex gap-2 mt-3">
+                          <Button variant="outline" size="sm" onClick={() => handleExportPayments("csv")}>
+                            <FileText className="h-4 w-4 mr-2" />
+                            CSV
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleExportPayments("xlsx")}>
+                            <FileSpreadsheet className="h-4 w-4 mr-2" />
+                            Excel
+                          </Button>
+                        </div>
+                      </Card>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="fechamento" className="mt-4">
+                    <ClosingReport />
+                  </TabsContent>
+
+                  <TabsContent value="cancelamentos" className="mt-4">
                     <CancellationReport />
-                  </Card>
-                  
-                  {/* Relatório de No-Show */}
-                  <Card className="p-6">
-                    <h4 className="font-medium mb-4">Relatório de No-Show</h4>
+                  </TabsContent>
+
+                  <TabsContent value="noshow" className="mt-4">
                     <NoShowReport />
-                  </Card>
-                  
-                  <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer">
-                    <h4 className="font-medium">Relatório de Taxa OTAs</h4>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Análise de comissões e rentabilidade (em desenvolvimento)
-                    </p>
-                  </Card>
-                </div>
+                  </TabsContent>
+                </Tabs>
               </Card>
             </TabsContent>
           </Tabs>
