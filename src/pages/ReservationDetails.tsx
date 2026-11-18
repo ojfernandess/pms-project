@@ -62,6 +62,7 @@ import {
 import { CLEANING_FEE_KIND } from "@/lib/cleaningFeeConfig";
 import { ParkingLinkedBillingCard } from "@/components/reservations/ParkingLinkedBillingCard";
 import { syncLinkedParkingSpotPaymentFromLodging } from "@/lib/parkingPaymentSync";
+import { patchReservationsInQueryCache, refreshReservationQueries } from "@/lib/reservationQuerySync";
 import { useServiceFees } from "@/hooks/useServiceFees";
 import { displayServiceFeeName, filterServiceFeesForReservation } from "@/lib/serviceFeeScope";
 import { useReservationServiceFees } from "@/hooks/useReservationServiceFees";
@@ -4331,10 +4332,15 @@ const ReservationDetails = () => {
         reservation={reservation}
         onSuccess={async () => {
           if (reservation?.id) {
-            await syncLinkedParkingSpotPaymentFromLodging(reservation.id);
+            const parkingSync = await syncLinkedParkingSpotPaymentFromLodging(reservation.id);
+            if (parkingSync.parkingReservationId) {
+              patchReservationsInQueryCache(queryClient, [
+                { id: parkingSync.parkingReservationId, patch: { payment_status: parkingSync.payment_status } },
+              ]);
+            }
           }
-          refetch();
-          queryClient.invalidateQueries({ queryKey: ["reservations"] });
+          await refetch();
+          await refreshReservationQueries(queryClient);
           queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation?.id] });
           queryClient.invalidateQueries({ queryKey: ["parking_linked_billing"] });
         }}

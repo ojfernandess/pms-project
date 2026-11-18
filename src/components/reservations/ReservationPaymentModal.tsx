@@ -25,6 +25,7 @@ import {
   isPaymentRefundRecord,
 } from "@/lib/reservationUtils";
 import { syncLinkedParkingSpotPaymentFromLodging } from "@/lib/parkingPaymentSync";
+import { patchReservationsInQueryCache, refreshReservationQueries } from "@/lib/reservationQuerySync";
 import { ensureParkingSpotIfLodgingHasFee } from "@/lib/parkingReservationSync";
 
 interface ReservationPaymentModalProps {
@@ -1179,15 +1180,29 @@ export function ReservationPaymentModal({
       setShowPaymentSuccess(true);
       toast.success("Pagamento lançado com sucesso!");
 
-      void queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
-      void queryClient.invalidateQueries({ queryKey: ["reservations"], exact: false });
+      queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
+
+      const lodgingPatch = {
+        paid_amount: newPaidAmount,
+        payment_status: newPaymentStatus,
+        status: finalStatus,
+      };
+
+      patchReservationsInQueryCache(queryClient, [{ id: reservation.id, patch: lodgingPatch }]);
 
       try {
         await ensureParkingSpotIfLodgingHasFee(reservation.id);
-        await syncLinkedParkingSpotPaymentFromLodging(reservation.id);
+        const parkingSync = await syncLinkedParkingSpotPaymentFromLodging(reservation.id);
+        if (parkingSync.parkingReservationId) {
+          patchReservationsInQueryCache(queryClient, [
+            { id: parkingSync.parkingReservationId, patch: { payment_status: parkingSync.payment_status } },
+          ]);
+        }
       } catch (syncErr) {
         console.error("Erro ao sincronizar estacionamento após pagamento:", syncErr);
       }
+
+      await refreshReservationQueries(queryClient);
 
       await new Promise((resolve) => setTimeout(resolve, 1400));
 

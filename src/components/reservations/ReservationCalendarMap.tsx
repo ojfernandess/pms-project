@@ -8,7 +8,8 @@ import { format, addDays, eachDayOfInterval, parseISO, startOfDay, isSameDay, di
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock, User, Users, Wrench, LogIn, LogOut, DollarSign } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useReservations } from "@/hooks/useReservations";
+import { useEstablishmentReservationRealtime } from "@/hooks/useEstablishmentReservationRealtime";
+import { refreshReservationQueries } from "@/lib/reservationQuerySync";
 import { usePricing } from "@/hooks/usePricing";
 import { validateRoomAvailability, formatCurrency, isPaymentRefundRecord, getRefundedPaymentId, toFiniteNumber } from "@/lib/reservationUtils";
 import { recordProcessedRefund } from "@/services/financial/refundService";
@@ -216,6 +217,7 @@ export const ReservationCalendarMap = ({
   }, [selectedEstablishment, establishmentIdFromParams, establishments, setSelectedEstablishment]);
 
   const { settings: hotelSettings } = useHotelSettings(establishmentId || undefined);
+  useEstablishmentReservationRealtime(establishmentId);
   const isHoverPreviewEnabled = (hotelSettings as any)?.map_reservation_hover_preview !== false;
   const [startDate, setStartDate] = useState(startOfDay(new Date()));
   const [viewDays, setViewDays] = useState(30);
@@ -4361,9 +4363,7 @@ export const ReservationCalendarMap = ({
         onOpenChange={setPaymentModalOpen}
         reservation={reservationForPayment}
         onSuccess={() => {
-          // Recarregar dados após lançar pagamento
-          queryClient.invalidateQueries({ queryKey: ["reservations"] });
-          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+          void refreshReservationQueries(queryClient);
           setReservationForPayment(null);
         }}
       />

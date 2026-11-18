@@ -1,6 +1,11 @@
 import { supabase } from "@/integrations/supabase/client";
 import { findLinkedParkingReservation, PARKING_FEE_KIND } from "@/lib/parkingFeeConfig";
-import { isPaymentRefundRecord } from "@/lib/reservationUtils";
+import {
+  allocateReservationPayments,
+  inferPaymentAllocationParams,
+  type ReservationPaymentRow,
+  type ReservationServiceFeeRow,
+} from "@/lib/reservationPaymentAllocation";
 
 export type LodgingParkingFeeBalance = {
   feeRowId: string;
@@ -33,7 +38,7 @@ export async function getLodgingParkingFeeRow(lodgingReservationId: string) {
     | undefined;
 }
 
-/** Quanto do estacionamento já foi pago na reserva de hospedagem (pagamentos com componente fee-*). */
+/** Quanto do estacionamento já foi pago na reserva de hospedagem (inclui [COMPONENT:all] e rateio legado). */
 export async function getLodgingParkingFeeBalance(
   lodgingReservationId: string,
 ): Promise<LodgingParkingFeeBalance | null> {
@@ -41,22 +46,45 @@ export async function getLodgingParkingFeeBalance(
   if (!fee?.id) return null;
 
   const feeTotal = Number(fee.amount || 0) * Number(fee.quantity || 1);
-  const { data: payments, error } = await supabase
-    .from("payments")
-    .select("id, amount, notes, payment_date, created_at")
-    .eq("reservation_id", lodgingReservationId);
-  if (error) throw error;
 
-  const feePrefix = `[COMPONENT:fee-${fee.id}]`;
-  let paid = 0;
-  for (const payment of payments ?? []) {
-    if (isPaymentRefundRecord(payment)) continue;
-    const notes = String(payment.notes ?? "");
-    if (!notes.includes(feePrefix)) continue;
-    paid += Number(payment.amount || 0);
-  }
+  const [
+    { data: reservation, error: resErr },
+    { data: payments, error: payErr },
+    { data: feeRows, error: feesErr },
+    { data: logs, error: logsErr },
+  ] = await Promise.all([
+    supabase.from("reservations").select("id, total_amount, paid_amount").eq("id", lodgingReservationId).single(),
+    supabase.from("payments").select("id, amount, notes, payment_date, created_at").eq("reservation_id", lodgingReservationId),
+    supabase
+      .from("reservation_service_fees")
+      .select("id, amount, quantity, created_at")
+      .eq("reservation_id", lodgingReservationId),
+    supabase
+      .from("activity_logs")
+      .select("action_type, new_values, old_values, created_at")
+      .eq("entity_id", lodgingReservationId)
+      .eq("entity_type", "reservation")
+      .order("created_at", { ascending: false })
+      .limit(80),
+  ]);
 
-  const pending = Math.max(0, feeTotal - paid);
+  if (resErr) throw resErr;
+  if (payErr) throw payErr;
+  if (feesErr) throw feesErr;
+  if (logsErr) throw logsErr;
+
+  const allocationParams = inferPaymentAllocationParams(reservation ?? {}, logs);
+  const { feesPaid } = allocateReservationPayments({
+    payments: (payments ?? []) as ReservationPaymentRow[],
+    serviceFees: (feeRows ?? []) as ReservationServiceFeeRow[],
+    originalBaseAmount: allocationParams.originalBaseAmount,
+    extensionAmount: allocationParams.extensionAmount,
+    wasCreatedWithoutPayment: allocationParams.wasCreatedWithoutPayment,
+    extensionAddedAt: allocationParams.extensionAddedAt,
+  });
+
+  const paid = Math.round((feesPaid[fee.id] ?? 0) * 100) / 100;
+  const pending = Math.max(0, Math.round((feeTotal - paid) * 100) / 100);
   const isFullyPaid = feeTotal > 0 && pending < 0.02;
   const isPartiallyPaid = paid > 0.01 && !isFullyPaid;
 
@@ -72,10 +100,19 @@ export async function getLodgingParkingFeeBalance(
   };
 }
 
+export type ParkingSpotPaymentSyncResult = {
+  parkingReservationId: string | null;
+  payment_status: "pending" | "partial" | "paid";
+};
+
 /** Atualiza payment_status da vaga no mapa conforme pagamento da taxa na hospedagem. */
-export async function syncLinkedParkingSpotPaymentFromLodging(lodgingReservationId: string): Promise<void> {
+export async function syncLinkedParkingSpotPaymentFromLodging(
+  lodgingReservationId: string,
+): Promise<ParkingSpotPaymentSyncResult> {
   const parkingId = await findLinkedParkingReservation(lodgingReservationId);
-  if (!parkingId) return;
+  if (!parkingId) {
+    return { parkingReservationId: null, payment_status: "pending" };
+  }
 
   const balance = await getLodgingParkingFeeBalance(lodgingReservationId);
   let payment_status: "pending" | "partial" | "paid" = "pending";
@@ -84,6 +121,8 @@ export async function syncLinkedParkingSpotPaymentFromLodging(lodgingReservation
 
   const { error } = await supabase.from("reservations").update({ payment_status }).eq("id", parkingId);
   if (error) console.error("syncLinkedParkingSpotPaymentFromLodging:", error);
+
+  return { parkingReservationId: parkingId, payment_status };
 }
 
 export function isParkingSpotMapReservation(reservation: {

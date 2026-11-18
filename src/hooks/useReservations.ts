@@ -6,6 +6,7 @@ import { useEstablishment } from "@/contexts/EstablishmentContext";
 import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { logActivity, createReservationUpdateDescription } from "@/lib/activityLogger";
 import { useEffect } from "react";
+import { useEstablishmentReservationRealtime } from "@/hooks/useEstablishmentReservationRealtime";
 import { format } from "date-fns";
 import { recalculatePolicyAfterDateChange } from "@/utils/cancellationPolicyDateChange";
 import { recordProcessedRefund } from "@/services/financial/refundService";
@@ -1642,87 +1643,7 @@ export const useReservations = () => {
     },
   });
 
-  // Subscription em tempo real para mudanças nas reservas
-  useEffect(() => {
-    const establishmentId = getEstablishmentId();
-    if (!establishmentId) return;
-
-    // Canal para mudanças nas reservas
-    const reservationsChannel = supabase
-      .channel(`reservations:${establishmentId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*", // INSERT, UPDATE, DELETE
-          schema: "public",
-          table: "reservations",
-          filter: `establishment_id=eq.${establishmentId}`,
-        },
-        (payload) => {
-          console.log("🔄 Mudança detectada na tabela reservations:", payload.eventType);
-          // Invalidar queries para atualizar os dados
-          queryClient.invalidateQueries({ queryKey: ["reservations", establishmentId] });
-          queryClient.invalidateQueries({ queryKey: ["reservations"] });
-          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-          queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
-        }
-      )
-      .subscribe();
-
-    // Canal para mudanças nos pagamentos (afeta paid_amount e payment_status das reservas)
-    const paymentsChannel = supabase
-      .channel(`payments:${establishmentId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*", // INSERT, UPDATE, DELETE
-          schema: "public",
-          table: "payments",
-        },
-        async (payload) => {
-          console.log("💳 Mudança detectada na tabela payments:", payload.eventType);
-          
-          // Se for INSERT ou UPDATE, buscar a reserva relacionada e atualizar
-          if (payload.eventType === "INSERT" || payload.eventType === "UPDATE") {
-            const payment = payload.new as any;
-            if (payment?.reservation_id) {
-              // Recalcular paid_amount da reserva
-              const { data: payments } = await supabase
-                .from("payments")
-                .select("amount, notes")
-                .eq("reservation_id", payment.reservation_id);
-
-              const totalPaid = Math.max(
-                0,
-                (payments || []).reduce((sum: number, p: any) => {
-                  const amt = Number(p.amount || 0);
-                  const isRefund = /\[REFUND/i.test(p.notes || "") || amt < 0;
-                  return sum + (isRefund ? -Math.abs(amt) : amt);
-                }, 0),
-              );
-
-              // Atualizar paid_amount da reserva
-              await supabase
-                .from("reservations")
-                .update({ paid_amount: totalPaid })
-                .eq("id", payment.reservation_id);
-            }
-          }
-
-          // Invalidar queries para atualizar os dados
-          queryClient.invalidateQueries({ queryKey: ["reservations", establishmentId] });
-          queryClient.invalidateQueries({ queryKey: ["reservations"] });
-          queryClient.invalidateQueries({ queryKey: ["reservation_payments"] });
-        }
-      )
-      .subscribe();
-
-    // Cleanup: remover subscriptions quando o componente desmontar ou establishmentId mudar
-    return () => {
-      supabase.removeChannel(reservationsChannel);
-      supabase.removeChannel(paymentsChannel);
-    };
-  }, [selectedEstablishment?.id, queryClient]);
+  useEstablishmentReservationRealtime(selectedEstablishment?.id ?? getEstablishmentId());
 
   // Verificar e cancelar pré-reservas expiradas periodicamente
   useEffect(() => {
