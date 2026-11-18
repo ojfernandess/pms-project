@@ -109,7 +109,6 @@ export const SoldReservationsReport = () => {
           checkout_date,
           status,
           channel,
-          origin,
           total_amount,
           paid_amount,
           payment_status,
@@ -175,7 +174,6 @@ export const SoldReservationsReport = () => {
           status: String(r.status || ""),
           channel_origin: formatReservationChannelOrigin({
             channel: (r.channel as string) ?? null,
-            origin: (r.origin as string) ?? null,
             ota_reservations: ota
               ? [
                   {
