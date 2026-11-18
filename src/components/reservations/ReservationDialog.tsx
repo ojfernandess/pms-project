@@ -17,12 +17,12 @@ import {
   isCleaningFeeConfigured,
 } from "@/lib/cleaningFeeConfig";
 import {
-  attachParkingFeeToReservation,
   computeParkingFeeTotal,
   isParkingFeeConfigured,
   PARKING_FEE_KIND,
-  syncParkingSpotReservationForLodging,
 } from "@/lib/parkingFeeConfig";
+import { provisionParkingForLodgingReservation } from "@/lib/parkingReservationSync";
+import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { displayServiceFeeName, filterServiceFeesForReservation } from "@/lib/serviceFeeScope";
 import { ReservationQuoteSummary } from "@/components/reservations/ReservationQuoteSummary";
 import { useHotelSettings } from "@/hooks/useHotelSettings";
@@ -424,38 +424,35 @@ export const ReservationDialog = ({
     id: string;
     reservation_code?: string | null;
     establishment_id?: string | null;
+    client_id?: string | null;
+    guest_id?: string | null;
+    guest_name?: string | null;
   }) => {
-    if (!includeParkingInQuote || !parkingConfigured || !parkingFeeConfig?.serviceFeeId) {
+    if (!includeParkingInQuote || !parkingConfigured) {
       return;
     }
-    const nights = calculateNights(formData.checkin_date, formData.checkout_date);
-    const { amount, quantity } = computeParkingFeeTotal(parkingFeeConfig, nights);
+    const establishmentId =
+      created.establishment_id || getSelectedEstablishmentId() || "";
+    if (!establishmentId) return;
+
     try {
-      await attachParkingFeeToReservation({
-        reservationId: created.id,
-        serviceFeeId: parkingFeeConfig.serviceFeeId,
-        amount,
-        quantity,
-        billingMode: parkingFeeConfig.billingMode,
+      const result = await provisionParkingForLodgingReservation({
+        lodgingReservationId: created.id,
+        establishmentId,
+        buildingId: quoteCategoryBuildingId,
+        checkinDate: formData.checkin_date,
+        checkoutDate: formData.checkout_date,
+        clientId: created.client_id ?? formData.client_id,
+        guestId: created.guest_id ?? formData.guest_id ?? created.client_id,
+        guestName: created.guest_name ?? clientData.full_name ?? formData.guest_name ?? null,
+        adults: formData.adults,
+        children: formData.children,
+        lodgingReservationCode: created.reservation_code ?? undefined,
       });
-      if (parkingFeeConfig.parkingCategoryId) {
-        const establishmentId =
-          created.establishment_id || localStorage.getItem("selectedEstablishmentId") || "";
-        const sync = await syncParkingSpotReservationForLodging({
-          lodgingReservationId: created.id,
-          establishmentId,
-          parkingCategoryId: parkingFeeConfig.parkingCategoryId,
-          checkinDate: formData.checkin_date,
-          checkoutDate: formData.checkout_date,
-          clientId: formData.client_id,
-          guestName: clientData.full_name || formData.guest_name || undefined,
-          adults: formData.adults,
-          children: formData.children,
-          lodgingReservationCode: created.reservation_code ?? undefined,
-        });
-        if (sync.warning) {
-          toast.warning(sync.warning);
-        }
+      if (result.warning) {
+        toast.warning(result.warning);
+      } else if (result.parkingReservationId) {
+        toast.success("Estacionamento: taxa incluída e vaga reservada no mapa.");
       }
       queryClient.invalidateQueries({ queryKey: ["reservation_service_fees", created.id] });
       queryClient.invalidateQueries({ queryKey: ["reservations"] });

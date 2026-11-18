@@ -25,6 +25,7 @@ import {
   isPaymentRefundRecord,
 } from "@/lib/reservationUtils";
 import { syncLinkedParkingSpotPaymentFromLodging } from "@/lib/parkingPaymentSync";
+import { ensureParkingSpotIfLodgingHasFee } from "@/lib/parkingReservationSync";
 
 interface ReservationPaymentModalProps {
   open: boolean;
@@ -1182,9 +1183,10 @@ export function ReservationPaymentModal({
       void queryClient.invalidateQueries({ queryKey: ["reservations"], exact: false });
 
       try {
+        await ensureParkingSpotIfLodgingHasFee(reservation.id);
         await syncLinkedParkingSpotPaymentFromLodging(reservation.id);
       } catch (syncErr) {
-        console.error("Erro ao sincronizar pagamento da vaga de estacionamento:", syncErr);
+        console.error("Erro ao sincronizar estacionamento após pagamento:", syncErr);
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1400));
