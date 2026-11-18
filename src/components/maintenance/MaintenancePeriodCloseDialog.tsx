@@ -162,46 +162,52 @@ export function MaintenancePeriodCloseDialog({
           </div>
 
           {isActive && (
-            <DialogFooter className="shrink-0 flex-col gap-2 border-t border-slate-100 bg-slate-50/95 px-5 py-4 pb-5 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-2 sm:space-x-0">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full sm:w-auto"
-                onClick={() => onOpenChange(false)}
-                disabled={isClosingTicket}
-              >
-                Voltar
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full border-red-200 text-red-800 hover:bg-red-50 sm:w-auto"
-                disabled={isClosingTicket}
-                onClick={() => {
-                  if (!resolutionNotes.trim()) {
-                    toast.error("Informe o motivo da resolução antes de cancelar.");
-                    return;
-                  }
-                  setConfirmCancelOpen(true);
-                }}
-              >
-                <XCircle className="mr-1.5 h-4 w-4 shrink-0" />
-                <span className="truncate">Cancelar manutenção</span>
-              </Button>
-              <Button
-                type="button"
-                className="w-full bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
-                disabled={isClosingTicket}
-                onClick={() => validateAndSubmit("completed")}
-              >
-                {isClosingTicket ? (
-                  <Loader2 className="mr-1.5 h-4 w-4 shrink-0 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="mr-1.5 h-4 w-4 shrink-0" />
-                )}
-                <span className="truncate">Concluir manutenção</span>
-              </Button>
-            </DialogFooter>
+            <div className="shrink-0 border-t border-slate-100 bg-slate-50/95 px-5 py-4 pb-5">
+              <div className="flex flex-col gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => onOpenChange(false)}
+                  disabled={isClosingTicket}
+                >
+                  Voltar
+                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-auto min-h-10 w-full border-red-200 px-2 py-2 text-xs leading-snug text-red-800 hover:bg-red-50 sm:text-sm"
+                    disabled={isClosingTicket}
+                    title="Cancelar manutenção"
+                    onClick={() => {
+                      if (!resolutionNotes.trim()) {
+                        toast.error("Informe o motivo da resolução antes de cancelar.");
+                        return;
+                      }
+                      setConfirmCancelOpen(true);
+                    }}
+                  >
+                    <XCircle className="h-4 w-4 shrink-0" />
+                    <span>Cancelar</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    className="h-auto min-h-10 w-full bg-emerald-600 px-2 py-2 text-xs leading-snug text-white hover:bg-emerald-700 sm:text-sm"
+                    disabled={isClosingTicket}
+                    title="Concluir manutenção"
+                    onClick={() => validateAndSubmit("completed")}
+                  >
+                    {isClosingTicket ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    )}
+                    <span>Concluir</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
           )}
         </DialogContent>
       </Dialog>
