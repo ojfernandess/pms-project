@@ -50,6 +50,8 @@ const ChannelManager = () => {
     isSyncingAiosellReservations,
     syncChannexReservations,
     isSyncingChannexReservations,
+    syncBuklyReservations,
+    isSyncingBuklyReservations,
   } = useChannelManager();
 
   /** Canais ativos — inativos não aparecem em «Canais OTA Configurados». */
@@ -109,17 +111,21 @@ const ChannelManager = () => {
       return;
     }
     const channel = channels.find((c: { id: string }) => c.id === channelId);
-    const check =
-      channel?.channel_manager_type === "channex"
-        ? validateChannexChannelForReservationsPull(channel)
-        : validateAiosellChannelForReservationsPull(channel);
-    if (!check.ok) {
-      toast.error(check.message);
-      return;
+    if (channel?.channel_manager_type !== "bukly") {
+      const check =
+        channel?.channel_manager_type === "channex"
+          ? validateChannexChannelForReservationsPull(channel)
+          : validateAiosellChannelForReservationsPull(channel);
+      if (!check.ok) {
+        toast.error(check.message);
+        return;
+      }
     }
     try {
       if (channel?.channel_manager_type === "channex") {
         await syncChannexReservations({ channelId, establishmentId: est });
+      } else if (channel?.channel_manager_type === "bukly") {
+        await syncBuklyReservations({ channelId, establishmentId: est });
       } else {
         await syncAiosellReservations({ channelId, establishmentId: est, pull: true });
       }
@@ -201,7 +207,11 @@ const ChannelManager = () => {
                     onSync={handleSync}
                     isSyncing={isSyncing}
                     onSyncReservations={handleSyncAiosellReservations}
-                    isSyncingReservations={isSyncingAiosellReservations || isSyncingChannexReservations}
+                    isSyncingReservations={
+                      isSyncingAiosellReservations ||
+                      isSyncingChannexReservations ||
+                      isSyncingBuklyReservations
+                    }
                   />
                 ))}
               </div>

@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { toast } from "sonner";
 import { invokeBuklySync } from "@/lib/buklySyncInvoke";
+import { invokeBuklyReservations } from "@/lib/buklyReservationsInvoke";
 import { invokeAiosellSync } from "@/lib/aiosellSyncInvoke";
 import { getAiosellSyncMappingDebug } from "@/lib/aiosellSyncSummary";
 import { invokeAiosellReservationsSync } from "@/lib/aiosellReservationsSyncInvoke";
@@ -511,6 +512,19 @@ export const useChannelManager = () => {
     },
   });
 
+  const syncBuklyReservationsMutation = useMutation({
+    mutationFn: async (args: { channelId: string; establishmentId: string }) => {
+      return invokeBuklyReservations(args.channelId, args.establishmentId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ota_reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Erro ao importar reservas Bukly");
+    },
+  });
+
   const syncChannexReservationsMutation = useMutation({
     mutationFn: async (args: { channelId: string; establishmentId: string }) => {
       return invokeChannexReservationsSync(args.channelId, args.establishmentId);
@@ -557,6 +571,8 @@ export const useChannelManager = () => {
     isSyncingAiosellReservations: syncAiosellReservationsMutation.isPending,
     syncChannexReservations: syncChannexReservationsMutation.mutateAsync,
     isSyncingChannexReservations: syncChannexReservationsMutation.isPending,
+    syncBuklyReservations: syncBuklyReservationsMutation.mutateAsync,
+    isSyncingBuklyReservations: syncBuklyReservationsMutation.isPending,
     isCreating: createChannel.isPending || createChannelPricing.isPending,
   };
 };

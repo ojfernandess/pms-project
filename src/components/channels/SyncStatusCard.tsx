@@ -81,7 +81,8 @@ export const SyncStatusCard = ({
           </div>
           <p>
             Push OTA XML (tarifas + disponibilidade) via <code className="text-[10px]">bukly-sync</code>.
-            Mapeie InvTypeCode / RatePlanCode em Tarifas por canal.
+            Reservas: pull <code className="text-[10px]">OTA_ReadRQ</code> Undelivered + confirmação{" "}
+            <code className="text-[10px]">OTA_NotifReportRQ</code>. Mapeie InvTypeCode / RatePlanCode em Tarifas por canal.
           </p>
           {channel.bukly_last_sync_at && (
             <p className="mt-1">Último sync: {formatDate(channel.bukly_last_sync_at)}</p>
@@ -144,7 +145,9 @@ export const SyncStatusCard = ({
             <RefreshCw className="h-4 w-4 mr-2" />
             Tarifas / inventário
           </Button>
-          {(channel.channel_manager_type === "aiosell" || channel.channel_manager_type === "channex") &&
+          {(channel.channel_manager_type === "aiosell" ||
+            channel.channel_manager_type === "channex" ||
+            channel.channel_manager_type === "bukly") &&
             onSyncReservations && (
             <Button
               variant="secondary"

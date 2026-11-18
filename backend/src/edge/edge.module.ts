@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { DataModule } from "../data/data.module";
+import { BuklyReservationsService } from "./bukly-reservations.service";
 import { BuklySyncService } from "./bukly-sync.service";
 import { ChannelTemplatesService } from "./channel-templates.service";
 import { CheckinChargeScheduleService } from "./checkin-charge-schedule.service";
@@ -52,6 +53,7 @@ import { PlatformDomainsService } from "./platform-domains.service";
     DailyDigestService,
     EmployeeAuthService,
     BuklySyncService,
+    BuklyReservationsService,
     CompanyPublicApiService,
     FnrhService,
     StripeWebhookService,

@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { ApplyDynamicPricingRulesService } from "./apply-dynamic-pricing-rules.service";
 import { AiosellReservationsService } from "./aiosell-reservations.service";
 import { AiosellSyncService } from "./aiosell-sync.service";
+import { BuklyReservationsService } from "./bukly-reservations.service";
 import { BuklySyncService } from "./bukly-sync.service";
 import { ChannexOtaService } from "./channex-ota.service";
 import { ChannexReservationsService } from "./channex-reservations.service";
@@ -49,6 +50,7 @@ export class FunctionsCompatController {
     private readonly dailyDigest: DailyDigestService,
     private readonly employeeAuth: EmployeeAuthService,
     private readonly bukly: BuklySyncService,
+    private readonly buklyReservations: BuklyReservationsService,
     private readonly companyApi: CompanyPublicApiService,
     private readonly fnrh: FnrhService,
     private readonly stripeWebhook: StripeWebhookService,
@@ -232,6 +234,11 @@ export class FunctionsCompatController {
   @Post("bukly-sync")
   async buklySync(@Body() body: unknown, @Res() res: Response) {
     await this.reply(res, () => this.bukly.run(body));
+  }
+
+  @Post("bukly-reservations")
+  async buklyReservations(@Body() body: unknown, @Res() res: Response) {
+    await this.reply(res, () => this.buklyReservations.run(body));
   }
 
   @All("company-public-api")
