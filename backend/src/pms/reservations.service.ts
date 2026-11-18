@@ -38,12 +38,7 @@ export class ReservationsService {
       orderBy: [{ checkin_date: "asc" }, { reservation_code: "asc" }],
     });
 
-    return rows.map((row) => ({
-      ...row,
-      identification_number: row.identification_number.toString(),
-      total_amount: row.total_amount.toString(),
-      paid_amount: row.paid_amount.toString(),
-    }));
+    return rows.map((row) => serializeReservationRow(row));
   }
 
   async createWithLock(body: {
@@ -102,7 +97,10 @@ export class ReservationsService {
         row: { id: roomId, establishment_id: current.establishment_id, status: room_status.occupied },
       });
     }
-    return { ...row, room_id: roomId || current.room_id };
+    return {
+      ...serializeReservationRow(row),
+      room_id: roomId || current.room_id,
+    };
   }
 
   async checkOut(user: SessionUser, reservationId: string) {
@@ -130,7 +128,7 @@ export class ReservationsService {
         row: { id: current.room_id, establishment_id: current.establishment_id, status: room_status.cleaning },
       });
     }
-    return updated;
+    return serializeReservationRow(updated);
   }
 
   private async requireReservation(user: SessionUser, reservationId: string) {
@@ -142,6 +140,21 @@ export class ReservationsService {
     await this.auth.assertEstablishment(user, current.establishment_id);
     return current;
   }
+}
+
+function serializeReservationRow<
+  T extends {
+    identification_number: bigint;
+    total_amount: { toString(): string };
+    paid_amount: { toString(): string };
+  },
+>(row: T) {
+  return {
+    ...row,
+    identification_number: row.identification_number.toString(),
+    total_amount: row.total_amount.toString(),
+    paid_amount: row.paid_amount.toString(),
+  };
 }
 
 function parseDateOnly(value: string): Date {

@@ -435,13 +435,17 @@ const ReservationDetails = () => {
         }
         
         const documentsWithUrls = await Promise.all(
-          (documentsData || []).map(async (doc: any) =>
-            resolveDocumentFields(doc, [
+          (documentsData || []).map(async (doc: any) => {
+            const normalized = {
+              ...doc,
+              selfie_url: doc.selfie_url || doc.document_selfie_url || null,
+            };
+            return resolveDocumentFields(normalized, [
               "document_front_url",
               "document_back_url",
               "selfie_url",
-            ])
-          )
+            ]);
+          })
         );
         
         // Pré check-in: mesclar web_checkin.guest_data.guests[] (FNRH/dados do fluxo) com as linhas

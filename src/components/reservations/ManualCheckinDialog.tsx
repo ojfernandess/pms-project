@@ -35,6 +35,15 @@ import { useIbgeMunicipios } from "@/hooks/useIbgeMunicipios";
  */
 const CHECKIN_FLOW_TYPE = "manual" as const;
 
+type DocumentSlot = "front" | "back" | "selfie";
+
+function documentStorageFieldKey(
+  documentType: DocumentSlot,
+): "document_front_url" | "document_back_url" | "selfie_url" {
+  if (documentType === "selfie") return "selfie_url";
+  return documentType === "back" ? "document_back_url" : "document_front_url";
+}
+
 const DEFAULT_FNRH_GUEST_FIELDS = {
   fnrh_motivo_viagem_id: "",
   fnrh_meio_transporte_id: "",
@@ -210,21 +219,6 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
     shouldSearchPreviousData ? mainGuestCpf : null,
     shouldSearchPreviousData ? mainGuestDocumentNumber : null
   );
-
-  // Função auxiliar para obter signed URL
-  const getSignedUrl = async (filePath: string): Promise<string> => {
-    try {
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .createSignedUrl(filePath, 3600);
-      
-      if (error) throw error;
-      return data.signedUrl;
-    } catch (error) {
-      console.error("Erro ao gerar signed URL:", error);
-      return filePath; // Retornar o caminho original se falhar
-    }
-  };
 
   // Obter capacidade da categoria (seguindo mesma lógica do check-in web)
   const maxCapacity = reservation?.room_categories?.capacity_adults !== undefined && reservation?.room_categories?.capacity_adults !== null
@@ -659,7 +653,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
 
   const handleFileUpload = async (
     guestIndex: number,
-    documentType: "front" | "back" | "selfie",
+    documentType: DocumentSlot,
     file: File
   ) => {
     const guest = guests[guestIndex];
@@ -716,18 +710,19 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
         (d) => d.guest_name === guest.name && d.document_type === guest.document_type
       );
 
+      const fieldKey = documentStorageFieldKey(documentType);
       const updatedDocuments = [...documents];
       if (docIndex >= 0) {
         updatedDocuments[docIndex] = {
           ...updatedDocuments[docIndex],
-          [`document_${documentType}_url`]: fileUrl,
+          [fieldKey]: fileUrl,
         };
       } else {
         updatedDocuments.push({
           guest_name: guest.name,
           document_type: guest.document_type,
           document_number: guest.document_number || guest.cpf,
-          [`document_${documentType}_url`]: fileUrl,
+          [fieldKey]: fileUrl,
         });
       }
 
@@ -752,7 +747,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
     return age < 18;
   };
 
-  const handleRemoveDocument = (guestIndex: number, documentType: "front" | "back" | "selfie") => {
+  const handleRemoveDocument = (guestIndex: number, documentType: DocumentSlot) => {
     const guest = guests[guestIndex];
     if (!guest) return;
 
@@ -762,7 +757,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
 
     if (docIndex >= 0) {
       const updatedDocuments = [...documents];
-      delete updatedDocuments[docIndex][`document_${documentType}_url`];
+      delete updatedDocuments[docIndex][documentStorageFieldKey(documentType)];
       setDocuments(updatedDocuments.filter(d => 
         d.document_front_url || d.document_back_url || d.selfie_url
       ));
@@ -932,34 +927,20 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
       });
 
       // 3. Salvar documentos (se houver)
-      const validDocuments = documents.filter(doc => 
-        doc.document_front_url || doc.document_back_url || doc.selfie_url
-      );
-      
-      if (validDocuments.length > 0) {
-        // Gerar signed URLs para os documentos antes de salvar
-        const documentsToSave = await Promise.all(
-          validDocuments.map(async (doc) => {
-            const frontUrl = doc.document_front_url 
-              ? (doc.document_front_url.startsWith('http') ? doc.document_front_url : await getSignedUrl(doc.document_front_url))
-              : null;
-            const backUrl = doc.document_back_url 
-              ? (doc.document_back_url.startsWith('http') ? doc.document_back_url : await getSignedUrl(doc.document_back_url))
-              : null;
-            const selfieUrl = doc.selfie_url 
-              ? (doc.selfie_url.startsWith('http') ? doc.selfie_url : await getSignedUrl(doc.selfie_url))
-              : null;
+      const validDocuments = documents.filter((doc) => {
+        const selfie = doc.selfie_url || doc.document_selfie_url;
+        return doc.document_front_url || doc.document_back_url || selfie;
+      });
 
-            return {
-              guest_name: doc.guest_name,
-              document_type: doc.document_type,
-              document_number: doc.document_number,
-              document_front_url: frontUrl,
-              document_back_url: backUrl,
-              selfie_url: selfieUrl,
-            };
-          })
-        );
+      if (validDocuments.length > 0) {
+        const documentsToSave = validDocuments.map((doc) => ({
+          guest_name: doc.guest_name,
+          document_type: doc.document_type,
+          document_number: doc.document_number,
+          document_front_url: doc.document_front_url || null,
+          document_back_url: doc.document_back_url || null,
+          selfie_url: doc.selfie_url || doc.document_selfie_url || null,
+        }));
 
         await saveDocuments.mutateAsync({
           token: token!,
@@ -1874,7 +1855,7 @@ export function ManualCheckinDialog({ open, onOpenChange, reservation }: ManualC
                         const doc = documents.find(
                           (d) => d.guest_name === guest.name && d.document_type === guest.document_type
                         );
-                        const url = doc?.[`document_${docType}_url`];
+                        const url = doc?.[documentStorageFieldKey(docType)];
                         const key = `${guestIndex}-${docType}`;
                         const isUploading = uploading[key];
 
