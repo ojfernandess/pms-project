@@ -119,7 +119,14 @@ export async function syncLinkedParkingSpotPaymentFromLodging(
   if (balance?.isFullyPaid) payment_status = "paid";
   else if (balance?.isPartiallyPaid) payment_status = "partial";
 
-  const { error } = await supabase.from("reservations").update({ payment_status }).eq("id", parkingId);
+  const updatePayload: { payment_status: typeof payment_status; status?: "confirmed" } = {
+    payment_status,
+  };
+  if (payment_status === "paid") {
+    updatePayload.status = "confirmed";
+  }
+
+  const { error } = await supabase.from("reservations").update(updatePayload).eq("id", parkingId);
   if (error) console.error("syncLinkedParkingSpotPaymentFromLodging:", error);
 
   return { parkingReservationId: parkingId, payment_status };
@@ -161,6 +168,22 @@ export function effectiveMapPaidAmount(reservation: {
 }
 
 /** Cor no mapa de vagas: deriva apenas do status sincronizado (evita `0 >= 0` como “pago”). */
+/**
+ * Status de pagamento para UI (quick view, detalhes) em vagas cobradas na hospedagem.
+ * Retorna null se a reserva segue a regra financeira padrão.
+ */
+export function parkingSpotUiPaymentStatus(
+  reservation: Parameters<typeof isParkingSpotMapReservation>[0],
+): "unpaid" | "pending" | "confirmed" | null {
+  if (!isParkingSpotMapReservation(reservation) || Number(reservation.total_amount || 0) > 0) {
+    return null;
+  }
+  const tone = parkingSpotMapPaymentTone(reservation);
+  if (tone === "paid") return "confirmed";
+  if (tone === "partial") return "pending";
+  return "unpaid";
+}
+
 export function parkingSpotMapPaymentTone(reservation: Parameters<typeof effectiveMapPaidAmount>[0]): "paid" | "partial" | "unpaid" {
   if (!isParkingSpotMapReservation(reservation) || Number(reservation.total_amount || 0) > 0) {
     return "unpaid";

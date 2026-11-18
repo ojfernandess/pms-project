@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PreregistrationExpiryTimer } from "@/components/reservations/PreregistrationExpiryTimer";
+import { isParkingSpotMapReservation, parkingSpotUiPaymentStatus } from "@/lib/parkingPaymentSync";
 
 interface ReservationQuickViewModalProps {
   open: boolean;
@@ -80,6 +81,9 @@ export function ReservationQuickViewModal({
     if (['blocked', 'cancelled', 'checkedin', 'checkedout', 'noshow', 'preregistration'].includes(reservation.status)) {
       return reservation.status;
     }
+
+    const parkingUi = parkingSpotUiPaymentStatus(reservation);
+    if (parkingUi) return parkingUi;
 
     const paidAmount = Number(reservation.paid_amount || 0);
     const baseTotalAmount = Number(reservation.total_amount || 0);
@@ -188,14 +192,17 @@ export function ReservationQuickViewModal({
                 Valor Total
               </label>
               <div className="text-sm font-bold text-slate-900 border border-slate-200 rounded-md p-2.5 bg-slate-50">
-                {(() => {
-                  const baseTotalAmount = Number(reservation.total_amount || 0);
-                  const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum: number, fee: any) => {
-                    return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
-                  }, 0);
-                  const totalWithFees = baseTotalAmount + serviceFeesTotal;
-                  return `R$ ${totalWithFees.toFixed(2).replace('.', ',')}`;
-                })()}
+                {isParkingSpotMapReservation(reservation) && Number(reservation.total_amount || 0) === 0
+                  ? "Cobrança na hospedagem"
+                  : (() => {
+                      const baseTotalAmount = Number(reservation.total_amount || 0);
+                      const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce(
+                        (sum: number, fee: any) => sum + (Number(fee.amount || 0) * Number(fee.quantity || 1)),
+                        0,
+                      );
+                      const totalWithFees = baseTotalAmount + serviceFeesTotal;
+                      return `R$ ${totalWithFees.toFixed(2).replace(".", ",")}`;
+                    })()}
               </div>
             </div>
           </div>
@@ -229,19 +236,20 @@ export function ReservationQuickViewModal({
                   Editar Responsável
                 </Button>
               )}
-              {onLaunchPayment && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => {
-                    onLaunchPayment();
-                    onOpenChange(false);
-                  }}
-                >
-                  <CreditCard className="h-4 w-4 mr-2" />
-                  Lançar Pagamento
-                </Button>
-              )}
+              {onLaunchPayment &&
+                !(isParkingSpotMapReservation(reservation) && Number(reservation.total_amount || 0) === 0) && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      onLaunchPayment();
+                      onOpenChange(false);
+                    }}
+                  >
+                    <CreditCard className="h-4 w-4 mr-2" />
+                    Lançar Pagamento
+                  </Button>
+                )}
             </div>
 
             {reservation.status === "preregistration" && (

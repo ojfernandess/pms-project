@@ -32,7 +32,11 @@ import { ReservationPaymentModal } from "./ReservationPaymentModal";
 import { BlockViewDialog } from "./BlockViewDialog";
 import { RatePlansModal } from "./RatePlansModal";
 import { toast } from "sonner";
-import { effectiveMapPaidAmount, isParkingSpotMapReservation, parkingSpotMapPaymentTone } from "@/lib/parkingPaymentSync";
+import {
+  effectiveMapPaidAmount,
+  isParkingSpotMapReservation,
+  parkingSpotMapPaymentTone,
+} from "@/lib/parkingPaymentSync";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1233,6 +1237,11 @@ export const ReservationCalendarMap = ({
       return;
     }
 
+    if (isParkingSpotMapReservation(reservation)) {
+      toast.info("Reservas de estacionamento não podem ser trocadas pelo mapa");
+      return;
+    }
+
     // Se já há uma reserva selecionada e é a mesma, deselecionar
     if (reservationForSwap?.id === reservation.id) {
       setReservationForSwap(null);
@@ -1941,6 +1950,12 @@ export const ReservationCalendarMap = ({
       if (["blocked", "cancelled", "checkedout"].includes(reservation1.status) ||
           ["blocked", "cancelled", "checkedout"].includes(reservation2.status)) {
         toast.error("Uma das reservas não pode ser trocada");
+        setReservationForSwap(null);
+        return;
+      }
+
+      if (isParkingSpotMapReservation(reservation1) || isParkingSpotMapReservation(reservation2)) {
+        toast.error("Reservas de estacionamento não podem ser trocadas pelo mapa");
         setReservationForSwap(null);
         return;
       }

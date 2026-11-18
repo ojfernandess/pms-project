@@ -61,7 +61,10 @@ import {
 } from "@/lib/parkingFeeConfig";
 import { CLEANING_FEE_KIND } from "@/lib/cleaningFeeConfig";
 import { ParkingLinkedBillingCard } from "@/components/reservations/ParkingLinkedBillingCard";
-import { syncLinkedParkingSpotPaymentFromLodging } from "@/lib/parkingPaymentSync";
+import {
+  parkingSpotUiPaymentStatus,
+  syncLinkedParkingSpotPaymentFromLodging,
+} from "@/lib/parkingPaymentSync";
 import { patchReservationsInQueryCache, refreshReservationQueries } from "@/lib/reservationQuerySync";
 import { useServiceFees } from "@/hooks/useServiceFees";
 import { displayServiceFeeName, filterServiceFeesForReservation } from "@/lib/serviceFeeScope";
@@ -669,6 +672,30 @@ const ReservationDetails = () => {
     const kind = (reservation?.room_categories as { category_kind?: string } | null)?.category_kind;
     return kind === "parking" && !!reservation?.lodging_reservation_id;
   }, [reservation?.room_categories, reservation?.lodging_reservation_id]);
+
+  useEffect(() => {
+    if (!isParkingLodgingLinked || !reservation?.lodging_reservation_id || !reservation?.id) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const parkingSync = await syncLinkedParkingSpotPaymentFromLodging(reservation.lodging_reservation_id!);
+        if (cancelled || !parkingSync.parkingReservationId) return;
+        const patch: Record<string, unknown> = { payment_status: parkingSync.payment_status };
+        if (parkingSync.payment_status === "paid") {
+          patch.status = "confirmed";
+        }
+        patchReservationsInQueryCache(queryClient, [{ id: parkingSync.parkingReservationId, patch }]);
+        await refetch();
+      } catch (err) {
+        console.error("Erro ao sincronizar pagamento da vaga:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isParkingLodgingLinked, reservation?.id, reservation?.lodging_reservation_id, queryClient, refetch]);
 
   const openServiceFeeDialog = (
     fee: { id: string; name: string; description?: string; service_kind?: string | null },
@@ -1969,6 +1996,7 @@ const ReservationDetails = () => {
   };
 
   const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+    unpaid: { label: "Não Pago", variant: "destructive" },
     pending: { label: "Pendente", variant: "secondary" },
     confirmed: { label: "Confirmada", variant: "default" },
     checkedin: { label: "Check-in Realizado", variant: "default" },
@@ -2009,7 +2037,23 @@ const ReservationDetails = () => {
     );
   }
 
-  const status = statusConfig[reservation.status] || statusConfig.pending;
+  const headerStatusKey = (() => {
+    const nonPaymentStatuses = [
+      "blocked",
+      "cancelled",
+      "checkedin",
+      "checkedout",
+      "noshow",
+      "preregistration",
+    ];
+    if (nonPaymentStatuses.includes(reservation.status)) {
+      return reservation.status;
+    }
+    const parkingUi = parkingSpotUiPaymentStatus(reservation);
+    if (parkingUi) return parkingUi;
+    return reservation.status;
+  })();
+  const status = statusConfig[headerStatusKey] || statusConfig.pending;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50">
@@ -3019,13 +3063,33 @@ const ReservationDetails = () => {
               </div>
               <h2 className="text-xl font-semibold text-slate-900">Resumo Financeiro</h2>
               {(() => {
-                // Verificar se há valor pendente baseado no cálculo real, não apenas no payment_status
-                // Isso garante que mesmo se payment_status não estiver atualizado, a UI mostra corretamente
+                if (isParkingLodgingLinked) {
+                  const ps = String(reservation.payment_status ?? "pending").toLowerCase();
+                  if (ps === "paid" || ps === "pago") {
+                    return (
+                      <Badge className="ml-auto px-3 py-1 bg-green-100 text-green-800 border-0 rounded-full font-medium">
+                        Taxa paga na hospedagem
+                      </Badge>
+                    );
+                  }
+                  if (ps === "partial" || ps === "parcial") {
+                    return (
+                      <Badge className="ml-auto px-3 py-1 bg-amber-100 text-amber-800 border-0 rounded-full font-medium">
+                        Pagamento parcial na hospedagem
+                      </Badge>
+                    );
+                  }
+                  return (
+                    <Badge className="ml-auto px-3 py-1 bg-amber-100 text-amber-800 border-0 rounded-full font-medium">
+                      Taxa pendente na hospedagem
+                    </Badge>
+                  );
+                }
+
                 const paidAmount = Number(reservation.paid_amount || 0);
                 const remainingAmount = Math.max(0, totalWithFees - paidAmount);
                 const hasPendingAmount = remainingAmount > 0;
-                
-                // Mostrar badge apenas se realmente houver valor pendente
+
                 return hasPendingAmount ? (
                   <Badge className="ml-auto px-3 py-1 bg-amber-100 text-amber-800 border-0 rounded-full font-medium">
                     Pagamento Pendente
@@ -3037,6 +3101,12 @@ const ReservationDetails = () => {
                 ) : null;
               })()}
             </div>
+            {isParkingLodgingLinked ? (
+              <p className="text-sm text-slate-600 mb-2">
+                Esta vaga não possui cobrança própria no PMS. Valores e pagamentos da taxa de estacionamento ficam na
+                reserva de hospedagem vinculada (cartão acima).
+              </p>
+            ) : (
             <div className="grid grid-cols-3 gap-6 mb-6">
               <div className="p-6 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100/50 border border-blue-200 col-span-1">
                 <Label className="text-sm font-medium text-slate-600 mb-2 block">Valor Total</Label>
@@ -3111,9 +3181,11 @@ const ReservationDetails = () => {
                 </div>
               </div>
             </div>
+            )}
             
             {/* Cupom de Desconto Aplicado */}
-            {reservation?.discount_coupons && typeof reservation.discount_coupons === 'object' && !Array.isArray(reservation.discount_coupons) && (() => {
+            {!isParkingLodgingLinked &&
+            reservation?.discount_coupons && typeof reservation.discount_coupons === 'object' && !Array.isArray(reservation.discount_coupons) && (() => {
               const coupon = reservation.discount_coupons as any;
               const baseTotal = Number(reservation?.total_amount || 0);
               const feesTotal = reservationServiceFees.reduce((sum: number, fee: any) => {
@@ -3247,16 +3319,21 @@ const ReservationDetails = () => {
                 <DollarSign className="h-5 w-5" />
                 Pagamentos
               </h2>
-              <Button
-                onClick={() => setPaymentModalOpen(true)}
-                className="gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                Lançar Pagamento
-              </Button>
+              {!isParkingLodgingLinked && (
+                <Button onClick={() => setPaymentModalOpen(true)} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Lançar Pagamento
+                </Button>
+              )}
             </div>
+            {isParkingLodgingLinked ? (
+              <p className="text-sm text-muted-foreground">
+                Pagamentos do estacionamento são lançados na reserva de hospedagem vinculada. Use o link no cartão de
+                estacionamento no passo Informações.
+              </p>
+            ) : null}
             {/* Lista de pagamentos */}
-            {payments && payments.length > 0 ? (
+            {!isParkingLodgingLinked && payments && payments.length > 0 ? (
               <div className="space-y-2">
                 {payments.map((payment: any, index: number) => {
                   const isRefund = isPaymentRefundRecord(payment);
@@ -3351,11 +3428,11 @@ const ReservationDetails = () => {
                   );
                 })}
               </div>
-            ) : (
+            ) : !isParkingLodgingLinked ? (
               <div className="text-sm text-muted-foreground text-center py-4">
                 Nenhum pagamento lançado
               </div>
-            )}
+            ) : null}
           </Card>
 
           {/* Taxas / Consumo */}
