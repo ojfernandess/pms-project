@@ -88,6 +88,11 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/parking_service.sql ]
     || echo "WARN: parking_service.sql falhou" >&2
 fi
 
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/maintenance_ticket_period.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/maintenance_ticket_period.sql \
+    || echo "WARN: maintenance_ticket_period.sql falhou" >&2
+fi
+
 # AR/AP reestruturado (fases 1–6): Postgres no deploy — não supabase db push
 if [ "${FINANCIAL_AR_AP_MIGRATION_ON_START:-true}" = "true" ] \
   && [ -n "$PSQL_DATABASE_URL" ] \
