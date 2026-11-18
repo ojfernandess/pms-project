@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
+import { useEstablishment } from "@/contexts/EstablishmentContext";
+import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { Car, ExternalLink, Receipt } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +17,14 @@ type Props = {
 };
 
 export function ParkingLinkedBillingCard({ parkingReservationId, lodgingReservationId }: Props) {
+  const { establishmentId: establishmentIdFromParams } = useParams<{ establishmentId?: string }>();
+  const { selectedEstablishment } = useEstablishment();
+  const establishmentRouteId =
+    establishmentIdFromParams ||
+    selectedEstablishment?.numeric_id?.toString() ||
+    getSelectedEstablishmentId() ||
+    "";
+
   const { data, isLoading } = useQuery({
     queryKey: ["parking_linked_billing", lodgingReservationId, parkingReservationId],
     queryFn: async () => {
@@ -72,13 +82,17 @@ export function ParkingLinkedBillingCard({ parkingReservationId, lodgingReservat
             <div className="text-sm space-y-1">
               <p>
                 <span className="text-muted-foreground">Hospedagem vinculada:</span>{" "}
-                <Link
-                  to={`/reservations/${lodging.reservation_code}`}
-                  className="font-mono text-blue-700 hover:underline inline-flex items-center gap-1"
-                >
-                  {lodging.reservation_code}
-                  <ExternalLink className="h-3 w-3" />
-                </Link>
+                {establishmentRouteId && lodging.reservation_code ? (
+                  <Link
+                    to={`/${establishmentRouteId}/reservas/${lodging.reservation_code}`}
+                    className="font-mono text-blue-700 hover:underline inline-flex items-center gap-1"
+                  >
+                    {lodging.reservation_code}
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
+                ) : (
+                  <span className="font-mono font-medium">{lodging.reservation_code}</span>
+                )}
                 {lodging.guest_name ? <span className="text-muted-foreground"> · {lodging.guest_name}</span> : null}
               </p>
               <p className="text-xs text-muted-foreground">
