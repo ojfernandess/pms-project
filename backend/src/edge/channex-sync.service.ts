@@ -4,6 +4,12 @@ import { ConfigService } from "@nestjs/config";
 import { AuthService } from "../auth/auth.service";
 import { StaffIdentityService } from "../auth/staff-identity.service";
 import { PrismaService } from "../prisma/prisma.service";
+import {
+  baseSellableRoomsByCategory,
+  bookedCountFromOccupiedMap,
+  buildOccupiedRoomsByCategoryDate,
+  categoryDateKey,
+} from "./channel-availability-blocks";
 
 const RATE_CALENDAR_PAGE_SIZE = 1000;
 const DYNAMIC_PAGE_SIZE = 1000;
@@ -123,7 +129,7 @@ export class ChannexSyncService {
       const futureDate = future.toISOString().slice(0, 10);
 
       const rateCalendar = await this.fetchAllRateCalendar(establishmentId, today, futureDate);
-      const [mappingRows, rooms, roomCategories, reservations, hotelSettings] = await Promise.all([
+      const [mappingRows, rooms, roomCategories, reservations, maintenanceTickets, hotelSettings] = await Promise.all([
         this.prisma.channel_pricing.findMany({
           where: { ota_channel_id: channelId, is_active: true },
           select: {
@@ -149,7 +155,28 @@ export class ChannexSyncService {
             checkout_date: { gte: utcDay(today) },
             checkin_date: { lte: utcDay(futureDate) },
           },
-          select: { category_id: true, room_id: true, checkin_date: true, checkout_date: true, status: true, channel: true },
+          select: {
+            id: true,
+            category_id: true,
+            room_id: true,
+            checkin_date: true,
+            checkout_date: true,
+            status: true,
+            channel: true,
+          },
+        }),
+        this.prisma.maintenance_tickets.findMany({
+          where: {
+            establishment_id: establishmentId,
+            status: { in: ["open", "in_progress"] },
+          },
+          select: {
+            room_id: true,
+            maintenance_start_date: true,
+            maintenance_end_date: true,
+            opened_at: true,
+            status: true,
+          },
         }),
         this.prisma.hotel_settings
           .findFirst({
@@ -169,18 +196,45 @@ export class ChannexSyncService {
         if (categoryId && date) tariffCategoryDateKeys.add(`${categoryId}::${date}`);
       }
 
-      const roomAvailabilityByCategory = new Map<string, number>();
-      for (const room of rooms) {
-        const categoryId = String(room.category_id ?? "");
-        if (!categoryId) continue;
-        const status = String(room.status ?? "").toLowerCase();
-        const isBlocked = room.is_blocked === true;
-        const isUnavailable = isBlocked || status === "maintenance" || status === "blocked";
-        const current = roomAvailabilityByCategory.get(categoryId) ?? 0;
-        roomAvailabilityByCategory.set(categoryId, current + (isUnavailable ? 0 : 1));
-      }
+      const roomAvailabilityByCategory = baseSellableRoomsByCategory(
+        rooms.map((room) => ({
+          id: String(room.id),
+          category_id: room.category_id ? String(room.category_id) : null,
+          is_blocked: room.is_blocked,
+        })),
+      );
+
+      const occupiedByCategoryDate = buildOccupiedRoomsByCategoryDate({
+        rooms: rooms.map((room) => ({
+          id: String(room.id),
+          category_id: room.category_id ? String(room.category_id) : null,
+          is_blocked: room.is_blocked,
+        })),
+        reservations: reservations.map((reservation) => ({
+          id: reservation.id,
+          category_id: reservation.category_id ? String(reservation.category_id) : null,
+          room_id: reservation.room_id ? String(reservation.room_id) : null,
+          checkin_date: reservation.checkin_date,
+          checkout_date: reservation.checkout_date,
+          status: reservation.status,
+        })),
+        maintenanceTickets: maintenanceTickets.map((ticket) => ({
+          room_id: String(ticket.room_id),
+          maintenance_start_date: ticket.maintenance_start_date,
+          maintenance_end_date: ticket.maintenance_end_date,
+          opened_at: ticket.opened_at,
+          status: ticket.status,
+        })),
+        windowStart: today,
+        windowEndInclusive: futureDate,
+        keySeparator: "::",
+      });
 
       const bookedByCategoryDate = new Map<string, number>();
+      for (const [key, set] of occupiedByCategoryDate) {
+        bookedByCategoryDate.set(key, set.size);
+      }
+
       const roomCategoryByRoomId = new Map<string, string>();
       for (const room of rooms) {
         const roomId = String(room.id ?? "").trim();
@@ -191,19 +245,19 @@ export class ChannexSyncService {
 
       const inactiveReservationStatuses = new Set(["cancelled", "canceled", "checkedout", "checked_out"]);
       for (const reservation of reservations) {
+        const status = String(reservation.status ?? "").toLowerCase();
+        const channelName = String(reservation.channel ?? "").toLowerCase();
+        if (inactiveReservationStatuses.has(status)) continue;
+        const isChannelReservation =
+          channelName === "ota" || channelName === "channel_manager" || channelName === "channel manager";
         const roomId = String(reservation.room_id ?? "").trim();
         const fallbackCategoryId = String(reservation.category_id ?? "").trim();
         const effectiveCategoryId = roomId
           ? String(roomCategoryByRoomId.get(roomId) ?? fallbackCategoryId).trim()
           : fallbackCategoryId;
-        if (!effectiveCategoryId) continue;
-
-        const status = String(reservation.status ?? "").toLowerCase();
-        const channelName = String(reservation.channel ?? "").toLowerCase();
-        if (inactiveReservationStatuses.has(status)) continue;
-        const isChannelReservation = channelName === "ota" || channelName === "channel_manager" || channelName === "channel manager";
         const hasCrossCategoryRelocation =
           Boolean(fallbackCategoryId) && Boolean(effectiveCategoryId) && fallbackCategoryId !== effectiveCategoryId;
+        if (!isChannelReservation || !hasCrossCategoryRelocation) continue;
 
         const checkin = ymd(reservation.checkin_date);
         const checkout = ymd(reservation.checkout_date);
@@ -215,16 +269,19 @@ export class ChannexSyncService {
         const maxExclusive = addDays(new Date(`${futureDate}T00:00:00.000Z`), 1);
         if (cursor < min) cursor = min;
         const loopEnd = end < maxExclusive ? end : maxExclusive;
+        const roomKey = roomId || `res:${reservation.id}`;
         while (cursor < loopEnd) {
           const date = toIsoDate(cursor);
-          const key = `${effectiveCategoryId}::${date}`;
-          bookedByCategoryDate.set(key, (bookedByCategoryDate.get(key) ?? 0) + 1);
-          if (isChannelReservation && hasCrossCategoryRelocation) {
-            const originalKey = `${fallbackCategoryId}::${date}`;
-            bookedByCategoryDate.set(originalKey, (bookedByCategoryDate.get(originalKey) ?? 0) + 1);
-          }
+          const originalKey = categoryDateKey(fallbackCategoryId, date, "::");
+          if (!occupiedByCategoryDate.has(originalKey)) occupiedByCategoryDate.set(originalKey, new Set());
+          occupiedByCategoryDate.get(originalKey)!.add(roomKey);
           cursor = addDays(cursor, 1);
         }
+      }
+
+      bookedByCategoryDate.clear();
+      for (const [key, set] of occupiedByCategoryDate) {
+        bookedByCategoryDate.set(key, set.size);
       }
 
       const diagCategories: Record<string, { base: number; topBooked: number }> = {};
@@ -375,7 +432,9 @@ export class ChannexSyncService {
           const availabilityKey = `${roomTypeId}::${date}`;
           if (!availabilityMap.has(availabilityKey)) {
             const totalInventory = Math.max(0, roomAvailabilityByCategory.get(categoryId) ?? 0);
-            const booked = bookedByCategoryDate.get(`${categoryId}::${date}`) ?? 0;
+            const booked =
+              bookedByCategoryDate.get(`${categoryId}::${date}`) ??
+              bookedCountFromOccupiedMap(occupiedByCategoryDate, categoryId, date, "::");
             availabilityMap.set(availabilityKey, {
               property_id: propertyId,
               room_type_id: roomTypeId,

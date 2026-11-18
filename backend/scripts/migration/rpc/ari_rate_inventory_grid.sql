@@ -148,42 +148,74 @@ CREATE OR REPLACE FUNCTION public.calculate_category_availability(
 ) RETURNS JSONB AS $$
 DECLARE
   v_total_rooms INTEGER;
-  v_confirmed_reservations INTEGER;
-  v_blocked_rooms INTEGER;
+  v_unavailable_rooms INTEGER;
+  v_unassigned_reservations INTEGER;
   v_available_rooms INTEGER;
   v_occupancy_percentage DECIMAL(5,2);
+  v_confirmed_reservations INTEGER;
+  v_blocked_rooms INTEGER;
 BEGIN
-  -- Buscar total de quartos da categoria
   SELECT COUNT(*) INTO v_total_rooms
   FROM public.rooms
   WHERE establishment_id = p_establishment_id
     AND category_id = p_category_id
-    AND is_blocked = false; -- Excluir quartos permanentemente bloqueados
+    AND is_blocked = false;
 
-  -- Buscar reservas confirmadas/check-in para esta data
-  -- Lógica: checkin_date <= date < checkout_date
-  SELECT COUNT(DISTINCT room_id) INTO v_confirmed_reservations
-  FROM public.reservations
-  WHERE establishment_id = p_establishment_id
-    AND category_id = p_category_id
-    AND checkin_date <= p_date
-    AND checkout_date > p_date
-    AND status IN ('confirmed', 'checkedin', 'blocked', 'preregistration')
-    AND room_id IS NOT NULL;
+  WITH unavailable_room AS (
+    SELECT DISTINCT res.room_id
+    FROM public.reservations res
+    WHERE res.establishment_id = p_establishment_id
+      AND res.checkin_date <= p_date
+      AND res.checkout_date > p_date
+      AND res.status IN ('pending', 'confirmed', 'checkedin', 'blocked', 'preregistration')
+      AND res.room_id IS NOT NULL
+      AND res.room_id IN (
+        SELECT id FROM public.rooms
+        WHERE establishment_id = p_establishment_id AND category_id = p_category_id
+      )
 
-  -- Buscar quartos bloqueados (manutenção, etc) para esta data
-  SELECT COUNT(*) INTO v_blocked_rooms
-  FROM public.rooms
-  WHERE establishment_id = p_establishment_id
-    AND category_id = p_category_id
-    AND (status = 'maintenance' OR is_blocked = true);
+    UNION
 
-  -- Calcular disponibilidade
-  v_available_rooms := GREATEST(0, v_total_rooms - v_confirmed_reservations - v_blocked_rooms);
+    SELECT mt.room_id
+    FROM public.maintenance_tickets mt
+    INNER JOIN public.rooms rm ON rm.id = mt.room_id
+    WHERE mt.establishment_id = p_establishment_id
+      AND rm.category_id = p_category_id
+      AND mt.status IN ('open', 'in_progress')
+      AND p_date >= COALESCE(mt.maintenance_start_date::date, mt.opened_at::date)
+      AND (
+        mt.maintenance_end_date IS NULL
+        OR p_date <= mt.maintenance_end_date::date
+      )
+  )
+  SELECT COUNT(DISTINCT room_id) INTO v_unavailable_rooms
+  FROM unavailable_room;
 
-  -- Calcular ocupação
+  SELECT COUNT(*) INTO v_unassigned_reservations
+  FROM public.reservations res
+  WHERE res.establishment_id = p_establishment_id
+    AND res.category_id = p_category_id
+    AND res.checkin_date <= p_date
+    AND res.checkout_date > p_date
+    AND res.status IN ('pending', 'confirmed', 'checkedin', 'blocked', 'preregistration')
+    AND res.room_id IS NULL;
+
+  v_available_rooms := GREATEST(0, v_total_rooms - v_unavailable_rooms - v_unassigned_reservations);
+
+  SELECT COUNT(DISTINCT res.room_id) INTO v_confirmed_reservations
+  FROM public.reservations res
+  WHERE res.establishment_id = p_establishment_id
+    AND res.category_id = p_category_id
+    AND res.checkin_date <= p_date
+    AND res.checkout_date > p_date
+    AND res.status IN ('confirmed', 'checkedin', 'blocked', 'preregistration')
+    AND res.room_id IS NOT NULL;
+
+  v_blocked_rooms := GREATEST(0, v_unavailable_rooms - COALESCE(v_confirmed_reservations, 0));
+
   IF v_total_rooms > 0 THEN
-    v_occupancy_percentage := (v_confirmed_reservations::DECIMAL / v_total_rooms::DECIMAL) * 100;
+    v_occupancy_percentage :=
+      ((v_unavailable_rooms + v_unassigned_reservations)::DECIMAL / v_total_rooms::DECIMAL) * 100;
   ELSE
     v_occupancy_percentage := 0;
   END IF;
@@ -191,7 +223,7 @@ BEGIN
   RETURN jsonb_build_object(
     'total_rooms', v_total_rooms,
     'available_rooms', v_available_rooms,
-    'confirmed_reservations', v_confirmed_reservations,
+    'confirmed_reservations', COALESCE(v_confirmed_reservations, 0) + v_unassigned_reservations,
     'blocked_rooms', v_blocked_rooms,
     'occupancy_percentage', ROUND(v_occupancy_percentage, 2)
   );

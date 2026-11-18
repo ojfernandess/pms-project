@@ -1,6 +1,11 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import {
+  baseSellableRoomsByCategory,
+  bookedCountFromOccupiedMap,
+  buildOccupiedRoomsByCategoryDate,
+} from "./channel-availability-blocks";
 
 /**
  * StayOS PMS → Bukly Channel Manager (OTA 2013A XML).
@@ -383,64 +388,74 @@ export class BuklySyncService {
       }
 
       const rateCalendar = await this.fetchAllRateCalendar(establishmentId, today, futureDateStr);
-      const rooms = await this.prisma.rooms.findMany({
-        where: { establishment_id: establishmentId },
-        select: { id: true, category_id: true, is_blocked: true, status: true },
-      });
-      const activeRooms = rooms.filter((room) => {
-        if (room.is_blocked === true) return false;
-        if (room.status === "maintenance") return false;
-        return !!room.category_id;
-      });
+      const [rooms, reservations, maintenanceTickets] = await Promise.all([
+        this.prisma.rooms.findMany({
+          where: { establishment_id: establishmentId },
+          select: { id: true, category_id: true, is_blocked: true },
+        }),
+        this.prisma.reservations.findMany({
+          where: {
+            establishment_id: establishmentId,
+            status: { in: ["pending", "confirmed", "checkedin", "blocked", "preregistration"] },
+          },
+          select: {
+            id: true,
+            category_id: true,
+            checkin_date: true,
+            checkout_date: true,
+            room_id: true,
+            status: true,
+          },
+        }),
+        this.prisma.maintenance_tickets.findMany({
+          where: {
+            establishment_id: establishmentId,
+            status: { in: ["open", "in_progress"] },
+          },
+          select: {
+            room_id: true,
+            maintenance_start_date: true,
+            maintenance_end_date: true,
+            opened_at: true,
+            status: true,
+          },
+        }),
+      ]);
 
-      const reservations = await this.prisma.reservations.findMany({
-        where: {
-          establishment_id: establishmentId,
-          status: { in: ["pending", "confirmed", "checkedin", "blocked", "preregistration"] },
-        },
-        select: { category_id: true, checkin_date: true, checkout_date: true, room_id: true, status: true },
+      const roomRows = rooms.map((room) => ({
+        id: String(room.id),
+        category_id: room.category_id ? String(room.category_id) : null,
+        is_blocked: room.is_blocked,
+      }));
+
+      const sellableByCategory = baseSellableRoomsByCategory(roomRows);
+
+      const occupiedByCategoryDate = buildOccupiedRoomsByCategoryDate({
+        rooms: roomRows,
+        reservations: reservations.map((reservation) => ({
+          id: reservation.id,
+          category_id: reservation.category_id ? String(reservation.category_id) : null,
+          room_id: reservation.room_id ? String(reservation.room_id) : null,
+          checkin_date: reservation.checkin_date,
+          checkout_date: reservation.checkout_date,
+          status: reservation.status,
+        })),
+        maintenanceTickets: maintenanceTickets.map((ticket) => ({
+          room_id: String(ticket.room_id),
+          maintenance_start_date: ticket.maintenance_start_date,
+          maintenance_end_date: ticket.maintenance_end_date,
+          opened_at: ticket.opened_at,
+          status: ticket.status,
+        })),
+        windowStart: today,
+        windowEndInclusive: futureDateStr,
+        keySeparator: "|",
       });
-
-      const roomsByCategory = new Map<string, string[]>();
-      for (const room of activeRooms) {
-        const category = String(room.category_id);
-        const list = roomsByCategory.get(category) ?? [];
-        list.push(String(room.id));
-        roomsByCategory.set(category, list);
-      }
-
-      const occupiedByCategoryDate = new Map<string, Set<string>>();
-      for (const reservation of reservations) {
-        const checkin = ymdFromDb(reservation.checkin_date);
-        const checkout = ymdFromDb(reservation.checkout_date);
-        if (!checkin || !checkout) continue;
-        let day = checkin;
-        while (day < checkout) {
-          if (day >= today && day <= futureDateStr) {
-            const roomId = reservation.room_id ? String(reservation.room_id) : null;
-            const category = reservation.category_id ? String(reservation.category_id) : null;
-            if (category) {
-              const key = `${category}|${day}`;
-              if (!occupiedByCategoryDate.has(key)) occupiedByCategoryDate.set(key, new Set());
-              occupiedByCategoryDate.get(key)?.add(roomId || `anon-${day}`);
-            }
-          }
-          day = addDaysYmd(day, 1);
-        }
-      }
 
       const availableFor = (categoryId: string, date: string): number => {
-        const roomIds = roomsByCategory.get(categoryId) || [];
-        const occupied = occupiedByCategoryDate.get(`${categoryId}|${date}`);
-        if (!occupied) return roomIds.length;
-        let used = 0;
-        for (const id of roomIds) {
-          if (occupied.has(id)) used += 1;
-        }
-        for (const id of occupied) {
-          if (id.startsWith("anon-")) used += 1;
-        }
-        return Math.max(0, roomIds.length - used);
+        const base = sellableByCategory.get(categoryId) ?? 0;
+        const booked = bookedCountFromOccupiedMap(occupiedByCategoryDate, categoryId, date, "|");
+        return Math.max(0, base - booked);
       };
 
       const resolvePrice = (row: CalRow, mapping: Mapping): number => {

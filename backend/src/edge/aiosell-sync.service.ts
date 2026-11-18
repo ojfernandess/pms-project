@@ -4,6 +4,11 @@ import { Prisma, reservation_status } from "@prisma/client";
 import { AuthService } from "../auth/auth.service";
 import { StaffIdentityService } from "../auth/staff-identity.service";
 import { PrismaService } from "../prisma/prisma.service";
+import {
+  baseSellableRoomsByCategory,
+  bookedCountFromOccupiedMap,
+  buildOccupiedRoomsByCategoryDate,
+} from "./channel-availability-blocks";
 
 type Result = { status: number; body: Record<string, unknown> };
 type Occ = 1 | 2 | 3 | 4;
@@ -143,17 +148,31 @@ export class AiosellSyncService {
       salesStatusByCategoryDate.set(`${row.category_id}|${d}`, String(row.status ?? ""));
     }
 
-    let rooms: Array<{ id: string; category_id: string }>;
+    let rooms: Array<{ id: string; category_id: string; is_blocked: boolean | null }>;
+    let maintenanceTickets: Array<{
+      room_id: string;
+      maintenance_start_date: Date | null;
+      maintenance_end_date: Date | null;
+      opened_at: Date | null;
+      status: string | null;
+    }> = [];
     try {
       rooms = await this.prisma.rooms.findMany({
         where: { establishment_id: establishmentId },
-        select: { id: true, category_id: true },
+        select: { id: true, category_id: true, is_blocked: true },
       });
     } catch (error) {
       return fail(500, errorMessage(error));
     }
 
-    let reservations: Array<{ category_id: string; checkin_date: string; checkout_date: string; room_id: string | null }>;
+    let reservations: Array<{
+      id: string;
+      category_id: string;
+      checkin_date: string;
+      checkout_date: string;
+      room_id: string | null;
+      status: string;
+    }>;
     try {
       const reservationRows = await this.prisma.reservations.findMany({
         where: {
@@ -169,24 +188,74 @@ export class AiosellSyncService {
             ],
           },
         },
-        select: { category_id: true, checkin_date: true, checkout_date: true, room_id: true },
+        select: {
+          id: true,
+          category_id: true,
+          checkin_date: true,
+          checkout_date: true,
+          room_id: true,
+          status: true,
+        },
       });
       reservations = reservationRows.map((row) => ({
+        id: row.id,
         category_id: row.category_id,
         checkin_date: dateOnly(row.checkin_date),
         checkout_date: dateOnly(row.checkout_date),
         room_id: row.room_id,
+        status: String(row.status),
       }));
     } catch (error) {
       return fail(500, errorMessage(error));
     }
 
-    const reservationsByCategory = new Map<string, typeof reservations>();
-    for (const reservation of reservations) {
-      const list = reservationsByCategory.get(reservation.category_id) ?? [];
-      list.push(reservation);
-      reservationsByCategory.set(reservation.category_id, list);
+    try {
+      maintenanceTickets = await this.prisma.maintenance_tickets.findMany({
+        where: {
+          establishment_id: establishmentId,
+          status: { in: ["open", "in_progress"] },
+        },
+        select: {
+          room_id: true,
+          maintenance_start_date: true,
+          maintenance_end_date: true,
+          opened_at: true,
+          status: true,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(`[aiosell-sync] maintenance_tickets: ${errorMessage(error)}`);
     }
+
+    const roomRows = rooms.map((room) => ({
+      id: String(room.id),
+      category_id: String(room.category_id),
+      is_blocked: room.is_blocked,
+    }));
+
+    const sellableByCategory = baseSellableRoomsByCategory(roomRows);
+
+    const occupiedByCategoryDate = buildOccupiedRoomsByCategoryDate({
+      rooms: roomRows,
+      reservations: reservations.map((reservation) => ({
+        id: reservation.id,
+        category_id: reservation.category_id,
+        room_id: reservation.room_id,
+        checkin_date: reservation.checkin_date,
+        checkout_date: reservation.checkout_date,
+        status: reservation.status,
+      })),
+      maintenanceTickets: maintenanceTickets.map((ticket) => ({
+        room_id: String(ticket.room_id),
+        maintenance_start_date: ticket.maintenance_start_date,
+        maintenance_end_date: ticket.maintenance_end_date,
+        opened_at: ticket.opened_at,
+        status: ticket.status,
+      })),
+      windowStart: today,
+      windowEndInclusive: futureDateStr,
+      keySeparator: "|",
+    });
 
     let channelPricingConfig: Record<string, unknown>[] = [];
     try {
@@ -422,16 +491,9 @@ export class AiosellSyncService {
 
     const invCombinedByCategory = new Map<string, InvDayCombined[]>();
     categoryDates.forEach((dates, categoryId) => {
-      const categoryRooms = rooms.filter((room) => room.category_id === categoryId);
-      const totalRooms = categoryRooms.length;
-      const categoryReservations = reservationsByCategory.get(categoryId) ?? [];
+      const totalRooms = sellableByCategory.get(categoryId) ?? 0;
       dates.forEach((date) => {
-        const currentDate = new Date(date + "T12:00:00Z");
-        const occupiedRooms = categoryReservations.filter((reservation) => {
-          const checkin = new Date(String(reservation.checkin_date).slice(0, 10) + "T00:00:00Z");
-          const checkout = new Date(String(reservation.checkout_date).slice(0, 10) + "T00:00:00Z");
-          return currentDate >= checkin && currentDate < checkout;
-        }).length;
+        const occupiedRooms = bookedCountFromOccupiedMap(occupiedByCategoryDate, categoryId, date, "|");
         let available = Math.max(0, totalRooms - occupiedRooms);
         const salesStatus = salesStatusByCategoryDate.get(`${categoryId}|${date}`) ?? null;
         if (isCategoryClosedForOtaChannel(salesStatus)) available = 0;

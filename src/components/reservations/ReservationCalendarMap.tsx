@@ -6,7 +6,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, addDays, eachDayOfInterval, parseISO, startOfDay, isSameDay, differenceInDays, isAfter, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock, User, Users, Wrench, LogIn, LogOut, DollarSign } from "lucide-react";
+import { CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, GripVertical, X, Lock, User, Users, Wrench, LogIn, LogOut, DollarSign, CalendarDays, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEstablishmentReservationRealtime } from "@/hooks/useEstablishmentReservationRealtime";
 import { refreshReservationQueries } from "@/lib/reservationQuerySync";
@@ -60,9 +60,11 @@ import { Label } from "@/components/ui/label";
 import {
   isMaintenanceTicketActive,
   isRoomDateBlockedByMaintenancePeriod,
+  resolveMaintenancePeriod,
   roomHasWholeRoomMaintenance,
   type MaintenanceTicketPeriodFields,
 } from "@/lib/maintenanceTicketPeriod";
+import { getMapPeriodBandPosition } from "@/lib/mapPeriodBandPosition";
 
 /** Quarto interditado manualmente ou em manutenção ativa. */
 const isRoomUnavailableForBooking = (room: { is_blocked?: boolean | null; status?: string | null } | null | undefined) =>
@@ -155,11 +157,11 @@ const statusConfig: Record<string, {
     legendColor: "#f43f5e" 
   },
   blocked: { 
-    bg: "bg-slate-800", 
-    text: "text-white", 
-    label: "Bloqueada", 
-    border: "border-slate-900", 
-    legendColor: "#1e293b"
+    bg: "bg-[#FEE2E2]", 
+    text: "text-red-900", 
+    label: "Bloqueado", 
+    border: "border-[#FCA5A5]", 
+    legendColor: "#F87171"
   },
   preregistration: { 
     bg: "bg-violet-500", 
@@ -172,6 +174,25 @@ const statusConfig: Record<string, {
 
 /** Bolinha no mapa: web check-in concluído (pré check-in), antes do check-in no hotel */
 const PRE_CHECKIN_DOT_COLOR = "#a855f7";
+
+/** Faixa contínua de bloqueio / manutenção parcial no mapa */
+const MAP_BLOCK_BAND =
+  "border-[#FCA5A5] bg-[#FEE2E2] text-red-900 shadow-sm ring-1 ring-[#FCA5A5]/40";
+
+function extractBlockReason(notes?: string | null): string {
+  const raw = notes?.replace(/^Bloqueio:\s*/i, "")?.trim();
+  return raw || "";
+}
+
+function formatMapBlockPeriod(checkin: string, checkout: string): string {
+  try {
+    const start = format(parseISO(checkin), "dd/MM", { locale: ptBR });
+    const end = format(parseISO(checkout), "dd/MM/yyyy", { locale: ptBR });
+    return `${start} a ${end}`;
+  } catch {
+    return `${checkin} → ${checkout}`;
+  }
+}
 
 function isWebCheckinCompleted(webCheckin: unknown): boolean {
   if (!webCheckin) return false;
@@ -295,6 +316,13 @@ export const ReservationCalendarMap = ({
     roomLabel?: string | null;
     statusLabel: string;
     statusColor: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const [hoveredMaintenanceBandPreview, setHoveredMaintenanceBandPreview] = useState<{
+    ticket: MaintenanceTicketPeriodFields;
+    roomLabel?: string | null;
     x: number;
     y: number;
   } | null>(null);
@@ -668,7 +696,7 @@ export const ReservationCalendarMap = ({
       const { data, error } = await supabase
         .from("maintenance_tickets")
         .select(
-          "id, room_id, reservation_id, status, blocks_entire_room, maintenance_start_date, maintenance_end_date, opened_at, completed_at, guest_account_id",
+          "id, room_id, reservation_id, status, blocks_entire_room, maintenance_start_date, maintenance_end_date, opened_at, completed_at, guest_account_id, title, description",
         )
         .eq("establishment_id", currentEstablishmentId)
         .in("status", ["open", "in_progress"]);
@@ -3514,7 +3542,7 @@ export const ReservationCalendarMap = ({
                           : isMaintenance
                           ? "bg-amber-50/40 hover:bg-amber-50/60"
                           : hasPartialMaintenance
-                          ? "bg-red-50/35 hover:bg-red-50/50"
+                          ? "bg-white hover:bg-slate-50/60"
                           : "bg-white hover:bg-slate-50/60"
                       )} style={{ minHeight: "40px" }}>
                         <div className={cn(
@@ -3523,8 +3551,6 @@ export const ReservationCalendarMap = ({
                             ? "bg-rose-50/50"
                             : isMaintenance
                             ? "bg-amber-50/50"
-                            : hasPartialMaintenance
-                            ? "bg-red-50/50"
                             : "bg-white"
                         )}>
                           {isInterdicted && (
@@ -3598,7 +3624,7 @@ export const ReservationCalendarMap = ({
                                     : isMaintenance
                                     ? "bg-amber-50/30 cursor-not-allowed"
                                     : isPeriodMaintenance
-                                    ? "bg-red-200/75 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.55)] cursor-not-allowed"
+                                    ? "bg-[#FEE2E2]/15 cursor-not-allowed"
                                     : isOccupied
                                     ? "bg-slate-50/80 cursor-not-allowed"
                                     : isSelected 
@@ -3700,6 +3726,78 @@ export const ReservationCalendarMap = ({
                               </div>
                             );
                           })}
+
+                          {/* Faixas de manutenção parcial (período) */}
+                          {maintenanceTickets
+                            .filter(
+                              (t) =>
+                                t.room_id === room.id &&
+                                isMaintenanceTicketActive(t) &&
+                                !t.blocks_entire_room,
+                            )
+                            .map((ticket) => {
+                              const period = resolveMaintenancePeriod(ticket);
+                              if (!period) return null;
+                              const pos = getMapPeriodBandPosition(
+                                visibleDates,
+                                period.start,
+                                period.checkoutExclusive,
+                              );
+                              if (!pos.isVisible) return null;
+                              const reason =
+                                ticket.title?.trim() ||
+                                ticket.description?.trim()?.slice(0, 60) ||
+                                "Manutenção";
+                              const showLabel = pos.duration >= 0.85 && viewDays <= 50;
+                              const bandWidthPct = Math.min(
+                                (pos.duration / visibleDates.length) * 100,
+                                100 - (pos.startIndex / visibleDates.length) * 100,
+                              );
+                              return (
+                                <div
+                                  key={`maint-band-${ticket.id}`}
+                                  role="presentation"
+                                  className={cn(
+                                    "absolute z-[6] flex items-center gap-1 rounded-lg border px-1.5 py-0.5 pointer-events-auto",
+                                    MAP_BLOCK_BAND,
+                                  )}
+                                  style={{
+                                    left: `${(pos.startIndex / visibleDates.length) * 100}%`,
+                                    width: `${bandWidthPct}%`,
+                                    height: "26px",
+                                    top: "7px",
+                                    margin: "0 1px",
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    if (!isHoverPreviewEnabled || draggedReservation || isDragging) return;
+                                    setHoveredReservationPreview(null);
+                                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                    setHoveredMaintenanceBandPreview({
+                                      ticket,
+                                      roomLabel: room.name || room.room_number || null,
+                                      x: rect.left + rect.width / 2,
+                                      y: rect.top,
+                                    });
+                                  }}
+                                  onMouseLeave={() => {
+                                    setHoveredMaintenanceBandPreview((prev) =>
+                                      prev?.ticket?.id === ticket.id ? null : prev,
+                                    );
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                  }}
+                                >
+                                  <Wrench className="h-3 w-3 shrink-0 text-red-700" aria-hidden />
+                                  {showLabel ? (
+                                    <span className="min-w-0 truncate text-[9px] sm:text-[10px] font-semibold leading-tight">
+                                      Bloqueado · {reason}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
 
                           {/* Reservas */}
                           {visibleReservations.map((reservation: any) => {
@@ -3816,15 +3914,21 @@ export const ReservationCalendarMap = ({
                             const canExtendStay = !["blocked", "cancelled", "checkedout", "noshow"].includes(reservation.status);
                             const showMaintenanceOnReservation =
                               reservationIdsWithMaintenance.has(reservation.id);
+                            const isBlockReservation = reservation.status === "blocked";
+                            const blockReason = isBlockReservation
+                              ? extractBlockReason(reservation.notes) || "Sem motivo informado"
+                              : "";
+                            const showBlockBandLabel =
+                              isBlockReservation && pos.duration >= 0.85 && viewDays <= 50;
                               
                               return (
                                 <div
                                   key={reservation.id}
                                   className={cn(
-                                  "absolute rounded-md border transition-all duration-150 flex items-center gap-1.5 px-2 py-0.5 group shadow-sm",
-                                    statusColor.bg,
-                                    statusColor.text,
-                                    statusColor.border,
+                                  "absolute rounded-lg border transition-all duration-150 flex items-center gap-1.5 px-2 py-0.5 group",
+                                    isBlockReservation
+                                      ? cn(MAP_BLOCK_BAND, "z-[12]")
+                                      : cn("rounded-md shadow-sm", statusColor.bg, statusColor.text, statusColor.border),
                                   isResizingThis && resizingReservation.conflict && "ring-2 ring-rose-400",
                                   isResizingThis && !resizingReservation.conflict && previewNightDelta > 0 && "ring-2 ring-amber-400",
                                   isResizingThis && previewNightDelta < 0 && "ring-2 ring-sky-400",
@@ -3847,14 +3951,17 @@ export const ReservationCalendarMap = ({
                                   }}
                                   onMouseEnter={(e) => {
                                     if (!isHoverPreviewEnabled || draggedReservation || isDragging) return;
+                                    setHoveredMaintenanceBandPreview(null);
                                     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                                     setHoveredReservationPreview({
                                       reservation,
                                       roomLabel: room.name || room.room_number || null,
-                                      statusLabel: showCheckinDot
-                                        ? `Check-in · ${statusColor.label}`
-                                        : statusColor.label,
-                                      statusColor: statusColor.legendColor,
+                                      statusLabel: isBlockReservation
+                                        ? "Bloqueio de período"
+                                        : showCheckinDot
+                                          ? `Check-in · ${statusColor.label}`
+                                          : statusColor.label,
+                                      statusColor: isBlockReservation ? "#F87171" : statusColor.legendColor,
                                       x: rect.left + rect.width / 2,
                                       y: rect.top,
                                     });
@@ -3904,7 +4011,9 @@ export const ReservationCalendarMap = ({
                                   }, 10);
                               }}
                               >
-                                {viewDays <= 30 && <GripVertical className="h-3 w-3 opacity-50 flex-shrink-0" />}
+                                {viewDays <= 30 && !isBlockReservation && (
+                                  <GripVertical className="h-3 w-3 opacity-50 flex-shrink-0" />
+                                )}
                                 <div className="flex-1 min-w-0 flex items-center gap-1.5">
                                   {showMaintenanceOnReservation && (
                                     <Wrench
@@ -3927,7 +4036,7 @@ export const ReservationCalendarMap = ({
                                     />
                                   )}
                                   {reservation.status === "blocked" ? (
-                                    <Lock className="h-3 w-3 opacity-70 flex-shrink-0" />
+                                    <Lock className="h-3 w-3 shrink-0 text-red-700" />
                                   ) : (reservation.adults || 1) + (reservation.children || 0) >= 2 ? (
                                     <Users className="h-3 w-3 opacity-70 flex-shrink-0" aria-hidden title="2 ou mais hóspedes" />
                                   ) : (
@@ -3939,7 +4048,9 @@ export const ReservationCalendarMap = ({
                                       style={{ fontSize: viewDays <= 30 ? '10px' : '9px' }}
                                     >
                                       {reservation.status === "blocked" 
-                                        ? "Bloqueado"
+                                        ? showBlockBandLabel
+                                          ? `Bloqueado${blockReason !== "Sem motivo informado" ? ` · ${blockReason}` : ""}`
+                                          : "Bloqueado"
                                         : viewDays <= 60 
                                         ? (reservation.guest_name || reservation.reservation_code)
                                         : (reservation.guest_name?.split(' ')[0] || reservation.reservation_code?.substring(0, 8))
@@ -4161,7 +4272,7 @@ export const ReservationCalendarMap = ({
           ? (reservation.notes?.replace(/^Bloqueio:\s*/i, "")?.trim() || "Não informado")
           : null;
         const previewTitle = isBlocked
-          ? "Bloqueio"
+          ? "Bloqueio de período"
           : reservation.guest_name || reservation.reservation_code || "Reserva";
         const baseTotalAmount = Number(reservation.total_amount || 0);
         const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum: number, fee: any) => {
@@ -4205,9 +4316,15 @@ export const ReservationCalendarMap = ({
                   </div>
                 </div>
               ) : (
-                <div className="border-b border-slate-100 bg-slate-50 px-3 py-2.5">
-                  <div className="truncate text-sm font-semibold text-slate-900">
-                    {previewTitle}
+                <div
+                  className={cn(
+                    "border-b px-3 py-2.5",
+                    isBlocked ? "border-[#FCA5A5]/50 bg-[#FEE2E2]" : "border-slate-100 bg-slate-50",
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    {isBlocked && <Lock className="h-4 w-4 shrink-0 text-red-700" />}
+                    <div className="truncate text-sm font-semibold text-red-900">{previewTitle}</div>
                   </div>
                 </div>
               )}
@@ -4228,28 +4345,42 @@ export const ReservationCalendarMap = ({
                   )}
                 </div>
 
-                {isBlocked && (
-                  <div className="rounded-md bg-slate-50 px-2 py-1.5 text-[11px] text-slate-700">
-                    <span className="font-medium text-slate-500">Motivo: </span>
-                    <span className="text-slate-800">{blockReason}</span>
+                {isBlocked && blockReason && (
+                  <div className="flex items-start gap-2 rounded-lg border border-[#FCA5A5]/40 bg-[#FEE2E2]/60 px-2 py-1.5 text-[11px] text-red-900">
+                    <Tag className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />
+                    <div>
+                      <span className="font-medium text-red-800/80">Motivo: </span>
+                      <span>{blockReason}</span>
+                    </div>
                   </div>
                 )}
 
                 {reservation.checkin_date && reservation.checkout_date && (
-                  <div className="text-[11px] text-slate-600">
-                    <span className="font-medium text-slate-800">
-                      {format(parseISO(reservation.checkin_date), "dd MMM", { locale: ptBR })}
-                    </span>
-                    {" → "}
-                    <span className="font-medium text-slate-800">
-                      {format(parseISO(reservation.checkout_date), "dd MMM", { locale: ptBR })}
-                    </span>
-                    {nights > 0 && (
-                      <span className="text-slate-400">
-                        {" · "}
-                        {nights} {nights === 1 ? "noite" : "noites"}
+                  <div className="flex items-start gap-2 text-[11px] text-slate-600">
+                    <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span>
+                    {isBlocked ? (
+                      <span className="font-medium text-slate-800">
+                        Período: {formatMapBlockPeriod(reservation.checkin_date, reservation.checkout_date)}
                       </span>
+                    ) : (
+                      <>
+                        <span className="font-medium text-slate-800">
+                          {format(parseISO(reservation.checkin_date), "dd MMM", { locale: ptBR })}
+                        </span>
+                        {" → "}
+                        <span className="font-medium text-slate-800">
+                          {format(parseISO(reservation.checkout_date), "dd MMM", { locale: ptBR })}
+                        </span>
+                        {nights > 0 && (
+                          <span className="text-slate-400">
+                            {" · "}
+                            {nights} {nights === 1 ? "noite" : "noites"}
+                          </span>
+                        )}
+                      </>
                     )}
+                    </span>
                   </div>
                 )}
 
@@ -4268,6 +4399,67 @@ export const ReservationCalendarMap = ({
                   <div className="text-[11px] font-semibold text-slate-800">
                     R$ {totalWithFees.toFixed(2).replace(".", ",")}
                   </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {hoveredMaintenanceBandPreview && isHoverPreviewEnabled && !draggedReservation && !isDragging && (() => {
+        const ticket = hoveredMaintenanceBandPreview.ticket;
+        const period = resolveMaintenancePeriod(ticket);
+        const cardWidth = 280;
+        const left = Math.min(
+          Math.max(12, hoveredMaintenanceBandPreview.x - cardWidth / 2),
+          (typeof window !== "undefined" ? window.innerWidth : 1200) - cardWidth - 12,
+        );
+        const top = Math.max(12, hoveredMaintenanceBandPreview.y - 8);
+        const reason =
+          ticket.title?.trim() ||
+          ticket.description?.trim() ||
+          "Manutenção preventiva";
+        const periodLabel =
+          period != null
+            ? formatMapBlockPeriod(period.start, period.checkoutExclusive)
+            : null;
+
+        return (
+          <div
+            className="fixed z-[9998] pointer-events-none"
+            style={{
+              left: `${left}px`,
+              top: `${top}px`,
+              transform: "translateY(-100%)",
+              width: `${cardWidth}px`,
+            }}
+          >
+            <div className="overflow-hidden rounded-xl border border-[#FCA5A5]/60 bg-white shadow-xl ring-1 ring-[#FCA5A5]/25">
+              <div className="border-b border-[#FCA5A5]/50 bg-[#FEE2E2] px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <Wrench className="h-4 w-4 shrink-0 text-red-700" />
+                  <span className="truncate text-sm font-semibold text-red-900">Bloqueio de período</span>
+                </div>
+              </div>
+              <div className="space-y-2 px-3 py-2.5">
+                {periodLabel && (
+                  <div className="flex items-start gap-2 text-[11px] text-slate-600">
+                    <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="font-medium text-slate-800">Período: {periodLabel}</span>
+                  </div>
+                )}
+                <div className="flex items-start gap-2 rounded-lg border border-[#FCA5A5]/40 bg-[#FEE2E2]/60 px-2 py-1.5 text-[11px] text-red-900">
+                  <Tag className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />
+                  <div>
+                    <span className="font-medium text-red-800/80">Motivo: </span>
+                    <span>{reason}</span>
+                  </div>
+                </div>
+                {ticket.description && ticket.title && ticket.description !== ticket.title && (
+                  <p className="text-[11px] leading-snug text-slate-600 line-clamp-3">{ticket.description}</p>
+                )}
+                {hoveredMaintenanceBandPreview.roomLabel && (
+                  <p className="text-[10px] text-slate-500">{hoveredMaintenanceBandPreview.roomLabel}</p>
                 )}
               </div>
             </div>

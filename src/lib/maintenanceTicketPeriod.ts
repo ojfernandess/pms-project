@@ -15,6 +15,8 @@ export type MaintenanceTicketPeriodFields = {
   completed_at?: string | null;
   resolved_at?: string | null;
   guest_account_id?: string | null;
+  title?: string | null;
+  description?: string | null;
 };
 
 function toDateOnly(value: string | null | undefined): string | null {
