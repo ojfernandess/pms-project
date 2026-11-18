@@ -20,6 +20,7 @@ import {
   attachParkingFeeToReservation,
   computeParkingFeeTotal,
   isParkingFeeConfigured,
+  PARKING_FEE_KIND,
   syncParkingSpotReservationForLodging,
 } from "@/lib/parkingFeeConfig";
 import { displayServiceFeeName, filterServiceFeesForReservation } from "@/lib/serviceFeeScope";
@@ -170,7 +171,12 @@ export const ReservationDialog = ({
   const [addServiceFeeDialogOpen, setAddServiceFeeDialogOpen] = useState(false);
   const [selectedServiceFee, setSelectedServiceFee] = useState<{ id: string; name: string; description?: string } | null>(null);
   const [editingServiceFee, setEditingServiceFee] = useState<{ id: string; amount: number; quantity: number; notes?: string } | null>(null);
-  
+  const [serviceFeeSuggest, setServiceFeeSuggest] = useState<{
+    amount: number;
+    quantity: number;
+    quantityHint?: string;
+  } | null>(null);
+
   const [calculatingPrice, setCalculatingPrice] = useState(false);
   const [createNewClient, setCreateNewClient] = useState(true); // Sempre criar novo cliente
   const [creatingClient, setCreatingClient] = useState(false);
@@ -382,6 +388,37 @@ export const ReservationDialog = ({
   const { data: parkingFeeConfig } = useParkingFeeConfig(quoteCategoryBuildingId);
   const cleaningConfigured = isCleaningFeeConfigured(cleaningFeeConfig);
   const parkingConfigured = isParkingFeeConfigured(parkingFeeConfig);
+
+  const openServiceFeeDialog = (
+    fee: { id: string; name: string; description?: string; service_kind?: string | null },
+    existing: { id: string; amount: number; quantity: number; notes?: string } | null,
+  ) => {
+    setSelectedServiceFee(fee);
+    setEditingServiceFee(existing);
+    if (!existing) {
+      const kind = fee.service_kind;
+      if (
+        kind === PARKING_FEE_KIND &&
+        parkingConfigured &&
+        parkingFeeConfig &&
+        formData.checkin_date &&
+        formData.checkout_date
+      ) {
+        const nights = calculateNights(formData.checkin_date, formData.checkout_date);
+        const { amount, quantity } = computeParkingFeeTotal(parkingFeeConfig, nights);
+        const quantityHint =
+          parkingFeeConfig.billingMode === "daily"
+            ? `${nights} diária(s) entre check-in e check-out da reserva`
+            : "Valor único para o período da reserva (check-in → check-out)";
+        setServiceFeeSuggest({ amount, quantity, quantityHint });
+      } else {
+        setServiceFeeSuggest(null);
+      }
+    } else {
+      setServiceFeeSuggest(null);
+    }
+    setAddServiceFeeDialogOpen(true);
+  };
 
   const persistParkingIfNeeded = async (created: {
     id: string;
@@ -3947,16 +3984,14 @@ export const ReservationDialog = ({
                                   type="button"
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => {
-                                    setSelectedServiceFee(fee);
-                                    setEditingServiceFee({
+                                  onClick={() =>
+                                    openServiceFeeDialog(fee, {
                                       id: existingFee.id,
                                       amount: existingFee.amount || 0,
                                       quantity: existingFee.quantity || 1,
                                       notes: existingFee.notes,
-                                    });
-                                    setAddServiceFeeDialogOpen(true);
-                                  }}
+                                    })
+                                  }
                                   title="Editar taxa"
                                   className="h-8 w-8 p-0"
                                 >
@@ -3986,11 +4021,7 @@ export const ReservationDialog = ({
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => {
-                                  setSelectedServiceFee(fee);
-                                  setEditingServiceFee(null);
-                                  setAddServiceFeeDialogOpen(true);
-                                }}
+                                onClick={() => openServiceFeeDialog(fee, null)}
                                 title="Adicionar taxa"
                                 className="h-8 w-8 p-0"
                               >
@@ -4124,11 +4155,15 @@ export const ReservationDialog = ({
             if (!open) {
               setSelectedServiceFee(null);
               setEditingServiceFee(null);
+              setServiceFeeSuggest(null);
             }
           }}
           serviceFee={selectedServiceFee}
           reservationId={reservationId}
           existingFee={editingServiceFee || undefined}
+          suggestedAmount={serviceFeeSuggest?.amount}
+          suggestedQuantity={serviceFeeSuggest?.quantity}
+          quantityHint={serviceFeeSuggest?.quantityHint}
           onConfirm={async (data) => {
             try {
               if (editingServiceFee) {

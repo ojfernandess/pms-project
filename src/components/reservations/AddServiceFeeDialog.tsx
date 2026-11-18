@@ -36,6 +36,10 @@ interface AddServiceFeeDialogProps {
     notes?: string;
   }) => Promise<void>;
   isSubmitting?: boolean;
+  /** Preenchimento ao abrir (ex.: estacionamento pelos dias da reserva) */
+  suggestedAmount?: number;
+  suggestedQuantity?: number;
+  quantityHint?: string;
 }
 
 export const AddServiceFeeDialog = ({
@@ -46,6 +50,9 @@ export const AddServiceFeeDialog = ({
   existingFee,
   onConfirm,
   isSubmitting = false,
+  suggestedAmount,
+  suggestedQuantity,
+  quantityHint,
 }: AddServiceFeeDialogProps) => {
   const [amount, setAmount] = useState("0.00");
   const [quantity, setQuantity] = useState("1");
@@ -58,12 +65,17 @@ export const AddServiceFeeDialog = ({
         setQuantity(existingFee.quantity.toString());
         setNotes(existingFee.notes || "");
       } else {
-        setAmount("0.00");
-        setQuantity("1");
+        if (suggestedAmount != null && suggestedAmount > 0) {
+          setAmount(String(suggestedAmount));
+          setQuantity(String(suggestedQuantity != null && suggestedQuantity > 0 ? suggestedQuantity : 1));
+        } else {
+          setAmount("0.00");
+          setQuantity("1");
+        }
         setNotes("");
       }
     }
-  }, [open, existingFee]);
+  }, [open, existingFee, suggestedAmount, suggestedQuantity]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,7 +134,12 @@ export const AddServiceFeeDialog = ({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="quantity">Quantidade</Label>
+            <Label htmlFor="quantity">
+              Quantidade
+              {quantityHint ? (
+                <span className="block text-xs font-normal text-muted-foreground">{quantityHint}</span>
+              ) : null}
+            </Label>
             <Input
               id="quantity"
               type="number"

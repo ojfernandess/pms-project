@@ -24,12 +24,15 @@ import {
   formatCurrency,
   isPaymentRefundRecord,
 } from "@/lib/reservationUtils";
+import { syncLinkedParkingSpotPaymentFromLodging } from "@/lib/parkingPaymentSync";
 
 interface ReservationPaymentModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   reservation: any;
   onSuccess?: () => void;
+  /** Ex.: `fee-<reservation_service_fees.id>` — pré-seleciona taxa ao abrir */
+  initialPaymentComponent?: string;
 }
 
 const paymentMethodLabels: Record<string, string> = {
@@ -46,6 +49,7 @@ export function ReservationPaymentModal({
   onOpenChange,
   reservation,
   onSuccess,
+  initialPaymentComponent,
 }: ReservationPaymentModalProps) {
   const queryClient = useQueryClient();
   const { carriers, paymentTypes, isLoading: loadingCarriers } = usePaymentCarriers();
@@ -744,6 +748,12 @@ export function ReservationPaymentModal({
 
     const syncSelection = () => {
       setSelectedComponent((current) => {
+        if (
+          initialPaymentComponent &&
+          availablePaymentComponentValues.includes(initialPaymentComponent)
+        ) {
+          return initialPaymentComponent;
+        }
         if (current && availablePaymentComponentValues.includes(current)) {
           return current;
         }
@@ -759,7 +769,7 @@ export function ReservationPaymentModal({
     }, 400);
 
     return () => window.clearTimeout(t);
-  }, [open, reservation?.id, availablePaymentComponentValues.join("|")]);
+  }, [open, reservation?.id, availablePaymentComponentValues.join("|"), initialPaymentComponent]);
 
   // Atualizar valor do campo quando seleções mudarem
   useEffect(() => {
@@ -1170,6 +1180,12 @@ export function ReservationPaymentModal({
 
       void queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
       void queryClient.invalidateQueries({ queryKey: ["reservations"], exact: false });
+
+      try {
+        await syncLinkedParkingSpotPaymentFromLodging(reservation.id);
+      } catch (syncErr) {
+        console.error("Erro ao sincronizar pagamento da vaga de estacionamento:", syncErr);
+      }
 
       await new Promise((resolve) => setTimeout(resolve, 1400));
 

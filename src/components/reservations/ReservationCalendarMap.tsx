@@ -23,6 +23,7 @@ import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterR
 import { usePermissions } from "@/hooks/usePermissions";
 import { useHotelSettings } from "@/hooks/useHotelSettings";
 import { QuickReservationDialog } from "./QuickReservationDialog";
+import { ParkingQuickReservationDialog } from "./ParkingQuickReservationDialog";
 import { ReservationQuickViewModal } from "./ReservationQuickViewModal";
 import { ReservationTransferModal } from "./ReservationTransferModal";
 import { ReservationReallocationModal } from "./ReservationReallocationModal";
@@ -30,6 +31,7 @@ import { ReservationPaymentModal } from "./ReservationPaymentModal";
 import { BlockViewDialog } from "./BlockViewDialog";
 import { RatePlansModal } from "./RatePlansModal";
 import { toast } from "sonner";
+import { effectiveMapPaidAmount, isParkingSpotMapReservation } from "@/lib/parkingPaymentSync";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -3616,7 +3618,7 @@ export const ReservationCalendarMap = ({
                             const showPreCheckinDot =
                               isWebCheckinCompleted(reservation.web_checkin) &&
                               reservation.status !== "checkedin";
-                            const paidAmount = Number(reservation.paid_amount || 0);
+                            const paidAmount = effectiveMapPaidAmount(reservation);
                             const baseTotalAmount = Number(reservation.total_amount || 0);
                             
                             // Calcular total incluindo taxas extras
@@ -3624,7 +3626,10 @@ export const ReservationCalendarMap = ({
                               return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
                             }, 0);
                             
-                            const totalWithFees = baseTotalAmount + serviceFeesTotal;
+                            const totalWithFees = Math.max(
+                              baseTotalAmount + serviceFeesTotal,
+                              paidAmount > 0 ? paidAmount : 0,
+                            );
                             
                             if (reservation.status === "checkedin") {
                               // Bolinha azul só quando há pendência; quitada = só a cor de check-in
@@ -3651,6 +3656,15 @@ export const ReservationCalendarMap = ({
                             ) {
                               // Status especiais: usar cor da legenda
                               statusColor = statusConfig[reservation.status] || statusConfig.confirmed;
+                            } else if (isParkingSpotMapReservation(reservation) && baseTotalAmount === 0) {
+                              const ps = String(reservation.payment_status ?? "pending");
+                              if (ps === "paid" || paidAmount >= totalWithFees) {
+                                statusColor = statusConfig.confirmed;
+                              } else if (ps === "partial" || paidAmount > 0) {
+                                statusColor = statusConfig.pending;
+                              } else {
+                                statusColor = statusConfig.unpaid || statusConfig.confirmed;
+                              }
                             } else if (paidAmount === 0 || reservation.status === "unpaid") {
                               // Sem pagamento = Não Pago (vermelho)
                               statusColor = statusConfig.unpaid || statusConfig.confirmed;
@@ -3663,6 +3677,8 @@ export const ReservationCalendarMap = ({
                                 // Base paga E sem taxas pendentes = Confirmada (verde)
                               statusColor = statusConfig.confirmed;
                               }
+                            } else if (baseTotalAmount === 0 && totalWithFees > 0 && paidAmount >= totalWithFees) {
+                              statusColor = statusConfig.confirmed;
                             } else {
                               // Base não paga completamente = Pendente (amarelo)
                               statusColor = statusConfig.pending;
@@ -3935,52 +3951,71 @@ export const ReservationCalendarMap = ({
       </Card>
 
       {/* Dialog de criação rápida */}
-      {quickDialogData && (
-        <QuickReservationDialog
-          open={quickDialogOpen}
-          onOpenChange={(open) => {
-            if (!open) {
-              // Pequena janela para ignorar o clique que fechou o dialog.
-              suppressQuickDialogUntilRef.current = Date.now() + 250;
-            }
-            setQuickDialogOpen(open);
-            if (!open) setQuickDialogData(null);
-          }}
-          onProceed={(data) => {
-            // Fechar o QuickReservationDialog primeiro
-            setQuickDialogOpen(false);
-            setQuickDialogData(null);
-            
-            // Depois chamar onCreateReservation (que pode abrir outro modal)
-            if (onCreateReservation) {
-              // Usar setTimeout para garantir que o QuickReservationDialog foi fechado
-              setTimeout(() => {
-              onCreateReservation({
-                checkin_date: data.checkin_date,
-                checkout_date: data.checkout_date,
-                category_id: data.category_id,
-                room_id: data.room_id,
-                pricing_plan_id: data.pricing_plan_id,
-                channel: data.channel,
-                adults: data.adults,
-                children: data.children,
-                total_amount: data.total_amount,
-                action: data.action,
-                });
-              }, 100);
-            }
-          }}
-          onOpenMaintenance={(data) => {
-            setQuickDialogOpen(false);
-            setQuickDialogData(null);
-            setTimeout(() => {
-              onOpenMaintenance?.(data);
-            }, 100);
-          }}
-          initialData={quickDialogData}
-          rateCalendar={rateCalendar}
-        />
-      )}
+      {quickDialogData &&
+        (() => {
+          const quickCategory = categories.find((c: { id?: string }) => c.id === quickDialogData.category_id);
+          const isParking = quickCategory?.category_kind === "parking";
+          if (isParking) {
+            return (
+              <ParkingQuickReservationDialog
+                open={quickDialogOpen}
+                onOpenChange={(open) => {
+                  if (!open) {
+                    suppressQuickDialogUntilRef.current = Date.now() + 250;
+                  }
+                  setQuickDialogOpen(open);
+                  if (!open) setQuickDialogData(null);
+                }}
+                initialData={quickDialogData}
+                onComplete={() => {
+                  queryClient.invalidateQueries({ queryKey: ["reservations"] });
+                  queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+                }}
+              />
+            );
+          }
+          return (
+            <QuickReservationDialog
+              open={quickDialogOpen}
+              onOpenChange={(open) => {
+                if (!open) {
+                  suppressQuickDialogUntilRef.current = Date.now() + 250;
+                }
+                setQuickDialogOpen(open);
+                if (!open) setQuickDialogData(null);
+              }}
+              onProceed={(data) => {
+                setQuickDialogOpen(false);
+                setQuickDialogData(null);
+                if (onCreateReservation) {
+                  setTimeout(() => {
+                    onCreateReservation({
+                      checkin_date: data.checkin_date,
+                      checkout_date: data.checkout_date,
+                      category_id: data.category_id,
+                      room_id: data.room_id,
+                      pricing_plan_id: data.pricing_plan_id,
+                      channel: data.channel,
+                      adults: data.adults,
+                      children: data.children,
+                      total_amount: data.total_amount,
+                      action: data.action,
+                    });
+                  }, 100);
+                }
+              }}
+              onOpenMaintenance={(data) => {
+                setQuickDialogOpen(false);
+                setQuickDialogData(null);
+                setTimeout(() => {
+                  onOpenMaintenance?.(data);
+                }, 100);
+              }}
+              initialData={quickDialogData}
+              rateCalendar={rateCalendar}
+            />
+          );
+        })()}
 
       {/* Thumbnail ao passar o mouse sobre a reserva */}
       {hoveredReservationPreview && isHoverPreviewEnabled && !draggedReservation && !isDragging && (() => {
@@ -4128,7 +4163,7 @@ export const ReservationCalendarMap = ({
             // Mesma lógica do bloco de reserva
             const reservation = draggedReservation.reservation;
             let previewColor;
-            const paidAmount = Number(reservation.paid_amount || 0);
+            const paidAmount = effectiveMapPaidAmount(reservation);
             const baseTotalAmount = Number(reservation.total_amount || 0);
             
             // Calcular total incluindo taxas extras
@@ -4136,7 +4171,10 @@ export const ReservationCalendarMap = ({
               return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
             }, 0);
             
-            const totalWithFees = baseTotalAmount + serviceFeesTotal;
+            const totalWithFees = Math.max(
+              baseTotalAmount + serviceFeesTotal,
+              paidAmount > 0 ? paidAmount : 0,
+            );
             
             if (reservation.status === "checkedin") {
               // Check-in: cor segue o pagamento (pendência após extensão = amarelo)
@@ -4158,6 +4196,15 @@ export const ReservationCalendarMap = ({
             ) {
               // Status especiais: usar cor da legenda
               previewColor = statusConfig[reservation.status] || statusConfig.confirmed;
+            } else if (isParkingSpotMapReservation(reservation) && baseTotalAmount === 0) {
+              const ps = String(reservation.payment_status ?? "pending");
+              if (ps === "paid" || paidAmount >= totalWithFees) {
+                previewColor = statusConfig.confirmed;
+              } else if (ps === "partial" || paidAmount > 0) {
+                previewColor = statusConfig.pending;
+              } else {
+                previewColor = statusConfig.unpaid || statusConfig.confirmed;
+              }
             } else if (paidAmount === 0 || reservation.status === "unpaid") {
               // Sem pagamento = Não Pago (vermelho)
               previewColor = statusConfig.unpaid || statusConfig.confirmed;
@@ -4170,6 +4217,8 @@ export const ReservationCalendarMap = ({
                 // Base paga E sem taxas pendentes = Confirmada (verde)
               previewColor = statusConfig.confirmed;
               }
+            } else if (baseTotalAmount === 0 && totalWithFees > 0 && paidAmount >= totalWithFees) {
+              previewColor = statusConfig.confirmed;
             } else {
               // Base não paga completamente = Pendente (amarelo)
               previewColor = statusConfig.pending;

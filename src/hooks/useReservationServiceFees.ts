@@ -5,6 +5,7 @@ import { logActivity } from "@/lib/activityLogger";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { PARKING_FEE_KIND, cancelParkingSpotForLodging } from "@/lib/parkingFeeConfig";
 import { maybeSyncParkingSpotAfterFeeAdded } from "@/lib/parkingReservationSync";
+import { syncLinkedParkingSpotPaymentFromLodging } from "@/lib/parkingPaymentSync";
 
 export const useReservationServiceFees = (reservationId?: string) => {
   const queryClient = useQueryClient();
@@ -112,6 +113,11 @@ export const useReservationServiceFees = (reservationId?: string) => {
           toast.warning(
             "Taxa adicionada, mas não foi possível reservar a vaga no mapa. Verifique disponibilidade ou datas da reserva.",
           );
+        }
+        try {
+          await syncLinkedParkingSpotPaymentFromLodging(data.reservation_id);
+        } catch {
+          /* ignore */
         }
       }
 

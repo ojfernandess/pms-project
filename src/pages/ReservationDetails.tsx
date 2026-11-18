@@ -51,7 +51,16 @@ import {
   isPaymentRefundRecord,
   getRefundedPaymentId,
   netPaymentsTotal,
+  calculateNights,
 } from "@/lib/reservationUtils";
+import { useParkingFeeConfig } from "@/hooks/useParkingFeeConfig";
+import {
+  computeParkingFeeTotal,
+  isParkingFeeConfigured,
+  PARKING_FEE_KIND,
+} from "@/lib/parkingFeeConfig";
+import { ParkingLinkedBillingCard } from "@/components/reservations/ParkingLinkedBillingCard";
+import { syncLinkedParkingSpotPaymentFromLodging } from "@/lib/parkingPaymentSync";
 import { useServiceFees } from "@/hooks/useServiceFees";
 import { displayServiceFeeName, filterServiceFeesForReservation } from "@/lib/serviceFeeScope";
 import { useReservationServiceFees } from "@/hooks/useReservationServiceFees";
@@ -370,7 +379,7 @@ const ReservationDetails = () => {
       if (categoryId) {
         const { data: categoryData } = await supabase
           .from("room_categories")
-          .select("name, capacity_adults, capacity_children, building_id")
+          .select("name, capacity_adults, capacity_children, building_id, category_kind")
           .eq("id", categoryId)
           .single();
         
@@ -651,6 +660,48 @@ const ReservationDetails = () => {
     [serviceFees, reservationBuildingId],
   );
 
+  const { data: parkingFeeConfig } = useParkingFeeConfig(reservationBuildingId);
+  const parkingConfigured = isParkingFeeConfigured(parkingFeeConfig);
+
+  const isParkingLodgingLinked = useMemo(() => {
+    const kind = (reservation?.room_categories as { category_kind?: string } | null)?.category_kind;
+    return kind === "parking" && !!reservation?.lodging_reservation_id;
+  }, [reservation?.room_categories, reservation?.lodging_reservation_id]);
+
+  const openServiceFeeDialog = (
+    fee: { id: string; name: string; description?: string; service_kind?: string | null },
+    existing: { id: string; amount: number; quantity: number; notes?: string } | null,
+  ) => {
+    setSelectedServiceFee(fee);
+    setEditingServiceFee(existing);
+    if (!existing) {
+      const kind = fee.service_kind;
+      if (
+        kind === PARKING_FEE_KIND &&
+        parkingConfigured &&
+        parkingFeeConfig &&
+        reservation?.checkin_date &&
+        reservation?.checkout_date
+      ) {
+        const nights = calculateNights(
+          String(reservation.checkin_date).split("T")[0],
+          String(reservation.checkout_date).split("T")[0],
+        );
+        const { amount, quantity } = computeParkingFeeTotal(parkingFeeConfig, nights);
+        const quantityHint =
+          parkingFeeConfig.billingMode === "daily"
+            ? `${nights} diária(s) entre check-in e check-out da reserva`
+            : "Valor único para o período da reserva (check-in → check-out)";
+        setServiceFeeSuggest({ amount, quantity, quantityHint });
+      } else {
+        setServiceFeeSuggest(null);
+      }
+    } else {
+      setServiceFeeSuggest(null);
+    }
+    setAddServiceFeeDialogOpen(true);
+  };
+
   // Buscar pagamentos da reserva
   const { data: payments, refetch: refetchPayments } = useQuery({
     queryKey: ["reservation_payments", reservation?.id],
@@ -684,6 +735,11 @@ const ReservationDetails = () => {
   const [addServiceFeeDialogOpen, setAddServiceFeeDialogOpen] = useState(false);
   const [selectedServiceFee, setSelectedServiceFee] = useState<{ id: string; name: string; description?: string } | null>(null);
   const [editingServiceFee, setEditingServiceFee] = useState<{ id: string; amount: number; quantity: number; notes?: string } | null>(null);
+  const [serviceFeeSuggest, setServiceFeeSuggest] = useState<{
+    amount: number;
+    quantity: number;
+    quantityHint?: string;
+  } | null>(null);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
@@ -2017,6 +2073,12 @@ const ReservationDetails = () => {
       {/* Step 1: Informações */}
       {currentStep === 1 && (
         <div className="space-y-6">
+          {isParkingLodgingLinked && reservation?.lodging_reservation_id && reservation?.id ? (
+            <ParkingLinkedBillingCard
+              parkingReservationId={reservation.id}
+              lodgingReservationId={reservation.lodging_reservation_id}
+            />
+          ) : null}
           {/* Alerta de Reserva Cancelada */}
           {reservation.status === "cancelled" && (
             <Card className="p-4 bg-red-50 border-red-200">
@@ -3312,16 +3374,14 @@ const ReservationDetails = () => {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => {
-                                setSelectedServiceFee(fee);
-                                setEditingServiceFee({
+                              onClick={() =>
+                                openServiceFeeDialog(fee, {
                                   id: existingFee.id,
                                   amount: existingFee.amount || 0,
                                   quantity: existingFee.quantity || 1,
                                   notes: existingFee.notes,
-                                });
-                                setAddServiceFeeDialogOpen(true);
-                              }}
+                                })
+                              }
                               title="Editar taxa"
                                   className="h-7 w-7 p-0"
                             >
@@ -3371,11 +3431,7 @@ const ReservationDetails = () => {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              setSelectedServiceFee(fee);
-                              setEditingServiceFee(null);
-                              setAddServiceFeeDialogOpen(true);
-                            }}
+                            onClick={() => openServiceFeeDialog(fee, null)}
                             title="Adicionar taxa"
                                   className="h-7 px-2 text-xs"
                           >
@@ -4185,11 +4241,15 @@ const ReservationDetails = () => {
             if (!open) {
               setSelectedServiceFee(null);
               setEditingServiceFee(null);
+              setServiceFeeSuggest(null);
             }
           }}
           serviceFee={selectedServiceFee}
           reservationId={reservation?.id}
           existingFee={editingServiceFee || undefined}
+          suggestedAmount={serviceFeeSuggest?.amount}
+          suggestedQuantity={serviceFeeSuggest?.quantity}
+          quantityHint={serviceFeeSuggest?.quantityHint}
           onConfirm={async (data) => {
             try {
               if (editingServiceFee) {
@@ -4218,10 +4278,14 @@ const ReservationDetails = () => {
         open={paymentModalOpen}
         onOpenChange={setPaymentModalOpen}
         reservation={reservation}
-        onSuccess={() => {
+        onSuccess={async () => {
+          if (reservation?.id) {
+            await syncLinkedParkingSpotPaymentFromLodging(reservation.id);
+          }
           refetch();
           queryClient.invalidateQueries({ queryKey: ["reservations"] });
           queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation?.id] });
+          queryClient.invalidateQueries({ queryKey: ["parking_linked_billing"] });
         }}
       />
 
