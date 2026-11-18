@@ -22,7 +22,8 @@ DECLARE
     'guest_stay_history',
     'email_queue',
     'reservation_extensions',
-    'fiscal_document_requests'
+    'fiscal_document_requests',
+    'stay_reviews'
   ];
   fn record;
 BEGIN
@@ -40,6 +41,14 @@ BEGIN
 
   IF to_regclass('public.reservations') IS NOT NULL THEN
     GRANT UPDATE ON TABLE public.reservations TO anon;
+  END IF;
+
+  IF to_regclass('public.rooms') IS NOT NULL THEN
+    GRANT UPDATE ON TABLE public.rooms TO anon;
+  END IF;
+
+  IF to_regclass('public.establishment_review_settings') IS NOT NULL THEN
+    GRANT SELECT ON TABLE public.establishment_review_settings TO anon;
   END IF;
 
   IF to_regclass('public.error_logs') IS NOT NULL THEN
