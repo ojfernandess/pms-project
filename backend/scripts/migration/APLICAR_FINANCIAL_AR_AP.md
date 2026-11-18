@@ -67,6 +67,8 @@ WHERE routine_schema = 'public'
 
 Deve listar as três funções.
 
+**API (myapi):** cada RPC nova precisa constar no `RPCS` de `backend/src/data/data.service.ts`; sem isso o Nest responde **400** `Função não disponível`. Após alterar a lista, faça **redeploy do backend**.
+
 ```sql
 SELECT EXISTS (
   SELECT 1 FROM information_schema.tables
