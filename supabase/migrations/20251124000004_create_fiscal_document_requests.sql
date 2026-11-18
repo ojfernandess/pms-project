@@ -119,3 +119,5 @@ COMMENT ON COLUMN public.fiscal_document_requests.document_type IS 'Tipo de docu
 COMMENT ON COLUMN public.fiscal_document_requests.request_type IS 'Tipo de solicitação: individual (Pessoa Física) ou company (Pessoa Jurídica)';
 COMMENT ON COLUMN public.fiscal_document_requests.status IS 'Status da solicitação: pending, processing, completed, cancelled';
 
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.fiscal_document_requests TO authenticated, service_role;
+

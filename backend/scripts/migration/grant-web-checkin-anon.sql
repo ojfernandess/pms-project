@@ -21,7 +21,8 @@ DECLARE
     'web_checkin_documents',
     'guest_stay_history',
     'email_queue',
-    'reservation_extensions'
+    'reservation_extensions',
+    'fiscal_document_requests'
   ];
   fn record;
 BEGIN
