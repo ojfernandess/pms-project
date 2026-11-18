@@ -3513,17 +3513,28 @@ export const ReservationCalendarMap = ({
                           ? "bg-rose-50/40 hover:bg-rose-50/60"
                           : isMaintenance
                           ? "bg-amber-50/40 hover:bg-amber-50/60"
+                          : hasPartialMaintenance
+                          ? "bg-red-50/35 hover:bg-red-50/50"
                           : "bg-white hover:bg-slate-50/60"
                       )} style={{ minHeight: "40px" }}>
                         <div className={cn(
                           "w-32 sm:w-48 md:w-56 flex-shrink-0 px-2 py-1.5 pl-4 sm:pl-7 border-r border-slate-100 text-[10px] sm:text-xs flex items-center gap-1.5 sm:gap-2",
-                          isInterdicted ? "bg-rose-50/50" : isMaintenance ? "bg-amber-50/50" : "bg-white"
+                          isInterdicted
+                            ? "bg-rose-50/50"
+                            : isMaintenance
+                            ? "bg-amber-50/50"
+                            : hasPartialMaintenance
+                            ? "bg-red-50/50"
+                            : "bg-white"
                         )}>
                           {isInterdicted && (
                             <Lock className="h-3.5 w-3.5 text-rose-500 flex-shrink-0" />
                           )}
-                          {(isMaintenance || hasPartialMaintenance) && !isInterdicted && (
+                          {isMaintenance && !isInterdicted && (
                             <Wrench className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
+                          )}
+                          {hasPartialMaintenance && !isMaintenance && !isInterdicted && (
+                            <Wrench className="h-3.5 w-3.5 text-red-600 flex-shrink-0" />
                           )}
                           <div className="min-w-0 flex-1">
                             <div className={cn(
@@ -3538,7 +3549,7 @@ export const ReservationCalendarMap = ({
                               </div>
                             )}
                             {hasPartialMaintenance && !isMaintenance && (
-                              <div className="text-[9px] sm:text-[10px] font-medium text-amber-700 truncate leading-tight">
+                              <div className="text-[9px] sm:text-[10px] font-semibold text-red-700 truncate leading-tight">
                                 Manutenção no período
                               </div>
                             )}
@@ -3587,7 +3598,7 @@ export const ReservationCalendarMap = ({
                                     : isMaintenance
                                     ? "bg-amber-50/30 cursor-not-allowed"
                                     : isPeriodMaintenance
-                                    ? "bg-amber-50/40 cursor-not-allowed"
+                                    ? "bg-red-200/75 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.55)] cursor-not-allowed"
                                     : isOccupied
                                     ? "bg-slate-50/80 cursor-not-allowed"
                                     : isSelected 
@@ -3613,6 +3624,12 @@ export const ReservationCalendarMap = ({
                                   justifyContent: 'center'
                                 }}
                                 onMouseDown={(e) => {
+                                  if (isPeriodMaintenance && !isUnavailable) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    toast.error("Período em manutenção — indisponível para nova reserva");
+                                    return;
+                                  }
                                   if (isBlocked) {
                                     e.preventDefault();
                                     e.stopPropagation();
@@ -3630,6 +3647,12 @@ export const ReservationCalendarMap = ({
                                   }
                                 }}
                                 onClick={(e) => {
+                                  if (isPeriodMaintenance && !isUnavailable) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    toast.error("Período em manutenção — indisponível para nova reserva");
+                                    return;
+                                  }
                                   if (isBlocked) {
                                     e.preventDefault();
                                     e.stopPropagation();
@@ -3885,7 +3908,7 @@ export const ReservationCalendarMap = ({
                                 <div className="flex-1 min-w-0 flex items-center gap-1.5">
                                   {showMaintenanceOnReservation && (
                                     <Wrench
-                                      className="h-3 w-3 text-amber-100 flex-shrink-0"
+                                      className="h-3 w-3 text-red-200 flex-shrink-0 drop-shadow-sm"
                                       title="Chamado de manutenção ativo nesta estadia"
                                     />
                                   )}
