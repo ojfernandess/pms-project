@@ -911,133 +911,132 @@ export function ReservationPaymentModal({
       
       const { error: reservationError, data: updatedReservation } = await supabase
         .from("reservations")
-        .update({ 
+        .update({
           paid_amount: newPaidAmount,
           payment_status: newPaymentStatus,
-          ...(shouldUpdateStatus || isPreregistration ? { status: finalStatus } : {})
+          ...(shouldUpdateStatus || isPreregistration ? { status: finalStatus } : {}),
         })
         .eq("id", reservation.id)
-        .select(`
-          *,
-          financial_responsible:clients!client_id(*),
-          guest:clients!guest_id(*),
-          rooms (*),
-          room_categories (*)
-        `)
+        .select(
+          "id, establishment_id, reservation_code, guest_name, paid_amount, payment_status, status, checkout_date, client_id, guest_id, total_amount",
+        )
         .single();
 
       if (reservationError) throw reservationError;
 
-      // Criar notificação se reserva ficou pendente de pagamento ou taxa
-      try {
-        if (updatedReservation && (newReservationStatus === "pending" || newReservationStatus === "unpaid")) {
-          const establishmentId = updatedReservation.establishment_id;
-          
-          if (establishmentId) {
-            const guestName = updatedReservation.guest?.full_name || 
-                             updatedReservation.financial_responsible?.full_name || 
-                             "Hóspede";
-            
-            let notificationType: "pending_payment" | "pending_service_fee" = "pending_payment";
-            let notificationMessage = "";
-            
-            if (newReservationStatus === "unpaid") {
-              notificationMessage = `Reserva ${updatedReservation.reservation_code || ''} de ${guestName} está sem pagamento`;
-            } else if (serviceFeesTotal > 0 && newPaidAmount < totalWithFees) {
-              notificationType = "pending_service_fee";
-              notificationMessage = `Reserva ${updatedReservation.reservation_code || ''} de ${guestName} tem taxas pendentes`;
-            } else {
-              notificationMessage = `Reserva ${updatedReservation.reservation_code || ''} de ${guestName} está pendente de pagamento`;
-            }
-            
-            await supabase.rpc("create_notification_for_establishment", {
-              p_establishment_id: establishmentId,
-              p_type: notificationType,
-              p_title: "Reserva Pendente",
-              p_message: notificationMessage,
-              p_priority: "high",
-              p_metadata: {
-                reservation_id: updatedReservation.id,
-                reservation_code: updatedReservation.reservation_code,
-                status: newReservationStatus,
-              },
-            });
-          }
-        }
-      } catch (error) {
-        console.error("Erro ao criar notificação de pagamento pendente:", error);
-        // Não bloquear o pagamento se a notificação falhar
-      }
+      const reservationSnapshot =
+        updatedReservation ??
+        ({
+          ...reservation,
+          paid_amount: newPaidAmount,
+          payment_status: newPaymentStatus,
+          status: finalStatus,
+        } as typeof updatedReservation);
 
-      // Registrar log de pagamento
-      try {
-        const oldPaidAmount = reservation.paid_amount || 0;
-        // Sempre usar "payment_added" quando um novo pagamento é criado
-        const actionType = "payment_added";
-        // Calcular taxa para o log
-        let feeAmount = 0;
-        let feePercent = 0;
-        if (selectedPaymentType?.payment_method === "credit_card") {
-          feePercent = selectedPaymentType.card_fee || 0;
-          if (installmentsCount >= 2 && installmentsCount <= 6) {
-            feePercent = selectedPaymentType.installments_2_6_fee || 0;
-          } else if (installmentsCount >= 7 && installmentsCount <= 12) {
-            feePercent = selectedPaymentType.installments_7_12_fee || 0;
+      const runPostPaymentSideEffects = async () => {
+        try {
+          if (reservationSnapshot && (newReservationStatus === "pending" || newReservationStatus === "unpaid")) {
+            const estId = reservationSnapshot.establishment_id;
+            if (estId) {
+              const guestName = reservationSnapshot.guest_name || reservation.guest_name || "Hóspede";
+              let notificationType: "pending_payment" | "pending_service_fee" = "pending_payment";
+              let notificationMessage = "";
+              if (newReservationStatus === "unpaid") {
+                notificationMessage = `Reserva ${reservationSnapshot.reservation_code || ""} de ${guestName} está sem pagamento`;
+              } else if (serviceFeesTotal > 0 && newPaidAmount < totalWithFees) {
+                notificationType = "pending_service_fee";
+                notificationMessage = `Reserva ${reservationSnapshot.reservation_code || ""} de ${guestName} tem taxas pendentes`;
+              } else {
+                notificationMessage = `Reserva ${reservationSnapshot.reservation_code || ""} de ${guestName} está pendente de pagamento`;
+              }
+              await supabase.rpc("create_notification_for_establishment", {
+                p_establishment_id: estId,
+                p_type: notificationType,
+                p_title: "Reserva Pendente",
+                p_message: notificationMessage,
+                p_priority: "high",
+                p_metadata: {
+                  reservation_id: reservationSnapshot.id,
+                  reservation_code: reservationSnapshot.reservation_code,
+                  status: newReservationStatus,
+                },
+              });
+            }
           }
-          feeAmount = (paymentAmount * feePercent) / 100;
+        } catch (error) {
+          console.error("Erro ao criar notificação de pagamento pendente:", error);
         }
-        
-        // Calcular datas de todas as parcelas para o log
-        const installmentDates: string[] = [];
-        for (let i = 0; i < installmentsCount; i++) {
-          const installmentDate = new Date(paymentDate);
-          installmentDate.setMonth(installmentDate.getMonth() + i);
-          installmentDates.push(format(installmentDate, "dd/MM/yyyy", { locale: ptBR }));
+
+        try {
+          const oldPaidAmount = reservation.paid_amount || 0;
+          const actionType = "payment_added";
+          let feeAmount = 0;
+          let feePercent = 0;
+          if (selectedPaymentType?.payment_method === "credit_card") {
+            feePercent = selectedPaymentType.card_fee || 0;
+            if (installmentsCount >= 2 && installmentsCount <= 6) {
+              feePercent = selectedPaymentType.installments_2_6_fee || 0;
+            } else if (installmentsCount >= 7 && installmentsCount <= 12) {
+              feePercent = selectedPaymentType.installments_7_12_fee || 0;
+            }
+            feeAmount = (paymentAmount * feePercent) / 100;
+          }
+
+          const installmentDates: string[] = [];
+          for (let i = 0; i < installmentsCount; i++) {
+            const installmentDate = new Date(paymentDate);
+            installmentDate.setMonth(installmentDate.getMonth() + i);
+            installmentDates.push(format(installmentDate, "dd/MM/yyyy", { locale: ptBR }));
+          }
+
+          const paymentDescription =
+            installmentsCount > 1
+              ? `Pagamento de ${formatCurrency(paymentAmount)} em ${installmentsCount}x adicionado à reserva ${reservation.reservation_code}. Parcelas: ${installmentDates.join(", ")}`
+              : `Pagamento de ${formatCurrency(paymentAmount)} adicionado à reserva ${reservation.reservation_code} em ${format(paymentDate, "dd/MM/yyyy", { locale: ptBR })}`;
+
+          await logActivity({
+            actionType,
+            entityType: "payment",
+            entityId: reservation.id,
+            entityCode: reservation.reservation_code,
+            description: paymentDescription,
+            oldValues: {
+              paid_amount: oldPaidAmount,
+              payment_status: reservation.payment_status || "pending",
+            },
+            newValues: {
+              paid_amount: newPaidAmount,
+              payment_status: newPaymentStatus,
+            },
+            metadata: {
+              payment_method: selectedPaymentType?.payment_method || "deposit",
+              carrier_id: selectedCarrierId,
+              payment_type_id: selectedPaymentTypeId,
+              installments: installmentsCount,
+              installment_dates:
+                installmentsCount > 1
+                  ? installmentDates
+                  : [format(paymentDate, "dd/MM/yyyy", { locale: ptBR })],
+              fee_percent: feePercent,
+              fee_amount: feeAmount,
+              total_amount: paymentAmount,
+              net_amount: paymentAmount - feeAmount,
+              payment_date: format(paymentDate, "yyyy-MM-dd"),
+              component: selectedComponent,
+              notes: observations || null,
+            },
+          });
+        } catch (logError) {
+          console.error("Erro ao registrar log de pagamento:", logError);
         }
-        
-        const paymentDescription = installmentsCount > 1
-          ? `Pagamento de ${formatCurrency(paymentAmount)} em ${installmentsCount}x adicionado à reserva ${reservation.reservation_code}. Parcelas: ${installmentDates.join(", ")}`
-          : `Pagamento de ${formatCurrency(paymentAmount)} adicionado à reserva ${reservation.reservation_code} em ${format(paymentDate, "dd/MM/yyyy", { locale: ptBR })}`;
-        
-        await logActivity({
-          actionType,
-          entityType: "payment",
-          entityId: reservation.id,
-          entityCode: reservation.reservation_code,
-          description: paymentDescription,
-          oldValues: {
-            paid_amount: oldPaidAmount,
-            payment_status: reservation.payment_status || "pending",
-          },
-          newValues: {
-            paid_amount: newPaidAmount,
-            payment_status: newPaymentStatus,
-          },
-          metadata: {
-            payment_method: selectedPaymentType?.payment_method || "deposit",
-            carrier_id: selectedCarrierId,
-            payment_type_id: selectedPaymentTypeId,
-            installments: installmentsCount,
-            installment_dates: installmentsCount > 1 ? installmentDates : [format(paymentDate, "dd/MM/yyyy", { locale: ptBR })],
-            fee_percent: feePercent,
-            fee_amount: feeAmount,
-            total_amount: paymentAmount,
-            net_amount: paymentAmount - feeAmount,
-            payment_date: format(paymentDate, "yyyy-MM-dd"),
-            component: selectedComponent, // Componente pago (base, extension, fee-xxx)
-            notes: observations || null,
-          },
-        });
-      } catch (logError) {
-        console.error("Erro ao registrar log de pagamento:", logError);
-        // Não bloquear o pagamento se o log falhar, mas avisar
-        toast.error("Pagamento registrado, mas houve erro ao salvar o log");
-      }
+      };
+
+      void runPostPaymentSideEffects();
 
       // Disparar e-mail se pagamento foi confirmado (status = "paid")
       // IMPORTANTE: Não enviar email de pagamento confirmado se for uma extensão
       // (extensões têm seu próprio email via updateReservation)
-      if (newPaymentStatus === "paid" && updatedReservation) {
+      if (newPaymentStatus === "paid" && reservationSnapshot) {
         // Verificar se é uma extensão de várias formas:
         // 1. Se o selectedComponent é "extension" (pagamento específico para extensão)
         // 2. Se o checkout_date foi atualizado recentemente (últimos 60 segundos)
@@ -1115,7 +1114,7 @@ export function ReservationPaymentModal({
               console.log("📧 Enviando email de extensão após pagamento confirmado:", {
                 reservationId: reservation.id.substring(0, 8),
                 selectedComponent,
-                newCheckout: updatedReservation.checkout_date
+                newCheckout: reservationSnapshot.checkout_date
               });
               
               const { triggerEmail } = await import("@/lib/emailService");
@@ -1139,8 +1138,8 @@ export function ReservationPaymentModal({
                 // Usar checkout_date da reserva original se não conseguir buscar do log
               }
               
-              const emailResult = await triggerEmail('reservation.extended', updatedReservation, {
-                new_checkout_date: updatedReservation.checkout_date,
+              const emailResult = await triggerEmail('reservation.extended', reservationSnapshot, {
+                new_checkout_date: reservationSnapshot.checkout_date,
               });
               
               if (emailResult) {
@@ -1157,7 +1156,7 @@ export function ReservationPaymentModal({
           // Se não for extensão, enviar email de pagamento confirmado normalmente
           try {
             const { triggerEmail } = await import("@/lib/emailService");
-            await triggerEmail('payment.confirmed', updatedReservation);
+            await triggerEmail('payment.confirmed', reservationSnapshot);
             console.log("📧 Email de pagamento confirmado enviado");
           } catch (emailError) {
             console.error("Erro ao disparar e-mail de pagamento confirmado:", emailError);
@@ -1169,11 +1168,8 @@ export function ReservationPaymentModal({
       setShowPaymentSuccess(true);
       toast.success("Pagamento lançado com sucesso!");
 
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] }),
-        queryClient.invalidateQueries({ queryKey: ["reservations"] }),
-        queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] }),
-      ]);
+      void queryClient.invalidateQueries({ queryKey: ["reservation_payments", reservation.id] });
+      void queryClient.invalidateQueries({ queryKey: ["reservations"], exact: false });
 
       await new Promise((resolve) => setTimeout(resolve, 1400));
 

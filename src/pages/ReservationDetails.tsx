@@ -53,6 +53,7 @@ import {
   netPaymentsTotal,
 } from "@/lib/reservationUtils";
 import { useServiceFees } from "@/hooks/useServiceFees";
+import { displayServiceFeeName, filterServiceFeesForReservation } from "@/lib/serviceFeeScope";
 import { useReservationServiceFees } from "@/hooks/useReservationServiceFees";
 import { AddServiceFeeDialog } from "@/components/reservations/AddServiceFeeDialog";
 import { ReservationPaymentModal } from "@/components/reservations/ReservationPaymentModal";
@@ -88,6 +89,7 @@ import { resolveDocumentFields } from "@/lib/resolveDocumentStorageUrl";
 import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
 import type { NightlyQuoteLine } from "@/components/reservations/ReservationQuoteSummary";
 import { reservationGuestDisplayName } from "@/lib/reservationGuestDisplay";
+import { formatOtaReservationCodesForDisplay } from "@/lib/otaReservationCodes";
 import {
   formatReservationChannelOrigin,
   otaContactHintFromOtaBooking,
@@ -368,7 +370,7 @@ const ReservationDetails = () => {
       if (categoryId) {
         const { data: categoryData } = await supabase
           .from("room_categories")
-          .select("name, capacity_adults, capacity_children")
+          .select("name, capacity_adults, capacity_children, building_id")
           .eq("id", categoryId)
           .single();
         
@@ -638,6 +640,16 @@ const ReservationDetails = () => {
     isAdding: isAddingServiceFee,
     isUpdating: isUpdatingServiceFee,
   } = useReservationServiceFees(reservation?.id);
+
+  const reservationBuildingId = useMemo(() => {
+    const cat = reservation?.room_categories as { building_id?: string | null } | null | undefined;
+    return cat?.building_id ?? null;
+  }, [reservation?.room_categories]);
+
+  const scopedServiceFees = useMemo(
+    () => filterServiceFeesForReservation(serviceFees ?? [], reservationBuildingId),
+    [serviceFees, reservationBuildingId],
+  );
 
   // Buscar pagamentos da reserva
   const { data: payments, refetch: refetchPayments } = useQuery({
@@ -2117,11 +2129,34 @@ const ReservationDetails = () => {
                         ))}
                       </div>
                     )}
-                  {reservation.ota_booking?.ota_cm_booking_id && (
-                    <div className="text-xs text-slate-500 pt-1">
-                      CM booking: {String(reservation.ota_booking.ota_cm_booking_id)}
-                    </div>
-                  )}
+                  {reservation.ota_booking && (() => {
+                    const codes = formatOtaReservationCodesForDisplay(
+                      reservation.ota_booking as Parameters<typeof formatOtaReservationCodesForDisplay>[0],
+                    );
+                    if (!codes.partnerCode && !codes.managerMasterRef && !codes.syncLineCode) return null;
+                    return (
+                      <div className="text-xs text-slate-600 pt-2 space-y-1 border-t border-slate-100 mt-2">
+                        {codes.partnerCode && (
+                          <div>
+                            <span className="font-medium text-slate-700">Código reserva OTA: </span>
+                            <span className="font-mono">{codes.partnerCode}</span>
+                          </div>
+                        )}
+                        {codes.managerMasterRef && (
+                          <div>
+                            <span className="font-medium text-slate-700">Ref. channel manager: </span>
+                            <span className="font-mono">{codes.managerMasterRef}</span>
+                          </div>
+                        )}
+                        {codes.syncLineCode.includes("#") && (
+                          <div className="text-slate-500">
+                            <span className="font-medium">Sincronização (quarto): </span>
+                            <span className="font-mono">{codes.syncLineCode}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {reservation.ota_booking?.ota_special_requests && (
                     <div className="text-sm text-slate-600 pt-1 border-t border-slate-100 mt-2 pt-2">
                       <span className="font-medium text-slate-700">Pedidos especiais: </span>
@@ -2688,6 +2723,28 @@ const ReservationDetails = () => {
                         reservation as Parameters<typeof formatReservationChannelOrigin>[0]
                       )}
                     </div>
+                    {reservation.ota_booking && (() => {
+                      const codes = formatOtaReservationCodesForDisplay(
+                        reservation.ota_booking as Parameters<typeof formatOtaReservationCodesForDisplay>[0],
+                      );
+                      if (!codes.partnerCode && !codes.managerMasterRef) return null;
+                      return (
+                        <div className="mt-2 text-sm text-slate-600 space-y-1">
+                          {codes.partnerCode && (
+                            <p>
+                              <span className="text-slate-500">Código reserva OTA: </span>
+                              <span className="font-mono font-medium text-slate-800">{codes.partnerCode}</span>
+                            </p>
+                          )}
+                          {codes.managerMasterRef && (
+                            <p>
+                              <span className="text-slate-500">Ref. Bukly/CM: </span>
+                              <span className="font-mono">{codes.managerMasterRef}</span>
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -3199,9 +3256,7 @@ const ReservationDetails = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-              {serviceFees
-                .filter((fee: any) => fee.is_active)
-                .map((fee: any) => {
+              {scopedServiceFees.map((fee: any) => {
                   const existingFee = reservationServiceFees.find(
                     (rsf: any) => rsf.service_fees?.id === fee.id || rsf.service_fee_id === fee.id
                   );
@@ -3234,7 +3289,7 @@ const ReservationDetails = () => {
                               </div>
                             )}
                       <div className="flex-1">
-                        <div className="font-medium text-sm">{fee.name}</div>
+                        <div className="font-medium text-sm">{displayServiceFeeName(fee)}</div>
                         {existingFee && (
                                 <div className="text-xs text-muted-foreground mt-0.5">
                             Qtd: {existingFee.quantity} × {formatCurrency(existingFee.amount || 0)}

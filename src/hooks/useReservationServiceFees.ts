@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { logActivity } from "@/lib/activityLogger";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { PARKING_FEE_KIND, cancelParkingSpotForLodging } from "@/lib/parkingFeeConfig";
+import { maybeSyncParkingSpotAfterFeeAdded } from "@/lib/parkingReservationSync";
 
 export const useReservationServiceFees = (reservationId?: string) => {
   const queryClient = useQueryClient();
@@ -99,6 +100,21 @@ export const useReservationServiceFees = (reservationId?: string) => {
         // Não lançar erro para não interromper o fluxo principal
       }
 
+      const serviceKind = (newFee as { service_fees?: { service_kind?: string } })?.service_fees?.service_kind;
+      if (serviceKind === PARKING_FEE_KIND) {
+        try {
+          const sync = await maybeSyncParkingSpotAfterFeeAdded(data.reservation_id, serviceKind);
+          if (sync.warning) {
+            toast.warning(sync.warning);
+          }
+        } catch (parkingErr) {
+          console.error("Erro ao reservar vaga de estacionamento:", parkingErr);
+          toast.warning(
+            "Taxa adicionada, mas não foi possível reservar a vaga no mapa. Verifique disponibilidade ou datas da reserva.",
+          );
+        }
+      }
+
       // Registrar log de atividade
       const feeName = (newFee as any)?.service_fees?.name || "Taxa";
       const feeTotal = Number(data.amount || 0) * Number(data.quantity || 1);
@@ -133,9 +149,8 @@ export const useReservationServiceFees = (reservationId?: string) => {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["reservation_service_fees", variables.reservation_id] });
-      queryClient.invalidateQueries({ queryKey: ["reservations"] });
-      // Invalidar também a query específica do mapa de reservas para atualizar a cor
       queryClient.invalidateQueries({ queryKey: ["reservations"], exact: false });
+      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
       toast.success("Taxa adicionada com sucesso!");
     },
     onError: (error: any) => {

@@ -49,11 +49,38 @@ const RPCS = new Set([
 
 type QueryResult = { data: unknown; error: { message: string; code?: string } | null; count: number | null };
 
+class TxConcurrencyGate {
+  private active = 0;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(private readonly max: number) {}
+
+  async acquire(): Promise<void> {
+    if (this.active < this.max) {
+      this.active++;
+      return;
+    }
+    await new Promise<void>((resolve) => this.waiters.push(resolve));
+    this.active++;
+  }
+
+  release(): void {
+    this.active = Math.max(0, this.active - 1);
+    const next = this.waiters.shift();
+    if (next) next();
+  }
+}
+
 @Injectable()
 export class DataService {
   private readonly logger = new Logger(DataService.name);
   private catalog: Promise<Catalog> | null = null;
   private readonly missingTableWarned = new Set<string>();
+  private readonly txGate = new TxConcurrencyGate(
+    Math.max(1, Number(process.env.PMS_DB_MAX_CONCURRENT_TX ?? 12)),
+  );
+  private readonly txMaxWaitMs = Math.max(5000, Number(process.env.PMS_TX_MAX_WAIT_MS ?? 45_000));
+  private readonly txTimeoutMs = Math.max(10_000, Number(process.env.PMS_TX_TIMEOUT_MS ?? 120_000));
 
   constructor(
     private readonly prisma: PrismaService,
@@ -104,7 +131,11 @@ export class DataService {
       }
       return { data: request.head ? null : records, error: null, count: rows.count };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Erro na consulta";
+      let message = error instanceof Error ? error.message : "Erro na consulta";
+      if (/Unable to start a transaction in the given time/i.test(message)) {
+        message =
+          "Banco ocupado: não foi possível abrir transação a tempo. Tente novamente em alguns segundos ou aumente connection_limit / PMS_DB_MAX_CONCURRENT_TX no servidor.";
+      }
       this.logQueryFailure(message);
       return { data: null, error: { message }, count: null };
     }
@@ -169,13 +200,21 @@ export class DataService {
     const jwtRole = user ? "authenticated" : "anon";
     const dbRole = this.resolveDbRole(user);
     const claims = JSON.stringify({ sub: user?.id, email: user?.email, role: jwtRole, aud: jwtRole });
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('request.jwt.claims', ${claims}, true)`;
-      await tx.$executeRaw`SELECT set_config('request.jwt.claim.sub', ${user?.id ?? ""}, true)`;
-      await tx.$executeRaw`SELECT set_config('request.jwt.claim.role', ${jwtRole}, true)`;
-      await tx.$executeRawUnsafe(`SET LOCAL ROLE ${dbRole}`);
-      return run(tx);
-    }, { maxWait: 15000, timeout: 45000 });
+    await this.txGate.acquire();
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT set_config('request.jwt.claims', ${claims}, true)`;
+          await tx.$executeRaw`SELECT set_config('request.jwt.claim.sub', ${user?.id ?? ""}, true)`;
+          await tx.$executeRaw`SELECT set_config('request.jwt.claim.role', ${jwtRole}, true)`;
+          await tx.$executeRawUnsafe(`SET LOCAL ROLE ${dbRole}`);
+          return run(tx);
+        },
+        { maxWait: this.txMaxWaitMs, timeout: this.txTimeoutMs },
+      );
+    } finally {
+      this.txGate.release();
+    }
   }
 
   private logQueryFailure(message: string): void {

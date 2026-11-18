@@ -20,9 +20,9 @@ import {
   attachParkingFeeToReservation,
   computeParkingFeeTotal,
   isParkingFeeConfigured,
-  PARKING_FEE_KIND,
   syncParkingSpotReservationForLodging,
 } from "@/lib/parkingFeeConfig";
+import { displayServiceFeeName, filterServiceFeesForReservation } from "@/lib/serviceFeeScope";
 import { ReservationQuoteSummary } from "@/components/reservations/ReservationQuoteSummary";
 import { useHotelSettings } from "@/hooks/useHotelSettings";
 import { DEFAULT_HOTEL_TZ, zonedLocalDateTimeToUtcIso } from "@/lib/hotelTimezoneDate";
@@ -372,6 +372,11 @@ export const ReservationDialog = ({
     const cat = categories?.find((c) => c.id === formData.category_id);
     return (cat as { building_id?: string | null } | undefined)?.building_id ?? null;
   }, [categories, formData.category_id]);
+
+  const scopedServiceFeesForQuote = useMemo(
+    () => filterServiceFeesForReservation(serviceFees ?? [], quoteCategoryBuildingId),
+    [serviceFees, quoteCategoryBuildingId],
+  );
 
   const { data: cleaningFeeConfig } = useCleaningFeeConfig(quoteCategoryBuildingId);
   const { data: parkingFeeConfig } = useParkingFeeConfig(quoteCategoryBuildingId);
@@ -3908,9 +3913,7 @@ export const ReservationDialog = ({
               <div className="col-span-2">
                 <Label className="text-base font-semibold mb-3 block">Taxas / Consumo</Label>
                 <div className="space-y-2 border rounded-lg p-4 bg-slate-50">
-                  {serviceFees
-                    .filter((fee: any) => fee.is_active)
-                    .map((fee: any) => {
+                  {scopedServiceFeesForQuote.map((fee: any) => {
                       const existingFee = reservationServiceFees.find(
                         (rsf: any) => rsf.service_fees?.id === fee.id || rsf.service_fee_id === fee.id
                       );
@@ -3924,7 +3927,7 @@ export const ReservationDialog = ({
                           className="flex items-center justify-between p-3 border rounded-lg bg-white hover:bg-slate-50 transition-colors"
                         >
                           <div className="flex-1">
-                            <div className="font-medium text-sm">{fee.name}</div>
+                            <div className="font-medium text-sm">{displayServiceFeeName(fee)}</div>
                             {existingFee && (
                               <div className="text-xs text-muted-foreground mt-1">
                                 Qtd: {existingFee.quantity} × {formatCurrency(existingFee.amount || 0)}
@@ -4138,33 +4141,6 @@ export const ReservationDialog = ({
                   reservation_id: reservationId,
                   ...data,
                 });
-                if (
-                  selectedServiceFee?.service_kind === PARKING_FEE_KIND &&
-                  parkingFeeConfig?.parkingCategoryId &&
-                  currentReservation &&
-                  reservationId
-                ) {
-                  const sync = await syncParkingSpotReservationForLodging({
-                    lodgingReservationId: reservationId,
-                    establishmentId:
-                      currentReservation.establishment_id ||
-                      localStorage.getItem("selectedEstablishmentId") ||
-                      "",
-                    parkingCategoryId: parkingFeeConfig.parkingCategoryId,
-                    checkinDate: formData.checkin_date || currentReservation.checkin_date,
-                    checkoutDate: formData.checkout_date || currentReservation.checkout_date,
-                    clientId: formData.client_id || currentReservation.client_id,
-                    guestName:
-                      clientData.full_name ||
-                      formData.guest_name ||
-                      currentReservation.guest_name ||
-                      undefined,
-                    adults: formData.adults ?? currentReservation.adults,
-                    children: formData.children ?? currentReservation.children,
-                    lodgingReservationCode: currentReservation.reservation_code,
-                  });
-                  if (sync.warning) toast.warning(sync.warning);
-                }
               }
               setAddServiceFeeDialogOpen(false);
               setSelectedServiceFee(null);
