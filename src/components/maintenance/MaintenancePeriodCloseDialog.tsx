@@ -84,8 +84,8 @@ export function MaintenancePeriodCloseDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-lg gap-0 overflow-hidden p-0">
-          <DialogHeader className="border-b border-[#FCA5A5]/50 bg-[#FEE2E2] px-5 py-4 text-left">
+        <DialogContent className="grid max-h-[min(90dvh,720px)] w-[calc(100%-1.5rem)] max-w-lg grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-h-[min(92vh,720px)]">
+          <DialogHeader className="shrink-0 border-b border-[#FCA5A5]/50 bg-[#FEE2E2] px-5 py-4 pr-12 text-left">
             <DialogTitle className="flex items-center gap-2 text-base font-semibold text-red-900">
               <Wrench className="h-4 w-4 shrink-0" />
               Bloqueio de período · Manutenção
@@ -95,7 +95,7 @@ export function MaintenancePeriodCloseDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 px-5 py-4">
+          <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-5 py-4">
             {isLoading && (
               <div className="flex justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
@@ -162,14 +162,20 @@ export function MaintenancePeriodCloseDialog({
           </div>
 
           {isActive && (
-            <DialogFooter className="flex-col gap-2 border-t border-slate-100 bg-slate-50/80 px-5 py-4 sm:flex-row sm:justify-end">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isClosingTicket}>
+            <DialogFooter className="shrink-0 flex-col gap-2 border-t border-slate-100 bg-slate-50/95 px-5 py-4 pb-5 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-2 sm:space-x-0">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full sm:w-auto"
+                onClick={() => onOpenChange(false)}
+                disabled={isClosingTicket}
+              >
                 Voltar
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                className="border-red-200 text-red-800 hover:bg-red-50"
+                className="w-full border-red-200 text-red-800 hover:bg-red-50 sm:w-auto"
                 disabled={isClosingTicket}
                 onClick={() => {
                   if (!resolutionNotes.trim()) {
@@ -179,21 +185,21 @@ export function MaintenancePeriodCloseDialog({
                   setConfirmCancelOpen(true);
                 }}
               >
-                <XCircle className="mr-1.5 h-4 w-4" />
-                Cancelar manutenção
+                <XCircle className="mr-1.5 h-4 w-4 shrink-0" />
+                <span className="truncate">Cancelar manutenção</span>
               </Button>
               <Button
                 type="button"
-                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                className="w-full bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
                 disabled={isClosingTicket}
                 onClick={() => validateAndSubmit("completed")}
               >
                 {isClosingTicket ? (
-                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-1.5 h-4 w-4 shrink-0 animate-spin" />
                 ) : (
-                  <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                  <CheckCircle2 className="mr-1.5 h-4 w-4 shrink-0" />
                 )}
-                Concluir manutenção
+                <span className="truncate">Concluir manutenção</span>
               </Button>
             </DialogFooter>
           )}
