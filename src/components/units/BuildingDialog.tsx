@@ -16,7 +16,9 @@ import { Loader2, Copy, Check, Save, Plus, X, Upload, Image as ImageIcon } from 
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { CleaningFeeSettingCard } from "@/components/settings/CleaningFeeSettingCard";
+import { ParkingFeeSettingCard } from "@/components/settings/ParkingFeeSettingCard";
 import { useCleaningFeeConfig } from "@/hooks/useCleaningFeeConfig";
+import { useParkingFeeConfig } from "@/hooks/useParkingFeeConfig";
 
 interface BuildingDialogProps {
   open: boolean;
@@ -1080,6 +1082,7 @@ const BuildingServicesManager = ({
   isSaving: boolean;
 }) => {
   const { data: cleaningConfig, isLoading: isLoadingCleaning } = useCleaningFeeConfig(buildingId);
+  const { data: parkingConfig, isLoading: isLoadingParking } = useParkingFeeConfig(buildingId);
   const [localServices, setLocalServices] = useState<Array<{ id?: string; name: string; description: string; is_active: boolean }>>([]);
   const [newServiceName, setNewServiceName] = useState("");
   const [newServiceDescription, setNewServiceDescription] = useState("");
@@ -1177,15 +1180,23 @@ const BuildingServicesManager = ({
         </div>
 
         {buildingId ? (
-          <CleaningFeeSettingCard
-            buildingId={buildingId}
-            buildingName={buildingName}
-            initialConfig={cleaningConfig}
-            isLoading={isLoadingCleaning}
-          />
+          <>
+            <CleaningFeeSettingCard
+              buildingId={buildingId}
+              buildingName={buildingName}
+              initialConfig={cleaningConfig}
+              isLoading={isLoadingCleaning}
+            />
+            <ParkingFeeSettingCard
+              buildingId={buildingId}
+              buildingName={buildingName}
+              initialConfig={parkingConfig}
+              isLoading={isLoadingParking}
+            />
+          </>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Salve o prédio primeiro para configurar a taxa de limpeza.
+            Salve o prédio primeiro para configurar a taxa de limpeza e o estacionamento.
           </p>
         )}
 

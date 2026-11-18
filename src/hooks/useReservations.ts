@@ -81,6 +81,8 @@ export const useReservations = () => {
       if (establishmentId) {
         query = query.eq("establishment_id", establishmentId);
       }
+
+      query = query.is("lodging_reservation_id", null);
       
       const { data, error } = await query.order("checkin_date", { ascending: false });
 

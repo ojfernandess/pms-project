@@ -1,6 +1,6 @@
 import { addDays, format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { BedDouble, Home, Info, Loader2 } from "lucide-react";
+import { BedDouble, Car, Home, Info, Loader2 } from "lucide-react";
 import { CleaningBroomIcon } from "@/components/icons/CleaningBroomIcon";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/reservationUtils";
 import { allocateCleaningFeePerNight } from "@/lib/cleaningFeeConfig";
+import { computeParkingFeeTotal, type ParkingBillingMode } from "@/lib/parkingFeeConfig";
 import { cn } from "@/lib/utils";
 
 export type NightlyQuoteLine = {
@@ -35,6 +36,12 @@ type Props = {
   couponFinalAmount?: number | null;
   showCleaningToggle?: boolean;
   hasCategory?: boolean;
+  parkingFee?: number;
+  parkingConfigured?: boolean;
+  parkingBillingMode?: ParkingBillingMode;
+  includeParking?: boolean;
+  onIncludeParkingChange?: (value: boolean) => void;
+  showParkingToggle?: boolean;
 };
 
 function nightsBetween(checkin: string, checkout: string): number {
@@ -56,12 +63,23 @@ export function ReservationQuoteSummary({
   couponFinalAmount,
   showCleaningToggle = true,
   hasCategory = false,
+  parkingFee = 0,
+  parkingConfigured = false,
+  parkingBillingMode = "period",
+  includeParking = false,
+  onIncludeParkingChange,
+  showParkingToggle = true,
 }: Props) {
   const nights = nightsBetween(checkinDate, checkoutDate);
   const effectiveLodging =
     couponFinalAmount != null && couponFinalAmount >= 0 ? couponFinalAmount : lodgingTotal;
   const cleaningAmount = cleaningConfigured && includeCleaning ? cleaningFee : 0;
-  const grandTotal = effectiveLodging + cleaningAmount;
+  const parkingBreakdown =
+    parkingConfigured && includeParking
+      ? computeParkingFeeTotal({ amount: parkingFee, billingMode: parkingBillingMode }, nights)
+      : { amount: 0, quantity: 0 };
+  const parkingAmount = parkingBreakdown.amount * parkingBreakdown.quantity;
+  const grandTotal = effectiveLodging + cleaningAmount + parkingAmount;
   const avgNight = nights > 0 ? effectiveLodging / nights : 0;
 
   const displayLines: NightlyQuoteLine[] =
@@ -198,6 +216,20 @@ export function ReservationQuoteSummary({
             </div>
           </div>
         ) : null}
+        {parkingConfigured ? (
+          <div className="flex items-start gap-2">
+            <Car className="mt-0.5 h-5 w-5 text-slate-600" />
+            <div>
+              <p className="text-xs text-muted-foreground">Estacionamento</p>
+              <p className="text-lg font-bold">{formatCurrency(parkingAmount)}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {parkingBillingMode === "daily"
+                  ? `${formatCurrency(parkingFee)} × ${parkingBreakdown.quantity} diária(s)`
+                  : "(período)"}
+              </p>
+            </div>
+          </div>
+        ) : null}
         <div className="sm:col-span-2 lg:col-span-2 flex flex-col justify-center sm:items-end">
           <p className="text-xs text-muted-foreground">Total estimado da cotação</p>
           <p className="text-2xl font-bold text-primary">{formatCurrency(grandTotal)}</p>
@@ -219,6 +251,27 @@ export function ReservationQuoteSummary({
           <p className="flex items-center gap-1 text-xs text-violet-900">
             <Info className="h-3.5 w-3.5 shrink-0" />
             A taxa de limpeza é cobrada apenas uma vez, independentemente da quantidade de diárias.
+          </p>
+        </div>
+      ) : null}
+
+      {parkingConfigured && showParkingToggle ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50/80 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="include-parking-quote"
+              checked={includeParking}
+              onCheckedChange={(v) => onIncludeParkingChange?.(Boolean(v))}
+            />
+            <Label htmlFor="include-parking-quote" className="text-sm cursor-pointer">
+              Incluir estacionamento na cotação
+            </Label>
+          </div>
+          <p className="flex items-center gap-1 text-xs text-slate-800">
+            <Info className="h-3.5 w-3.5 shrink-0" />
+            {parkingBillingMode === "daily"
+              ? "Cobrança por diária da hospedagem. Ao confirmar, uma vaga será reservada no mapa com os dados do hóspede."
+              : "Valor único para todo o período. Ao confirmar, uma vaga será reservada no mapa com os dados do hóspede."}
           </p>
         </div>
       ) : null}

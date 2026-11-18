@@ -11,10 +11,18 @@ import { toast } from "sonner";
 import { useReservations } from "@/hooks/useReservations";
 import { usePricing } from "@/hooks/usePricing";
 import { useCleaningFeeConfig } from "@/hooks/useCleaningFeeConfig";
+import { useParkingFeeConfig } from "@/hooks/useParkingFeeConfig";
 import {
   attachCleaningFeeToReservation,
   isCleaningFeeConfigured,
 } from "@/lib/cleaningFeeConfig";
+import {
+  attachParkingFeeToReservation,
+  computeParkingFeeTotal,
+  isParkingFeeConfigured,
+  PARKING_FEE_KIND,
+  syncParkingSpotReservationForLodging,
+} from "@/lib/parkingFeeConfig";
 import { ReservationQuoteSummary } from "@/components/reservations/ReservationQuoteSummary";
 import { useHotelSettings } from "@/hooks/useHotelSettings";
 import { DEFAULT_HOTEL_TZ, zonedLocalDateTimeToUtcIso } from "@/lib/hotelTimezoneDate";
@@ -143,6 +151,7 @@ export const ReservationDialog = ({
     Array<{ date: string; dayLabel: string; amount: number }>
   >([]);
   const [includeCleaningInQuote, setIncludeCleaningInQuote] = useState(true);
+  const [includeParkingInQuote, setIncludeParkingInQuote] = useState(true);
   const [isManualPrice, setIsManualPrice] = useState(false); // Flag para indicar que o preço foi definido manualmente
   const [promotionCode, setPromotionCode] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null); // Cupom aplicado
@@ -365,7 +374,55 @@ export const ReservationDialog = ({
   }, [categories, formData.category_id]);
 
   const { data: cleaningFeeConfig } = useCleaningFeeConfig(quoteCategoryBuildingId);
+  const { data: parkingFeeConfig } = useParkingFeeConfig(quoteCategoryBuildingId);
   const cleaningConfigured = isCleaningFeeConfigured(cleaningFeeConfig);
+  const parkingConfigured = isParkingFeeConfigured(parkingFeeConfig);
+
+  const persistParkingIfNeeded = async (created: {
+    id: string;
+    reservation_code?: string | null;
+    establishment_id?: string | null;
+  }) => {
+    if (!includeParkingInQuote || !parkingConfigured || !parkingFeeConfig?.serviceFeeId) {
+      return;
+    }
+    const nights = calculateNights(formData.checkin_date, formData.checkout_date);
+    const { amount, quantity } = computeParkingFeeTotal(parkingFeeConfig, nights);
+    try {
+      await attachParkingFeeToReservation({
+        reservationId: created.id,
+        serviceFeeId: parkingFeeConfig.serviceFeeId,
+        amount,
+        quantity,
+        billingMode: parkingFeeConfig.billingMode,
+      });
+      if (parkingFeeConfig.parkingCategoryId) {
+        const establishmentId =
+          created.establishment_id || localStorage.getItem("selectedEstablishmentId") || "";
+        const sync = await syncParkingSpotReservationForLodging({
+          lodgingReservationId: created.id,
+          establishmentId,
+          parkingCategoryId: parkingFeeConfig.parkingCategoryId,
+          checkinDate: formData.checkin_date,
+          checkoutDate: formData.checkout_date,
+          clientId: formData.client_id,
+          guestName: clientData.full_name || formData.guest_name || undefined,
+          adults: formData.adults,
+          children: formData.children,
+          lodgingReservationCode: created.reservation_code ?? undefined,
+        });
+        if (sync.warning) {
+          toast.warning(sync.warning);
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ["reservation_service_fees", created.id] });
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+    } catch (e) {
+      console.error(e);
+      toast.error("Reserva criada, mas não foi possível vincular o estacionamento.");
+    }
+  };
 
   const persistCleaningFeeIfNeeded = async (createdReservationId: string) => {
     if (!includeCleaningInQuote || !cleaningConfigured || !cleaningFeeConfig?.serviceFeeId) {
@@ -399,7 +456,16 @@ export const ReservationDialog = ({
         ? Number(cleaningFeeConfig?.amount || 0)
         : 0;
 
-    return discountedBase + feesTotal + quoteCleaning;
+    const quoteParking =
+      !reservationId && parkingConfigured && includeParkingInQuote && parkingFeeConfig
+        ? (() => {
+            const nights = calculateNights(formData.checkin_date, formData.checkout_date);
+            const b = computeParkingFeeTotal(parkingFeeConfig, nights);
+            return b.amount * b.quantity;
+          })()
+        : 0;
+
+    return discountedBase + feesTotal + quoteCleaning + quoteParking;
   }, [
     calculatedTotal,
     reservationServiceFees,
@@ -408,6 +474,11 @@ export const ReservationDialog = ({
     cleaningConfigured,
     includeCleaningInQuote,
     cleaningFeeConfig?.amount,
+    parkingConfigured,
+    includeParkingInQuote,
+    parkingFeeConfig,
+    formData.checkin_date,
+    formData.checkout_date,
   ]);
 
   // Função para busca inicial de cliente
@@ -2257,6 +2328,7 @@ export const ReservationDialog = ({
         const created = await createReservation(cleanReservationData);
         if (created?.id) {
           await persistCleaningFeeIfNeeded(created.id);
+          await persistParkingIfNeeded(created);
         }
       }
 
@@ -3762,6 +3834,12 @@ export const ReservationDialog = ({
                     appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : null
                   }
                   showCleaningToggle={!reservationId}
+                  parkingFee={parkingFeeConfig?.amount ?? 0}
+                  parkingConfigured={parkingConfigured}
+                  parkingBillingMode={parkingFeeConfig?.billingMode ?? "period"}
+                  includeParking={includeParkingInQuote}
+                  onIncludeParkingChange={setIncludeParkingInQuote}
+                  showParkingToggle={!reservationId}
                 />
               )}
 
@@ -4060,6 +4138,33 @@ export const ReservationDialog = ({
                   reservation_id: reservationId,
                   ...data,
                 });
+                if (
+                  selectedServiceFee?.service_kind === PARKING_FEE_KIND &&
+                  parkingFeeConfig?.parkingCategoryId &&
+                  currentReservation &&
+                  reservationId
+                ) {
+                  const sync = await syncParkingSpotReservationForLodging({
+                    lodgingReservationId: reservationId,
+                    establishmentId:
+                      currentReservation.establishment_id ||
+                      localStorage.getItem("selectedEstablishmentId") ||
+                      "",
+                    parkingCategoryId: parkingFeeConfig.parkingCategoryId,
+                    checkinDate: formData.checkin_date || currentReservation.checkin_date,
+                    checkoutDate: formData.checkout_date || currentReservation.checkout_date,
+                    clientId: formData.client_id || currentReservation.client_id,
+                    guestName:
+                      clientData.full_name ||
+                      formData.guest_name ||
+                      currentReservation.guest_name ||
+                      undefined,
+                    adults: formData.adults ?? currentReservation.adults,
+                    children: formData.children ?? currentReservation.children,
+                    lodgingReservationCode: currentReservation.reservation_code,
+                  });
+                  if (sync.warning) toast.warning(sync.warning);
+                }
               }
               setAddServiceFeeDialogOpen(false);
               setSelectedServiceFee(null);
@@ -4135,6 +4240,7 @@ export const ReservationDialog = ({
                   const createdPast = await createReservation(cleanReservationData);
                   if (createdPast?.id) {
                     await persistCleaningFeeIfNeeded(createdPast.id);
+                    await persistParkingIfNeeded(createdPast);
                   }
 
                   // Limpar formulário

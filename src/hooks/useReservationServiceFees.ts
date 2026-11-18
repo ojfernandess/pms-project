@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { logActivity } from "@/lib/activityLogger";
 import { formatCurrency } from "@/lib/reservationUtils";
+import { PARKING_FEE_KIND, cancelParkingSpotForLodging } from "@/lib/parkingFeeConfig";
 
 export const useReservationServiceFees = (reservationId?: string) => {
   const queryClient = useQueryClient();
@@ -292,6 +293,15 @@ export const useReservationServiceFees = (reservationId?: string) => {
         .eq("id", id);
 
       if (error) throw error;
+
+      const serviceKind = (feeData as { service_fees?: { service_kind?: string } })?.service_fees?.service_kind;
+      if (serviceKind === PARKING_FEE_KIND && reservationId) {
+        try {
+          await cancelParkingSpotForLodging(reservationId);
+        } catch (parkingErr) {
+          console.error("Erro ao liberar vaga de estacionamento:", parkingErr);
+        }
+      }
 
       // Verificar se ainda há taxas pendentes após a remoção
       const { data: remainingFees } = await supabase

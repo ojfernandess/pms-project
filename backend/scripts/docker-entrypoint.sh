@@ -73,6 +73,11 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/cleaning_fee_configur
     || echo "WARN: cleaning_fee_configuration.sql falhou" >&2
 fi
 
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/parking_service.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/parking_service.sql \
+    || echo "WARN: parking_service.sql falhou" >&2
+fi
+
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/site_settings_storage_config.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/site_settings_storage_config.sql \
     || echo "WARN: site_settings_storage_config.sql falhou" >&2

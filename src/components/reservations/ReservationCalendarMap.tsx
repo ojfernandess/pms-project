@@ -493,7 +493,13 @@ export const ReservationCalendarMap = ({
           rooms: category.rooms.sort((a: any, b: any) => 
             a.room_number.localeCompare(b.room_number, undefined, { numeric: true })
           )
-      }));
+      }))
+        .sort((a: any, b: any) => {
+          const aParking = a.category_kind === "parking" ? 1 : 0;
+          const bParking = b.category_kind === "parking" ? 1 : 0;
+          if (aParking !== bParking) return aParking - bParking;
+          return String(a.name).localeCompare(String(b.name));
+        });
 
       console.log("✅ Categorias processadas:", categoriesWithRooms);
       console.log("📊 Total de categorias:", categoriesWithRooms.length);
@@ -3241,6 +3247,7 @@ export const ReservationCalendarMap = ({
                         )}
                       </button>
                       <span className="font-semibold text-[10px] sm:text-[11px] uppercase text-slate-800 tracking-wide truncate">
+                        {category.category_kind === "parking" ? "🅿️ " : ""}
                         {category.name}
                       </span>
                       <span className="text-[9px] sm:text-[10px] text-slate-500 font-medium bg-white border border-slate-200 px-1.5 py-0.5 rounded-md flex-shrink-0">

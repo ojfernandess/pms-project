@@ -31,7 +31,9 @@ import { PmsWebhooksReference } from "@/components/settings/PmsWebhooksReference
 import { CompanyApiRequestLogsPanel } from "@/components/settings/CompanyApiRequestLogsPanel";
 import { FnrhSettingsCard } from "@/components/settings/FnrhSettingsCard";
 import { CleaningFeeSettingCard } from "@/components/settings/CleaningFeeSettingCard";
+import { ParkingFeeSettingCard } from "@/components/settings/ParkingFeeSettingCard";
 import { useCleaningFeeConfig } from "@/hooks/useCleaningFeeConfig";
+import { useParkingFeeConfig } from "@/hooks/useParkingFeeConfig";
 import { useBuildings } from "@/hooks/useBuildings";
 import { EstablishmentEmailTemplatesManager } from "@/components/settings/EstablishmentEmailTemplatesManager";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
@@ -1116,6 +1118,7 @@ const ServicesManager = () => {
   const { services, isLoading, saveServices, isSaving } = useEstablishmentServices();
   const { buildings } = useBuildings();
   const { data: establishmentCleaningConfig, isLoading: isLoadingCleaningConfig } = useCleaningFeeConfig(null);
+  const { data: establishmentParkingConfig, isLoading: isLoadingParkingConfig } = useParkingFeeConfig(null);
   const hasBuildings = (buildings?.length ?? 0) > 0;
   const [localServices, setLocalServices] = useState<Array<{ id?: string; name: string; description: string; is_active: boolean }>>([]);
   const [newServiceName, setNewServiceName] = useState("");
@@ -1216,6 +1219,12 @@ const ServicesManager = () => {
         <CleaningFeeSettingCard
           initialConfig={establishmentCleaningConfig}
           isLoading={isLoadingCleaningConfig}
+          establishmentHasBuildings={hasBuildings}
+        />
+
+        <ParkingFeeSettingCard
+          initialConfig={establishmentParkingConfig}
+          isLoading={isLoadingParkingConfig}
           establishmentHasBuildings={hasBuildings}
         />
 
