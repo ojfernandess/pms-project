@@ -36,8 +36,15 @@ import { Label } from "@/components/ui/label";
 import { useAccountsReceivable } from "@/hooks/useAccountsReceivable";
 import { formatCurrency } from "@/lib/financialUtils";
 import { formatDate } from "@/lib/reservationUtils";
-import { Loader2, DollarSign, Filter, Search, Eye, Edit, User, Calendar, Hash } from "lucide-react";
+import { Loader2, DollarSign, Search, Eye, Plus, X, Layers } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { titleOpenBalance } from "@/lib/financial/financialTitleStatus";
+import { receivableCategoryLabel, resolveReceivableDebtorLabel, RECEIVABLE_CATEGORIES } from "@/lib/financial/receivableCategories";
+import { AccountsReceivableDialog } from "./AccountsReceivableDialog";
+import { ReceivableBatchPaymentDialog } from "./ReceivableBatchPaymentDialog";
+import { EXPECTED_PAYMENT_METHODS } from "@/lib/financial/receivableCategories";
 import type { AccountsReceivable } from "@/services/financial/accountsReceivableService";
+import { listReceivableSettlements } from "@/services/financial/financialSettlementsService";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
@@ -55,6 +62,14 @@ const originLabels: Record<AccountsReceivable['origin'], string> = {
   no_show_penalty: "Multa No-Show",
   extra_consumption: "Consumo Extra",
   service_fee: "Taxa de Serviço",
+  other: "Outro",
+  manual: "Manual",
+  checkin_charge: "Cobrança check-in",
+};
+
+const debtorTypeLabels: Record<string, string> = {
+  guest: "Hóspede",
+  company: "Empresa",
   other: "Outro",
 };
 
@@ -101,20 +116,43 @@ export const AccountsReceivableList = () => {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [originFilter, setOriginFilter] = useState<string>("all");
+  const [debtorFilter, setDebtorFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedReceivable, setSelectedReceivable] = useState<AccountsReceivable | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("pix");
+  const [paymentReference, setPaymentReference] = useState("");
   const [viewDetailsOpen, setViewDetailsOpen] = useState(false);
   const [receivableForView, setReceivableForView] = useState<AccountsReceivable | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
+  const [batchDialogOpen, setBatchDialogOpen] = useState(false);
 
   const filters = {
-    status: statusFilter !== "all" ? statusFilter as AccountsReceivable['status'] : undefined,
-    origin: originFilter !== "all" ? originFilter as AccountsReceivable['origin'] : undefined,
+    status: statusFilter !== "all" && statusFilter !== "overdue" ? (statusFilter as AccountsReceivable["status"]) : undefined,
+    origin: originFilter !== "all" ? (originFilter as AccountsReceivable["origin"]) : undefined,
+    debtorType:
+      debtorFilter !== "all" ? (debtorFilter as AccountsReceivable["debtor_type"]) : undefined,
+    category: categoryFilter !== "all" ? categoryFilter : undefined,
     overdueOnly: statusFilter === "overdue",
   };
 
-  const { receivables, summary, isLoading, payReceivable, isPaying } = useAccountsReceivable(filters);
+  const { receivables, summary, isLoading, payReceivable, isPaying, cancelReceivable, isCancelling } =
+    useAccountsReceivable(filters);
+
+  const { data: settlementHistory = [] } = useQuery({
+    queryKey: ["receivable_settlements", selectedReceivable?.id],
+    queryFn: async () => {
+      if (!selectedReceivable?.id) return [];
+      const result = await listReceivableSettlements(selectedReceivable.id);
+      if (!result.success) throw new Error(result.error);
+      return (result.data || []).filter((s) => !s.reversed_at);
+    },
+    enabled: paymentDialogOpen && !!selectedReceivable?.id,
+  });
 
   // Buscar reserva e hóspede quando abrir o diálogo de detalhes
   const { data: reservationDetails, isLoading: isLoadingDetails } = useQuery({
@@ -161,9 +199,17 @@ export const AccountsReceivableList = () => {
     return (
       r.description.toLowerCase().includes(term) ||
       r.reservation_id?.toLowerCase().includes(term) ||
-      r.client_id?.toLowerCase().includes(term)
+      r.client_id?.toLowerCase().includes(term) ||
+      resolveReceivableDebtorLabel(r).toLowerCase().includes(term) ||
+      r.debtor_document?.toLowerCase().includes(term)
     );
   });
+
+  const batchReceivables = filteredReceivables.filter((r) => selectedBatchIds.includes(r.id));
+
+  const toggleBatchId = (id: string, checked: boolean) => {
+    setSelectedBatchIds((prev) => (checked ? [...new Set([...prev, id])] : prev.filter((x) => x !== id)));
+  };
 
   const reservationIds = useMemo(
     () => [...new Set(filteredReceivables.map((r) => r.reservation_id).filter((id): id is string => !!id))],
@@ -343,8 +389,8 @@ export const AccountsReceivableList = () => {
       return;
     }
 
-    const remaining = selectedReceivable.amount - selectedReceivable.paid_amount;
-    if (amount > remaining) {
+    const remaining = titleOpenBalance(selectedReceivable.amount, selectedReceivable.paid_amount);
+    if (amount > remaining + 0.02) {
       return;
     }
 
@@ -352,6 +398,8 @@ export const AccountsReceivableList = () => {
       {
         receivableId: selectedReceivable.id,
         amount,
+        paymentMethod,
+        reference: paymentReference || undefined,
       },
       {
         onSuccess: () => {
@@ -379,8 +427,8 @@ export const AccountsReceivableList = () => {
           <Card className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Total a Receber</p>
-                <p className="text-2xl font-bold mt-1">{formatCurrency(summary.total)}</p>
+                <p className="text-sm text-muted-foreground">Saldo em aberto</p>
+                <p className="text-2xl font-bold mt-1">{formatCurrency(summary.totalOpen ?? summary.total)}</p>
               </div>
               <DollarSign className="h-8 w-8 text-primary" />
             </div>
@@ -409,7 +457,7 @@ export const AccountsReceivableList = () => {
           <Card className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Pago</p>
+                <p className="text-sm text-muted-foreground">Recebido (títulos quitados)</p>
                 <p className="text-2xl font-bold mt-1 text-green-600">{formatCurrency(summary.paid)}</p>
               </div>
               <DollarSign className="h-8 w-8 text-green-600" />
@@ -420,12 +468,12 @@ export const AccountsReceivableList = () => {
 
       {/* Filtros */}
       <Card className="p-4">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1">
+        <div className="flex flex-col md:flex-row gap-4 flex-wrap">
+          <div className="flex-1 min-w-[200px]">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar por descrição, reserva ou cliente..."
+                placeholder="Buscar por devedor, descrição ou reserva..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
@@ -458,8 +506,51 @@ export const AccountsReceivableList = () => {
               <SelectItem value="no_show_penalty">Multa No-Show</SelectItem>
               <SelectItem value="extra_consumption">Consumo Extra</SelectItem>
               <SelectItem value="service_fee">Taxa de Serviço</SelectItem>
+              <SelectItem value="manual">Manual</SelectItem>
             </SelectContent>
           </Select>
+
+          <Select value={debtorFilter} onValueChange={setDebtorFilter}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Devedor" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos devedores</SelectItem>
+              <SelectItem value="guest">Hóspede</SelectItem>
+              <SelectItem value="company">Empresa</SelectItem>
+              <SelectItem value="other">Outro</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Categoria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas categorias</SelectItem>
+              {RECEIVABLE_CATEGORIES.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Button variant={batchMode ? "default" : "outline"} onClick={() => { setBatchMode((v) => !v); setSelectedBatchIds([]); }}>
+            <Layers className="h-4 w-4 mr-2" />
+            Lote
+          </Button>
+
+          {batchMode && selectedBatchIds.length > 0 && (
+            <Button onClick={() => setBatchDialogOpen(true)}>
+              Receber {selectedBatchIds.length} título(s)
+            </Button>
+          )}
+
+          <Button onClick={() => setCreateDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nova conta
+          </Button>
         </div>
       </Card>
 
@@ -476,12 +567,13 @@ export const AccountsReceivableList = () => {
           <Table>
             <TableHeader>
               <TableRow>
+                {batchMode && <TableHead className="w-10" />}
+                <TableHead>Cliente / empresa</TableHead>
                 <TableHead>Descrição</TableHead>
+                <TableHead>Categoria</TableHead>
                 <TableHead>Origem</TableHead>
-                <TableHead>Origem da Reserva</TableHead>
                 <TableHead>Vencimento</TableHead>
                 <TableHead>Valor</TableHead>
-                <TableHead>Pago</TableHead>
                 <TableHead>Saldo</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Ações</TableHead>
@@ -489,31 +581,44 @@ export const AccountsReceivableList = () => {
             </TableHeader>
             <TableBody>
               {filteredReceivables.map((receivable) => {
-                const remaining = receivable.amount - receivable.paid_amount;
+                const remaining = titleOpenBalance(receivable.amount, receivable.paid_amount);
                 const isOverdue = receivable.status === "overdue" || 
                   (receivable.status === "pending" && new Date(receivable.due_date) < new Date());
+                const canSelectBatch = batchMode && remaining > 0.02 && receivable.status !== "cancelled";
 
                 return (
                   <TableRow key={receivable.id}>
-                    <TableCell className="font-medium">
-                      {receivable.description}
-                    </TableCell>
-                    <TableCell>
-                      {originLabels[receivable.origin]}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {receivable.reservation_id && reservationOriginsMap[receivable.reservation_id]?.logoUrl ? (
-                          <img
-                            src={reservationOriginsMap[receivable.reservation_id]?.logoUrl || ""}
-                            alt="Logo OTA"
-                            className="h-4 w-4 rounded-sm object-contain"
-                            loading="lazy"
-                            referrerPolicy="no-referrer"
+                    {batchMode && (
+                      <TableCell>
+                        {canSelectBatch ? (
+                          <Checkbox
+                            checked={selectedBatchIds.includes(receivable.id)}
+                            onCheckedChange={(v) => toggleBatchId(receivable.id, v === true)}
                           />
                         ) : null}
-                        <span>{resolveReservationOriginLabel(receivable)}</span>
-                      </div>
+                      </TableCell>
+                    )}
+                    <TableCell className="font-medium text-sm">
+                      <div>{resolveReceivableDebtorLabel(receivable)}</div>
+                      {receivable.debtor_type && (
+                        <span className="text-xs text-muted-foreground">
+                          {debtorTypeLabels[receivable.debtor_type] || receivable.debtor_type}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {receivable.description}
+                      {receivable.total_installments && receivable.total_installments > 1 && (
+                        <Badge variant="outline" className="ml-2">
+                          {receivable.installment_number}/{receivable.total_installments}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {receivableCategoryLabel(receivable.financial_category)}
+                    </TableCell>
+                    <TableCell>
+                      {originLabels[receivable.origin] ?? receivable.origin}
                     </TableCell>
                     <TableCell>
                       <span className={isOverdue ? "text-red-600 font-semibold" : ""}>
@@ -521,9 +626,8 @@ export const AccountsReceivableList = () => {
                       </span>
                     </TableCell>
                     <TableCell>{formatCurrency(receivable.amount)}</TableCell>
-                    <TableCell>{formatCurrency(receivable.paid_amount)}</TableCell>
                     <TableCell>
-                      <span className={remaining > 0 ? "font-semibold" : ""}>
+                      <span className={remaining > 0.02 ? "font-semibold" : ""}>
                         {formatCurrency(remaining)}
                       </span>
                     </TableCell>
@@ -545,7 +649,7 @@ export const AccountsReceivableList = () => {
                             Ver reserva
                           </Button>
                         )}
-                        {remaining > 0 && receivable.status !== "cancelled" && (
+                        {remaining > 0.02 && receivable.status !== "cancelled" && !batchMode && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -556,7 +660,21 @@ export const AccountsReceivableList = () => {
                             }}
                           >
                             <DollarSign className="h-4 w-4 mr-1" />
-                            Pagar
+                            Receber
+                          </Button>
+                        )}
+                        {receivable.status !== "cancelled" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              if (confirm(`Cancelar título "${receivable.description}"?`)) {
+                                cancelReceivable(receivable.id);
+                              }
+                            }}
+                            disabled={isCancelling}
+                          >
+                            <X className="h-4 w-4" />
                           </Button>
                         )}
                       </div>
@@ -573,7 +691,7 @@ export const AccountsReceivableList = () => {
       <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Registrar Pagamento</DialogTitle>
+            <DialogTitle>Registrar recebimento</DialogTitle>
             <DialogDescription>
               Registrar pagamento para: {selectedReceivable?.description}
             </DialogDescription>
@@ -600,20 +718,55 @@ export const AccountsReceivableList = () => {
               </p>
             </div>
             <div>
-              <Label htmlFor="payment-amount">Valor do Pagamento</Label>
+              <Label htmlFor="payment-amount">Valor do recebimento</Label>
               <Input
                 id="payment-amount"
                 type="number"
                 step="0.01"
                 min="0.01"
-                max={
-                  (selectedReceivable?.amount || 0) - (selectedReceivable?.paid_amount || 0)
-                }
+                max={titleOpenBalance(selectedReceivable?.amount || 0, selectedReceivable?.paid_amount || 0)}
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
                 placeholder="0.00"
               />
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Forma de pagamento</Label>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EXPECTED_PAYMENT_METHODS.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Referência</Label>
+                <Input value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} placeholder="Opcional" />
+              </div>
+            </div>
+            {settlementHistory.length > 0 && (
+              <div className="rounded-lg border p-3 space-y-2">
+                <p className="text-sm font-medium">Histórico de recebimentos</p>
+                <ul className="text-sm space-y-1 max-h-32 overflow-y-auto">
+                  {settlementHistory.map((s) => (
+                    <li key={s.id} className="flex justify-between text-muted-foreground">
+                      <span>
+                        {format(new Date(s.effective_date), "dd/MM/yyyy", { locale: ptBR })}
+                        {s.payment_method ? ` · ${s.payment_method}` : ""}
+                      </span>
+                      <span className="font-medium text-foreground">{formatCurrency(s.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -636,12 +789,23 @@ export const AccountsReceivableList = () => {
                   Processando...
                 </>
               ) : (
-                "Registrar Pagamento"
+                "Registrar recebimento"
               )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AccountsReceivableDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
+      <ReceivableBatchPaymentDialog
+        open={batchDialogOpen}
+        onOpenChange={setBatchDialogOpen}
+        receivables={batchReceivables}
+        onComplete={() => {
+          setSelectedBatchIds([]);
+          setBatchMode(false);
+        }}
+      />
 
       {/* Dialog Ver hóspede e reserva */}
       <Dialog open={viewDetailsOpen} onOpenChange={setViewDetailsOpen}>

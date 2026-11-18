@@ -52,7 +52,7 @@ COPY scripts/apply-guest-checkin-db.sh ./scripts/apply-guest-checkin-db.sh
 COPY scripts/ensure-storage-buckets.mjs ./scripts/ensure-storage-buckets.mjs
 COPY scripts/sync-foreign-keys-from-supabase.mjs ./scripts/sync-foreign-keys-from-supabase.mjs
 COPY scripts/sync-public-functions-from-supabase.mjs ./scripts/sync-public-functions-from-supabase.mjs
-RUN chmod +x ./scripts/docker-entrypoint.sh ./scripts/docker-entrypoint-worker.sh ./scripts/import-supabase-data.sh ./scripts/import-supabase-schema.sh ./scripts/apply-bundled-rpcs.sh ./scripts/apply-guest-checkin-db.sh
+RUN chmod +x ./scripts/docker-entrypoint.sh ./scripts/docker-entrypoint-worker.sh ./scripts/import-supabase-data.sh ./scripts/import-supabase-schema.sh ./scripts/apply-bundled-rpcs.sh ./scripts/apply-guest-checkin-db.sh ./scripts/migration/apply-financial-ar-ap.sh
 
 EXPOSE 3000
 

@@ -19,6 +19,7 @@ import { RevenueChart } from "@/components/dashboard/RevenueChart";
 import { PaymentMethodChart } from "@/components/financial/PaymentMethodChart";
 import { ChannelComparisonChart } from "@/components/financial/ChannelComparisonChart";
 import { CashFlowChart } from "@/components/financial/CashFlowChart";
+import { FinancialCashFlowDashboard } from "@/components/financial/FinancialCashFlowDashboard";
 import {
   formatCurrency,
   calculatePercentageChange,
@@ -618,6 +619,7 @@ const Financial = () => {
               <TabsTrigger value="overview">Visão Geral</TabsTrigger>
               <TabsTrigger value="receivables">Contas a Receber</TabsTrigger>
               <TabsTrigger value="payables">Contas a Pagar</TabsTrigger>
+              <TabsTrigger value="cashflow">Fluxo de Caixa</TabsTrigger>
               <TabsTrigger value="invoices">Faturas</TabsTrigger>
               <TabsTrigger value="reconciliation">Conciliação</TabsTrigger>
               <TabsTrigger value="refunds">Estornos</TabsTrigger>
@@ -684,6 +686,10 @@ const Financial = () => {
 
             <TabsContent value="payables">
               <AccountsPayableList />
+            </TabsContent>
+
+            <TabsContent value="cashflow">
+              <FinancialCashFlowDashboard />
             </TabsContent>
 
             <TabsContent value="invoices">

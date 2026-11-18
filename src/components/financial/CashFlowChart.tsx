@@ -2,17 +2,27 @@ import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianG
 import { formatCurrency } from "@/lib/reservationUtils";
 
 interface CashFlowChartProps {
-  data?: Array<{ date: string; revenue: number; payments: number }>;
+  data?: Array<{
+    date: string;
+    inflows?: number;
+    outflows?: number;
+    /** @deprecated use inflows */
+    revenue?: number;
+    /** @deprecated use outflows */
+    payments?: number;
+  }>;
 }
 
 export const CashFlowChart = ({ data = [] }: CashFlowChartProps) => {
-  // Formatar datas e calcular saldo acumulado
   let accumulatedBalance = 0;
   const formattedData = data.map((item) => {
-    accumulatedBalance = accumulatedBalance + item.revenue - item.payments;
+    const inflows = item.inflows ?? item.revenue ?? 0;
+    const outflows = item.outflows ?? item.payments ?? 0;
+    accumulatedBalance = accumulatedBalance + inflows - outflows;
     return {
-      ...item,
       date: new Date(item.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+      inflows,
+      outflows,
       balance: accumulatedBalance,
     };
   });
@@ -49,24 +59,16 @@ export const CashFlowChart = ({ data = [] }: CashFlowChartProps) => {
           }}
           formatter={(value: number, name: string) => [
             formatCurrency(value),
-            name === "revenue" ? "Entradas" : name === "payments" ? "Saídas" : "Saldo",
+            name === "inflows" || name === "revenue"
+              ? "Entradas"
+              : name === "outflows" || name === "payments"
+                ? "Saídas"
+                : "Saldo",
           ]}
         />
         <Legend />
-        <Line
-          type="monotone"
-          dataKey="revenue"
-          stroke="hsl(var(--success))"
-          strokeWidth={2}
-          name="Entradas"
-        />
-        <Line
-          type="monotone"
-          dataKey="payments"
-          stroke="hsl(var(--destructive))"
-          strokeWidth={2}
-          name="Saídas"
-        />
+        <Line type="monotone" dataKey="inflows" stroke="hsl(var(--success))" strokeWidth={2} name="Entradas" />
+        <Line type="monotone" dataKey="outflows" stroke="hsl(var(--destructive))" strokeWidth={2} name="Saídas" />
         <Line
           type="monotone"
           dataKey="balance"

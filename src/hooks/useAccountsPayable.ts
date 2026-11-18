@@ -12,6 +12,9 @@ import {
   createAccountsPayable,
   createInstallmentPayable,
   cancelAccountsPayable,
+  approveAccountsPayable,
+  rejectAccountsPayable,
+  spawnRecurringPayables,
   type AccountsPayable,
   type CreatePayableParams,
 } from "@/services/financial/accountsPayableService";
@@ -114,6 +117,49 @@ export const useAccountsPayable = (filters?: {
     },
   });
 
+  const approvePayable = useMutation({
+    mutationFn: async ({ payableId, notes }: { payableId: string; notes?: string }) => {
+      const result = await approveAccountsPayable(payableId, notes);
+      if (!result.success) throw new Error(result.error || "Erro ao aprovar despesa");
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts_payable"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts_payable_summary"] });
+      toast.success("Despesa aprovada");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const rejectPayable = useMutation({
+    mutationFn: async ({ payableId, notes }: { payableId: string; notes?: string }) => {
+      const result = await rejectAccountsPayable(payableId, notes);
+      if (!result.success) throw new Error(result.error || "Erro ao rejeitar despesa");
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts_payable"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts_payable_summary"] });
+      toast.success("Despesa rejeitada");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const spawnRecurring = useMutation({
+    mutationFn: async () => {
+      if (!establishmentId) throw new Error("Estabelecimento não selecionado");
+      const result = await spawnRecurringPayables(establishmentId);
+      if (!result.success) throw new Error(result.error || "Erro ao gerar recorrências");
+      return result.spawned ?? 0;
+    },
+    onSuccess: (spawned) => {
+      queryClient.invalidateQueries({ queryKey: ["accounts_payable"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts_payable_summary"] });
+      toast.success(spawned > 0 ? `${spawned} título(s) gerado(s)` : "Nenhuma recorrência vencida");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
   // Cancelar conta
   const cancelPayable = useMutation({
     mutationFn: async (payableId: string) => {
@@ -151,6 +197,12 @@ export const useAccountsPayable = (filters?: {
     isCreatingInstallment: createInstallment.isPending,
     cancelPayable: cancelPayable.mutate,
     isCancelling: cancelPayable.isPending,
+    approvePayable: approvePayable.mutate,
+    isApproving: approvePayable.isPending,
+    rejectPayable: rejectPayable.mutate,
+    isRejecting: rejectPayable.isPending,
+    spawnRecurring: spawnRecurring.mutate,
+    isSpawningRecurring: spawnRecurring.isPending,
   };
 };
 

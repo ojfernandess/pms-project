@@ -78,6 +78,15 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/parking_service.sql ]
     || echo "WARN: parking_service.sql falhou" >&2
 fi
 
+# AR/AP reestruturado (fases 1–6): Postgres no deploy — não supabase db push
+if [ "${FINANCIAL_AR_AP_MIGRATION_ON_START:-true}" = "true" ] \
+  && [ -n "$PSQL_DATABASE_URL" ] \
+  && [ -f ./scripts/migration/apply-financial-ar-ap.sh ]; then
+  chmod +x ./scripts/migration/apply-financial-ar-ap.sh 2>/dev/null || true
+  ./scripts/migration/apply-financial-ar-ap.sh "$PSQL_DATABASE_URL" \
+    || echo "WARN: apply-financial-ar-ap.sh falhou" >&2
+fi
+
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/site_settings_storage_config.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/site_settings_storage_config.sql \
     || echo "WARN: site_settings_storage_config.sql falhou" >&2
