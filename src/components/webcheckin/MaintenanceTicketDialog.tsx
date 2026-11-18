@@ -172,6 +172,12 @@ export function MaintenanceTicketDialog({
       });
       
       // Criar ticket
+      const stayStart = String(reservation.checkin_date || "").slice(0, 10);
+      const stayEnd = String(reservation.checkout_date || "").slice(0, 10);
+      const today = new Date().toISOString().slice(0, 10);
+      const maintenanceStart = stayStart || today;
+      const maintenanceEnd = stayEnd || maintenanceStart;
+
       const { data: ticket, error: ticketError } = await supabase
         .from("maintenance_tickets")
         .insert({
@@ -184,6 +190,10 @@ export function MaintenanceTicketDialog({
           title: title.trim(),
           description: description.trim(),
           status: "open",
+          maintenance_start_date: maintenanceStart,
+          maintenance_end_date: maintenanceEnd,
+          blocks_entire_room: false,
+          lock_room_on_transfer: true,
         })
         .select()
         .single();

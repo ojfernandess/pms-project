@@ -57,6 +57,12 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import {
+  isMaintenanceTicketActive,
+  isRoomDateBlockedByMaintenancePeriod,
+  roomHasWholeRoomMaintenance,
+  type MaintenanceTicketPeriodFields,
+} from "@/lib/maintenanceTicketPeriod";
 
 /** Quarto interditado manualmente ou em manutenção ativa. */
 const isRoomUnavailableForBooking = (room: { is_blocked?: boolean | null; status?: string | null } | null | undefined) =>
@@ -84,7 +90,11 @@ interface ReservationCalendarMapProps {
     room_id?: string;
     action?: "confirmed" | "blocked" | "preregistration";
   }) => void;
-  onOpenMaintenance?: (data: { room_id: string }) => void;
+  onOpenMaintenance?: (data: {
+    room_id: string;
+    checkin_date?: string;
+    checkout_date?: string;
+  }) => void;
   onReservationAction?: (action: "edit" | "checkin" | "checkout" | "cancel", reservationId: string) => void;
 }
 
@@ -645,6 +655,58 @@ export const ReservationCalendarMap = ({
     refetchOnReconnect: true,
   });
 
+  const { data: maintenanceTickets = [] } = useQuery({
+    queryKey: [
+      "maintenance_tickets_map",
+      establishmentId,
+      visibleDates[0]?.toISOString(),
+      visibleDates[visibleDates.length - 1]?.toISOString(),
+    ],
+    queryFn: async () => {
+      const currentEstablishmentId = establishmentId || getSelectedEstablishmentId();
+      if (!currentEstablishmentId) return [];
+      const { data, error } = await supabase
+        .from("maintenance_tickets")
+        .select(
+          "id, room_id, reservation_id, status, blocks_entire_room, maintenance_start_date, maintenance_end_date, opened_at, completed_at, guest_account_id",
+        )
+        .eq("establishment_id", currentEstablishmentId)
+        .in("status", ["open", "in_progress"]);
+      if (error) throw error;
+      return (data || []) as MaintenanceTicketPeriodFields[];
+    },
+    enabled: !!establishmentId && visibleDates.length > 0,
+    refetchInterval: 15000,
+  });
+
+  const isRoomUnavailableForBookingCb = useCallback(
+    (room: { is_blocked?: boolean | null; status?: string | null; id?: string } | null | undefined) => {
+      if (!room) return false;
+      if (room.is_blocked) return true;
+      if (!room.id) return room.status === "maintenance";
+      return roomHasWholeRoomMaintenance(room, maintenanceTickets, room.id);
+    },
+    [maintenanceTickets],
+  );
+
+  const isRoomInMaintenanceCb = useCallback(
+    (room: { status?: string | null; is_blocked?: boolean | null; id?: string }) => {
+      if (!room?.id) return room?.status === "maintenance";
+      return roomHasWholeRoomMaintenance(room, maintenanceTickets, room.id);
+    },
+    [maintenanceTickets],
+  );
+
+  const reservationIdsWithMaintenance = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of maintenanceTickets) {
+      if (t.reservation_id && isMaintenanceTicketActive(t) && !t.blocks_entire_room) {
+        ids.add(t.reservation_id);
+      }
+    }
+    return ids;
+  }, [maintenanceTickets]);
+
   // Função auxiliar para normalizar datas (garantir formato YYYY-MM-DD)
   const normalizeDate = useCallback((date: string | Date | null | undefined): string | null => {
     if (!date) return null;
@@ -777,12 +839,16 @@ export const ReservationCalendarMap = ({
         }
       }
 
+      if (isRoomDateBlockedByMaintenancePeriod(date, roomId, maintenanceTickets)) {
+        return true;
+      }
+
       return false;
     } catch (error) {
       console.error("❌ Erro em isDateOccupied:", error, { date, roomId, excludeReservationId });
       return false;
     }
-  }, [reservationsByRoom, normalizeDate, isValidReservation]);
+  }, [reservationsByRoom, normalizeDate, isValidReservation, maintenanceTickets]);
 
   // Calcular posição de uma reserva no grid
   const getReservationPosition = useCallback((reservation: any, otherReservations?: any[]) => {
@@ -981,7 +1047,7 @@ export const ReservationCalendarMap = ({
         .flatMap((cat: any) => cat.rooms || [])
         .find((r: any) => r.id === roomId);
       
-      if (isRoomUnavailableForBooking(room)) {
+      if (isRoomUnavailableForBookingCb(room)) {
         toast.error(getRoomUnavailableMessage(room));
         return;
       }
@@ -992,12 +1058,12 @@ export const ReservationCalendarMap = ({
       const category = categories.find((cat: any) => cat.id === categoryId);
       if (category) {
         const availableRooms = (category.rooms || []).filter((room: any) => {
-          if (isRoomUnavailableForBooking(room)) return false;
+          if (isRoomUnavailableForBookingCb(room)) return false;
           return !isDateOccupied(date, room.id);
         });
         
         if (availableRooms.length === 0) {
-          const unavailableRooms = (category.rooms || []).filter((room: any) => isRoomUnavailableForBooking(room));
+          const unavailableRooms = (category.rooms || []).filter((room: any) => isRoomUnavailableForBookingCb(room));
           if (unavailableRooms.length > 0) {
             toast.error("Todos os quartos desta categoria estão indisponíveis (interditados, em manutenção ou ocupados)");
           } else {
@@ -1027,7 +1093,7 @@ export const ReservationCalendarMap = ({
         .flatMap((cat: any) => cat.rooms || [])
         .find((r: any) => r.id === roomId);
       
-      if (isRoomUnavailableForBooking(room)) {
+      if (isRoomUnavailableForBookingCb(room)) {
         return; // Não permitir arrastar para quarto indisponível
       }
     }
@@ -1099,7 +1165,7 @@ export const ReservationCalendarMap = ({
           .flatMap((cat: any) => cat.rooms || [])
           .find((r: any) => r.id === roomId);
         
-        if (isRoomUnavailableForBooking(room)) {
+        if (isRoomUnavailableForBookingCb(room)) {
           toast.error(getRoomUnavailableMessage(room));
           setIsDragging(false);
           setDragStart(null);
@@ -1120,12 +1186,12 @@ export const ReservationCalendarMap = ({
         const category = categories.find((cat: any) => cat.id === categoryId);
         if (category) {
           const availableRooms = (category.rooms || []).filter((room: any) => {
-            if (isRoomUnavailableForBooking(room)) return false;
+            if (isRoomUnavailableForBookingCb(room)) return false;
             return !isDateOccupied(date, room.id);
           });
           
           if (availableRooms.length === 0) {
-            const unavailableRooms = (category.rooms || []).filter((room: any) => isRoomUnavailableForBooking(room));
+            const unavailableRooms = (category.rooms || []).filter((room: any) => isRoomUnavailableForBookingCb(room));
             if (unavailableRooms.length > 0 && unavailableRooms.length === (category.rooms || []).length) {
               toast.error("Todos os quartos desta categoria estão interditados ou em manutenção");
             } else {
@@ -1167,7 +1233,7 @@ export const ReservationCalendarMap = ({
         .flatMap((cat: any) => cat.rooms || [])
         .find((r: any) => r.id === roomId);
       
-      if (isRoomUnavailableForBooking(room)) {
+      if (isRoomUnavailableForBookingCb(room)) {
         toast.error(getRoomUnavailableMessage(room));
         setIsDragging(false);
         setDragStart(null);
@@ -1190,12 +1256,12 @@ export const ReservationCalendarMap = ({
       if (category) {
         const datesInRange = eachDayOfInterval({ start: minDate, end: maxDate });
         const availableRooms = (category.rooms || []).filter((room: any) => {
-          if (isRoomUnavailableForBooking(room)) return false;
+          if (isRoomUnavailableForBookingCb(room)) return false;
           return !datesInRange.some((d) => isDateOccupied(d, room.id));
         });
         
         if (availableRooms.length === 0) {
-          const unavailableRooms = (category.rooms || []).filter((room: any) => isRoomUnavailableForBooking(room));
+          const unavailableRooms = (category.rooms || []).filter((room: any) => isRoomUnavailableForBookingCb(room));
           if (unavailableRooms.length > 0 && unavailableRooms.length === (category.rooms || []).length) {
             toast.error("Todos os quartos desta categoria estão interditados ou em manutenção");
           } else {
@@ -3355,7 +3421,7 @@ export const ReservationCalendarMap = ({
                         // Calcular disponibilidade da categoria (ocupados + interditados + manutenção)
                         const totalRooms = rooms.length;
                         const unavailableCount = rooms.filter(
-                          (room: any) => isDateOccupied(date, room.id) || isRoomUnavailableForBooking(room)
+                          (room: any) => isDateOccupied(date, room.id) || isRoomUnavailableForBookingCb(room)
                         ).length;
                         const availableRooms = Math.max(0, totalRooms - unavailableCount);
                         
@@ -3430,9 +3496,15 @@ export const ReservationCalendarMap = ({
                       return pos.isVisible;
                     });
 
-                    const isMaintenance = isRoomInMaintenance(room);
+                    const isMaintenance = isRoomInMaintenanceCb(room);
+                    const hasPartialMaintenance = maintenanceTickets.some(
+                      (t) =>
+                        t.room_id === room.id &&
+                        isMaintenanceTicketActive(t) &&
+                        !t.blocks_entire_room,
+                    );
                     const isInterdicted = room.is_blocked === true;
-                    const isUnavailable = isRoomUnavailableForBooking(room);
+                    const isUnavailable = isRoomUnavailableForBookingCb(room);
 
                     return (
                       <div key={room.id} className={cn(
@@ -3450,7 +3522,7 @@ export const ReservationCalendarMap = ({
                           {isInterdicted && (
                             <Lock className="h-3.5 w-3.5 text-rose-500 flex-shrink-0" />
                           )}
-                          {isMaintenance && !isInterdicted && (
+                          {(isMaintenance || hasPartialMaintenance) && !isInterdicted && (
                             <Wrench className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
                           )}
                           <div className="min-w-0 flex-1">
@@ -3463,6 +3535,11 @@ export const ReservationCalendarMap = ({
                             {isMaintenance && (
                               <div className="text-[9px] sm:text-[10px] font-medium text-amber-700 truncate leading-tight">
                                 Em manutenção
+                              </div>
+                            )}
+                            {hasPartialMaintenance && !isMaintenance && (
+                              <div className="text-[9px] sm:text-[10px] font-medium text-amber-700 truncate leading-tight">
+                                Manutenção no período
                               </div>
                             )}
                             {isInterdicted && !isMaintenance && (
@@ -3491,7 +3568,10 @@ export const ReservationCalendarMap = ({
                             const isValidDrop = draggedReservation && hoveredCell?.roomId === room.id && 
                               !isUnavailable &&
                               !isDateOccupied(date, room.id, draggedReservation.reservation.id);
-                            const isBlocked = isUnavailable;
+                            const isPeriodMaintenance =
+                              !isUnavailable &&
+                              isRoomDateBlockedByMaintenancePeriod(date, room.id, maintenanceTickets);
+                            const isBlocked = isUnavailable || isPeriodMaintenance;
                             const isToday = isSameDay(date, new Date());
                             
                             return (
@@ -3506,6 +3586,8 @@ export const ReservationCalendarMap = ({
                                     ? "bg-rose-50/25 cursor-not-allowed"
                                     : isMaintenance
                                     ? "bg-amber-50/30 cursor-not-allowed"
+                                    : isPeriodMaintenance
+                                    ? "bg-amber-50/40 cursor-not-allowed"
                                     : isOccupied
                                     ? "bg-slate-50/80 cursor-not-allowed"
                                     : isSelected 
@@ -3565,6 +3647,8 @@ export const ReservationCalendarMap = ({
                                 title={
                                   isMaintenance
                                     ? "Quarto em manutenção — indisponível até a conclusão"
+                                    : isPeriodMaintenance
+                                    ? "Período em manutenção — indisponível para nova reserva"
                                     : isInterdicted
                                     ? "Quarto interditado — não é possível criar reserva"
                                     : isOccupied
@@ -3707,6 +3791,8 @@ export const ReservationCalendarMap = ({
                             const previewNightDelta = isResizingThis ? resizingReservation.nightDelta : 0;
                             const previewDuration = Math.max(1, pos.duration + previewNightDelta);
                             const canExtendStay = !["blocked", "cancelled", "checkedout", "noshow"].includes(reservation.status);
+                            const showMaintenanceOnReservation =
+                              reservationIdsWithMaintenance.has(reservation.id);
                               
                               return (
                                 <div
@@ -3797,6 +3883,12 @@ export const ReservationCalendarMap = ({
                               >
                                 {viewDays <= 30 && <GripVertical className="h-3 w-3 opacity-50 flex-shrink-0" />}
                                 <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                                  {showMaintenanceOnReservation && (
+                                    <Wrench
+                                      className="h-3 w-3 text-amber-100 flex-shrink-0"
+                                      title="Chamado de manutenção ativo nesta estadia"
+                                    />
+                                  )}
                                   {showPreCheckinDot && (
                                     <span
                                       className="h-2 w-2 rounded-full flex-shrink-0 ring-2 ring-white/70 shadow-sm"

@@ -44,7 +44,11 @@ interface QuickReservationDialogProps {
     action: "confirmed" | "blocked" | "preregistration";
   }) => void;
   /** Abre o modal Abrir Chamado (manutenção) sem criar reserva */
-  onOpenMaintenance?: (data: { room_id: string }) => void;
+  onOpenMaintenance?: (data: {
+    room_id: string;
+    checkin_date?: string;
+    checkout_date?: string;
+  }) => void;
   initialData: {
     checkin_date: string;
     checkout_date?: string;
@@ -135,7 +139,11 @@ export const QuickReservationDialog = ({
       return;
     }
     onOpenChange(false);
-    onOpenMaintenance?.({ room_id: initialData.room_id });
+    onOpenMaintenance?.({
+      room_id: initialData.room_id,
+      checkin_date: initialData.checkin_date,
+      checkout_date: initialData.checkout_date,
+    });
   };
 
   // Função auxiliar para obter o plano padrão

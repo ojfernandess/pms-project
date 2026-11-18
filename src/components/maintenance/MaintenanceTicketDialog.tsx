@@ -13,6 +13,7 @@ import { useMaintenance } from "@/hooks/useMaintenance";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { Loader2, ChevronRight, ChevronLeft, CheckCircle, Upload, X, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
 
 // Função para converter URL antiga de "documents" para "maintenance"
 // Também garante que URLs do bucket maintenance estejam corretas
@@ -157,6 +158,8 @@ interface MaintenanceTicketDialogProps {
   onSuccess: () => void;
   ticketId?: string; // Para edição
   initialRoomId?: string; // Para pré-selecionar um quarto
+  initialCheckinDate?: string;
+  initialCheckoutDate?: string;
 }
 
 export const MaintenanceTicketDialog = ({
@@ -165,6 +168,8 @@ export const MaintenanceTicketDialog = ({
   onSuccess,
   ticketId,
   initialRoomId,
+  initialCheckinDate,
+  initialCheckoutDate,
 }: MaintenanceTicketDialogProps) => {
   const { createTicket, updateTicket, isCreating, isUpdating } = useMaintenance();
   const { selectedEstablishment } = useEstablishment();
@@ -183,6 +188,9 @@ export const MaintenanceTicketDialog = ({
     notes: "",
     ticket_type: "" as "" | "water" | "electrical" | "cleaning" | "other",
     initial_comment: "", // Comentário inicial ao criar o ticket
+    maintenance_start_date: "",
+    maintenance_end_date: "",
+    blocks_entire_room: false,
   });
 
   // Buscar quartos com categorias
@@ -352,6 +360,11 @@ export const MaintenanceTicketDialog = ({
             priority: data.priority,
             status: data.status,
             notes: data.notes || "",
+            ticket_type: (data.ticket_type as typeof formData.ticket_type) || "",
+            initial_comment: "",
+            maintenance_start_date: data.maintenance_start_date || "",
+            maintenance_end_date: data.maintenance_end_date || "",
+            blocks_entire_room: Boolean(data.blocks_entire_room),
           });
           setExistingAttachments(data.maintenance_ticket_attachments || []);
         }
@@ -359,7 +372,9 @@ export const MaintenanceTicketDialog = ({
 
       fetchTicket();
     } else if (!ticketId && open) {
-      // Reset form for new ticket
+      const today = new Date().toISOString().slice(0, 10);
+      const start = initialCheckinDate?.slice(0, 10) || today;
+      const end = initialCheckoutDate?.slice(0, 10) || start;
       setFormData({
         room_id: initialRoomId || "",
         title: "",
@@ -368,12 +383,16 @@ export const MaintenanceTicketDialog = ({
         status: "open",
         notes: "",
         ticket_type: "",
+        initial_comment: "",
+        maintenance_start_date: start,
+        maintenance_end_date: end,
+        blocks_entire_room: false,
       });
-      setStep(1); // Reset para primeiro passo
+      setStep(initialRoomId ? 2 : 1);
       setFiles([]);
       setExistingAttachments([]);
     }
-  }, [ticketId, open, initialRoomId]);
+  }, [ticketId, open, initialRoomId, initialCheckinDate, initialCheckoutDate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -392,6 +411,15 @@ export const MaintenanceTicketDialog = ({
 
       if (!formData.description.trim()) {
         toast.error("Descrição é obrigatória");
+        return;
+      }
+
+      if (!formData.maintenance_start_date || !formData.maintenance_end_date) {
+        toast.error("Informe o período de manutenção");
+        return;
+      }
+      if (formData.maintenance_end_date < formData.maintenance_start_date) {
+        toast.error("A data final deve ser igual ou posterior à inicial");
         return;
       }
 
@@ -430,7 +458,12 @@ export const MaintenanceTicketDialog = ({
           description: formData.description,
           priority: formData.priority,
           notes: formData.notes || null,
-        });
+          ticket_type: formData.ticket_type || "general",
+          maintenance_start_date: formData.maintenance_start_date,
+          maintenance_end_date: formData.maintenance_end_date,
+          blocks_entire_room: formData.blocks_entire_room,
+          lock_room_on_transfer: true,
+        } as Record<string, unknown>);
         createdTicketId = (ticket as any)?.id;
       }
 
@@ -639,6 +672,55 @@ export const MaintenanceTicketDialog = ({
                     rows={4}
                     className="mt-2"
                     required
+                  />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="maintenance_start_date" className="text-base font-semibold">
+                      Início da manutenção
+                    </Label>
+                    <Input
+                      id="maintenance_start_date"
+                      type="date"
+                      className="mt-2"
+                      value={formData.maintenance_start_date}
+                      onChange={(e) =>
+                        setFormData({ ...formData, maintenance_start_date: e.target.value })
+                      }
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="maintenance_end_date" className="text-base font-semibold">
+                      Fim da manutenção
+                    </Label>
+                    <Input
+                      id="maintenance_end_date"
+                      type="date"
+                      className="mt-2"
+                      value={formData.maintenance_end_date}
+                      onChange={(e) =>
+                        setFormData({ ...formData, maintenance_end_date: e.target.value })
+                      }
+                      required
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Período em que o quarto permanece em tratativa até a conclusão do chamado (editável).
+                </p>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <p className="text-sm font-medium">Bloquear quarto inteiro</p>
+                    <p className="text-xs text-muted-foreground">
+                      Se desligado, só o período fica indisponível no mapa (como chamado do hóspede).
+                    </p>
+                  </div>
+                  <Switch
+                    checked={formData.blocks_entire_room}
+                    onCheckedChange={(checked) =>
+                      setFormData({ ...formData, blocks_entire_room: checked })
+                    }
                   />
                 </div>
                 <div>

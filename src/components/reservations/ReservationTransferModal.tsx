@@ -165,7 +165,8 @@ export function ReservationTransferModal({
     setIsLoading(true);
 
     try {
-      // Atualizar reserva com novos dados
+      const originalRoomId = reservation.room_id as string | null;
+
       const { error } = await supabase
         .from("reservations")
         .update({
@@ -179,6 +180,15 @@ export function ReservationTransferModal({
         .eq("id", reservation.id);
 
       if (error) throw error;
+
+      if (originalRoomId && originalRoomId !== selectedRoomId) {
+        await supabase
+          .from("maintenance_tickets")
+          .update({ room_id: originalRoomId })
+          .eq("reservation_id", reservation.id)
+          .eq("lock_room_on_transfer", true)
+          .in("status", ["open", "in_progress"]);
+      }
 
       toast.success("Reserva transferida com sucesso!");
       onSuccess?.();

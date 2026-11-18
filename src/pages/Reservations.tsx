@@ -91,7 +91,11 @@ const Reservations = () => {
   const [blockViewDialogOpen, setBlockViewDialogOpen] = useState(false);
   const [selectedBlockId, setSelectedBlockId] = useState<string | undefined>();
   const [maintenanceDialogOpen, setMaintenanceDialogOpen] = useState(false);
-  const [maintenanceRoomId, setMaintenanceRoomId] = useState<string | undefined>();
+  const [maintenanceInitial, setMaintenanceInitial] = useState<{
+    room_id: string;
+    checkin_date?: string;
+    checkout_date?: string;
+  } | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [reservationToCancel, setReservationToCancel] = useState<{ 
     id: string; 
@@ -788,7 +792,7 @@ const Reservations = () => {
               }
             }}
             onOpenMaintenance={(data) => {
-              setMaintenanceRoomId(data.room_id);
+              setMaintenanceInitial(data);
               setMaintenanceDialogOpen(true);
             }}
             onReservationAction={(action, reservationId) => {
@@ -865,10 +869,12 @@ const Reservations = () => {
         onOpenChange={(open) => {
           setMaintenanceDialogOpen(open);
           if (!open) {
-            setMaintenanceRoomId(undefined);
+            setMaintenanceInitial(null);
           }
         }}
-        initialRoomId={maintenanceRoomId}
+        initialRoomId={maintenanceInitial?.room_id}
+        initialCheckinDate={maintenanceInitial?.checkin_date}
+        initialCheckoutDate={maintenanceInitial?.checkout_date}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["maintenance_tickets"] });
           queryClient.invalidateQueries({ queryKey: ["rooms"] });
@@ -876,7 +882,7 @@ const Reservations = () => {
           queryClient.invalidateQueries({ queryKey: ["reservations"] });
           refetch();
           setMaintenanceDialogOpen(false);
-          setMaintenanceRoomId(undefined);
+          setMaintenanceInitial(null);
         }}
       />
 

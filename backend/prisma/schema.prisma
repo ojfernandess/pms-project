@@ -2429,6 +2429,10 @@ model maintenance_tickets {
   resolved_at                                  DateTime?                        @db.Timestamptz(6)
   resolved_by                                  String?                          @db.Uuid
   resolution_notes                             String?
+  maintenance_start_date                       DateTime?                        @db.Date
+  maintenance_end_date                         DateTime?                        @db.Date
+  blocks_entire_room                           Boolean                          @default(false)
+  lock_room_on_transfer                        Boolean                          @default(true)
   maintenance_ticket_attachments               maintenance_ticket_attachments[]
   maintenance_ticket_comments                  maintenance_ticket_comments[]
   users_maintenance_tickets_assigned_toTousers auth_users?                      @relation("maintenance_tickets_assigned_toTousers", fields: [assigned_to], references: [id], onDelete: NoAction, onUpdate: NoAction)
