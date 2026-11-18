@@ -30,6 +30,7 @@ import { ReservationTransferModal } from "./ReservationTransferModal";
 import { ReservationReallocationModal } from "./ReservationReallocationModal";
 import { ReservationPaymentModal } from "./ReservationPaymentModal";
 import { BlockViewDialog } from "./BlockViewDialog";
+import { MaintenancePeriodCloseDialog } from "@/components/maintenance/MaintenancePeriodCloseDialog";
 import { RatePlansModal } from "./RatePlansModal";
 import { toast } from "sonner";
 import {
@@ -283,6 +284,10 @@ export const ReservationCalendarMap = ({
   
   // Estados para modal de bloqueio
   const [blockViewOpen, setBlockViewOpen] = useState(false);
+  const [maintenanceCloseTarget, setMaintenanceCloseTarget] = useState<{
+    ticketId: string;
+    roomLabel?: string | null;
+  } | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
 
   // Estados para modal de transferência
@@ -3730,10 +3735,7 @@ export const ReservationCalendarMap = ({
                           {/* Faixas de manutenção parcial (período) */}
                           {maintenanceTickets
                             .filter(
-                              (t) =>
-                                t.room_id === room.id &&
-                                isMaintenanceTicketActive(t) &&
-                                !t.blocks_entire_room,
+                              (t) => t.room_id === room.id && isMaintenanceTicketActive(t),
                             )
                             .map((ticket) => {
                               const period = resolveMaintenancePeriod(ticket);
@@ -3758,8 +3760,9 @@ export const ReservationCalendarMap = ({
                                   key={`maint-band-${ticket.id}`}
                                   role="presentation"
                                   className={cn(
-                                    "absolute z-[6] flex items-center gap-1 rounded-lg border px-1.5 py-0.5 pointer-events-auto",
+                                    "absolute z-[6] flex cursor-pointer items-center gap-1 rounded-lg border px-1.5 py-0.5 pointer-events-auto",
                                     MAP_BLOCK_BAND,
+                                    "hover:brightness-[0.97] active:scale-[0.99]",
                                   )}
                                   style={{
                                     left: `${(pos.startIndex / visibleDates.length) * 100}%`,
@@ -3787,6 +3790,16 @@ export const ReservationCalendarMap = ({
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     e.preventDefault();
+                                    setHoveredMaintenanceBandPreview(null);
+                                    if (!canUpdate("maintenance") && !canCreate("maintenance")) {
+                                      toast.error("Você não tem permissão para encerrar manutenção");
+                                      return;
+                                    }
+                                    if (!ticket.id) return;
+                                    setMaintenanceCloseTarget({
+                                      ticketId: ticket.id,
+                                      roomLabel: room.name || room.room_number || null,
+                                    });
                                   }}
                                 >
                                   <Wrench className="h-3 w-3 shrink-0 text-red-700" aria-hidden />
@@ -4687,6 +4700,18 @@ export const ReservationCalendarMap = ({
         onSuccess={() => {
           void refreshReservationQueries(queryClient);
           setReservationForPayment(null);
+        }}
+      />
+
+      <MaintenancePeriodCloseDialog
+        open={!!maintenanceCloseTarget}
+        onOpenChange={(open) => {
+          if (!open) setMaintenanceCloseTarget(null);
+        }}
+        ticketId={maintenanceCloseTarget?.ticketId ?? null}
+        roomLabel={maintenanceCloseTarget?.roomLabel}
+        onClosed={() => {
+          void queryClient.invalidateQueries({ queryKey: ["maintenance_tickets_map"] });
         }}
       />
 

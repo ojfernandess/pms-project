@@ -174,8 +174,8 @@ export const useMaintenance = () => {
 
       if (error) throw error;
 
-      const ticketRow = ticket as MaintenanceTicketRow;
-      if (ticket.room_id && ticketRow.blocks_entire_room) {
+      // Atualizar status do quarto para maintenance
+      if (ticket.room_id) {
         const { error: roomError } = await supabase
           .from("rooms")
           .update({ status: "maintenance" })
@@ -183,6 +183,7 @@ export const useMaintenance = () => {
 
         if (roomError) {
           console.error("Erro ao atualizar status do quarto:", roomError);
+          // Não falhar a criação do ticket por causa disso
         }
       }
 
@@ -232,7 +233,6 @@ export const useMaintenance = () => {
         .single();
 
       if (error) throw error;
-
       if (reopeningFromCompleted && before?.room_id) {
         const { data: ticketRow } = await supabase
           .from("maintenance_tickets")
@@ -242,9 +242,9 @@ export const useMaintenance = () => {
         if (ticketRow?.blocks_entire_room) {
           await supabase.from("rooms").update({ status: "maintenance" }).eq("id", before.room_id);
         }
+        await supabase.from("rooms").update({ status: "maintenance" }).eq("id", before.room_id);
       }
-
-      if (updates.status === "completed") {
+      if (updates.status === "completed" || updates.status === "cancelled") {
         const { data: ticket } = await supabase
           .from("maintenance_tickets")
           .select("room_id")
@@ -273,7 +273,6 @@ export const useMaintenance = () => {
   // Deletar/Cancelar ticket
   const cancelTicket = useMutation({
     mutationFn: async (id: string) => {
-      // Buscar ticket para pegar room_id
       const { data: ticket } = await supabase
         .from("maintenance_tickets")
         .select("room_id, status")
@@ -286,7 +285,6 @@ export const useMaintenance = () => {
         .eq("id", id);
 
       if (error) throw error;
-
       if (ticket?.room_id && (ticket.status === "open" || ticket.status === "in_progress")) {
         await resolveRoomStatusAfterMaintenanceChange(ticket.room_id);
       }
@@ -318,7 +316,6 @@ export const useMaintenance = () => {
         .single();
 
       if (error) throw error;
-
       const blocksEntireRoom = Boolean((data as MaintenanceTicketRow).blocks_entire_room);
       if (data.room_id && blocksEntireRoom) {
         await supabase.from("rooms").update({ status: "maintenance" }).eq("id", data.room_id);
@@ -356,7 +353,6 @@ export const useMaintenance = () => {
         .single();
 
       if (error) throw error;
-
       if (data.room_id) {
         await resolveRoomStatusAfterMaintenanceChange(data.room_id);
       }
@@ -373,6 +369,72 @@ export const useMaintenance = () => {
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao completar manutenção");
+    },
+  });
+
+  /** Encerrar chamado do mapa (concluído ou cancelado) com motivo da resolução */
+  const closeTicketMutation = useMutation({
+    mutationFn: async ({
+      id,
+      outcome,
+      resolutionNotes,
+    }: {
+      id: string;
+      outcome: "completed" | "cancelled";
+      resolutionNotes: string;
+    }) => {
+      const notes = resolutionNotes.trim();
+      if (!notes) {
+        throw new Error("Informe o motivo da resolução");
+      }
+
+      const { data: before, error: beforeErr } = await supabase
+        .from("maintenance_tickets")
+        .select("room_id, status")
+        .eq("id", id)
+        .single();
+      if (beforeErr) throw beforeErr;
+      if (!before || !["open", "in_progress"].includes(String(before.status))) {
+        throw new Error("Este chamado já foi encerrado");
+      }
+
+      const now = new Date().toISOString();
+      const payload: MaintenanceTicketUpdate = {
+        status: outcome,
+        resolution_notes: notes,
+        resolved_at: now,
+        ...(outcome === "completed" ? { completed_at: now } : {}),
+      };
+
+      const { data, error } = await supabase
+        .from("maintenance_tickets")
+        .update(payload)
+        .eq("id", id)
+        .select(`*, rooms (*)`)
+        .single();
+
+      if (error) throw error;
+      if (data.room_id) {
+        await resolveRoomStatusAfterMaintenanceChange(data.room_id);
+      }
+      return data;
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["maintenance_tickets", selectedEstablishment?.id] });
+      queryClient.invalidateQueries({ queryKey: ["maintenance_tickets_map"] });
+      queryClient.invalidateQueries({ queryKey: ["rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+      scheduleChannelSyncAfterInventoryChange(getEstablishmentId());
+      toast.success(
+        variables.outcome === "completed"
+          ? "Manutenção concluída com sucesso!"
+          : "Manutenção cancelada.",
+      );
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Erro ao encerrar manutenção";
+      toast.error(message);
     },
   });
 
@@ -541,6 +603,8 @@ export const useMaintenance = () => {
     cancelTicket: cancelTicket.mutateAsync,
     startTicket: startTicket.mutateAsync,
     completeTicket: completeTicket.mutateAsync,
+    closeTicket: closeTicketMutation.mutateAsync,
+    isClosingTicket: closeTicketMutation.isPending,
     isCreating: createTicket.isPending,
     isUpdating: updateTicket.isPending,
     getTicketComments,

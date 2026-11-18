@@ -124,8 +124,6 @@ const ChannelManager = () => {
     try {
       if (channel?.channel_manager_type === "channex") {
         await syncChannexReservations({ channelId, establishmentId: est });
-      } else if (channel?.channel_manager_type === "bukly") {
-        await syncBuklyReservations({ channelId, establishmentId: est });
       } else {
         await syncAiosellReservations({ channelId, establishmentId: est, pull: true });
       }
@@ -547,10 +545,10 @@ const ChannelManager = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>Código OTA</TableHead>
+                      <TableHead>Canal</TableHead>
                       <TableHead>Cód. reserva OTA</TableHead>
                       <TableHead>Ref. CM</TableHead>
-                      <TableHead>Canal</TableHead>
-                      <TableHead>Reserva</TableHead>
                       <TableHead>Hóspede</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Sincronizado em</TableHead>
@@ -559,13 +557,13 @@ const ChannelManager = () => {
                   <TableBody>
                     {otaReservations.map((otaReservation: any) => (
                       <TableRow key={otaReservation.id}>
+                        <TableCell className="font-medium">
+                          {otaReservation.ota_reservation_code}
                         <TableCell className="font-medium font-mono text-xs">
                           {otaReservation.ota_cm_booking_id || "—"}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
                           {otaReservation.ota_reservation_code || "—"}
-                        </TableCell>
-                        <TableCell>{otaReservation.ota_channels?.name || "-"}</TableCell>
                         <TableCell>
                           {otaReservation.reservations?.reservation_code || "-"}
                         </TableCell>
