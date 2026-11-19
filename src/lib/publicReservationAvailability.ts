@@ -10,24 +10,26 @@ const ACTIVE_RESERVATION_STATUSES = [
   "preregistration",
 ] as const;
 
-/**
- * Quartos públicos livres no período (quarto atribuído + overlap de datas).
- * Não considera reservas sem room_id — isso entra no mínimo ARI.
- */
-export async function countPublicPhysicalRoomsAvailableForPeriod(
+async function countCategoryPhysicalRoomsAvailableForPeriod(
   establishmentId: string,
   categoryId: string,
   checkinDate: string,
   checkoutDate: string,
+  options?: { publicRoomsOnly?: boolean },
 ): Promise<number> {
-  const { data: rooms, error: roomsError } = await supabase
+  let roomsQuery = supabase
     .from("rooms")
     .select("id")
     .eq("category_id", categoryId)
     .eq("establishment_id", establishmentId)
-    .eq("show_in_public", true)
     .in("status", ["available", "cleaning"])
     .eq("is_blocked", false);
+
+  if (options?.publicRoomsOnly) {
+    roomsQuery = roomsQuery.eq("show_in_public", true);
+  }
+
+  const { data: rooms, error: roomsError } = await roomsQuery;
 
   if (roomsError || !rooms?.length) return 0;
 
@@ -46,6 +48,25 @@ export async function countPublicPhysicalRoomsAvailableForPeriod(
   );
 
   return rooms.filter((room) => !occupiedRoomIds.has(room.id)).length;
+}
+
+/**
+ * Quartos públicos livres no período (quarto atribuído + overlap de datas).
+ * Não considera reservas sem room_id — isso entra no mínimo ARI.
+ */
+export async function countPublicPhysicalRoomsAvailableForPeriod(
+  establishmentId: string,
+  categoryId: string,
+  checkinDate: string,
+  checkoutDate: string,
+): Promise<number> {
+  return countCategoryPhysicalRoomsAvailableForPeriod(
+    establishmentId,
+    categoryId,
+    checkinDate,
+    checkoutDate,
+    { publicRoomsOnly: true },
+  );
 }
 
 async function minAriAvailableRoomsForPeriod(
@@ -113,6 +134,44 @@ export async function getPublicCategoryAvailabilityForPeriod(
     reason:
       availableRooms < requiredRooms
         ? `Apenas ${availableRooms} ${availableRooms === 1 ? "quarto disponível" : "quartos disponíveis"} de ${requiredRooms} necessário(s)`
+        : undefined,
+  };
+}
+
+/**
+ * Vagas de estacionamento livres no período (categoria parking / mapa).
+ * Usa ARI + ocupação física; não exige show_in_public (vagas não aparecem no catálogo).
+ */
+export async function getParkingSpotsAvailabilityForPeriod(
+  establishmentId: string,
+  parkingCategoryId: string,
+  checkinDate: string,
+  checkoutDate: string,
+): Promise<{ availableSpots: number; reason?: string }> {
+  if (!establishmentId || !parkingCategoryId || !checkinDate || !checkoutDate) {
+    return { availableSpots: 0, reason: "Datas ou categoria de estacionamento inválidas" };
+  }
+
+  const checkinLocal = parseLocalDate(checkinDate);
+  const checkoutLocal = parseLocalDate(checkoutDate);
+
+  const [ariMin, physical] = await Promise.all([
+    minAriAvailableRoomsForPeriod(establishmentId, parkingCategoryId, checkinLocal, checkoutLocal),
+    countCategoryPhysicalRoomsAvailableForPeriod(
+      establishmentId,
+      parkingCategoryId,
+      checkinDate,
+      checkoutDate,
+      { publicRoomsOnly: false },
+    ),
+  ]);
+
+  const availableSpots = Math.min(ariMin, physical);
+  return {
+    availableSpots,
+    reason:
+      availableSpots < 1
+        ? "Não há vagas de estacionamento disponíveis para este período"
         : undefined,
   };
 }

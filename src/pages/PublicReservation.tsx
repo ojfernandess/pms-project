@@ -41,7 +41,11 @@ import {
 import { computePublicQuoteExtras } from "@/lib/publicReservationQuoteFees";
 import { provisionParkingForLodgingReservation } from "@/lib/parkingReservationSync";
 import { generateQuoteCode } from "@/utils/quoteCode";
-import { getPublicCategoryAvailabilityForPeriod } from "@/lib/publicReservationAvailability";
+import {
+  getParkingSpotsAvailabilityForPeriod,
+  getPublicCategoryAvailabilityForPeriod,
+} from "@/lib/publicReservationAvailability";
+import { isParkingFeeConfigured } from "@/lib/parkingFeeConfig";
 
 // Importar tipos e configurações de tema do booking engine
 type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel" | "airbnb";
@@ -535,6 +539,8 @@ const PublicReservation = () => {
   const [includeParkingInQuote, setIncludeParkingInQuote] = useState(false);
   /** Vagas de estacionamento (até 1 por quarto de hospedagem). */
   const [parkingSpotsCount, setParkingSpotsCount] = useState(1);
+  const [availableParkingSpots, setAvailableParkingSpots] = useState<number | null>(null);
+  const [checkingParkingAvailability, setCheckingParkingAvailability] = useState(false);
   const [publicServiceFeesLoading, setPublicServiceFeesLoading] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
@@ -1171,12 +1177,72 @@ const PublicReservation = () => {
         ? selectedCategories.reduce((sum, cat) => sum + cat.rooms, 0)
         : manualRooms ?? 1;
     if (lodgingRoomCount < 1) return;
+    const cap = availableParkingSpots ?? lodgingRoomCount;
+    const maxSpots = Math.min(lodgingRoomCount, Math.max(0, cap));
     setParkingSpotsCount((prev) => {
-      if (prev > lodgingRoomCount) return lodgingRoomCount;
+      if (maxSpots < 1) return 1;
+      if (prev > maxSpots) return maxSpots;
       if (prev < 1) return 1;
       return prev;
     });
-  }, [selectedCategories, manualRooms]);
+    if (maxSpots < 1) setIncludeParkingInQuote(false);
+  }, [selectedCategories, manualRooms, availableParkingSpots]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadParkingAvailability = async () => {
+      const showParking = Boolean(company?.public_reservation_parking_option_enabled);
+      if (
+        !showParking ||
+        !establishment?.id ||
+        !formData.checkinDate ||
+        !formData.checkoutDate ||
+        !parkingFeeConfig?.parkingCategoryId ||
+        !isParkingFeeConfigured(parkingFeeConfig)
+      ) {
+        if (!cancelled) {
+          setAvailableParkingSpots(null);
+          setCheckingParkingAvailability(false);
+        }
+        return;
+      }
+
+      setCheckingParkingAvailability(true);
+      try {
+        const result = await getParkingSpotsAvailabilityForPeriod(
+          establishment.id,
+          parkingFeeConfig.parkingCategoryId,
+          formData.checkinDate,
+          formData.checkoutDate,
+        );
+        if (!cancelled) {
+          setAvailableParkingSpots(result.availableSpots);
+          if (result.availableSpots < 1) setIncludeParkingInQuote(false);
+        }
+      } catch (error) {
+        console.error("[PublicReservation] Disponibilidade estacionamento:", error);
+        if (!cancelled) {
+          setAvailableParkingSpots(0);
+          setIncludeParkingInQuote(false);
+        }
+      } finally {
+        if (!cancelled) setCheckingParkingAvailability(false);
+      }
+    };
+
+    const timeoutId = setTimeout(loadParkingAvailability, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [
+    establishment?.id,
+    formData.checkinDate,
+    formData.checkoutDate,
+    parkingFeeConfig,
+    company?.public_reservation_parking_option_enabled,
+  ]);
 
   useEffect(() => {
     if (!establishment?.id) {
@@ -2561,6 +2627,35 @@ const PublicReservation = () => {
       }
     }
 
+    if (includeParkingInQuote && parkingFeeConfig?.parkingCategoryId) {
+      const parkingCheck = await getParkingSpotsAvailabilityForPeriod(
+        establishment.id,
+        parkingFeeConfig.parkingCategoryId,
+        formData.checkinDate,
+        formData.checkoutDate,
+      );
+      if (parkingCheck.availableSpots < parkingSpotsCount) {
+        toast.error(
+          parkingCheck.reason ||
+            t(
+              "publicReservation.errors.insufficientParkingSpots",
+              "Não há vagas de estacionamento suficientes para o período selecionado.",
+            ),
+        );
+        setIsSubmitting(false);
+        return;
+      }
+    } else if (includeParkingInQuote) {
+      toast.error(
+        t(
+          "publicReservation.errors.parkingNotAvailableOnline",
+          "Estacionamento não está disponível para reserva online neste período.",
+        ),
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -3514,6 +3609,24 @@ const PublicReservation = () => {
   const totalRooms = selectedCategories.length > 0
     ? selectedCategories.reduce((sum, cat) => sum + cat.rooms, 0)
     : requiredRooms;
+
+  const parkingSellableOnPage = useMemo(() => {
+    if (!quoteExtras.parkingOffered || !isParkingFeeConfigured(parkingFeeConfig)) return false;
+    if (!parkingFeeConfig?.parkingCategoryId) return false;
+    if (checkingParkingAvailability || availableParkingSpots === null) return false;
+    return availableParkingSpots > 0;
+  }, [
+    quoteExtras.parkingOffered,
+    parkingFeeConfig,
+    checkingParkingAvailability,
+    availableParkingSpots,
+  ]);
+
+  const maxSelectableParkingSpots = useMemo(() => {
+    const cap = availableParkingSpots ?? 0;
+    if (cap < 1) return 0;
+    return Math.min(totalRooms, cap);
+  }, [availableParkingSpots, totalRooms]);
   
   // Calcular preço por quarto por noite corretamente
   // Se há múltiplas categorias, calcular preço médio por quarto
@@ -5139,7 +5252,32 @@ const PublicReservation = () => {
                         </span>
                       </div>
                     )}
-                    {quoteExtras.parkingOffered && (
+                    {quoteExtras.parkingOffered &&
+                      isParkingFeeConfigured(parkingFeeConfig) &&
+                      !parkingFeeConfig?.parkingCategoryId &&
+                      formData.checkinDate &&
+                      formData.checkoutDate && (
+                        <p className="text-xs text-amber-700">
+                          {t(
+                            "publicReservation.parkingNotOfferedNoMap",
+                            "Estacionamento não pode ser vendido online: vagas no mapa não estão configuradas.",
+                          )}
+                        </p>
+                      )}
+                    {quoteExtras.parkingOffered &&
+                      parkingFeeConfig?.parkingCategoryId &&
+                      formData.checkinDate &&
+                      formData.checkoutDate &&
+                      !checkingParkingAvailability &&
+                      availableParkingSpots === 0 && (
+                        <p className="text-xs text-amber-700">
+                          {t(
+                            "publicReservation.parkingSoldOut",
+                            "Estacionamento indisponível para as datas selecionadas.",
+                          )}
+                        </p>
+                      )}
+                    {parkingSellableOnPage && (
                       <div className="rounded-md border border-dashed border-slate-200 bg-white/60 p-3 space-y-2">
                         <div className="flex items-start gap-2">
                           <Checkbox
@@ -5180,9 +5318,14 @@ const PublicReservation = () => {
                                     variant="outline"
                                     size="icon"
                                     className="h-8 w-8"
-                                    disabled={parkingSpotsCount >= totalRooms}
+                                    disabled={
+                                      parkingSpotsCount >= totalRooms ||
+                                      parkingSpotsCount >= maxSelectableParkingSpots
+                                    }
                                     onClick={() =>
-                                      setParkingSpotsCount((n) => Math.min(totalRooms, n + 1))
+                                      setParkingSpotsCount((n) =>
+                                        Math.min(totalRooms, maxSelectableParkingSpots, n + 1),
+                                      )
                                     }
                                   >
                                     <Plus className="h-4 w-4" />
@@ -5205,14 +5348,24 @@ const PublicReservation = () => {
                                 })}
                               </span>
                             </p>
-                            {totalRooms > 1 && (
-                              <p className="text-xs text-muted-foreground">
-                                {t(
-                                  "publicReservation.parkingSpotsHint",
-                                  "Até uma vaga por quarto de hospedagem reservado.",
-                                )}
-                              </p>
-                            )}
+                            <p className="text-xs text-muted-foreground">
+                              {totalRooms > 1
+                                ? t(
+                                    "publicReservation.parkingSpotsHint",
+                                    "Até uma vaga por quarto de hospedagem reservado.",
+                                  )
+                                : null}
+                              {availableParkingSpots !== null && maxSelectableParkingSpots > 0 && (
+                                <>
+                                  {" "}
+                                  {t("publicReservation.parkingSpotsAvailable", {
+                                    count: maxSelectableParkingSpots,
+                                    defaultValue:
+                                      "{{count}} vaga(s) disponível(eis) no período.",
+                                  })}
+                                </>
+                              )}
+                            </p>
                           </div>
                         )}
                       </div>
@@ -5280,7 +5433,8 @@ const PublicReservation = () => {
                     !selectedCategory || 
                     !formData.checkinDate || 
                     !formData.checkoutDate ||
-                    !hasSufficientAvailability()
+                    !hasSufficientAvailability() ||
+                    (includeParkingInQuote && !parkingSellableOnPage)
                   }
                   className={`w-full h-14 text-lg font-semibold ${theme.primaryButton} ${theme.primaryButtonHover} rounded-lg ${theme.cardShadow} transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
                 >

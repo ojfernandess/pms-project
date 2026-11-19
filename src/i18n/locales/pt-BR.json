@@ -792,6 +792,9 @@
     "onlyRoomsLeft": "Apenas {count} quartos restantes!",
     "parkingSpotsLabel": "Vagas de estacionamento",
     "parkingSpotsHint": "Até uma vaga por quarto de hospedagem reservado.",
+    "parkingSpotsAvailable": "{{count}} vaga(s) disponível(eis) no período.",
+    "parkingSoldOut": "Estacionamento indisponível para as datas selecionadas.",
+    "parkingNotOfferedNoMap": "Estacionamento não pode ser vendido online: vagas no mapa não estão configuradas.",
     "soldOut": "Esgotado",
     "noAvailability": "Indisponível",
     "periodClosedForSale": "As datas selecionadas estão fechadas para reservas no tarifário. Por favor, selecione outras datas.",
@@ -816,7 +819,9 @@
       "quoteCreatedSuccess": "Orçamento criado com sucesso! Redirecionando para pagamento...",
       "createReservationError": "Erro ao criar reserva. Tente novamente.",
       "insufficientRooms": "Quartos insuficientes. Necessário: {required}, Disponível: {available}",
-      "maxRoomsReached": "Limite de quartos disponíveis atingido. Disponível: {available}"
+      "maxRoomsReached": "Limite de quartos disponíveis atingido. Disponível: {available}",
+      "insufficientParkingSpots": "Não há vagas de estacionamento suficientes para o período selecionado.",
+      "parkingNotAvailableOnline": "Estacionamento não está disponível para reserva online neste período."
     }
   },
   "bookingEngine": {

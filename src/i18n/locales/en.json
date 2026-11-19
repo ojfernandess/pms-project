@@ -745,6 +745,9 @@
     "onlyRoomsLeft": "Only {count} rooms left!",
     "parkingSpotsLabel": "Parking spots",
     "parkingSpotsHint": "Up to one parking spot per lodging room booked.",
+    "parkingSpotsAvailable": "{{count}} parking spot(s) available for this period.",
+    "parkingSoldOut": "Parking is not available for the selected dates.",
+    "parkingNotOfferedNoMap": "Parking cannot be sold online: map spots are not configured.",
     "soldOut": "Sold Out",
     "noAvailability": "Unavailable",
     "periodClosedForSale": "The selected dates are closed for reservations. Please select other dates.",
@@ -769,7 +772,9 @@
       "quoteCreatedSuccess": "Quote created successfully! Redirecting to payment...",
       "createReservationError": "Error creating reservation. Please try again.",
       "insufficientRooms": "Insufficient rooms. Required: {required}, Available: {available}",
-      "maxRoomsReached": "Maximum available rooms reached. Available: {available}"
+      "maxRoomsReached": "Maximum available rooms reached. Available: {available}",
+      "insufficientParkingSpots": "Not enough parking spots for the selected period.",
+      "parkingNotAvailableOnline": "Parking is not available for online booking in this period."
     }
   },
   "bookingEngine": {
