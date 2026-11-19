@@ -1339,6 +1339,8 @@ model companies {
   booking_engine_webhook_url                String?
   booking_engine_webhook_secret             String?
   booking_engine_theme_config               Json?
+  public_reservation_cleaning_fee_enabled    Boolean?                                    @default(false)
+  public_reservation_parking_option_enabled Boolean?                                    @default(false)
   users                                     auth_users?                                 @relation(fields: [created_by], references: [id], onUpdate: NoAction)
   company_api_credentials                   company_api_credentials?
   company_api_request_logs                  company_api_request_logs[]

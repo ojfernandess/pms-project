@@ -5,7 +5,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Loader2, Building2, ExternalLink, Settings2 } from "lucide-react";
+import { Loader2, Building2, ExternalLink, Settings2, Car } from "lucide-react";
+import { CleaningBroomIcon } from "@/components/icons/CleaningBroomIcon";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
@@ -223,6 +225,27 @@ const PublicReservationSettings = () => {
   });
 
   // Mutation para adicionar/remover estabelecimento da página pública
+  const updatePublicFeeFlagsMutation = useMutation({
+    mutationFn: async (flags: { cleaning: boolean; parking: boolean }) => {
+      if (!company?.id) throw new Error("Empresa não encontrada");
+      const { error } = await supabase
+        .from("companies")
+        .update({
+          public_reservation_cleaning_fee_enabled: flags.cleaning,
+          public_reservation_parking_option_enabled: flags.parking,
+        })
+        .eq("id", company.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["company"] });
+      toast.success("Opções de taxas na página pública atualizadas");
+    },
+    onError: (error: { message?: string }) => {
+      toast.error(error.message || "Erro ao salvar opções");
+    },
+  });
+
   const toggleEstablishmentMutation = useMutation({
     mutationFn: async ({ establishmentId, isActive }: { establishmentId: string; isActive: boolean }) => {
       // Encontrar o estabelecimento para obter a empresa correta
@@ -428,6 +451,58 @@ const PublicReservationSettings = () => {
         </div>
       </Card>
 
+      <Card className="p-6">
+        <div className="space-y-4">
+          <h3 className="text-xl font-semibold">Taxas no checkout (motor e página pública)</h3>
+          <p className="text-sm text-muted-foreground">
+            Os valores vêm das configurações de taxa de limpeza e estacionamento do estabelecimento. Aqui você só
+            define se aparecem para o hóspede em <strong>Complete sua reserva</strong>.
+          </p>
+          <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+            <div className="flex gap-3">
+              <CleaningBroomIcon className="mt-0.5 h-5 w-5 text-primary" />
+              <div>
+                <p className="font-medium">Taxa de limpeza</p>
+                <p className="text-sm text-muted-foreground">
+                  Incluída automaticamente no total quando configurada no hotel.
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={Boolean(company.public_reservation_cleaning_fee_enabled)}
+              disabled={updatePublicFeeFlagsMutation.isPending}
+              onCheckedChange={(checked) =>
+                updatePublicFeeFlagsMutation.mutate({
+                  cleaning: checked,
+                  parking: Boolean(company.public_reservation_parking_option_enabled),
+                })
+              }
+            />
+          </div>
+          <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+            <div className="flex gap-3">
+              <Car className="mt-0.5 h-5 w-5 text-primary" />
+              <div>
+                <p className="font-medium">Estacionamento (opcional)</p>
+                <p className="text-sm text-muted-foreground">
+                  O hóspede escolhe se inclui estacionamento no total, quando disponível.
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={Boolean(company.public_reservation_parking_option_enabled)}
+              disabled={updatePublicFeeFlagsMutation.isPending}
+              onCheckedChange={(checked) =>
+                updatePublicFeeFlagsMutation.mutate({
+                  cleaning: Boolean(company.public_reservation_cleaning_fee_enabled),
+                  parking: checked,
+                })
+              }
+            />
+          </div>
+        </div>
+      </Card>
+
       {/* Informações */}
       <Card className="p-6 bg-blue-50 border-blue-200">
         <div className="space-y-2">
@@ -441,6 +516,7 @@ const PublicReservationSettings = () => {
             <li>Fotos do estabelecimento</li>
             <li>Badges de destaque para categorias</li>
             <li>Timer de pagamento de orçamentos</li>
+            <li>Valores de taxa de limpeza e estacionamento (em Configurações do estabelecimento)</li>
             <li>Outras configurações específicas do estabelecimento</li>
           </ul>
           <p className="text-sm text-blue-800 mt-2">

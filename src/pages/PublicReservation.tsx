@@ -26,6 +26,20 @@ import { batchCalculateRatePrice } from "@/utils/ratePriceBatch";
 import { calculateRatePriceWithResilience } from "@/lib/calculateRatePriceRpc";
 import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 import { DateRangePicker } from "@/components/booking-engine/DateRangePicker";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  attachCleaningFeeToReservation,
+  fetchCleaningFeeConfig,
+  type CleaningFeeConfig,
+  CLEANING_FEE_NAME,
+} from "@/lib/cleaningFeeConfig";
+import {
+  fetchParkingFeeConfig,
+  type ParkingFeeConfig,
+  PARKING_FEE_NAME,
+} from "@/lib/parkingFeeConfig";
+import { computePublicQuoteExtras } from "@/lib/publicReservationQuoteFees";
+import { provisionParkingForLodgingReservation } from "@/lib/parkingReservationSync";
 
 // Importar tipos e configurações de tema do booking engine
 type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel" | "airbnb";
@@ -514,6 +528,10 @@ const PublicReservation = () => {
   const [searchParams] = useSearchParams();
   const [establishment, setEstablishment] = useState<any>(null);
   const [company, setCompany] = useState<any>(null);
+  const [cleaningFeeConfig, setCleaningFeeConfig] = useState<CleaningFeeConfig | null>(null);
+  const [parkingFeeConfig, setParkingFeeConfig] = useState<ParkingFeeConfig | null>(null);
+  const [includeParkingInQuote, setIncludeParkingInQuote] = useState(false);
+  const [publicServiceFeesLoading, setPublicServiceFeesLoading] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
   const [establishmentServices, setEstablishmentServices] = useState<any[]>([]);
@@ -1260,6 +1278,41 @@ const PublicReservation = () => {
       clearTimeout(timeoutId);
     };
   }, [formData.checkinDate, formData.checkoutDate, establishment?.id, selectedCategory, selectedCategories]);
+
+  useEffect(() => {
+    if (!establishment?.id) {
+      setCleaningFeeConfig(null);
+      setParkingFeeConfig(null);
+      return;
+    }
+    const primaryCategoryId =
+      selectedCategories[0]?.categoryId || selectedCategory || null;
+    const categoryRow = primaryCategoryId
+      ? categories.find((c) => c.id === primaryCategoryId)
+      : null;
+    const buildingId = categoryRow?.building_id ?? null;
+    let cancelled = false;
+    (async () => {
+      setPublicServiceFeesLoading(true);
+      try {
+        const [cleaning, parking] = await Promise.all([
+          fetchCleaningFeeConfig({ establishmentId: establishment.id, buildingId }),
+          fetchParkingFeeConfig({ establishmentId: establishment.id, buildingId }),
+        ]);
+        if (!cancelled) {
+          setCleaningFeeConfig(cleaning);
+          setParkingFeeConfig(parking);
+        }
+      } catch (error) {
+        console.error("[PublicReservation] Erro ao carregar taxas de serviço:", error);
+      } finally {
+        if (!cancelled) setPublicServiceFeesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [establishment?.id, selectedCategory, selectedCategories, categories]);
 
   // Verificar restrições (min_stay, max_stay, CTA, CTD) que bloqueiam reserva
   useEffect(() => {
@@ -2707,10 +2760,30 @@ const PublicReservation = () => {
         ? selectedCategories.reduce((sum, cat) => sum + cat.price, 0)
         : (calculatedPrice || 0);
 
-      // Aplicar desconto se houver cupom válido
-      const totalAmount = appliedCoupon && appliedCoupon.valid
-        ? appliedCoupon.final_amount
-        : baseTotalAmount;
+      const lodgingAfterCoupon =
+        appliedCoupon && appliedCoupon.valid ? appliedCoupon.final_amount : baseTotalAmount;
+      const [checkinY, checkinM, checkinD] = formData.checkinDate.split("-").map(Number);
+      const [checkoutY, checkoutM, checkoutD] = formData.checkoutDate.split("-").map(Number);
+      const stayNights = Math.max(
+        0,
+        Math.ceil(
+          (new Date(checkoutY, checkoutM - 1, checkoutD).getTime() -
+            new Date(checkinY, checkinM - 1, checkinD).getTime()) /
+            (1000 * 60 * 60 * 24),
+        ),
+      );
+      const submitExtras = computePublicQuoteExtras({
+        lodgingTotal: lodgingAfterCoupon,
+        nights: stayNights,
+        flags: {
+          showCleaning: Boolean(company?.public_reservation_cleaning_fee_enabled),
+          showParkingOption: Boolean(company?.public_reservation_parking_option_enabled),
+        },
+        cleaning: cleaningFeeConfig,
+        parking: parkingFeeConfig,
+        includeParking: includeParkingInQuote,
+      });
+      const totalAmount = submitExtras.grandTotal;
 
       // Usar a primeira categoria como categoria principal (para compatibilidade)
       const primaryCategory = selectedCategories[0]?.categoryId || selectedCategory;
@@ -2855,6 +2928,42 @@ const PublicReservation = () => {
       }
       
       console.log(`[Reservation] Total de reservas criadas: ${createdReservations.length}, roomIndex final: ${roomIndex}, additionalClientIds: ${additionalClientIds.length}`);
+
+      const firstReservationId = createdReservations[0];
+      const primaryCat = categories.find((c) => c.id === primaryCategory);
+      if (firstReservationId && submitExtras.cleaningActive && cleaningFeeConfig?.serviceFeeId) {
+        try {
+          await attachCleaningFeeToReservation({
+            reservationId: firstReservationId,
+            serviceFeeId: cleaningFeeConfig.serviceFeeId,
+            amount: cleaningFeeConfig.amount,
+          });
+        } catch (feeError) {
+          console.error("[PublicReservation] Taxa de limpeza:", feeError);
+        }
+      }
+      if (
+        firstReservationId &&
+        submitExtras.parkingOffered &&
+        includeParkingInQuote &&
+        parkingFeeConfig
+      ) {
+        try {
+          await provisionParkingForLodgingReservation({
+            lodgingReservationId: firstReservationId,
+            establishmentId: establishment.id,
+            buildingId: primaryCat?.building_id ?? null,
+            checkinDate: formData.checkinDate,
+            checkoutDate: formData.checkoutDate,
+            clientId: mainClientId,
+            guestName: `${formData.firstName} ${formData.lastName}`,
+            adults: parseInt(formData.adults) || 1,
+            children: parseInt(formData.children) || 0,
+          });
+        } catch (parkingError) {
+          console.error("[PublicReservation] Estacionamento:", parkingError);
+        }
+      }
 
       scheduleChannelSyncAfterInventoryChange(establishment.id);
 
@@ -3509,6 +3618,36 @@ const PublicReservation = () => {
   const discountAmount = appliedCoupon && appliedCoupon.valid
     ? appliedCoupon.discount_amount
     : 0;
+
+  const publicFeeFlags = useMemo(
+    () => ({
+      showCleaning: Boolean(company?.public_reservation_cleaning_fee_enabled),
+      showParkingOption: Boolean(company?.public_reservation_parking_option_enabled),
+    }),
+    [company?.public_reservation_cleaning_fee_enabled, company?.public_reservation_parking_option_enabled],
+  );
+
+  const quoteExtras = useMemo(
+    () =>
+      computePublicQuoteExtras({
+        lodgingTotal: finalPrice,
+        nights,
+        flags: publicFeeFlags,
+        cleaning: cleaningFeeConfig,
+        parking: parkingFeeConfig,
+        includeParking: includeParkingInQuote,
+      }),
+    [
+      finalPrice,
+      nights,
+      publicFeeFlags,
+      cleaningFeeConfig,
+      parkingFeeConfig,
+      includeParkingInQuote,
+    ],
+  );
+
+  const checkoutGrandTotal = quoteExtras.grandTotal;
   
   // Calcular número total de quartos de todas as categorias selecionadas
   const totalRooms = selectedCategories.length > 0
@@ -5104,7 +5243,7 @@ const PublicReservation = () => {
                     {discountAmount > 0 && (
                       <>
                         <div className="flex justify-between text-sm">
-                          <span className={theme.priceLabel}>Subtotal</span>
+                          <span className={theme.priceLabel}>Subtotal hospedagem</span>
                           <span className={theme.textSecondary}>
                             R$ {basePrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
@@ -5117,10 +5256,64 @@ const PublicReservation = () => {
                         </div>
                       </>
                     )}
+                    {!discountAmount && (
+                      <div className="flex justify-between text-sm">
+                        <span className={theme.priceLabel}>Hospedagem</span>
+                        <span className={theme.textSecondary}>
+                          R$ {finalPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
+                    {quoteExtras.cleaningActive && (
+                      <div className="flex justify-between text-sm">
+                        <span className={theme.priceLabel}>
+                          {CLEANING_FEE_NAME} <span className="text-xs text-muted-foreground">(obrigatória)</span>
+                        </span>
+                        <span className={`font-medium ${theme.textPrimary}`}>
+                          R${" "}
+                          {quoteExtras.cleaningAmount.toLocaleString("pt-BR", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    )}
+                    {quoteExtras.parkingOffered && (
+                      <div className="rounded-md border border-dashed border-slate-200 bg-white/60 p-3 space-y-2">
+                        <div className="flex items-start gap-2">
+                          <Checkbox
+                            id="public-include-parking"
+                            checked={includeParkingInQuote}
+                            onCheckedChange={(v) => setIncludeParkingInQuote(v === true)}
+                          />
+                          <Label htmlFor="public-include-parking" className="text-sm font-medium leading-snug cursor-pointer">
+                            Incluir {PARKING_FEE_NAME}
+                            {parkingFeeConfig?.billingMode === "daily"
+                              ? ` (${nights} diária(s))`
+                              : " (período)"}
+                          </Label>
+                        </div>
+                        {includeParkingInQuote && (
+                          <p className="flex justify-between text-sm pl-6">
+                            <span className={theme.priceLabel}>{PARKING_FEE_NAME}</span>
+                            <span className={`font-medium ${theme.textPrimary}`}>
+                              R${" "}
+                              {quoteExtras.parkingAmount.toLocaleString("pt-BR", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {publicServiceFeesLoading && (
+                      <p className="text-xs text-muted-foreground">Carregando taxas adicionais…</p>
+                    )}
                     <div className="flex justify-between">
                       <span className={`font-bold text-lg ${theme.textPrimary}`}>{t("publicReservation.total")}</span>
                       <span className={`font-bold text-2xl ${theme.priceHighlight}`}>
-                        R$ {finalPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        R$ {checkoutGrandTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </div>
                   </div>
