@@ -204,10 +204,8 @@ export const validateRoomAvailability = async (
   const { data: conflicts, error: conflictsError } = await query;
 
   if (conflictsError) {
-    // Logar erro de validação
-    try {
-      const { logError } = await import("@/lib/errorLogger");
-      await logError({
+    void import("@/lib/errorLogger").then(({ logError }) =>
+      logError({
         error: conflictsError,
         context: "reservationUtils.validateRoomAvailability",
         severity: "medium",
@@ -216,10 +214,8 @@ export const validateRoomAvailability = async (
           checkin_date: checkinDate,
           checkout_date: checkoutDate,
         },
-      });
-    } catch (logError) {
-      console.warn("Erro ao fazer log:", logError);
-    }
+      }),
+    );
     throw conflictsError;
   }
 

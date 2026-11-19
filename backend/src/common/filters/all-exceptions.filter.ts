@@ -6,11 +6,17 @@ import {
   HttpStatus,
   Logger,
 } from "@nestjs/common";
-import type { Response } from "express";
+import type { Request, Response } from "express";
+import { applyCorsHeadersIfAllowed, type CorsPolicy } from "../../config/cors-options";
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
+
+  constructor(
+    private readonly corsPolicy?: CorsPolicy,
+    private readonly extraCorsOrigin?: (origin: string) => boolean,
+  ) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     if (host.getType() !== "http") {
@@ -19,6 +25,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     const response = host.switchToHttp().getResponse<Response>();
+    const request = host.switchToHttp().getRequest<Request>();
+    if (this.corsPolicy) {
+      applyCorsHeadersIfAllowed(request, response, this.corsPolicy, this.extraCorsOrigin);
+    }
     const status =
       exception instanceof HttpException
         ? exception.getStatus()

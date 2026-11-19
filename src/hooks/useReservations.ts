@@ -229,7 +229,7 @@ export const useReservations = () => {
         );
 
         if (!availability.available) {
-          await logError({
+          void logError({
             error: new Error(availability.reason || "Quarto não disponível"),
             context: "reservations.createReservation",
             severity: "medium",
@@ -250,7 +250,7 @@ export const useReservations = () => {
         );
 
         if (!categoryAvailability.available) {
-          await logError({
+          void logError({
             error: new Error(categoryAvailability.reason || "Categoria sem quartos disponíveis"),
             context: "reservations.createReservation",
             severity: "medium",
@@ -310,7 +310,7 @@ export const useReservations = () => {
         }
 
         if (lockError) {
-          await logError({
+          void logError({
             error: lockError,
             context: "reservations.createReservation.lock",
             severity: "high",
@@ -346,7 +346,7 @@ export const useReservations = () => {
             console.error("🔍 Status do quarto:", roomStatus);
           }
           
-          await logError({
+          void logError({
             error: new Error(errorMessage),
             context: "reservations.createReservation.validation",
             severity: "medium",
@@ -368,7 +368,7 @@ export const useReservations = () => {
           .single();
 
         if (fetchError || !newReservation) {
-          await logError({
+          void logError({
             error: fetchError || new Error("Reserva não encontrada após criação"),
             context: "reservations.createReservation.fetch",
             severity: "high",
@@ -415,36 +415,32 @@ export const useReservations = () => {
             const establishmentId = getEstablishmentId();
             
             if (newReservation?.id && establishmentId) {
-              // Aguardar um pouco mais para garantir que o reservation_code foi gerado pelo trigger
-              // Tentar buscar até 3 vezes com delay crescente
-              let reservationWithCode = null;
-              let attempts = 0;
-              const maxAttempts = 3;
-              
-              while (attempts < maxAttempts && !reservationWithCode?.reservation_code) {
-                await new Promise(resolve => setTimeout(resolve, 500 * (attempts + 1)));
-                
-                const { data, error: fetchError } = await supabase
-                  .from("reservations")
-                  .select("id, reservation_code, checkin_date")
-                  .eq("id", newReservation.id)
-                  .single();
+              let reservationCode = String(newReservation.reservation_code ?? "").trim();
+              let checkinForWeb = newReservation.checkin_date;
 
-                if (!fetchError && data?.reservation_code) {
-                  reservationWithCode = data;
-                  break;
+              if (!reservationCode) {
+                let attempts = 0;
+                const maxAttempts = 2;
+                while (attempts < maxAttempts && !reservationCode) {
+                  await new Promise((resolve) => setTimeout(resolve, 300 * (attempts + 1)));
+                  const { data } = await supabase
+                    .from("reservations")
+                    .select("reservation_code, checkin_date")
+                    .eq("id", newReservation.id)
+                    .maybeSingle();
+                  if (data?.reservation_code) {
+                    reservationCode = data.reservation_code;
+                    checkinForWeb = data.checkin_date ?? checkinForWeb;
+                    break;
+                  }
+                  attempts++;
                 }
-                
-                attempts++;
               }
 
-              if (!reservationWithCode || !reservationWithCode.reservation_code) {
-                console.error("Reservation code não foi gerado para a reserva após", maxAttempts, "tentativas:", newReservation.id);
-                // Tentar criar web_checkin mesmo sem código, será atualizado depois
+              if (!reservationCode) {
+                console.error("Reservation code não gerado após criação:", newReservation.id);
                 return;
               }
-
-              const reservationCode = reservationWithCode.reservation_code;
               
               const { locatorService } = await import("@/lib/locatorService");
               
@@ -455,7 +451,7 @@ export const useReservations = () => {
               );
 
               // Calcular data de expiração (7 dias antes do check-in ou no check-in, o que for menor)
-              const checkinDate = new Date(reservationWithCode.checkin_date);
+              const checkinDate = new Date(checkinForWeb);
               const expiresAt = new Date();
               expiresAt.setDate(expiresAt.getDate() + 7);
               
