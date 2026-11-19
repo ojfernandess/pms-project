@@ -879,7 +879,8 @@ export class StripeWebhookService {
       const amountValue = customAmount !== undefined ? customAmount : paymentIntent.amount / 100;
       const amountAsNumber = Number(amountValue.toFixed(2));
       const amount = amountAsNumber.toFixed(2);
-      let notes = `[STRIPE] Payment Intent: ${paymentIntent.id}\n[COMPONENT:base]`;
+      // [COMPONENT:all] — orçamento/pagamento Stripe quitam hospedagem + taxas; [COMPONENT:base] deixava taxas pendentes na UI.
+      let notes = `[STRIPE] Payment Intent: ${paymentIntent.id}\n[COMPONENT:all]`;
       if (allReservationsInfo && allReservationsInfo.length > 1) {
         const totalAmountFromReservations = allReservationsInfo.reduce((sum, res) => sum + res.amount, 0);
         notes += `\n\n--- PAGAMENTO MULTIPLO ---\n`;

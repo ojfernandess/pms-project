@@ -541,7 +541,7 @@ async function registerStripePaymentInPMS(
     console.log(`[Webhook] 💳 Valor formatado (string): ${amount}`);
 
     // Criar observações com informações do Stripe
-    let notes = `[STRIPE] Payment Intent: ${paymentIntent.id}\n[COMPONENT:base]`;
+    let notes = `[STRIPE] Payment Intent: ${paymentIntent.id}\n[COMPONENT:all]`;
     
     // Se houver informações sobre múltiplas reservas, adicionar detalhes na observação
     if (allReservationsInfo && allReservationsInfo.length > 1) {
