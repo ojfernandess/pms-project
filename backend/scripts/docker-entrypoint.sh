@@ -72,6 +72,11 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/public_reservation_an
     || echo "WARN: public_reservation_anon.sql falhou" >&2
 fi
 
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/ensure_quote_code_trigger.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/ensure_quote_code_trigger.sql \
+    || echo "WARN: ensure_quote_code_trigger.sql falhou" >&2
+fi
+
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/web-checkin-anon-rls.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=0 -f ./scripts/migration/web-checkin-anon-rls.sql \
     || echo "WARN: web-checkin-anon-rls.sql falhou" >&2

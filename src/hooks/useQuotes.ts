@@ -5,6 +5,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { usePricing } from "./usePricing";
 import { format } from "date-fns";
+import { generateQuoteCode } from "@/utils/quoteCode";
 
 export type QuoteStatus = "pending" | "sent" | "accepted" | "rejected" | "expired" | "converted";
 
@@ -174,6 +175,7 @@ export const useQuotes = () => {
         .from("quotes")
         .insert({
           ...quoteData,
+          quote_code: quoteData.quote_code || generateQuoteCode(),
           establishment_id: establishmentId,
           total_amount: totalAmount,
           status: quoteData.status || "pending",

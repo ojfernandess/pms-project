@@ -743,6 +743,8 @@
     "roomsAvailable": "{available} {available, plural, =1 {room available} other {rooms available}} for this period",
     "onlyRoomLeft": "Only 1 room left!",
     "onlyRoomsLeft": "Only {count} rooms left!",
+    "parkingSpotsLabel": "Parking spots",
+    "parkingSpotsHint": "Up to one parking spot per lodging room booked.",
     "soldOut": "Sold Out",
     "noAvailability": "Unavailable",
     "periodClosedForSale": "The selected dates are closed for reservations. Please select other dates.",

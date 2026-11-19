@@ -16,6 +16,14 @@ BEGIN
   END IF;
 END $$;
 
+-- Disponibilidade na página pública (alinhada ao mapa / ARI)
+DO $$
+BEGIN
+  IF to_regprocedure('public.calculate_category_availability(uuid,uuid,date)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.calculate_category_availability(UUID, UUID, DATE) TO anon;
+  END IF;
+END $$;
+
 -- clients
 DROP POLICY IF EXISTS "Public can create clients for reservations" ON public.clients;
 CREATE POLICY "Public can create clients for reservations"

@@ -15,6 +15,8 @@ export function computePublicQuoteExtras(params: {
   cleaning: CleaningFeeConfig | null | undefined;
   parking: ParkingFeeConfig | null | undefined;
   includeParking: boolean;
+  /** Vagas de estacionamento (1 por quarto de hospedagem, quando aplicável). */
+  parkingSpotCount?: number;
 }): {
   lodgingTotal: number;
   cleaningAmount: number;
@@ -32,7 +34,8 @@ export function computePublicQuoteExtras(params: {
   let parkingAmount = 0;
   if (parkingOffered && params.includeParking && params.parking) {
     const b = computeParkingFeeTotal(params.parking, params.nights);
-    parkingAmount = b.amount * b.quantity;
+    const spots = Math.max(1, Math.min(99, params.parkingSpotCount ?? 1));
+    parkingAmount = b.amount * b.quantity * spots;
   }
 
   const grandTotal = Math.max(0, params.lodgingTotal + cleaningAmount + parkingAmount);

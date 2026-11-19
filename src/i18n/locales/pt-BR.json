@@ -790,6 +790,8 @@
     "roomsAvailable": "{available} {available, plural, =1 {quarto disponível} other {quartos disponíveis}} para este período",
     "onlyRoomLeft": "Apenas 1 quarto restante!",
     "onlyRoomsLeft": "Apenas {count} quartos restantes!",
+    "parkingSpotsLabel": "Vagas de estacionamento",
+    "parkingSpotsHint": "Até uma vaga por quarto de hospedagem reservado.",
     "soldOut": "Esgotado",
     "noAvailability": "Indisponível",
     "periodClosedForSale": "As datas selecionadas estão fechadas para reservas no tarifário. Por favor, selecione outras datas.",

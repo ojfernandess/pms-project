@@ -40,6 +40,8 @@ import {
 } from "@/lib/parkingFeeConfig";
 import { computePublicQuoteExtras } from "@/lib/publicReservationQuoteFees";
 import { provisionParkingForLodgingReservation } from "@/lib/parkingReservationSync";
+import { generateQuoteCode } from "@/utils/quoteCode";
+import { getPublicCategoryAvailabilityForPeriod } from "@/lib/publicReservationAvailability";
 
 // Importar tipos e configurações de tema do booking engine
 type BookingThemeKey = "default" | "modern" | "luxury" | "minimal" | "dark" | "travel" | "airbnb";
@@ -531,6 +533,8 @@ const PublicReservation = () => {
   const [cleaningFeeConfig, setCleaningFeeConfig] = useState<CleaningFeeConfig | null>(null);
   const [parkingFeeConfig, setParkingFeeConfig] = useState<ParkingFeeConfig | null>(null);
   const [includeParkingInQuote, setIncludeParkingInQuote] = useState(false);
+  /** Vagas de estacionamento (até 1 por quarto de hospedagem). */
+  const [parkingSpotsCount, setParkingSpotsCount] = useState(1);
   const [publicServiceFeesLoading, setPublicServiceFeesLoading] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
@@ -1027,87 +1031,15 @@ const PublicReservation = () => {
           currentRequiredRooms = calculateRequiredRooms(adults, selectedCategoryData);
         }
 
-        // Buscar todos os quartos da categoria que estão disponíveis
-        const { data: rooms, error: roomsError } = await supabase
-          .from("rooms")
-          .select("id")
-          .eq("category_id", selectedCategory)
-          .eq("establishment_id", establishment.id)
-          .eq("show_in_public", true)
-          .in("status", ["available", "cleaning"])
-          .eq("is_blocked", false);
-
-        if (roomsError || !rooms || rooms.length === 0) {
-          setAvailableRoomsCount(0);
-          return;
-        }
-
-        // Verificar se o período está disponível para venda (ARI)
-        const { checkPeriodAvailabilityForSale, checkInventoryAvailability, parseLocalDate } = await import("@/lib/ariAvailabilityUtils");
-        const checkinLocal = parseLocalDate(formData.checkinDate);
-        const checkoutLocal = parseLocalDate(formData.checkoutDate);
-
-        const periodCheck = await checkPeriodAvailabilityForSale(
+        const availability = await getPublicCategoryAvailabilityForPeriod(
           establishment.id,
           selectedCategory,
-          checkinLocal,
-          checkoutLocal,
-          'booking_engine'
+          formData.checkinDate,
+          formData.checkoutDate,
+          currentRequiredRooms,
         );
 
-        if (!periodCheck.available) {
-          setAvailableRoomsCount(0);
-          setCheckingAvailability(false);
-          return;
-        }
-
-        // Verificar inventário para cada data do período
-        const checkin = checkinLocal;
-        const checkout = checkoutLocal;
-        let minAvailableRooms = Infinity;
-        
-        const current = new Date(checkin);
-        while (current < checkout) {
-          const inventoryCheck = await checkInventoryAvailability(
-            establishment.id,
-            selectedCategory,
-            current,
-            currentRequiredRooms
-          );
-          
-          if (!inventoryCheck.available || inventoryCheck.availableRooms < currentRequiredRooms) {
-            setAvailableRoomsCount(0);
-            setCheckingAvailability(false);
-            return;
-          }
-          
-          minAvailableRooms = Math.min(minAvailableRooms, inventoryCheck.availableRooms);
-          current.setDate(current.getDate() + 1);
-        }
-
-        // Buscar reservas que conflitam com o período
-        const { data: conflictingReservations, error: reservationsError } = await supabase
-          .from("reservations")
-          .select("room_id")
-          .eq("category_id", selectedCategory)
-          .eq("establishment_id", establishment.id)
-          .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"])
-          .or(`and(checkin_date.lt.${formData.checkoutDate},checkout_date.gt.${formData.checkinDate})`);
-
-        if (reservationsError) {
-          console.error("Erro ao buscar reservas:", reservationsError);
-          setAvailableRoomsCount(null);
-          return;
-        }
-
-        // IDs de quartos ocupados
-        const occupiedRoomIds = new Set(
-          conflictingReservations?.map((r) => r.room_id).filter(Boolean) || []
-        );
-
-        // Quartos disponíveis (não ocupados)
-        const availableRooms = rooms.filter((room) => !occupiedRoomIds.has(room.id));
-        const availableCount = availableRooms.length;
+        const availableCount = availability.availableRooms;
         setAvailableRoomsCount(availableCount);
 
         // Mostrar aviso se não houver quartos suficientes (apenas se mudou)
@@ -1154,65 +1086,19 @@ const PublicReservation = () => {
       try {
         const availabilityByCategory: Record<string, number> = {};
 
-        // Importar verificação ARI (rate_sales_status) para respeitar "tarifa fechada"
-        const { checkPeriodAvailabilityForSale, parseLocalDate } = await import("@/lib/ariAvailabilityUtils");
-        const checkinLocal = parseLocalDate(formData.checkinDate);
-        const checkoutLocal = parseLocalDate(formData.checkoutDate);
-
-        // Para cada categoria, verificar disponibilidade no período
-        for (const category of categories) {
-          // 1. Verificar se o período está aberto para venda (rate_sales_status: closed = indisponível)
-          const periodCheck = await checkPeriodAvailabilityForSale(
-            establishment.id,
-            category.id,
-            checkinLocal,
-            checkoutLocal,
-            "booking_engine"
-          );
-          if (!periodCheck.available) {
-            availabilityByCategory[category.id] = 0;
-            continue;
-          }
-
-          // 2. Buscar todos os quartos da categoria que estão disponíveis
-          const { data: rooms, error: roomsError } = await supabase
-            .from("rooms")
-            .select("id")
-            .eq("category_id", category.id)
-            .eq("establishment_id", establishment.id)
-            .eq("show_in_public", true)
-            .in("status", ["available", "cleaning"])
-            .eq("is_blocked", false);
-
-          if (roomsError || !rooms || rooms.length === 0) {
-            availabilityByCategory[category.id] = 0;
-            continue;
-          }
-
-          // 3. Buscar reservas que conflitam com o período
-          const { data: conflictingReservations, error: reservationsError } = await supabase
-            .from("reservations")
-            .select("room_id")
-            .eq("category_id", category.id)
-            .eq("establishment_id", establishment.id)
-            .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"])
-            .or(`and(checkin_date.lt.${formData.checkoutDate},checkout_date.gt.${formData.checkinDate})`);
-
-          if (reservationsError) {
-            console.error("Erro ao buscar reservas para categoria:", category.id, reservationsError);
-            availabilityByCategory[category.id] = 0;
-            continue;
-          }
-
-          // IDs de quartos ocupados
-          const occupiedRoomIds = new Set(
-            conflictingReservations?.map((r) => r.room_id).filter(Boolean) || []
-          );
-
-          // Quartos disponíveis (não ocupados)
-          const availableRooms = rooms.filter((room) => !occupiedRoomIds.has(room.id));
-          availabilityByCategory[category.id] = availableRooms.length;
-        }
+        // Para cada categoria, verificar disponibilidade no período (ARI + quartos públicos)
+        await Promise.all(
+          categories.map(async (category) => {
+            const result = await getPublicCategoryAvailabilityForPeriod(
+              establishment.id,
+              category.id,
+              formData.checkinDate,
+              formData.checkoutDate,
+              1,
+            );
+            availabilityByCategory[category.id] = result.availableRooms;
+          }),
+        );
 
         setCategoryAvailableRooms(availabilityByCategory);
       } catch (error: any) {
@@ -1278,6 +1164,19 @@ const PublicReservation = () => {
       clearTimeout(timeoutId);
     };
   }, [formData.checkinDate, formData.checkoutDate, establishment?.id, selectedCategory, selectedCategories]);
+
+  useEffect(() => {
+    const lodgingRoomCount =
+      selectedCategories.length > 0
+        ? selectedCategories.reduce((sum, cat) => sum + cat.rooms, 0)
+        : manualRooms ?? 1;
+    if (lodgingRoomCount < 1) return;
+    setParkingSpotsCount((prev) => {
+      if (prev > lodgingRoomCount) return lodgingRoomCount;
+      if (prev < 1) return 1;
+      return prev;
+    });
+  }, [selectedCategories, manualRooms]);
 
   useEffect(() => {
     if (!establishment?.id) {
@@ -1490,11 +1389,6 @@ const PublicReservation = () => {
             const adjustedAvailableRooms: Record<string, number> = {
               ...categoryAvailableRooms,
             };
-            
-            // Garantir que a categoria primária tenha pelo menos manualRooms disponíveis
-            if (adjustedAvailableRooms[selectedCategory] < manualRooms) {
-              adjustedAvailableRooms[selectedCategory] = manualRooms;
-            }
             
             // Distribuir adultos entre categorias, garantindo que a categoria primária use manualRooms
             const distribution = await distributeAdultsAcrossCategoriesWithManualRooms(
@@ -2784,6 +2678,7 @@ const PublicReservation = () => {
         cleaning: cleaningFeeConfig,
         parking: parkingFeeConfig,
         includeParking: includeParkingInQuote,
+        parkingSpotCount: includeParkingInQuote ? parkingSpotsCount : 1,
       });
       const totalAmount = submitExtras.grandTotal;
 
@@ -2792,6 +2687,14 @@ const PublicReservation = () => {
 
       // Criar reservas para cada categoria e quarto
       const createdReservations: string[] = [];
+      const createdLodgingMeta: Array<{
+        reservationId: string;
+        buildingId: string | null;
+        clientId: string | null;
+        guestName: string;
+        adults: number;
+        children: number;
+      }> = [];
       let roomIndex = 0; // Índice global do quarto (para rastrear qual cliente usar)
       
       console.log(`[Reservation] Iniciando criação de reservas. allReservationsInMyName: ${allReservationsInMyName}, totalRooms: ${totalRooms}, additionalClientIds.length: ${additionalClientIds.length}, additionalGuestsData.length: ${additionalGuestsData.length}`);
@@ -2924,6 +2827,14 @@ const PublicReservation = () => {
           }
 
           createdReservations.push(reservationResult.reservation_id);
+          createdLodgingMeta.push({
+            reservationId: reservationResult.reservation_id,
+            buildingId: category?.building_id ?? null,
+            clientId: roomClientId,
+            guestName: roomGuestName,
+            adults: finalAdults,
+            children: finalChildren,
+          });
           console.log(`[Reservation] ✅ Reserva criada - ID: ${reservationResult.reservation_id}, Cliente: ${roomClientId}, Nome: ${roomGuestName}, roomIndex: ${roomIndex}`);
           roomIndex++; // Incrementar índice global do quarto
         }
@@ -2944,26 +2855,28 @@ const PublicReservation = () => {
           console.error("[PublicReservation] Taxa de limpeza:", feeError);
         }
       }
-      if (
-        firstReservationId &&
-        submitExtras.parkingOffered &&
-        includeParkingInQuote &&
-        parkingFeeConfig
-      ) {
-        try {
-          await provisionParkingForLodgingReservation({
-            lodgingReservationId: firstReservationId,
-            establishmentId: establishment.id,
-            buildingId: primaryCat?.building_id ?? null,
-            checkinDate: formData.checkinDate,
-            checkoutDate: formData.checkoutDate,
-            clientId: mainClientId,
-            guestName: `${formData.firstName} ${formData.lastName}`,
-            adults: parseInt(formData.adults) || 1,
-            children: parseInt(formData.children) || 0,
-          });
-        } catch (parkingError) {
-          console.error("[PublicReservation] Estacionamento:", parkingError);
+      if (submitExtras.parkingOffered && includeParkingInQuote && parkingFeeConfig && createdLodgingMeta.length > 0) {
+        const spotsToProvision = Math.min(
+          Math.max(1, parkingSpotsCount),
+          createdLodgingMeta.length,
+        );
+        for (let i = 0; i < spotsToProvision; i++) {
+          const meta = createdLodgingMeta[i];
+          try {
+            await provisionParkingForLodgingReservation({
+              lodgingReservationId: meta.reservationId,
+              establishmentId: establishment.id,
+              buildingId: meta.buildingId,
+              checkinDate: formData.checkinDate,
+              checkoutDate: formData.checkoutDate,
+              clientId: meta.clientId,
+              guestName: meta.guestName,
+              adults: meta.adults,
+              children: meta.children,
+            });
+          } catch (parkingError) {
+            console.error(`[PublicReservation] Estacionamento (quarto ${i + 1}):`, parkingError);
+          }
         }
       }
 
@@ -2980,6 +2893,7 @@ const PublicReservation = () => {
       const { data: quote, error: quoteError } = await supabase
         .from("quotes")
         .insert({
+          quote_code: generateQuoteCode(),
           establishment_id: establishment.id,
           client_id: mainClientId,
           guest_name: `${formData.firstName} ${formData.lastName}`,
@@ -3455,72 +3369,17 @@ const PublicReservation = () => {
     }
 
     try {
-      // Verificar rate_sales_status (tarifa fechada) primeiro
-      const { checkPeriodAvailabilityForSale, parseLocalDate } = await import("@/lib/ariAvailabilityUtils");
-      const periodCheck = await checkPeriodAvailabilityForSale(
+      return await getPublicCategoryAvailabilityForPeriod(
         establishment.id,
         categoryId,
-        parseLocalDate(checkinDate),
-        parseLocalDate(checkoutDate),
-        "booking_engine"
+        checkinDate,
+        checkoutDate,
+        requiredRooms,
       );
-      if (!periodCheck.available) {
-        return { available: false, availableRooms: 0, reason: "Período fechado para venda" };
-      }
-
-      // Buscar todos os quartos da categoria que estão disponíveis
-      const { data: rooms, error: roomsError } = await supabase
-        .from("rooms")
-        .select("id")
-        .eq("category_id", categoryId)
-        .eq("establishment_id", establishment.id)
-        .eq("show_in_public", true)
-        .in("status", ["available", "cleaning"])
-        .eq("is_blocked", false);
-
-      if (roomsError) {
-        console.error("Erro ao buscar quartos:", roomsError);
-        return { available: false, availableRooms: 0, reason: "Erro ao verificar disponibilidade" };
-      }
-
-      if (!rooms || rooms.length === 0) {
-        return { available: false, availableRooms: 0, reason: "Nenhum quarto disponível nesta categoria" };
-      }
-
-      // Buscar reservas que conflitam com o período
-      const { data: conflictingReservations, error: reservationsError } = await supabase
-        .from("reservations")
-        .select("room_id")
-        .eq("category_id", categoryId)
-        .eq("establishment_id", establishment.id)
-        .in("status", ["pending", "confirmed", "checkedin", "blocked", "preregistration"])
-        .or(`and(checkin_date.lt.${checkoutDate},checkout_date.gt.${checkinDate})`);
-
-      if (reservationsError) {
-        console.error("Erro ao buscar reservas:", reservationsError);
-        return { available: false, availableRooms: 0, reason: "Erro ao verificar disponibilidade" };
-      }
-
-      // IDs de quartos ocupados
-      const occupiedRoomIds = new Set(
-        conflictingReservations?.map((r) => r.room_id).filter(Boolean) || []
-      );
-
-      // Quartos disponíveis (não ocupados)
-      const availableRooms = rooms.filter((room) => !occupiedRoomIds.has(room.id));
-
-      const availableRoomsCount = availableRooms.length;
-
-      return {
-        available: availableRoomsCount >= requiredRooms,
-        availableRooms: availableRoomsCount,
-        reason: availableRoomsCount < requiredRooms
-          ? `Apenas ${availableRoomsCount} quarto(s) disponível(is) de ${requiredRooms} necessário(s)`
-          : undefined,
-      };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Erro ao verificar disponibilidade:", error);
-      return { available: false, availableRooms: 0, reason: error.message || "Erro ao verificar disponibilidade" };
+      const message = error instanceof Error ? error.message : "Erro ao verificar disponibilidade";
+      return { available: false, availableRooms: 0, reason: message };
     }
   };
 
@@ -3638,6 +3497,7 @@ const PublicReservation = () => {
         cleaning: cleaningFeeConfig,
         parking: parkingFeeConfig,
         includeParking: includeParkingInQuote,
+        parkingSpotCount: includeParkingInQuote ? parkingSpotsCount : 1,
       }),
     [
       finalPrice,
@@ -3646,6 +3506,7 @@ const PublicReservation = () => {
       cleaningFeeConfig,
       parkingFeeConfig,
       includeParkingInQuote,
+      parkingSpotsCount,
     ],
   );
 
@@ -5296,16 +5157,65 @@ const PublicReservation = () => {
                           </Label>
                         </div>
                         {includeParkingInQuote && (
-                          <p className="flex justify-between text-sm pl-6">
-                            <span className={theme.priceLabel}>{PARKING_FEE_NAME}</span>
-                            <span className={`font-medium ${theme.textPrimary}`}>
-                              R${" "}
-                              {quoteExtras.parkingAmount.toLocaleString("pt-BR", {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </span>
-                          </p>
+                          <div className="space-y-2 pl-6">
+                            {totalRooms > 1 && (
+                              <div className="flex items-center justify-between gap-3 text-sm">
+                                <span className={theme.priceLabel}>
+                                  {t("publicReservation.parkingSpotsLabel", "Vagas de estacionamento")}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    disabled={parkingSpotsCount <= 1}
+                                    onClick={() => setParkingSpotsCount((n) => Math.max(1, n - 1))}
+                                  >
+                                    <Minus className="h-4 w-4" />
+                                  </Button>
+                                  <span className={`min-w-[2ch] text-center font-medium ${theme.textPrimary}`}>
+                                    {parkingSpotsCount}
+                                  </span>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    disabled={parkingSpotsCount >= totalRooms}
+                                    onClick={() =>
+                                      setParkingSpotsCount((n) => Math.min(totalRooms, n + 1))
+                                    }
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                            <p className="flex justify-between text-sm">
+                              <span className={theme.priceLabel}>
+                                {PARKING_FEE_NAME}
+                                {totalRooms > 1 && parkingSpotsCount > 1
+                                  ? ` (× ${parkingSpotsCount})`
+                                  : ""}
+                              </span>
+                              <span className={`font-medium ${theme.textPrimary}`}>
+                                R${" "}
+                                {quoteExtras.parkingAmount.toLocaleString("pt-BR", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                            </p>
+                            {totalRooms > 1 && (
+                              <p className="text-xs text-muted-foreground">
+                                {t(
+                                  "publicReservation.parkingSpotsHint",
+                                  "Até uma vaga por quarto de hospedagem reservado.",
+                                )}
+                              </p>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}
