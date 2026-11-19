@@ -32,6 +32,7 @@ export class SchemaReadinessService implements OnModuleInit {
       }
       this.logger.log(`Schema PMS validado (public.companies presente; ${this.publicTableCount} tabelas).`);
       await this.applyIncrementalSiteSettingsColumns();
+      await this.applyPublicReservationServiceFeeToggleColumns();
       await this.applyPlatformCustomDomainsTable();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -55,6 +56,26 @@ export class SchemaReadinessService implements OnModuleInit {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
         `Não foi possível garantir colunas incrementais em site_settings (web_checkin_public_base_url / storage_config): ${message}`,
+      );
+    }
+  }
+
+  /** Colunas em companies para toggles de taxa na página/motor público (Data API valida information_schema). */
+  private async applyPublicReservationServiceFeeToggleColumns(): Promise<void> {
+    if (!this.schemaReady) return;
+    try {
+      await this.prisma.$executeRawUnsafe(`
+        ALTER TABLE public.companies
+        ADD COLUMN IF NOT EXISTS public_reservation_cleaning_fee_enabled boolean NOT NULL DEFAULT false
+      `);
+      await this.prisma.$executeRawUnsafe(`
+        ALTER TABLE public.companies
+        ADD COLUMN IF NOT EXISTS public_reservation_parking_option_enabled boolean NOT NULL DEFAULT false
+      `);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Não foi possível garantir colunas public_reservation_*_enabled em companies: ${message}`,
       );
     }
   }

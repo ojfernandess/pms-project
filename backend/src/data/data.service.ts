@@ -242,6 +242,11 @@ export class DataService {
     this.logger.warn(message);
   }
 
+  /** Após DDL incremental (ex. novas colunas em companies), recarrega information_schema. */
+  invalidateCatalog(): void {
+    this.catalog = null;
+  }
+
   private loadCatalog(): Promise<Catalog> {
     if (!this.catalog) {
       this.catalog = this.readCatalog().catch((error) => {
