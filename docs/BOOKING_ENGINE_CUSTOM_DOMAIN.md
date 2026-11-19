@@ -24,9 +24,12 @@ Variáveis no `.env` do compose (backend + worker):
 Ao salvar domínio, o backend enfileira um job (`booking-engine-infra-sync`) que:
 
 1. Lê todos os hostnames ativos (`companies.booking_engine_custom_domain` + `platform_custom_domains`).
-2. Atualiza `BOOKING_ENGINE_TRAEFIK_RULE` e `BOOKING_ENGINE_PUBLIC_HOSTS` via `compose.saveEnvironment`.
-3. Opcionalmente executa `compose.deploy`.
-4. Atualiza cache CORS em memória (também refrescado a cada 5 min).
+2. **`domain.create`** no Dokploy (host → serviço `frontend`, porta 80, Let's Encrypt) — mesmo fluxo do web check-in.
+3. Atualiza `BOOKING_ENGINE_TRAEFIK_RULE` e `BOOKING_ENGINE_PUBLIC_HOSTS` via `compose.saveEnvironment`.
+4. Opcionalmente executa `compose.deploy` (principalmente após criar domínio novo).
+5. Atualiza cache CORS em memória (também refrescado a cada 5 min).
+
+Variável opcional: `DOKPLOY_FRONTEND_SERVICE_NAME=frontend` (padrão). Desativar só API de domínios: `DOKPLOY_SYNC_DOMAINS=false`.
 
 Job de reconciliação: a cada **15 minutos** (worker + BullMQ).
 

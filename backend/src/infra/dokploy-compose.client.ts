@@ -27,6 +27,10 @@ export class DokployComposeClient {
     return Boolean(this.apiUrl() && this.apiKey() && this.composeId());
   }
 
+  getComposeId(): string | null {
+    return this.composeId();
+  }
+
   isAutoSyncEnabled(): boolean {
     if (this.config.get<string>("BOOKING_ENGINE_INFRA_AUTO_SYNC") === "false") return false;
     return this.isConfigured();

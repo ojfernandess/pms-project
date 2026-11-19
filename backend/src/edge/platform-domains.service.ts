@@ -848,10 +848,10 @@ export class PlatformDomainsService {
         );
       }
       if (!infra?.lastDeployAt) {
-        return (
-          "Certificado ainda não emitido (Traefik DEFAULT CERT). " +
-          "Disparando deploy no Dokploy — veja a aba Deployments do compose em 1–3 minutos (backend + worker com as mesmas vars DOKPLOY_*)."
-        );
+      return (
+        "Certificado ainda não emitido (Traefik DEFAULT CERT / 404 no host). " +
+        "No Dokploy é obrigatório Domains → frontend:80 + HTTPS (o sync automático chama domain.create). Aguarde 1–3 min após o deploy."
+      );
       }
       return (
         "Certificado ainda não emitido (Traefik DEFAULT CERT). " +

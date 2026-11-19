@@ -4,6 +4,7 @@ import { BookingEngineHostsService } from "../edge/booking-engine-hosts.service"
 import { RedisService } from "../redis/redis.service";
 import { BookingEngineCorsCacheService } from "./booking-engine-cors-cache.service";
 import { DokployComposeClient, type DokploySaveResult } from "./dokploy-compose.client";
+import { DokployDomainClient } from "./dokploy-domain.client";
 
 const REDIS_RULE_KEY = "pms:booking_engine:traefik_rule";
 const REDIS_SYNC_AT = "pms:booking_engine:infra_sync:last_at";
@@ -23,6 +24,7 @@ export class BookingEngineInfraSyncService {
 
   constructor(
     private readonly dokploy: DokployComposeClient,
+    private readonly dokployDomains: DokployDomainClient,
     private readonly hosts: BookingEngineHostsService,
     private readonly redis: RedisService,
     private readonly corsCache: BookingEngineCorsCacheService,
@@ -78,6 +80,12 @@ export class BookingEngineInfraSyncService {
       return { ok: true, skipped: true, reason: "rule_unchanged", rule, hosts };
     }
 
+    const domainSync = await this.dokployDomains.ensureBookingEngineDomains(hosts);
+    if (!domainSync.ok && domainSync.error) {
+      await this.redis.client.set(REDIS_SYNC_ERROR, domainSync.error);
+      return { ok: false, error: domainSync.error, rule, hosts };
+    }
+
     let result: DokploySaveResult = { ok: true, skipped: true, reason: "noop" };
     const envAlreadySynced = lastRule === rule;
     if (!envAlreadySynced || !forceRedeploy) {
@@ -89,7 +97,7 @@ export class BookingEngineInfraSyncService {
     const wantDeploy =
       options?.deploy !== false &&
       this.dokploy.shouldDeployAfterSave() &&
-      (forceRedeploy || result.envChanged === true);
+      (forceRedeploy || result.envChanged === true || domainSync.created.length > 0);
 
     if (result.ok && wantDeploy) {
       try {
