@@ -83,8 +83,29 @@ export async function ensureBookingEngineDomain(companyId: string) {
     ok: boolean;
     hostname?: string;
     traefik?: { envBlock: string; rule: string; hosts: string[]; auto_sync_enabled?: boolean };
-    infra_sync?: { enabled: boolean; queued: boolean };
+    infra_sync?: { enabled: boolean; queued: boolean; inline?: boolean };
+    infra_status?: InfraSyncStatus;
   };
+}
+
+export type InfraSyncStatus = {
+  autoSyncEnabled: boolean;
+  dokployConfigured: boolean;
+  lastAt: string | null;
+  lastDeployAt: string | null;
+  lastError: string | null;
+  lastRule: string | null;
+  lastResult: string | null;
+};
+
+export async function fetchBookingEngineInfraStatus(companyId: string) {
+  const qs = new URLSearchParams({ company_id: companyId });
+  const res = await fetch(`${apiBase()}/platform-custom-domains/booking-engine/infra-status?${qs}`, {
+    headers: await authHeaders(),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload?.message || `Status infra falhou (${res.status})`);
+  return payload as InfraSyncStatus;
 }
 
 export async function verifyBookingEngineDomain(companyId: string) {
@@ -100,6 +121,7 @@ export async function verifyBookingEngineDomain(companyId: string) {
     traefik: { envBlock: string; rule: string; hosts: string[]; auto_sync_enabled?: boolean };
     ssl_issue: string | null;
     domain: PlatformDomainRecord | null;
+    infra_status?: InfraSyncStatus;
   };
 }
 

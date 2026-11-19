@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 import { SessionUser } from "../auth/auth.service";
@@ -68,7 +69,13 @@ export class PlatformDomainsController {
   }
 
   @Get("booking-engine/infra-status")
-  bookingEngineInfraStatus(@CurrentUser() user: SessionUser) {
+  bookingEngineInfraStatus(
+    @CurrentUser() user: SessionUser,
+    @Query("company_id") companyId?: string,
+  ) {
+    if (companyId?.trim()) {
+      return this.domains.getBookingEngineInfraStatusForCompany(user, companyId);
+    }
     return this.domains.getBookingEngineInfraStatus(user);
   }
 

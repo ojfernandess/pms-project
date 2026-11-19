@@ -749,13 +749,18 @@ export class PlatformDomainsService {
     if (!domainRow) {
       const checks = await this.runDnsChecks(hostname, generateDomainVerificationToken(), hints);
       const traefik = this.buildBookingEngineTraefikEnvBlock([hostname]);
+      if (checks.dnsPointsOk && !checks.sslOk) {
+        this.runInlineInfraSync("verify");
+      }
+      const infra_status = await this.infraSync.getLastSyncStatus();
       return {
         company_id: companyId,
         hostname,
         checks,
         domain: null,
         traefik,
-        ssl_issue: checks.dnsPointsOk && !checks.sslOk ? this.bookingEngineSslHint() : null,
+        infra_status,
+        ssl_issue: checks.dnsPointsOk && !checks.sslOk ? this.bookingEngineSslHint(infra_status) : null,
       };
     }
 
@@ -779,7 +784,7 @@ export class PlatformDomainsService {
       sslStatus = "active";
     } else if (checks.dnsPointsOk && !checks.sslOk) {
       status = "pending_dns";
-      lastError = this.bookingEngineSslHint();
+      lastError = this.bookingEngineSslHint(await this.infraSync.getLastSyncStatus());
     } else if (!checks.dnsPointsOk) {
       status = "pending_dns";
       lastError = "DNS ainda não aponta para a infraestrutura do PMS (CNAME)";
@@ -803,21 +808,39 @@ export class PlatformDomainsService {
       include: { companies: { select: { id: true, name: true } } },
     });
 
+    if (checks.dnsPointsOk && !checks.sslOk) {
+      this.runInlineInfraSync("verify");
+    }
+    const infra_status = await this.infraSync.getLastSyncStatus();
+
     return {
       company_id: companyId,
       hostname,
       checks,
       domain: this.serializeDomain(updated, hints),
       traefik,
-      ssl_issue: checks.dnsPointsOk && !checks.sslOk ? this.bookingEngineSslHint() : null,
+      infra_status,
+      ssl_issue: checks.dnsPointsOk && !checks.sslOk ? this.bookingEngineSslHint(infra_status) : null,
     };
   }
 
-  private bookingEngineSslHint(): string {
+  private bookingEngineSslHint(infra?: Awaited<ReturnType<BookingEngineInfraSyncService["getLastSyncStatus"]>>): string {
     if (this.infraSync.isAutoSyncEnabled()) {
+      if (infra?.lastError) {
+        return (
+          "Certificado ainda não emitido (Traefik DEFAULT CERT). " +
+          `Falha na API Dokploy: ${infra.lastError}. Confira DOKPLOY_* no backend/worker e a aba Deployments do compose.`
+        );
+      }
+      if (!infra?.lastDeployAt) {
+        return (
+          "Certificado ainda não emitido (Traefik DEFAULT CERT). " +
+          "Disparando deploy no Dokploy — veja a aba Deployments do compose em 1–3 minutos (backend + worker com as mesmas vars DOKPLOY_*)."
+        );
+      }
       return (
         "Certificado ainda não emitido (Traefik DEFAULT CERT). " +
-        "A sincronização automática com o Dokploy foi enfileirada; aguarde alguns minutos após o deploy."
+        "Deploy solicitado; aguarde o Let's Encrypt após o compose terminar."
       );
     }
     return (
@@ -829,10 +852,28 @@ export class PlatformDomainsService {
   private async enqueueInfraSync(reason: string, companyId?: string) {
     const enabled = this.infraSync.isAutoSyncEnabled();
     if (!enabled) {
-      return { enabled: false, queued: false };
+      return { enabled: false, queued: false, inline: false as const };
     }
     const queued = await this.infraQueue.enqueueBookingEngineSync({ reason, companyId });
     return { enabled: true, queued };
+  }
+
+  private runInlineInfraSync(reason: string) {
+    if (!this.infraSync.isAutoSyncEnabled()) return;
+    void this.infraSync
+      .syncBookingEngineTraefik({ reason, forceRedeploy: true })
+      .catch((error) => {
+        this.logger.warn(
+          `Sync inline Dokploy falhou: ${error instanceof Error ? error.message : error}`,
+        );
+      });
+  }
+
+  async getBookingEngineInfraStatusForCompany(user: SessionUser, companyId: string) {
+    if (!canAccessCompany(user.isSuperAdmin, user.companyIds ?? [], companyId)) {
+      throw new ForbiddenException("Sem permissão para esta empresa");
+    }
+    return this.infraSync.getLastSyncStatus();
   }
 
   async syncBookingEngineInfra(user: SessionUser) {
@@ -865,6 +906,8 @@ export class PlatformDomainsService {
       await this.listBookingEngineHostnames(),
     );
     const infra_sync = await this.enqueueInfraSync("ensure", companyId);
-    return { ok: true, hostname, traefik, infra_sync };
+    this.runInlineInfraSync("ensure");
+    const infra_status = await this.infraSync.getLastSyncStatus();
+    return { ok: true, hostname, traefik, infra_sync: { ...infra_sync, inline: true }, infra_status };
   }
 }

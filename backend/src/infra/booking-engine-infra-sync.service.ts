@@ -8,6 +8,8 @@ import { DokployComposeClient, type DokploySaveResult } from "./dokploy-compose.
 const REDIS_RULE_KEY = "pms:booking_engine:traefik_rule";
 const REDIS_SYNC_AT = "pms:booking_engine:infra_sync:last_at";
 const REDIS_SYNC_ERROR = "pms:booking_engine:infra_sync:last_error";
+const REDIS_SYNC_RESULT = "pms:booking_engine:infra_sync:last_result";
+const REDIS_DEPLOY_AT = "pms:booking_engine:infra_sync:last_deploy_at";
 
 export type BookingEngineInfraSyncResult = DokploySaveResult & {
   rule?: string;
@@ -42,7 +44,17 @@ export class BookingEngineInfraSyncService {
   async syncBookingEngineTraefik(options?: {
     deploy?: boolean;
     reason?: string;
+    forceRedeploy?: boolean;
   }): Promise<BookingEngineInfraSyncResult> {
+    const reason = options?.reason ?? "manual";
+    const scheduled = reason === "schedule";
+    const forceRedeploy =
+      options?.forceRedeploy === true ||
+      reason === "ensure" ||
+      reason === "verify" ||
+      reason === "super_admin" ||
+      reason === "clear";
+
     const { rule, hosts, updates } = await this.buildDesiredTraefikEnv();
     await this.corsCache.refresh();
 
@@ -51,47 +63,86 @@ export class BookingEngineInfraSyncService {
     }
 
     const lastRule = await this.redis.client.get(REDIS_RULE_KEY);
-    if (lastRule === rule) {
-      await this.redis.client.set(REDIS_SYNC_AT, new Date().toISOString());
-      await this.redis.client.del(REDIS_SYNC_ERROR);
+    if (lastRule === rule && scheduled && !forceRedeploy) {
+      await this.touchSyncOk(rule, "rule_unchanged");
       return { ok: true, skipped: true, reason: "rule_unchanged", rule, hosts };
     }
 
-    const result = await this.dokploy.applyEnvironmentVars(updates, { deploy: options?.deploy });
-    if (result.ok && !result.skipped) {
+    let result: DokploySaveResult = { ok: true, skipped: true, reason: "noop" };
+    const envAlreadySynced = lastRule === rule;
+    if (!envAlreadySynced || !forceRedeploy) {
+      result = await this.dokploy.applyEnvironmentVars(updates, { deploy: false });
+    } else {
+      result = { ok: true, skipped: true, reason: "env_unchanged", envChanged: false };
+    }
+
+    const wantDeploy =
+      options?.deploy !== false &&
+      this.dokploy.shouldDeployAfterSave() &&
+      (forceRedeploy || result.envChanged === true);
+
+    if (result.ok && wantDeploy) {
+      try {
+        await this.dokploy.deploy();
+        result = { ...result, ok: true, deployed: true };
+        await this.redis.client.set(REDIS_DEPLOY_AT, new Date().toISOString());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        result = { ok: false, error: `compose.deploy: ${message}`, envChanged: result.envChanged };
+      }
+    }
+
+    if (result.ok) {
       await this.redis.client.set(REDIS_RULE_KEY, rule);
-      await this.redis.client.set(REDIS_SYNC_AT, new Date().toISOString());
-      await this.redis.client.del(REDIS_SYNC_ERROR);
+      await this.touchSyncOk(rule, result.reason ?? (result.deployed ? "deployed" : "synced"));
       this.logger.log(
-        `Traefik motor sincronizado (${hosts.length} host(s)) reason=${options?.reason ?? "manual"} deploy=${result.deployed ?? false}`,
+        `Traefik motor sync reason=${reason} hosts=${hosts.length} envChanged=${result.envChanged ?? false} deployed=${result.deployed ?? false}`,
       );
-    } else if (result.ok && result.reason === "env_unchanged") {
-      await this.redis.client.set(REDIS_RULE_KEY, rule);
-      await this.redis.client.set(REDIS_SYNC_AT, new Date().toISOString());
-      await this.redis.client.del(REDIS_SYNC_ERROR);
-    } else if (!result.ok && result.error) {
+    } else if (result.error) {
       await this.redis.client.set(REDIS_SYNC_ERROR, result.error);
+      await this.redis.client.set(
+        REDIS_SYNC_RESULT,
+        JSON.stringify({ at: new Date().toISOString(), reason, error: result.error }),
+      );
     }
 
     return { ...result, rule, hosts };
   }
 
+  private async touchSyncOk(rule: string, resultLabel: string) {
+    await this.redis.client.set(REDIS_RULE_KEY, rule);
+    await this.redis.client.set(REDIS_SYNC_AT, new Date().toISOString());
+    await this.redis.client.del(REDIS_SYNC_ERROR);
+    await this.redis.client.set(
+      REDIS_SYNC_RESULT,
+      JSON.stringify({ at: new Date().toISOString(), result: resultLabel }),
+    );
+  }
+
   async getLastSyncStatus(): Promise<{
     autoSyncEnabled: boolean;
+    dokployConfigured: boolean;
     lastAt: string | null;
+    lastDeployAt: string | null;
     lastError: string | null;
     lastRule: string | null;
+    lastResult: string | null;
   }> {
-    const [lastAt, lastError, lastRule] = await Promise.all([
+    const [lastAt, lastDeployAt, lastError, lastRule, lastResult] = await Promise.all([
       this.redis.client.get(REDIS_SYNC_AT),
+      this.redis.client.get(REDIS_DEPLOY_AT),
       this.redis.client.get(REDIS_SYNC_ERROR),
       this.redis.client.get(REDIS_RULE_KEY),
+      this.redis.client.get(REDIS_SYNC_RESULT),
     ]);
     return {
       autoSyncEnabled: this.isAutoSyncEnabled(),
+      dokployConfigured: this.dokploy.isConfigured(),
       lastAt,
+      lastDeployAt,
       lastError,
       lastRule,
+      lastResult,
     };
   }
 }

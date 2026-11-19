@@ -2,11 +2,14 @@ import { Button } from "@/components/ui/button";
 import { Copy } from "lucide-react";
 import { toast } from "sonner";
 
+import type { InfraSyncStatus } from "@/lib/platformDomainsApi";
+
 type Props = {
   envBlock?: string | null;
   sslIssue?: string | null;
   autoSyncEnabled?: boolean;
   infraSyncQueued?: boolean;
+  infraStatus?: InfraSyncStatus | null;
 };
 
 export function BookingEngineDeployChecklist({
@@ -14,6 +17,7 @@ export function BookingEngineDeployChecklist({
   sslIssue,
   autoSyncEnabled,
   infraSyncQueued,
+  infraStatus,
 }: Props) {
   if (autoSyncEnabled) {
     return (
@@ -30,6 +34,24 @@ export function BookingEngineDeployChecklist({
             minutos).
           </p>
         )}
+        {infraStatus?.lastDeployAt ? (
+          <p className="text-[10px] text-slate-600">
+            Último deploy solicitado: {new Date(infraStatus.lastDeployAt).toLocaleString("pt-BR")}
+          </p>
+        ) : infraStatus?.lastAt ? (
+          <p className="text-[10px] text-slate-600">
+            Última sync: {new Date(infraStatus.lastAt).toLocaleString("pt-BR")}
+            {!infraStatus.lastDeployAt ? " (ainda sem registro de deploy no Dokploy)" : null}
+          </p>
+        ) : (
+          <p className="text-[10px] text-amber-800">
+            Ainda não há registro de sync no servidor — confira se o serviço <strong>worker</strong> está rodando e se
+            DOKPLOY_* está no backend e no worker.
+          </p>
+        )}
+        {infraStatus?.lastError ? (
+          <p className="text-[10px] font-medium text-red-800">Erro Dokploy: {infraStatus.lastError}</p>
+        ) : null}
       </div>
     );
   }

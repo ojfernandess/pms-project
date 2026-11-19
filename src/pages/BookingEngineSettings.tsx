@@ -56,6 +56,9 @@ const BookingEngineSettings = () => {
   const [sslIssueMessage, setSslIssueMessage] = useState<string | null>(null);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
   const [infraSyncQueued, setInfraSyncQueued] = useState(false);
+  const [infraStatus, setInfraStatus] = useState<
+    import("@/lib/platformDomainsApi").InfraSyncStatus | null
+  >(null);
   const [isVerifyingDomain, setIsVerifyingDomain] = useState(false);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [localSlug, setLocalSlug] = useState<string>("");
@@ -166,6 +169,7 @@ const BookingEngineSettings = () => {
       const result = await verifyBookingEngineDomain(company.id);
       setTraefikEnvBlock(result.traefik?.envBlock ?? null);
       setAutoSyncEnabled(Boolean(result.traefik?.auto_sync_enabled));
+      setInfraStatus(result.infra_status ?? null);
       setSslIssueMessage(result.ssl_issue);
 
       if (result.checks.dnsPointsOk) {
@@ -2019,9 +2023,10 @@ const BookingEngineSettings = () => {
                                           }
                                           setAutoSyncEnabled(Boolean(ensured.traefik?.auto_sync_enabled));
                                           setInfraSyncQueued(Boolean(ensured.infra_sync?.queued));
-                                          if (ensured.infra_sync?.queued) {
+                                          if (ensured.infra_status) setInfraStatus(ensured.infra_status);
+                                          if (ensured.infra_sync?.queued || ensured.infra_sync?.inline) {
                                             toast.message(
-                                              "Atualização de HTTPS/CORS enfileirada — aguarde alguns minutos.",
+                                              "Solicitando atualização HTTPS no Dokploy — veja Deployments do compose.",
                                             );
                                           }
                                         } catch {
@@ -2152,6 +2157,7 @@ const BookingEngineSettings = () => {
                             sslIssue={sslIssueMessage}
                             autoSyncEnabled={autoSyncEnabled}
                             infraSyncQueued={infraSyncQueued}
+                            infraStatus={infraStatus}
                           />
                         )}
                       </div>

@@ -30,6 +30,16 @@ Ao salvar domínio, o backend enfileira um job (`booking-engine-infra-sync`) que
 
 Job de reconciliação: a cada **15 minutos** (worker + BullMQ).
 
+Ao salvar domínio, o **backend** também dispara sync **inline** (não depende só do worker). Mesmo assim, o container **worker** deve estar ativo para jobs agendados.
+
+### Não aparece deploy no Dokploy?
+
+1. **DOKPLOY_*** precisa estar no **backend** e no **worker** (não só no frontend).
+2. Abra o compose → **Deployments** (não só Environment).
+3. Na aba Domínio, após verificar, veja se surge **Erro Dokploy** (API key, composeId ou URL errados).
+4. Se `BOOKING_ENGINE_TRAEFIK_RULE` já estava igual no Environment, versões antigas **não** chamavam `compose.deploy` — atualize o backend e salve o domínio de novo.
+5. Confira logs: `worker` e `backend` (mensagens `Traefik motor sync` / `compose.deploy`).
+
 Endpoints (Super Admin, JWT):
 
 - `GET /platform-custom-domains/booking-engine/infra-status`
