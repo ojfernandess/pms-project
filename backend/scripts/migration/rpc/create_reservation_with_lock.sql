@@ -22,17 +22,12 @@ DECLARE
   v_room_is_blocked BOOLEAN;
   v_room_status TEXT;
   v_conflict_count INTEGER;
-  v_client_id UUID;
 BEGIN
   IF p_checkin_date >= p_checkout_date THEN
     RETURN jsonb_build_object(
       'success', false,
       'error', 'Data de check-in deve ser anterior à data de check-out'
     );
-  END IF;
-
-  IF p_reservation_data->>'client_id' IS NOT NULL THEN
-    v_client_id := (p_reservation_data->>'client_id')::UUID;
   END IF;
 
   IF p_category_id IS NOT NULL THEN
@@ -81,14 +76,6 @@ BEGIN
         AND establishment_id = p_establishment_id
         AND status IN ('pending', 'confirmed', 'checkedin', 'blocked', 'preregistration')
         AND (checkin_date < p_checkout_date AND checkout_date > p_checkin_date)
-        AND (
-          v_client_id IS NULL
-          OR client_id IS NULL
-          OR client_id != v_client_id
-          OR checkin_date != p_checkin_date
-          OR checkout_date != p_checkout_date
-          OR created_at <= NOW() - INTERVAL '60 seconds'
-        )
       FOR UPDATE NOWAIT;
 
       SELECT COUNT(*) INTO v_conflict_count
@@ -96,15 +83,7 @@ BEGIN
       WHERE room_id = v_room_id
         AND establishment_id = p_establishment_id
         AND status IN ('pending', 'confirmed', 'checkedin', 'blocked', 'preregistration')
-        AND (checkin_date < p_checkout_date AND checkout_date > p_checkin_date)
-        AND (
-          v_client_id IS NULL
-          OR client_id IS NULL
-          OR client_id != v_client_id
-          OR checkin_date != p_checkin_date
-          OR checkout_date != p_checkout_date
-          OR created_at <= NOW() - INTERVAL '60 seconds'
-        );
+        AND (checkin_date < p_checkout_date AND checkout_date > p_checkin_date);
 
       IF v_conflict_count > 0 THEN
         RETURN jsonb_build_object(
@@ -136,14 +115,6 @@ BEGIN
           AND res.establishment_id = p_establishment_id
           AND res.status IN ('pending', 'confirmed', 'checkedin', 'blocked', 'preregistration')
           AND (res.checkin_date < p_checkout_date AND res.checkout_date > p_checkin_date)
-          AND (
-            v_client_id IS NULL
-            OR res.client_id IS NULL
-            OR res.client_id != v_client_id
-            OR res.checkin_date != p_checkin_date
-            OR res.checkout_date != p_checkout_date
-            OR res.created_at <= NOW() - INTERVAL '60 seconds'
-          )
       );
 
     IF v_available_rooms = 0 THEN
@@ -166,15 +137,8 @@ BEGIN
           AND res.establishment_id = p_establishment_id
           AND res.status IN ('pending', 'confirmed', 'checkedin', 'blocked', 'preregistration')
           AND (res.checkin_date < p_checkout_date AND res.checkout_date > p_checkin_date)
-          AND (
-            v_client_id IS NULL
-            OR res.client_id IS NULL
-            OR res.client_id != v_client_id
-            OR res.checkin_date != p_checkin_date
-            OR res.checkout_date != p_checkout_date
-            OR res.created_at <= NOW() - INTERVAL '60 seconds'
-          )
       )
+    ORDER BY r.room_number NULLS LAST, r.name NULLS LAST, r.id
     LIMIT 1;
   END IF;
 

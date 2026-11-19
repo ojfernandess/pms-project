@@ -2733,7 +2733,6 @@ const PublicReservation = () => {
 
         // Criar uma reserva para cada quarto
         for (let i = 0; i < cat.rooms; i++) {
-          const roomId = availableRoomIds[i];
           const category = categories.find((c) => c.id === cat.categoryId);
           
           // Último quarto recebe o resto dos adultos e crianças
@@ -2776,7 +2775,6 @@ const PublicReservation = () => {
           // Preparar dados da reserva
           const reservationData = {
             establishment_id: establishment.id,
-            room_id: roomId,
             category_id: cat.categoryId,
             client_id: roomClientId,
             guest_name: roomGuestName,
@@ -2811,7 +2809,7 @@ const PublicReservation = () => {
               p_checkin_date: formData.checkinDate,
               p_checkout_date: formData.checkoutDate,
               p_establishment_id: establishment.id,
-              p_room_id: roomId,
+              p_room_id: null,
               p_category_id: cat.categoryId,
             });
           } catch (error) {

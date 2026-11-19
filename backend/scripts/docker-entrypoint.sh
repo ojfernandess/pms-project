@@ -77,6 +77,11 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/ensure_quote_code_tri
     || echo "WARN: ensure_quote_code_trigger.sql falhou" >&2
 fi
 
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/fix_reservation_overlap_same_client.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/fix_reservation_overlap_same_client.sql \
+    || echo "WARN: fix_reservation_overlap_same_client.sql falhou" >&2
+fi
+
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/web-checkin-anon-rls.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=0 -f ./scripts/migration/web-checkin-anon-rls.sql \
     || echo "WARN: web-checkin-anon-rls.sql falhou" >&2

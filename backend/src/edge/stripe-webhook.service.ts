@@ -7,6 +7,7 @@ import {
   email_event_type,
   email_provider,
   email_status,
+  payment_status,
   quote_status,
   reservation_status,
 } from "@prisma/client";
@@ -406,6 +407,7 @@ export class StripeWebhookService {
       if (payment.reservation_id) return;
       if (reservationIds.length > 0) {
         await this.applyPaymentToReservations(reservationIds, paymentIntent, quote.establishment_id);
+        await this.settleQuoteLodgingReservationsAfterPayment(reservationIds);
       }
       if (quote.reservation_id) {
         await this.prisma.stripe_payments.update({
@@ -418,6 +420,7 @@ export class StripeWebhookService {
 
     if (reservationIds.length > 0) {
       await this.applyPaymentToReservations(reservationIds, paymentIntent, quote.establishment_id);
+      await this.settleQuoteLodgingReservationsAfterPayment(reservationIds);
       await this.prisma.quotes.update({
         where: { id: quoteId },
         data: {
@@ -712,17 +715,27 @@ export class StripeWebhookService {
         const currentPaidAmount = Number(reservation.paid_amount || 0);
         const newPaidAmount = currentPaidAmount + amountPerReservation;
         const totalAmountReservation = Number(reservation.total_amount || 0);
-        const reservationUpdate: { paid_amount: number; status?: reservation_status } = { paid_amount: newPaidAmount };
+        const reservationUpdate: {
+          paid_amount: number;
+          status?: reservation_status;
+          payment_status?: payment_status;
+        } = { paid_amount: newPaidAmount };
         if (newPaidAmount >= totalAmountReservation && totalAmountReservation > 0) {
           reservationUpdate.status = reservation_status.confirmed;
-        } else if (newPaidAmount > 0 && reservation.status !== reservation_status.confirmed) {
-          reservationUpdate.status = reservation_status.pending;
+          reservationUpdate.payment_status = payment_status.paid;
+        } else if (newPaidAmount > 0) {
+          reservationUpdate.payment_status = payment_status.partial;
+          if (reservation.status !== reservation_status.confirmed) {
+            reservationUpdate.status = reservation_status.pending;
+          }
         }
         await this.prisma.reservations.update({ where: { id: reservationId }, data: reservationUpdate });
       } catch (error) {
         console.error(`[Webhook] Erro ao processar reserva ${reservationId}:`, this.errorText(error));
       }
     }
+
+    await this.settleQuoteLodgingReservationsAfterPayment(reservationIds);
 
     if (reservationIds.length > 1) {
       try {
@@ -769,6 +782,55 @@ export class StripeWebhookService {
           console.error("[Webhook] Erro ao enviar email de fallback:", this.errorText(fallbackError));
         }
       }
+    }
+  }
+
+  private async settleQuoteLodgingReservationsAfterPayment(reservationIds: string[]): Promise<void> {
+    if (reservationIds.length === 0) return;
+
+    for (const lodgingId of reservationIds) {
+      const reservation = await this.prisma.reservations.findUnique({
+        where: { id: lodgingId },
+        select: { total_amount: true, paid_amount: true, status: true },
+      });
+      if (!reservation) continue;
+
+      const feeRows = await this.prisma.reservation_service_fees.findMany({
+        where: { reservation_id: lodgingId },
+        select: { amount: true, quantity: true },
+      });
+      const feeTotal = feeRows.reduce(
+        (sum, f) => sum + Number(f.amount || 0) * Number(f.quantity || 1),
+        0,
+      );
+      const base = Number(reservation.total_amount || 0);
+      const currentPaid = Number(reservation.paid_amount || 0);
+      const targetPaid = base + feeTotal;
+      const newPaid = Math.max(currentPaid, targetPaid);
+      const lodgingFullyPaid = base > 0 && newPaid + 0.02 >= targetPaid;
+
+      const data: {
+        paid_amount: number;
+        payment_status: payment_status;
+        status?: reservation_status;
+      } = {
+        paid_amount: Math.round(newPaid * 100) / 100,
+        payment_status: lodgingFullyPaid
+          ? payment_status.paid
+          : newPaid > 0.01
+            ? payment_status.partial
+            : payment_status.pending,
+      };
+      if (lodgingFullyPaid && reservation.status !== reservation_status.checkedin) {
+        data.status = reservation_status.confirmed;
+      }
+      await this.prisma.reservations.update({ where: { id: lodgingId }, data });
+
+      if (!lodgingFullyPaid) continue;
+      await this.prisma.reservations.updateMany({
+        where: { lodging_reservation_id: lodgingId },
+        data: { payment_status: payment_status.paid, status: reservation_status.confirmed },
+      });
     }
   }
 

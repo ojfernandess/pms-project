@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { buildWebCheckinLocatorUrl } from "../_shared/webCheckinPublicUrl.ts";
+import { settleQuoteLodgingReservationsAfterPayment } from "../_shared/quoteLodgingPaymentSettlement.ts";
 
 /**
  * Cria ou busca o portador de pagamento Stripe
@@ -288,8 +289,12 @@ async function applyPaymentToReservations(
       // Atualizar status se necessário
       if (newPaidAmount >= totalAmountReservation && totalAmountReservation > 0) {
         reservationUpdate.status = "confirmed";
-      } else if (newPaidAmount > 0 && reservation.status !== "confirmed") {
-        reservationUpdate.status = "pending";
+        reservationUpdate.payment_status = "paid";
+      } else if (newPaidAmount > 0) {
+        reservationUpdate.payment_status = "partial";
+        if (reservation.status !== "confirmed") {
+          reservationUpdate.status = "pending";
+        }
       }
 
       // Atualizar reserva
@@ -307,6 +312,8 @@ async function applyPaymentToReservations(
       console.error(`[Webhook] ❌ Erro ao processar reserva ${reservationId}:`, error);
     }
   }
+
+  await settleQuoteLodgingReservationsAfterPayment(supabaseClient, reservationIds);
 
   // Verificar se todas as reservas têm o mesmo cliente
   // Se tiverem o mesmo cliente: enviar email de "Múltiplas Reservas Criadas"
