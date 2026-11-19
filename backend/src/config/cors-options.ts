@@ -17,13 +17,19 @@ const ALLOWED_HEADERS = [
   "X-PMS-Visitor-Host",
 ];
 
-export function buildCorsOptions(config: ConfigService): CorsOptions {
+export type CorsOriginResolver = (origin: string) => boolean | Promise<boolean>;
+
+export function buildCorsOptions(
+  config: ConfigService,
+  extraOriginAllowed?: CorsOriginResolver,
+): CorsOptions {
   const explicit = parseOriginList(config.get<string>("CORS_ORIGINS"));
   const publicApp = normalizeOrigin(config.get<string>("PUBLIC_APP_URL"));
   const siteUrl = normalizeOrigin(config.get<string>("SITE_URL"));
   const webCheckin = normalizeOrigin(config.get<string>("WEB_CHECKIN_PUBLIC_URL"));
   const webCheckinHosts = originsFromHostnames(config.get<string>("WEB_CHECKIN_PUBLIC_HOST"));
   const extraWebCheckinHosts = originsFromHostnames(config.get<string>("WEB_CHECKIN_PUBLIC_HOSTS"));
+  const bookingEngineHosts = originsFromHostnames(config.get<string>("BOOKING_ENGINE_PUBLIC_HOSTS"));
   const apiPublic = normalizeOrigin(config.get<string>("VITE_PMS_API_URL"));
   const allowlist = [
     ...new Set(
@@ -35,6 +41,7 @@ export function buildCorsOptions(config: ConfigService): CorsOptions {
         apiPublic,
         ...webCheckinHosts,
         ...extraWebCheckinHosts,
+        ...bookingEngineHosts,
       ].filter(Boolean),
     ),
   ];
@@ -59,6 +66,15 @@ export function buildCorsOptions(config: ConfigService): CorsOptions {
       }
       if (allowlist.includes(origin)) {
         callback(null, origin);
+        return;
+      }
+      if (extraOriginAllowed) {
+        Promise.resolve(extraOriginAllowed(origin))
+          .then((allowed) => {
+            if (allowed) callback(null, origin);
+            else callback(new Error(`CORS blocked for origin: ${origin}`), false);
+          })
+          .catch(() => callback(new Error(`CORS blocked for origin: ${origin}`), false));
         return;
       }
       callback(new Error(`CORS blocked for origin: ${origin}`), false);

@@ -5,9 +5,35 @@ import { toast } from "sonner";
 type Props = {
   envBlock?: string | null;
   sslIssue?: string | null;
+  autoSyncEnabled?: boolean;
+  infraSyncQueued?: boolean;
 };
 
-export function BookingEngineDeployChecklist({ envBlock, sslIssue }: Props) {
+export function BookingEngineDeployChecklist({
+  envBlock,
+  sslIssue,
+  autoSyncEnabled,
+  infraSyncQueued,
+}: Props) {
+  if (autoSyncEnabled) {
+    return (
+      <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
+        <p className="text-xs font-medium text-emerald-900">
+          Sincronização automática com o Dokploy ativa
+          {infraSyncQueued ? " — atualização enfileirada após salvar o domínio." : "."}
+        </p>
+        {sslIssue ? (
+          <p className="text-xs leading-snug text-amber-900">{sslIssue}</p>
+        ) : (
+          <p className="text-[11px] text-emerald-800">
+            Traefik (HTTPS) e CORS da API são ajustados a partir do banco. Aguarde o deploy e o Let&apos;s Encrypt (alguns
+            minutos).
+          </p>
+        )}
+      </div>
+    );
+  }
+
   if (!envBlock?.trim()) return null;
 
   const copy = async () => {

@@ -82,7 +82,8 @@ export async function ensureBookingEngineDomain(companyId: string) {
   return payload as {
     ok: boolean;
     hostname?: string;
-    traefik?: { envBlock: string; rule: string; hosts: string[] };
+    traefik?: { envBlock: string; rule: string; hosts: string[]; auto_sync_enabled?: boolean };
+    infra_sync?: { enabled: boolean; queued: boolean };
   };
 }
 
@@ -96,7 +97,7 @@ export async function verifyBookingEngineDomain(companyId: string) {
   if (!res.ok) throw new Error(payload?.message || `Verificação falhou (${res.status})`);
   return payload as {
     checks: { txtOk: boolean; dnsPointsOk: boolean; sslOk: boolean; details: string[] };
-    traefik: { envBlock: string; rule: string; hosts: string[] };
+    traefik: { envBlock: string; rule: string; hosts: string[]; auto_sync_enabled?: boolean };
     ssl_issue: string | null;
     domain: PlatformDomainRecord | null;
   };

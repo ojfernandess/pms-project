@@ -3,6 +3,8 @@ import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { Job, Queue } from "bullmq";
 import { CheckoutRemindersService } from "../edge/checkout-reminders.service";
 import { DailyDigestService } from "../edge/daily-digest.service";
+import { BookingEngineInfraSyncService } from "../infra/booking-engine-infra-sync.service";
+import { BookingEngineCorsCacheService } from "../infra/booking-engine-cors-cache.service";
 import { PMS_QUEUE } from "./queue.constants";
 
 @Injectable()
@@ -14,6 +16,8 @@ export class PmsScheduleProcessor extends WorkerHost implements OnModuleInit {
     @InjectQueue(PMS_QUEUE) private readonly queue: Queue,
     private readonly digest: DailyDigestService,
     private readonly checkout: CheckoutRemindersService,
+    private readonly bookingInfra: BookingEngineInfraSyncService,
+    private readonly bookingCors: BookingEngineCorsCacheService,
   ) {
     super();
   }
@@ -21,11 +25,29 @@ export class PmsScheduleProcessor extends WorkerHost implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     await this.queue.upsertJobScheduler("daily-digest", { pattern: "0 * * * *" }, { name: "daily-digest", data: {} });
     await this.queue.upsertJobScheduler("checkout-reminders", { pattern: "0 12 * * *" }, { name: "checkout-reminders", data: {} });
+    await this.queue.upsertJobScheduler(
+      "booking-engine-infra-sync",
+      { pattern: "*/15 * * * *" },
+      { name: "booking-engine-infra-sync", data: { reason: "schedule" } },
+    );
+    await this.queue.upsertJobScheduler(
+      "booking-engine-cors-refresh",
+      { pattern: "*/5 * * * *" },
+      { name: "booking-engine-cors-refresh", data: {} },
+    );
   }
 
   async process(job: Job): Promise<unknown> {
     if (job.name === "daily-digest") return this.digest.schedule();
     if (job.name === "checkout-reminders") return this.checkout.run({ days: 1, hints: {} });
+    if (job.name === "booking-engine-infra-sync") {
+      const reason = typeof job.data?.reason === "string" ? job.data.reason : "job";
+      return this.bookingInfra.syncBookingEngineTraefik({ reason });
+    }
+    if (job.name === "booking-engine-cors-refresh") {
+      await this.bookingCors.refresh();
+      return { ok: true };
+    }
     this.logger.warn(`Job ignorado: ${job.name}`);
     return { ok: false };
   }

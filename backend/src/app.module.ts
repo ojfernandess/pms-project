@@ -11,6 +11,7 @@ import { RealtimeModule } from "./realtime/realtime.module";
 import { SocketRedisAdapterShutdown } from "./realtime/redis-adapter.shutdown";
 import { RedisModule } from "./redis/redis.module";
 import { validateEnv } from "./config/env.validation";
+import { InfraModule } from "./infra/infra.module";
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { validateEnv } from "./config/env.validation";
     QueuesModule,
     RealtimeModule,
     HealthModule,
+    InfraModule,
   ],
   providers: [SocketRedisAdapterShutdown],
 })

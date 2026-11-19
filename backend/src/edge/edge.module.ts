@@ -32,9 +32,11 @@ import { HealthCheckService } from "./health-check.service";
 import { RobotsService } from "./robots.service";
 import { SiteSettingsService } from "./site-settings.service";
 import { PlatformDomainsService } from "./platform-domains.service";
+import { InfraModule } from "../infra/infra.module";
+import { QueuesModule } from "../queues/queues.module";
 
 @Module({
-  imports: [AuthModule, DataModule],
+  imports: [AuthModule, DataModule, InfraModule, QueuesModule],
   controllers: [FunctionsCompatController],
   providers: [
     HealthCheckService,

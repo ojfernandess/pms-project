@@ -6,6 +6,7 @@ import type { Request, Response, NextFunction } from "express";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { buildCorsOptions } from "./config/cors-options";
+import { BookingEngineCorsCacheService } from "./infra/booking-engine-cors-cache.service";
 import { registerSocketRedisAdapter } from "./realtime/redis-adapter.shutdown";
 import { RedisIoAdapter } from "./realtime/redis-io.adapter";
 import { hydrateStorageEnvFromJson, logStorageEnvBootHint } from "./data/storage-env";
@@ -50,7 +51,8 @@ async function bootstrap() {
     }),
   );
   app.enableShutdownHooks();
-  app.enableCors(buildCorsOptions(config));
+  const bookingCors = app.get(BookingEngineCorsCacheService);
+  app.enableCors(buildCorsOptions(config, (origin) => bookingCors.isAllowedOrigin(origin)));
 
   const redisUrl = config.getOrThrow<string>("REDIS_URL");
   const redisAdapter = new RedisIoAdapter(app);

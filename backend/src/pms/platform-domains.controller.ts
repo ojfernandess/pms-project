@@ -67,6 +67,16 @@ export class PlatformDomainsController {
     return this.domains.verifyBookingEngineForCompany(user, body.company_id);
   }
 
+  @Get("booking-engine/infra-status")
+  bookingEngineInfraStatus(@CurrentUser() user: SessionUser) {
+    return this.domains.getBookingEngineInfraStatus(user);
+  }
+
+  @Post("booking-engine/sync-infra")
+  syncBookingEngineInfra(@CurrentUser() user: SessionUser) {
+    return this.domains.syncBookingEngineInfra(user);
+  }
+
   @Post(":id/verify")
   verify(@CurrentUser() user: SessionUser, @Param("id") id: string) {
     return this.domains.verify(user, id);

@@ -21,6 +21,10 @@ import { PrismaService } from "../prisma/prisma.service";
 import { canAccessCompany } from "../auth/access-scope";
 import { SITE_SETTINGS_ID } from "./robots.service";
 import type { HostnameResolution, PlatformDomainStatus } from "./platform-domains.types";
+import { buildBookingEngineTraefikHostRule } from "../lib/booking-engine-traefik.util";
+import { BookingEngineHostsService } from "./booking-engine-hosts.service";
+import { BookingEngineInfraSyncService } from "../infra/booking-engine-infra-sync.service";
+import { InfraSyncQueueService } from "../queues/infra-sync-queue.service";
 
 type DomainRow = {
   id: string;
@@ -50,6 +54,9 @@ export class PlatformDomainsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly bookingHosts: BookingEngineHostsService,
+    private readonly infraSync: BookingEngineInfraSyncService,
+    private readonly infraQueue: InfraSyncQueueService,
   ) {}
 
   private async assertTableReady(): Promise<boolean> {
@@ -648,49 +655,31 @@ export class PlatformDomainsService {
     return hostIps.length > 0 && targets.size === 0;
   }
 
-  private buildTraefikHostRule(hosts: string[]): string {
-    const unique = [...new Set(hosts.map((h) => normalizeHostname(h)).filter(Boolean))];
-    if (unique.length === 0) return "Host(`booking-engine-route-disabled.invalid`)";
-    return unique.map((h) => `Host(\`${h}\`)`).join(" || ");
-  }
-
   async listBookingEngineHostnames(): Promise<string[]> {
-    const hosts = new Set<string>();
-    const companies = await this.prisma.companies.findMany({
-      where: { booking_engine_enabled: true, booking_engine_custom_domain: { not: null } },
-      select: { booking_engine_custom_domain: true },
-    });
-    for (const row of companies) {
-      const h = normalizeHostname(row.booking_engine_custom_domain ?? "");
-      if (h) hosts.add(h);
-    }
-    if (await this.assertTableReady()) {
-      const rows = await this.prisma.platform_custom_domains.findMany({
-        where: { service_type: "booking_engine", status: { not: "suspended" } },
-        select: { hostname: true },
-      });
-      for (const row of rows) {
-        const h = normalizeHostname(row.hostname);
-        if (h) hosts.add(h);
-      }
-    }
-    return [...hosts];
+    return this.bookingHosts.listHostnames();
   }
 
   buildBookingEngineTraefikEnvBlock(hosts?: string[]) {
     const list = hosts?.length ? hosts : [];
-    const rule = this.buildTraefikHostRule(list);
-    const lines = [
-      "# Cole no Environment do Docker Compose (Dokploy) e redeploy (pelo menos o frontend)",
-      `BOOKING_ENGINE_TRAEFIK_RULE=${rule}`,
-    ];
+    const rule = buildBookingEngineTraefikHostRule(list);
+    const autoSync = this.infraSync.isAutoSyncEnabled();
+    const lines = autoSync
+      ? [
+          "# Sincronização automática ativa (Dokploy API) — Traefik/CORS atualizam ao salvar domínio.",
+          `BOOKING_ENGINE_TRAEFIK_RULE=${rule}`,
+        ]
+      : [
+          "# Cole no Environment do Docker Compose (Dokploy) e redeploy (pelo menos o frontend)",
+          "# Ou configure DOKPLOY_API_URL + DOKPLOY_API_KEY + DOKPLOY_COMPOSE_ID para sync automático.",
+          `BOOKING_ENGINE_TRAEFIK_RULE=${rule}`,
+        ];
     if (list.length > 0) {
       lines.push(`BOOKING_ENGINE_PUBLIC_HOSTS=${list.join(",")}`);
-      lines.push("# Backend — permita o motor na API:");
-      lines.push(`# CORS_ORIGINS=...,${list.map((h) => `https://${h}`).join(",")}`);
-      lines.push("# Dokploy → Domains → serviço frontend: adicione cada host com HTTPS (Let's Encrypt)");
+      if (!autoSync) {
+        lines.push("# Backend — CORS dinâmico (banco) dispensa lista manual quando BOOKING_ENGINE_CORS_FROM_DB=true.");
+      }
     }
-    return { hosts: list, rule, envBlock: lines.join("\n") };
+    return { hosts: list, rule, envBlock: lines.join("\n"), auto_sync_enabled: autoSync };
   }
 
   async getBookingEngineTraefikEnv(user: SessionUser) {
@@ -825,10 +814,37 @@ export class PlatformDomainsService {
   }
 
   private bookingEngineSslHint(): string {
+    if (this.infraSync.isAutoSyncEnabled()) {
+      return (
+        "Certificado ainda não emitido (Traefik DEFAULT CERT). " +
+        "A sincronização automática com o Dokploy foi enfileirada; aguarde alguns minutos após o deploy."
+      );
+    }
     return (
       "Certificado inválido (Traefik DEFAULT CERT / ERR_CERT_AUTHORITY_INVALID). " +
       "No Dokploy: defina BOOKING_ENGINE_TRAEFIK_RULE com Host(`seu-dominio`), redeploy do frontend e aguarde o Let's Encrypt."
     );
+  }
+
+  private async enqueueInfraSync(reason: string, companyId?: string) {
+    const enabled = this.infraSync.isAutoSyncEnabled();
+    if (!enabled) {
+      return { enabled: false, queued: false };
+    }
+    const queued = await this.infraQueue.enqueueBookingEngineSync({ reason, companyId });
+    return { enabled: true, queued };
+  }
+
+  async syncBookingEngineInfra(user: SessionUser) {
+    this.assertSuperAdmin(user);
+    const result = await this.infraSync.syncBookingEngineTraefik({ reason: "super_admin" });
+    const status = await this.infraSync.getLastSyncStatus();
+    return { result, status };
+  }
+
+  async getBookingEngineInfraStatus(user: SessionUser) {
+    this.assertSuperAdmin(user);
+    return this.infraSync.getLastSyncStatus();
   }
 
   async ensureBookingEngineForCompany(user: SessionUser, companyId: string) {
@@ -840,11 +856,15 @@ export class PlatformDomainsService {
       select: { booking_engine_custom_domain: true },
     });
     const hostname = normalizeHostname(company?.booking_engine_custom_domain ?? "");
-    if (!hostname) return { ok: true, skipped: true as const };
+    if (!hostname) {
+      const infra_sync = await this.enqueueInfraSync("clear", companyId);
+      return { ok: true, skipped: true as const, infra_sync };
+    }
     await this.upsertBookingEngineDomainRow(companyId, hostname);
     const traefik = this.buildBookingEngineTraefikEnvBlock(
       await this.listBookingEngineHostnames(),
     );
-    return { ok: true, hostname, traefik };
+    const infra_sync = await this.enqueueInfraSync("ensure", companyId);
+    return { ok: true, hostname, traefik, infra_sync };
   }
 }

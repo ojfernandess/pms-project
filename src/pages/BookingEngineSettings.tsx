@@ -54,6 +54,8 @@ const BookingEngineSettings = () => {
   const [sslStatus, setSslStatus] = useState<"checking" | "active" | "pending" | "inactive">("inactive");
   const [traefikEnvBlock, setTraefikEnvBlock] = useState<string | null>(null);
   const [sslIssueMessage, setSslIssueMessage] = useState<string | null>(null);
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
+  const [infraSyncQueued, setInfraSyncQueued] = useState(false);
   const [isVerifyingDomain, setIsVerifyingDomain] = useState(false);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [localSlug, setLocalSlug] = useState<string>("");
@@ -163,6 +165,7 @@ const BookingEngineSettings = () => {
     try {
       const result = await verifyBookingEngineDomain(company.id);
       setTraefikEnvBlock(result.traefik?.envBlock ?? null);
+      setAutoSyncEnabled(Boolean(result.traefik?.auto_sync_enabled));
       setSslIssueMessage(result.ssl_issue);
 
       if (result.checks.dnsPointsOk) {
@@ -2014,6 +2017,13 @@ const BookingEngineSettings = () => {
                                           if (ensured.traefik?.envBlock) {
                                             setTraefikEnvBlock(ensured.traefik.envBlock);
                                           }
+                                          setAutoSyncEnabled(Boolean(ensured.traefik?.auto_sync_enabled));
+                                          setInfraSyncQueued(Boolean(ensured.infra_sync?.queued));
+                                          if (ensured.infra_sync?.queued) {
+                                            toast.message(
+                                              "Atualização de HTTPS/CORS enfileirada — aguarde alguns minutos.",
+                                            );
+                                          }
                                         } catch {
                                           /* registro central opcional */
                                         }
@@ -2136,10 +2146,12 @@ const BookingEngineSettings = () => {
                           </Button>
                         </div>
 
-                        {(sslStatus === "pending" || traefikEnvBlock) && (
+                        {(sslStatus === "pending" || traefikEnvBlock || autoSyncEnabled) && (
                           <BookingEngineDeployChecklist
                             envBlock={traefikEnvBlock}
                             sslIssue={sslIssueMessage}
+                            autoSyncEnabled={autoSyncEnabled}
+                            infraSyncQueued={infraSyncQueued}
                           />
                         )}
                       </div>
