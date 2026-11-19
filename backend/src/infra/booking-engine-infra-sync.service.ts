@@ -10,6 +10,7 @@ const REDIS_SYNC_AT = "pms:booking_engine:infra_sync:last_at";
 const REDIS_SYNC_ERROR = "pms:booking_engine:infra_sync:last_error";
 const REDIS_SYNC_RESULT = "pms:booking_engine:infra_sync:last_result";
 const REDIS_DEPLOY_AT = "pms:booking_engine:infra_sync:last_deploy_at";
+const REDIS_VERIFY_SYNC_COOLDOWN = "pms:booking_engine:infra_sync:verify_cooldown";
 
 export type BookingEngineInfraSyncResult = DokploySaveResult & {
   rule?: string;
@@ -29,6 +30,15 @@ export class BookingEngineInfraSyncService {
 
   isAutoSyncEnabled(): boolean {
     return this.dokploy.isAutoSyncEnabled();
+  }
+
+  /** Evita compose.deploy a cada poll de verificação (30s) na UI. */
+  async allowInfraSyncOnVerify(): Promise<boolean> {
+    const ttlSec = Number(process.env.BOOKING_ENGINE_VERIFY_SYNC_COOLDOWN_SEC ?? 900);
+    const hit = await this.redis.client.get(REDIS_VERIFY_SYNC_COOLDOWN);
+    if (hit) return false;
+    await this.redis.client.set(REDIS_VERIFY_SYNC_COOLDOWN, new Date().toISOString(), "EX", ttlSec);
+    return true;
   }
 
   async buildDesiredTraefikEnv(): Promise<{ rule: string; hosts: string[]; updates: Record<string, string> }> {

@@ -22,6 +22,7 @@ import { canAccessCompany } from "../auth/access-scope";
 import { SITE_SETTINGS_ID } from "./robots.service";
 import type { HostnameResolution, PlatformDomainStatus } from "./platform-domains.types";
 import { buildBookingEngineTraefikHostRule } from "../lib/booking-engine-traefik.util";
+import { probeHttpsCertificate } from "../lib/https-probe";
 import { BookingEngineHostsService } from "./booking-engine-hosts.service";
 import { BookingEngineInfraSyncService } from "../infra/booking-engine-infra-sync.service";
 import { InfraSyncQueueService } from "../queues/infra-sync-queue.service";
@@ -565,6 +566,7 @@ export class PlatformDomainsService {
     hostname: string,
     token: string,
     hints: ReturnType<PlatformDomainsService["infrastructureHints"]>,
+    options?: { serviceType?: "web_checkin" | "booking_engine" },
   ) {
     const expectedTxt = verificationTxtValue(token);
     const txtName = verificationTxtRecordName(hostname);
@@ -602,19 +604,28 @@ export class PlatformDomainsService {
       );
     }
 
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(`https://${hostname}/health`, {
-        method: "GET",
-        signal: controller.signal,
-        redirect: "follow",
-      });
-      clearTimeout(timer);
-      sslOk = res.ok;
-      if (!sslOk) details.push(`HTTPS respondeu status ${res.status} em /health`);
-    } catch {
-      details.push("HTTPS indisponível ou certificado ainda não emitido para este hostname");
+    if (options?.serviceType === "booking_engine") {
+      const probe = await probeHttpsCertificate(hostname);
+      sslOk = probe.sslOk;
+      if (!sslOk) {
+        details.push(probe.detail ?? "Certificado HTTPS ainda inválido para o motor");
+        if (probe.isTraefikDefault) details.push("Traefik ainda entrega DEFAULT CERT para este host");
+      }
+    } else {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(`https://${hostname}/health`, {
+          method: "GET",
+          signal: controller.signal,
+          redirect: "follow",
+        });
+        clearTimeout(timer);
+        sslOk = res.ok;
+        if (!sslOk) details.push(`HTTPS respondeu status ${res.status} em /health`);
+      } catch {
+        details.push("HTTPS indisponível ou certificado ainda não emitido para este hostname");
+      }
     }
 
     return { txtOk, dnsPointsOk, sslOk, details };
@@ -747,9 +758,11 @@ export class PlatformDomainsService {
     const domainRow = await this.upsertBookingEngineDomainRow(companyId, hostname);
     const hints = this.infrastructureHints();
     if (!domainRow) {
-      const checks = await this.runDnsChecks(hostname, generateDomainVerificationToken(), hints);
+      const checks = await this.runDnsChecks(hostname, generateDomainVerificationToken(), hints, {
+        serviceType: "booking_engine",
+      });
       const traefik = this.buildBookingEngineTraefikEnvBlock([hostname]);
-      if (checks.dnsPointsOk && !checks.sslOk) {
+      if (checks.dnsPointsOk && !checks.sslOk && (await this.infraSync.allowInfraSyncOnVerify())) {
         this.runInlineInfraSync("verify");
       }
       const infra_status = await this.infraSync.getLastSyncStatus();
@@ -764,7 +777,9 @@ export class PlatformDomainsService {
       };
     }
 
-    const checks = await this.runDnsChecks(hostname, domainRow.verification_token, hints);
+    const checks = await this.runDnsChecks(hostname, domainRow.verification_token, hints, {
+      serviceType: "booking_engine",
+    });
     const allHosts = await this.listBookingEngineHostnames();
     if (!allHosts.includes(hostname)) allHosts.push(hostname);
     const traefik = this.buildBookingEngineTraefikEnvBlock(allHosts);
@@ -808,7 +823,7 @@ export class PlatformDomainsService {
       include: { companies: { select: { id: true, name: true } } },
     });
 
-    if (checks.dnsPointsOk && !checks.sslOk) {
+    if (checks.dnsPointsOk && !checks.sslOk && (await this.infraSync.allowInfraSyncOnVerify())) {
       this.runInlineInfraSync("verify");
     }
     const infra_status = await this.infraSync.getLastSyncStatus();

@@ -183,6 +183,10 @@ const BookingEngineSettings = () => {
         setSslIssueMessage(null);
       } else if (result.checks.dnsPointsOk) {
         setSslStatus("pending");
+        const detail = result.checks.details?.find((d) => d.length > 0);
+        if (detail && !result.ssl_issue) {
+          setSslIssueMessage(detail);
+        }
       } else {
         setSslStatus("pending");
       }
@@ -203,7 +207,7 @@ const BookingEngineSettings = () => {
       // Verificar novamente após 30 segundos (para dar tempo de propagação)
       const interval = setInterval(() => {
         checkDomainStatus(localCustomDomain);
-      }, 30000); // Verificar a cada 30 segundos
+      }, 120000); // Verificar a cada 2 min (evita spam no Dokploy)
 
       return () => clearInterval(interval);
     } else {
@@ -2127,8 +2131,12 @@ const BookingEngineSettings = () => {
                               ) : (
                                 <>
                                   <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                                  <span className="text-sm text-amber-600">
-                                    {sslIssueMessage ? "Certificado pendente (Traefik)" : "Aguardando HTTPS"}
+                                  <span className="text-sm text-amber-600" title={sslIssueMessage ?? undefined}>
+                                    {sslIssueMessage
+                                      ? sslIssueMessage.length > 48
+                                        ? `${sslIssueMessage.slice(0, 48)}…`
+                                        : sslIssueMessage
+                                      : "Aguardando HTTPS"}
                                   </span>
                                 </>
                               )}
