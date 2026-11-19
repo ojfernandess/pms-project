@@ -652,7 +652,15 @@ export class StripeWebhookService {
           select: { id: true, reservation_code: true, total_amount: true },
         });
         if (reservation) {
-          const reservationTotal = Number(reservation.total_amount || 0);
+          const feeRows = await this.prisma.reservation_service_fees.findMany({
+            where: { reservation_id: reservationId },
+            select: { amount: true, quantity: true },
+          });
+          const feeTotal = feeRows.reduce(
+            (sum, f) => sum + Number(f.amount || 0) * Number(f.quantity || 1),
+            0,
+          );
+          const reservationTotal = Math.round((Number(reservation.total_amount || 0) + feeTotal) * 100) / 100;
           totalReservationsAmount += reservationTotal;
           reservationsInfo.push({
             id: reservation.id,
@@ -701,6 +709,14 @@ export class StripeWebhookService {
           console.error(`[Webhook] Erro ao buscar reserva ${reservationId}`);
           continue;
         }
+        const feeRowsForStatus = await this.prisma.reservation_service_fees.findMany({
+          where: { reservation_id: reservationId },
+          select: { amount: true, quantity: true },
+        });
+        const feeTotalForStatus = feeRowsForStatus.reduce(
+          (sum, f) => sum + Number(f.amount || 0) * Number(f.quantity || 1),
+          0,
+        );
         if (stripeSecretKey) {
           await this.registerStripePaymentInPms(
             reservationId,
@@ -713,13 +729,14 @@ export class StripeWebhookService {
         }
         const currentPaidAmount = Number(reservation.paid_amount || 0);
         const newPaidAmount = currentPaidAmount + amountPerReservation;
-        const totalAmountReservation = Number(reservation.total_amount || 0);
+        const totalAmountReservation =
+          Math.round((Number(reservation.total_amount || 0) + feeTotalForStatus) * 100) / 100;
         const reservationUpdate: {
           paid_amount: number;
           status?: reservation_status;
           payment_status?: payment_status;
         } = { paid_amount: newPaidAmount };
-        if (newPaidAmount >= totalAmountReservation && totalAmountReservation > 0) {
+        if (newPaidAmount + 0.02 >= totalAmountReservation && totalAmountReservation > 0) {
           reservationUpdate.status = reservation_status.confirmed;
           reservationUpdate.payment_status = payment_status.paid;
         } else if (newPaidAmount > 0) {
@@ -804,8 +821,12 @@ export class StripeWebhookService {
       );
       const base = Number(reservation.total_amount || 0);
       const currentPaid = Number(reservation.paid_amount || 0);
-      const targetPaid = base + feeTotal;
-      const newPaid = Math.max(currentPaid, targetPaid);
+      const targetPaid = Math.round((base + feeTotal) * 100) / 100;
+      let newPaid = Math.max(currentPaid, targetPaid);
+      if (targetPaid > 0 && newPaid > targetPaid + 0.02) {
+        newPaid = targetPaid;
+      }
+      newPaid = Math.round(newPaid * 100) / 100;
       const lodgingFullyPaid = base > 0 && newPaid + 0.02 >= targetPaid;
 
       const data: {

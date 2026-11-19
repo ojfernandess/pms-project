@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { occupiedParkingSpotsOnDate, parkingCategoryIdSet } from "../_shared/channel-parking-inventory.ts";
 
 /** Parte `channel_rate_plan_code` em vários Rate Plan Codes (vírgula, `;`, newline). Inline: o deploy da função não inclui `../_shared`. */
 function splitAiosellRatePlanCodes(raw: unknown): string[] {
@@ -1207,6 +1208,22 @@ serve(async (req) => {
     });
   }
 
+  let parkingCategoryIds = new Set<string>();
+  const { data: categoryKindRows, error: categoryKindError } = await db
+    .from("room_categories")
+    .select("id, category_kind")
+    .eq("establishment_id", establishmentId);
+  if (categoryKindError) {
+    console.warn("[aiosell-sync] room_categories (parking):", categoryKindError.message);
+  } else {
+    parkingCategoryIds = parkingCategoryIdSet(
+      (categoryKindRows ?? []).map((c) => ({
+        id: String(c.id),
+        category_kind: c.category_kind as string | null,
+      })),
+    );
+  }
+
   const { data: reservations, error: reservationsError } = await db
     .from("reservations")
     .select("category_id, checkin_date, checkout_date, room_id")
@@ -1590,7 +1607,15 @@ serve(async (req) => {
         }
 
         const listC = invCombinedByCategory.get(categoryId) || [];
-        listC.push({ date, available: 0, restrictions: agg });
+        let available = 0;
+        if (parkingCategoryIds.has(categoryId)) {
+          const categoryRooms = rooms?.filter((r) => r.category_id === categoryId) || [];
+          const totalRooms = categoryRooms.length;
+          const catRes = reservationsByCategory.get(categoryId) || [];
+          available = Math.max(0, totalRooms - occupiedParkingSpotsOnDate(catRes, date));
+          if (isCategoryClosedForOtaChannel(rss)) available = 0;
+        }
+        listC.push({ date, available, restrictions: agg });
         invCombinedByCategory.set(categoryId, listC);
       }
     }

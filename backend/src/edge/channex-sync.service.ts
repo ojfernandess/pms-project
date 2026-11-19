@@ -10,6 +10,10 @@ import {
   buildOccupiedRoomsByCategoryDate,
   categoryDateKey,
 } from "./channel-availability-blocks";
+import {
+  appendParkingMappedCalendarRows,
+  parkingCategoryIdSet,
+} from "./channel-parking-inventory";
 
 const RATE_CALENDAR_PAGE_SIZE = 1000;
 const DYNAMIC_PAGE_SIZE = 1000;
@@ -147,7 +151,7 @@ export class ChannexSyncService {
         }),
         this.prisma.room_categories.findMany({
           where: { establishment_id: establishmentId },
-          select: { id: true, base_price: true },
+          select: { id: true, base_price: true, category_kind: true },
         }),
         this.prisma.reservations.findMany({
           where: {
@@ -357,6 +361,33 @@ export class ChannexSyncService {
               stop_sell_booking_engine: null,
             });
           }
+        }
+      }
+
+      const parkingCategoryIds = parkingCategoryIdSet(
+        roomCategories.map((c) => ({ id: String(c.id), category_kind: c.category_kind })),
+      );
+      if (parkingCategoryIds.size > 0) {
+        appendParkingMappedCalendarRows({
+          calendarLikeRows,
+          mappingRows,
+          parkingCategoryIds,
+          categoryBasePriceById: categoryBasePriceMap,
+          windowStartYmd: today,
+          windowEndInclusiveYmd: futureDate,
+        });
+        const mappedParking = [...parkingCategoryIds].filter((id) =>
+          mappingRows.some(
+            (m) =>
+              String(m.category_id ?? "") === id &&
+              String(m.channel_room_code ?? "").trim() &&
+              String(m.channel_rate_plan_code ?? "").trim(),
+          ),
+        );
+        if (mappedParking.length > 0) {
+          this.logger.log(
+            `[channex-sync] parking_inventory ${JSON.stringify({ mapped_parking_categories: mappedParking })}`,
+          );
         }
       }
 

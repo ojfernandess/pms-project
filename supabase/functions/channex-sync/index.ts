@@ -1,5 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  appendParkingMappedCalendarRows,
+  type ChannelCalRow,
+  parkingCategoryIdSet,
+} from "../_shared/channel-parking-inventory.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -300,7 +305,7 @@ serve(async (req) => {
         .eq("establishment_id", establishmentId),
       supabase
         .from("room_categories")
-        .select("id, base_price")
+        .select("id, base_price, category_kind")
         .eq("establishment_id", establishmentId),
       supabase
         .from("reservations")
@@ -478,6 +483,39 @@ serve(async (req) => {
             base_price: categoryBasePriceMap.get(categoryId) ?? 0,
           });
         }
+      }
+    }
+
+    const parkingCategoryIds = parkingCategoryIdSet(
+      (roomCategories ?? []).map((c) => {
+        const cc = c as AnyObj;
+        return { id: String(cc.id ?? ""), category_kind: cc.category_kind as string | null };
+      }),
+    );
+    if (parkingCategoryIds.size > 0) {
+      appendParkingMappedCalendarRows({
+        calendarLikeRows: calendarLikeRows as ChannelCalRow[],
+        mappingRows: (mappingRows ?? []) as Array<{ category_id?: string | null; pricing_plan_id?: string | null }>,
+        parkingCategoryIds,
+        categoryBasePriceById: categoryBasePriceMap,
+        windowStartYmd: today,
+        windowEndInclusiveYmd: futureDate,
+      });
+      const mappedParking = [...parkingCategoryIds].filter((id) =>
+        (mappingRows ?? []).some((m) => {
+          const mm = m as AnyObj;
+          return (
+            String(mm.category_id ?? "") === id &&
+            String(mm.channel_room_code ?? "").trim() &&
+            String(mm.channel_rate_plan_code ?? "").trim()
+          );
+        }),
+      );
+      if (mappedParking.length > 0) {
+        console.info(
+          "[channex-sync] parking_inventory",
+          JSON.stringify({ mapped_parking_categories: mappedParking }),
+        );
       }
     }
 

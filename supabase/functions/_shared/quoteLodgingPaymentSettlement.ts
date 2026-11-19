@@ -29,8 +29,12 @@ export async function settleQuoteLodgingReservationsAfterPayment(
       0,
     );
 
-    const targetPaid = base + feeTotal;
-    const newPaid = Math.max(currentPaid, targetPaid);
+    const targetPaid = Math.round((base + feeTotal) * 100) / 100;
+    let newPaid = Math.max(currentPaid, targetPaid);
+    if (targetPaid > 0 && newPaid > targetPaid + 0.02) {
+      newPaid = targetPaid;
+    }
+    newPaid = Math.round(newPaid * 100) / 100;
     const lodgingFullyPaid = base > 0 && newPaid + 0.02 >= targetPaid;
 
     const update: Record<string, unknown> = {

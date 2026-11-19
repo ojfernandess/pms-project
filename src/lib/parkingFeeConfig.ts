@@ -504,6 +504,12 @@ export async function syncParkingSpotReservationForLodging(params: {
     } catch {
       /* ignore */
     }
+    try {
+      const { scheduleChannelSyncAfterInventoryChange } = await import("@/lib/channelSyncAfterRates");
+      scheduleChannelSyncAfterInventoryChange(params.establishmentId);
+    } catch {
+      /* ignore */
+    }
     return { parkingReservationId: existingId };
   }
 
@@ -533,6 +539,12 @@ export async function syncParkingSpotReservationForLodging(params: {
 
   const parkingReservationId = lockResult.reservation_id;
   try {
+    const { scheduleChannelSyncAfterInventoryChange } = await import("@/lib/channelSyncAfterRates");
+    scheduleChannelSyncAfterInventoryChange(params.establishmentId);
+  } catch {
+    /* ignore */
+  }
+  try {
     const { syncLinkedParkingSpotPaymentFromLodging } = await import("@/lib/parkingPaymentSync");
     await syncLinkedParkingSpotPaymentFromLodging(params.lodgingReservationId);
   } catch {
@@ -545,9 +557,22 @@ export async function syncParkingSpotReservationForLodging(params: {
 export async function cancelParkingSpotForLodging(lodgingReservationId: string): Promise<void> {
   const parkingId = await findLinkedParkingReservation(lodgingReservationId);
   if (!parkingId) return;
+  const { data: parkingRes } = await supabase
+    .from("reservations")
+    .select("establishment_id")
+    .eq("id", parkingId)
+    .maybeSingle();
   const { error } = await supabase
     .from("reservations")
     .update({ status: "cancelled", notes: "Estacionamento removido da reserva principal" })
     .eq("id", parkingId);
   if (error) throw error;
+  if (parkingRes?.establishment_id) {
+    try {
+      const { scheduleChannelSyncAfterInventoryChange } = await import("@/lib/channelSyncAfterRates");
+      scheduleChannelSyncAfterInventoryChange(parkingRes.establishment_id);
+    } catch {
+      /* ignore */
+    }
+  }
 }

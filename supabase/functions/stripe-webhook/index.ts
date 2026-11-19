@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { buildWebCheckinLocatorUrl } from "../_shared/webCheckinPublicUrl.ts";
 import { settleQuoteLodgingReservationsAfterPayment } from "../_shared/quoteLodgingPaymentSettlement.ts";
+import { reservationGrossCharge } from "../_shared/reservationGrossCharge.ts";
 
 /**
  * Cria ou busca o portador de pagamento Stripe
@@ -166,7 +167,7 @@ async function applyPaymentToReservations(
   console.log(`[Webhook] 💰 Total amount pago (reais): ${totalPaidAmount}`);
   console.log(`[Webhook] 💰 Número de reservas: ${reservationIds.length}`);
 
-  // Buscar informações de todas as reservas (incluindo total_amount) para calcular proporção
+  // Buscar informações de todas as reservas (diárias + taxas) para calcular proporção
   const reservationsInfo: Array<{ id: string; code?: string; amount: number; total_amount: number }> = [];
   let totalReservationsAmount = 0;
   
@@ -177,20 +178,27 @@ async function applyPaymentToReservations(
         .select("id, reservation_code, total_amount")
         .eq("id", reservationId)
         .single();
+
+      const { data: feeRows } = await supabaseClient
+        .from("reservation_service_fees")
+        .select("amount, quantity")
+        .eq("reservation_id", reservationId);
       
       if (reservation) {
-        const reservationTotal = Number(reservation.total_amount || 0);
+        const reservationTotal = reservationGrossCharge(
+          Number(reservation.total_amount || 0),
+          feeRows ?? [],
+        );
         totalReservationsAmount += reservationTotal;
         reservationsInfo.push({
           id: reservation.id,
           code: reservation.reservation_code || undefined,
-          amount: 0, // Será calculado abaixo
+          amount: 0,
           total_amount: reservationTotal,
         });
       }
     } catch (error) {
       console.warn(`[Webhook] ⚠️ Erro ao buscar informações da reserva ${reservationId}:`, error);
-      // Adicionar mesmo sem código se não conseguir buscar
       reservationsInfo.push({
         id: reservationId,
         amount: 0,
@@ -199,8 +207,7 @@ async function applyPaymentToReservations(
     }
   }
   
-  // Calcular valor proporcional para cada reserva
-  // Distribuir o pagamento proporcionalmente ao total_amount de cada reserva
+  // Distribuir o pagamento proporcionalmente ao valor bruto (hospedagem + taxas) de cada quarto
   let distributedTotal = 0;
   const amountsPerReservation: number[] = [];
   
@@ -256,6 +263,11 @@ async function applyPaymentToReservations(
         continue;
       }
 
+      const { data: feeRowsForStatus } = await supabaseClient
+        .from("reservation_service_fees")
+        .select("amount, quantity")
+        .eq("reservation_id", reservationId);
+
       // Registrar pagamento no PMS com valor proporcional e informações de todas as reservas
       if (stripeClient) {
         await registerStripePaymentInPMS(
@@ -273,13 +285,16 @@ async function applyPaymentToReservations(
       // Calcular novo paid_amount
       const currentPaidAmount = Number(reservation.paid_amount || 0);
       const newPaidAmount = currentPaidAmount + amountPerReservation;
-      const totalAmountReservation = Number(reservation.total_amount || 0);
+      const totalAmountReservation = reservationGrossCharge(
+        Number(reservation.total_amount || 0),
+        feeRowsForStatus ?? [],
+      );
       
       console.log(`[Webhook] 💰 Reserva ${reservationId}:`);
       console.log(`[Webhook] 💰   Paid amount atual: ${currentPaidAmount.toFixed(2)}`);
       console.log(`[Webhook] 💰   Valor do pagamento: ${amountPerReservation.toFixed(2)}`);
       console.log(`[Webhook] 💰   Novo paid amount: ${newPaidAmount.toFixed(2)}`);
-      console.log(`[Webhook] 💰   Total amount da reserva: ${totalAmountReservation.toFixed(2)}`);
+      console.log(`[Webhook] 💰   Total bruto da reserva: ${totalAmountReservation.toFixed(2)}`);
 
       // Preparar atualização
       const reservationUpdate: any = {
@@ -287,7 +302,7 @@ async function applyPaymentToReservations(
       };
 
       // Atualizar status se necessário
-      if (newPaidAmount >= totalAmountReservation && totalAmountReservation > 0) {
+      if (newPaidAmount + 0.02 >= totalAmountReservation && totalAmountReservation > 0) {
         reservationUpdate.status = "confirmed";
         reservationUpdate.payment_status = "paid";
       } else if (newPaidAmount > 0) {

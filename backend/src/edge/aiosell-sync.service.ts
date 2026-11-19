@@ -9,6 +9,7 @@ import {
   bookedCountFromOccupiedMap,
   buildOccupiedRoomsByCategoryDate,
 } from "./channel-availability-blocks";
+import { netParkingAvailabilityForDate, parkingCategoryIdSet } from "./channel-parking-inventory";
 
 type Result = { status: number; body: Record<string, unknown> };
 type Occ = 1 | 2 | 3 | 4;
@@ -234,6 +235,19 @@ export class AiosellSyncService {
     }));
 
     const sellableByCategory = baseSellableRoomsByCategory(roomRows);
+
+    let parkingCategoryIds = new Set<string>();
+    try {
+      const categoryRows = await this.prisma.room_categories.findMany({
+        where: { establishment_id: establishmentId },
+        select: { id: true, category_kind: true },
+      });
+      parkingCategoryIds = parkingCategoryIdSet(
+        categoryRows.map((c) => ({ id: String(c.id), category_kind: c.category_kind })),
+      );
+    } catch (error) {
+      this.logger.warn(`[aiosell-sync] room_categories (parking): ${errorMessage(error)}`);
+    }
 
     const occupiedByCategoryDate = buildOccupiedRoomsByCategoryDate({
       rooms: roomRows,
@@ -516,17 +530,33 @@ export class AiosellSyncService {
         if (configHasCompleteAiosellMapping(cfg)) mappedCategoryIdsForInventory.add(cfg.category_id as string);
       }
       const datesInWindow = eachDateInRangeInclusiveAiosell(today, futureDateStr);
+      const bookedByCategoryDate = new Map<string, number>();
+      for (const [key, set] of occupiedByCategoryDate) {
+        bookedByCategoryDate.set(key, set.size);
+      }
       for (const categoryId of mappedCategoryIdsForInventory) {
         for (const date of datesInWindow) {
           if (tariffCategoryDateKeysAiosell.has(`${categoryId}|${date}`)) continue;
           const salesStatus = salesStatusByCategoryDate.get(`${categoryId}|${date}`) ?? null;
+          const isParking = parkingCategoryIds.has(categoryId);
           let agg: Record<string, unknown> | null = aiosellRestrictionShape(null, null, false, false, true, null, null);
           if (isCategoryClosedForOtaChannel(salesStatus)) {
             const forced = aiosellRestrictionShape(null, null, false, false, true, null, null);
             agg = agg ? mergeTwoInvRestrictions(agg, forced) : forced;
           }
           const list = invCombinedByCategory.get(categoryId) ?? [];
-          list.push({ date, available: 0, restrictions: agg });
+          let available = 0;
+          if (isParking) {
+            available = netParkingAvailabilityForDate(
+              categoryId,
+              date,
+              sellableByCategory,
+              bookedByCategoryDate,
+              "|",
+            );
+            if (isCategoryClosedForOtaChannel(salesStatus)) available = 0;
+          }
+          list.push({ date, available, restrictions: agg });
           invCombinedByCategory.set(categoryId, list);
         }
       }

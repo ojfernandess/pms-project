@@ -3144,7 +3144,7 @@ const ReservationDetails = () => {
                         <span>Taxa de limpeza</span>
                         <span className="font-medium text-blue-800 shrink-0">
                           {formatCurrency(lodgingFeeBreakdown.cleaningTotal)}{" "}
-                          <span className="text-slate-500 font-normal">(única)</span>
+                          <span className="text-slate-500 font-normal">(por quarto)</span>
                         </span>
                       </div>
                     )}

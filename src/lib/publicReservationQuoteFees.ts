@@ -17,6 +17,8 @@ export function computePublicQuoteExtras(params: {
   includeParking: boolean;
   /** Vagas de estacionamento (1 por quarto de hospedagem, quando aplicável). */
   parkingSpotCount?: number;
+  /** Quartos de hospedagem na reserva (taxa de limpeza cobrada por quarto). */
+  lodgingRoomCount?: number;
 }): {
   lodgingTotal: number;
   cleaningAmount: number;
@@ -27,7 +29,10 @@ export function computePublicQuoteExtras(params: {
 } {
   const cleaningActive =
     params.flags.showCleaning && isCleaningFeeConfigured(params.cleaning);
-  const cleaningAmount = cleaningActive ? Number(params.cleaning!.amount) : 0;
+  const cleaningRooms = Math.max(1, Math.min(99, params.lodgingRoomCount ?? 1));
+  const cleaningAmount = cleaningActive
+    ? Number(params.cleaning!.amount) * cleaningRooms
+    : 0;
 
   const parkingOffered =
     params.flags.showParkingOption && isParkingFeeConfigured(params.parking);

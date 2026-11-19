@@ -30,6 +30,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   attachCleaningFeeToReservation,
   fetchCleaningFeeConfig,
+  isCleaningFeeConfigured,
+  fetchCleaningFeeConfig,
   type CleaningFeeConfig,
   CLEANING_FEE_NAME,
 } from "@/lib/cleaningFeeConfig";
@@ -2763,6 +2765,10 @@ const PublicReservation = () => {
             (1000 * 60 * 60 * 24),
         ),
       );
+      const roomsInBooking =
+        selectedCategories.length > 0
+          ? selectedCategories.reduce((sum, cat) => sum + cat.rooms, 0)
+          : Math.max(1, totalRooms);
       const submitExtras = computePublicQuoteExtras({
         lodgingTotal: lodgingAfterCoupon,
         nights: stayNights,
@@ -2774,6 +2780,7 @@ const PublicReservation = () => {
         parking: parkingFeeConfig,
         includeParking: includeParkingInQuote,
         parkingSpotCount: includeParkingInQuote ? parkingSpotsCount : 1,
+        lodgingRoomCount: roomsInBooking,
       });
       const totalAmount = submitExtras.grandTotal;
 
@@ -2935,17 +2942,27 @@ const PublicReservation = () => {
       
       console.log(`[Reservation] Total de reservas criadas: ${createdReservations.length}, roomIndex final: ${roomIndex}, additionalClientIds: ${additionalClientIds.length}`);
 
-      const firstReservationId = createdReservations[0];
-      const primaryCat = categories.find((c) => c.id === primaryCategory);
-      if (firstReservationId && submitExtras.cleaningActive && cleaningFeeConfig?.serviceFeeId) {
-        try {
-          await attachCleaningFeeToReservation({
-            reservationId: firstReservationId,
-            serviceFeeId: cleaningFeeConfig.serviceFeeId,
-            amount: cleaningFeeConfig.amount,
-          });
-        } catch (feeError) {
-          console.error("[PublicReservation] Taxa de limpeza:", feeError);
+      if (submitExtras.cleaningActive) {
+        for (const meta of createdLodgingMeta) {
+          try {
+            let feeConfig = cleaningFeeConfig;
+            if (meta.buildingId) {
+              const buildingCleaning = await fetchCleaningFeeConfig({
+                establishmentId: establishment.id,
+                buildingId: meta.buildingId,
+                strictBuildingScope: true,
+              });
+              if (isCleaningFeeConfigured(buildingCleaning)) feeConfig = buildingCleaning;
+            }
+            if (!feeConfig?.serviceFeeId || !isCleaningFeeConfigured(feeConfig)) continue;
+            await attachCleaningFeeToReservation({
+              reservationId: meta.reservationId,
+              serviceFeeId: feeConfig.serviceFeeId,
+              amount: feeConfig.amount,
+            });
+          } catch (feeError) {
+            console.error(`[PublicReservation] Taxa de limpeza (${meta.reservationId}):`, feeError);
+          }
         }
       }
       if (submitExtras.parkingOffered && includeParkingInQuote && parkingFeeConfig && createdLodgingMeta.length > 0) {
@@ -3581,6 +3598,11 @@ const PublicReservation = () => {
     [company?.public_reservation_cleaning_fee_enabled, company?.public_reservation_parking_option_enabled],
   );
 
+  // Calcular número total de quartos de todas as categorias selecionadas
+  const totalRooms = selectedCategories.length > 0
+    ? selectedCategories.reduce((sum, cat) => sum + cat.rooms, 0)
+    : requiredRooms;
+
   const quoteExtras = useMemo(
     () =>
       computePublicQuoteExtras({
@@ -3591,6 +3613,7 @@ const PublicReservation = () => {
         parking: parkingFeeConfig,
         includeParking: includeParkingInQuote,
         parkingSpotCount: includeParkingInQuote ? parkingSpotsCount : 1,
+        lodgingRoomCount: totalRooms,
       }),
     [
       finalPrice,
@@ -3600,15 +3623,11 @@ const PublicReservation = () => {
       parkingFeeConfig,
       includeParkingInQuote,
       parkingSpotsCount,
+      totalRooms,
     ],
   );
 
   const checkoutGrandTotal = quoteExtras.grandTotal;
-  
-  // Calcular número total de quartos de todas as categorias selecionadas
-  const totalRooms = selectedCategories.length > 0
-    ? selectedCategories.reduce((sum, cat) => sum + cat.rooms, 0)
-    : requiredRooms;
 
   const parkingSellableOnPage = useMemo(() => {
     if (!quoteExtras.parkingOffered || !isParkingFeeConfigured(parkingFeeConfig)) return false;
@@ -5241,7 +5260,10 @@ const PublicReservation = () => {
                     {quoteExtras.cleaningActive && (
                       <div className="flex justify-between text-sm">
                         <span className={theme.priceLabel}>
-                          {CLEANING_FEE_NAME} <span className="text-xs text-muted-foreground">(obrigatória)</span>
+                          {CLEANING_FEE_NAME}{" "}
+                          <span className="text-xs text-muted-foreground">
+                            (obrigatória{totalRooms > 1 ? ` × ${totalRooms} quartos` : ""})
+                          </span>
                         </span>
                         <span className={`font-medium ${theme.textPrimary}`}>
                           R${" "}
