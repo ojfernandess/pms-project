@@ -1,7 +1,5 @@
-import { CLEANING_FEE_KIND } from "@/lib/cleaningFeeConfig";
-import { PARKING_FEE_KIND } from "@/lib/parkingFeeConfig";
-
-const SCOPED_BY_BUILDING_KINDS = new Set([CLEANING_FEE_KIND, PARKING_FEE_KIND]);
+/** Constantes locais — evita import circular com cleaningFeeConfig / parkingFeeConfig. */
+const SCOPED_BY_BUILDING_KINDS = new Set(["cleaning_fee", "parking_fee"]);
 
 export type ServiceFeeRow = {
   id: string;
