@@ -71,6 +71,37 @@ export async function diagnosePlatformDomain(id: string) {
   return res.json();
 }
 
+export async function ensureBookingEngineDomain(companyId: string) {
+  const res = await fetch(`${apiBase()}/platform-custom-domains/booking-engine/ensure`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({ company_id: companyId }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload?.message || `Ensure falhou (${res.status})`);
+  return payload as {
+    ok: boolean;
+    hostname?: string;
+    traefik?: { envBlock: string; rule: string; hosts: string[] };
+  };
+}
+
+export async function verifyBookingEngineDomain(companyId: string) {
+  const res = await fetch(`${apiBase()}/platform-custom-domains/booking-engine/verify`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({ company_id: companyId }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload?.message || `Verificação falhou (${res.status})`);
+  return payload as {
+    checks: { txtOk: boolean; dnsPointsOk: boolean; sslOk: boolean; details: string[] };
+    traefik: { envBlock: string; rule: string; hosts: string[] };
+    ssl_issue: string | null;
+    domain: PlatformDomainRecord | null;
+  };
+}
+
 export async function importLegacyWebCheckinDomain() {
   const res = await fetch(`${apiBase()}/platform-custom-domains/import-legacy-web-checkin`, {
     method: "POST",

@@ -163,6 +163,13 @@ services:
       - traefik.http.routers.pms-frontend-checkin.tls.certresolver=letsencrypt
       - traefik.http.routers.pms-frontend-checkin.service=pms-frontend-checkin-svc
       - traefik.http.services.pms-frontend-checkin-svc.loadbalancer.server.port=80
+      # Motores de reserva (domínios por empresa — BOOKING_ENGINE_TRAEFIK_RULE no Environment)
+      - "traefik.http.routers.pms-frontend-booking.rule=${BOOKING_ENGINE_TRAEFIK_RULE:-Host(`booking-engine-route-disabled.invalid`)}"
+      - traefik.http.routers.pms-frontend-booking.entrypoints=web,websecure
+      - traefik.http.routers.pms-frontend-booking.tls=true
+      - traefik.http.routers.pms-frontend-booking.tls.certresolver=letsencrypt
+      - traefik.http.routers.pms-frontend-booking.service=pms-frontend-booking-svc
+      - traefik.http.services.pms-frontend-booking-svc.loadbalancer.server.port=80
     depends_on:
       backend:
         condition: service_healthy

@@ -26,6 +26,11 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { BookingEngineDeployChecklist } from "@/components/booking-engine/BookingEngineDeployChecklist";
+import {
+  ensureBookingEngineDomain,
+  verifyBookingEngineDomain,
+} from "@/lib/platformDomainsApi";
 
 const BookingEngineSettings = () => {
   const { selectedEstablishment } = useEstablishment();
@@ -47,6 +52,9 @@ const BookingEngineSettings = () => {
   const [searchEstablishment, setSearchEstablishment] = useState<string>("");
   const [dnsStatus, setDnsStatus] = useState<"checking" | "active" | "pending" | "inactive">("inactive");
   const [sslStatus, setSslStatus] = useState<"checking" | "active" | "pending" | "inactive">("inactive");
+  const [traefikEnvBlock, setTraefikEnvBlock] = useState<string | null>(null);
+  const [sslIssueMessage, setSslIssueMessage] = useState<string | null>(null);
+  const [isVerifyingDomain, setIsVerifyingDomain] = useState(false);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [localSlug, setLocalSlug] = useState<string>("");
   const [localRobotsTxt, setLocalRobotsTxt] = useState<string>("");
@@ -139,99 +147,45 @@ const BookingEngineSettings = () => {
     setLocalRobotsTxt(siteSettings?.robots_txt ?? "");
   }, [siteSettings?.robots_txt]);
 
-  // Função para verificar status DNS e SSL
   const checkDomainStatus = async (domain: string) => {
-    if (!domain) {
+    if (!domain || !company?.id) {
       setDnsStatus("inactive");
       setSslStatus("inactive");
+      setTraefikEnvBlock(null);
+      setSslIssueMessage(null);
       return;
     }
 
-    // Normalizar domínio (remover http:// ou https://)
-    const normalizedDomain = domain.replace(/^https?:\/\//, "").replace(/\/$/, "");
-
-    // Verificar DNS e SSL simultaneamente
     setDnsStatus("checking");
     setSslStatus("checking");
+    setIsVerifyingDomain(true);
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 segundos de timeout
-      
-      try {
-        // Tentar fazer uma requisição para verificar se o domínio está acessível
-        // Usamos uma imagem pequena ou favicon como teste, pois é mais confiável
-        const testUrl = `https://${normalizedDomain}/favicon.ico?t=${Date.now()}`;
-        
-        const response = await fetch(testUrl, {
-          method: "HEAD",
-          mode: "cors", // Tentar CORS primeiro para verificar resposta real
-          signal: controller.signal,
-          cache: "no-cache",
-        }).catch(async (corsError) => {
-          // Se falhar por CORS, tentar no-cors (isso significa que o domínio está acessível)
-          try {
-            await fetch(testUrl, {
-              method: "HEAD",
-              mode: "no-cors",
-              signal: controller.signal,
-              cache: "no-cache",
-            });
-            // Se chegou aqui, o domínio está acessível (DNS funcionando)
-            return { ok: true, cors: false };
-          } catch (noCorsError: any) {
-            throw noCorsError;
-          }
-  });
+      const result = await verifyBookingEngineDomain(company.id);
+      setTraefikEnvBlock(result.traefik?.envBlock ?? null);
+      setSslIssueMessage(result.ssl_issue);
 
-        // Se chegou aqui sem erro, DNS e SSL estão funcionando
-        if (response && (response.ok || response.type === "opaque")) {
-          setDnsStatus("active");
-          setSslStatus("active");
-        } else {
-          // Se a resposta não foi ok, mas não deu erro de rede, DNS está funcionando
-          setDnsStatus("active");
-          setSslStatus("active");
-        }
-      } catch (error: any) {
-        // Analisar o tipo de erro
-        const errorMessage = error.message || error.toString() || "";
-        const errorName = error.name || "";
-        
-        // Verificar se é erro de SSL/certificado
-        if (
-          errorMessage.includes("SSL") ||
-          errorMessage.includes("certificate") ||
-          errorMessage.includes("ERR_CERT") ||
-          errorMessage.includes("NET::ERR_CERT") ||
-          errorMessage.includes("certificate has expired") ||
-          errorMessage.includes("certificate is not yet valid")
-        ) {
-          // DNS está funcionando, mas SSL não
-          setDnsStatus("active");
-          setSslStatus("pending");
-        } else if (
-          errorMessage.includes("Failed to fetch") ||
-          errorMessage.includes("NetworkError") ||
-          errorMessage.includes("ERR_NAME_NOT_RESOLVED") ||
-          errorMessage.includes("ERR_CONNECTION_REFUSED") ||
-          errorName === "AbortError"
-        ) {
-          // Erro de rede ou timeout - DNS pode não estar configurado
-          setDnsStatus("pending");
-          setSslStatus("pending");
-        } else {
-          // Outros erros - assumir que está funcionando (pode ser CORS)
-          setDnsStatus("active");
-          setSslStatus("active");
-        }
-      } finally {
-        clearTimeout(timeoutId);
+      if (result.checks.dnsPointsOk) {
+        setDnsStatus("active");
+      } else {
+        setDnsStatus("pending");
+      }
+
+      if (result.checks.sslOk) {
+        setSslStatus("active");
+        setSslIssueMessage(null);
+      } else if (result.checks.dnsPointsOk) {
+        setSslStatus("pending");
+      } else {
+        setSslStatus("pending");
       }
     } catch (error) {
-      // Erro geral - assumir pendente
       setDnsStatus("pending");
       setSslStatus("pending");
+      const msg = error instanceof Error ? error.message : "Falha ao verificar domínio";
+      toast.error(msg);
+    } finally {
+      setIsVerifyingDomain(false);
     }
   };
 
@@ -2050,9 +2004,23 @@ const BookingEngineSettings = () => {
                             onBlur={() => {
                               const trimmedValue = localCustomDomain.trim() || null;
                               if (trimmedValue !== (company?.booking_engine_custom_domain || "")) {
-                                updateCompanyMutation.mutate({
-                                  booking_engine_custom_domain: trimmedValue,
-                                });
+                                updateCompanyMutation.mutate(
+                                  { booking_engine_custom_domain: trimmedValue },
+                                  {
+                                    onSuccess: async () => {
+                                      if (company?.id && trimmedValue) {
+                                        try {
+                                          const ensured = await ensureBookingEngineDomain(company.id);
+                                          if (ensured.traefik?.envBlock) {
+                                            setTraefikEnvBlock(ensured.traefik.envBlock);
+                                          }
+                                        } catch {
+                                          /* registro central opcional */
+                                        }
+                                      }
+                                    },
+                                  },
+                                );
                               }
                             }}
                             onKeyDown={(e) => {
@@ -2144,12 +2112,36 @@ const BookingEngineSettings = () => {
                               ) : (
                                 <>
                                   <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                                  <span className="text-sm text-amber-600">Provisionamento automático</span>
+                                  <span className="text-sm text-amber-600">
+                                    {sslIssueMessage ? "Certificado pendente (Traefik)" : "Aguardando HTTPS"}
+                                  </span>
                                 </>
                               )}
                             </div>
                           </div>
                         </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={!localCustomDomain || isVerifyingDomain}
+                            onClick={() => void checkDomainStatus(localCustomDomain)}
+                          >
+                            {isVerifyingDomain ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : null}
+                            Verificar DNS e HTTPS
+                          </Button>
+                        </div>
+
+                        {(sslStatus === "pending" || traefikEnvBlock) && (
+                          <BookingEngineDeployChecklist
+                            envBlock={traefikEnvBlock}
+                            sslIssue={sslIssueMessage}
+                          />
+                        )}
                       </div>
                     </div>
                   </Card>

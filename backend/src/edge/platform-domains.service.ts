@@ -18,6 +18,7 @@ import {
   verificationTxtValue,
 } from "../lib/hostname.util";
 import { PrismaService } from "../prisma/prisma.service";
+import { canAccessCompany } from "../auth/access-scope";
 import { SITE_SETTINGS_ID } from "./robots.service";
 import type { HostnameResolution, PlatformDomainStatus } from "./platform-domains.types";
 
@@ -218,6 +219,31 @@ export class PlatformDomainsService {
             diagnosis: this.buildDiagnosisFromRow(domain),
           };
         }
+
+        if (domain.service_type === "booking_engine" && active) {
+          return {
+            hostname,
+            mode: "booking_engine",
+            service_type: "booking_engine",
+            company_id: domain.company_id,
+            company_name: domain.companies?.name ?? null,
+            active: true,
+            internal_path: "/",
+          };
+        }
+
+        if (domain.service_type === "booking_engine" && !active) {
+          return {
+            hostname,
+            mode: "pending",
+            service_type: "booking_engine",
+            company_id: domain.company_id,
+            company_name: domain.companies?.name ?? null,
+            active: false,
+            message: domain.last_error || "Domínio do motor aguardando DNS/SSL (Traefik)",
+            diagnosis: this.buildDiagnosisFromRow(domain),
+          };
+        }
       }
     }
 
@@ -378,11 +404,33 @@ export class PlatformDomainsService {
       lastError = null;
     }
 
-    if (!checks.sslOk && checks.txtOk && checks.dnsPointsOk) {
+    if (domain.service_type === "booking_engine" && !checks.txtOk && checks.dnsPointsOk && checks.sslOk) {
+      const linked = await this.prisma.companies.findFirst({
+        where: {
+          booking_engine_custom_domain: { equals: domain.hostname, mode: "insensitive" },
+          booking_engine_enabled: true,
+        },
+        select: { id: true },
+      });
+      if (linked) {
+        status = "active";
+        ownershipVerified = ownershipVerified ?? new Date();
+        dnsStatus = "ok";
+        sslStatus = "active";
+        lastError = null;
+      }
+    }
+
+    if (!checks.sslOk && checks.dnsPointsOk) {
       sslStatus = "pending";
-      lastError =
-        lastError ||
-        "DNS válido, mas HTTPS ainda indisponível (adicione o domínio no Dokploy/Traefik e aguarde Let's Encrypt)";
+      const traefikHint =
+        domain.service_type === "booking_engine"
+          ? "DNS aponta para o PMS, mas o certificado ainda é o padrão do Traefik (DEFAULT CERT). Defina BOOKING_ENGINE_TRAEFIK_RULE no Environment do Dokploy, redeploy do frontend e aguarde o Let's Encrypt."
+          : "DNS válido, mas HTTPS ainda indisponível (adicione o domínio no Dokploy/Traefik e aguarde Let's Encrypt)";
+      lastError = lastError || traefikHint;
+      if (checks.txtOk) {
+        status = domain.service_type === "booking_engine" ? "pending_dns" : status;
+      }
     }
 
     const updated = await this.prisma.platform_custom_domains.update({
@@ -598,5 +646,205 @@ export class PlatformDomainsService {
     }
 
     return hostIps.length > 0 && targets.size === 0;
+  }
+
+  private buildTraefikHostRule(hosts: string[]): string {
+    const unique = [...new Set(hosts.map((h) => normalizeHostname(h)).filter(Boolean))];
+    if (unique.length === 0) return "Host(`booking-engine-route-disabled.invalid`)";
+    return unique.map((h) => `Host(\`${h}\`)`).join(" || ");
+  }
+
+  async listBookingEngineHostnames(): Promise<string[]> {
+    const hosts = new Set<string>();
+    const companies = await this.prisma.companies.findMany({
+      where: { booking_engine_enabled: true, booking_engine_custom_domain: { not: null } },
+      select: { booking_engine_custom_domain: true },
+    });
+    for (const row of companies) {
+      const h = normalizeHostname(row.booking_engine_custom_domain ?? "");
+      if (h) hosts.add(h);
+    }
+    if (await this.assertTableReady()) {
+      const rows = await this.prisma.platform_custom_domains.findMany({
+        where: { service_type: "booking_engine", status: { not: "suspended" } },
+        select: { hostname: true },
+      });
+      for (const row of rows) {
+        const h = normalizeHostname(row.hostname);
+        if (h) hosts.add(h);
+      }
+    }
+    return [...hosts];
+  }
+
+  buildBookingEngineTraefikEnvBlock(hosts?: string[]) {
+    const list = hosts?.length ? hosts : [];
+    const rule = this.buildTraefikHostRule(list);
+    const lines = [
+      "# Cole no Environment do Docker Compose (Dokploy) e redeploy (pelo menos o frontend)",
+      `BOOKING_ENGINE_TRAEFIK_RULE=${rule}`,
+    ];
+    if (list.length > 0) {
+      lines.push(`BOOKING_ENGINE_PUBLIC_HOSTS=${list.join(",")}`);
+      lines.push("# Backend — permita o motor na API:");
+      lines.push(`# CORS_ORIGINS=...,${list.map((h) => `https://${h}`).join(",")}`);
+      lines.push("# Dokploy → Domains → serviço frontend: adicione cada host com HTTPS (Let's Encrypt)");
+    }
+    return { hosts: list, rule, envBlock: lines.join("\n") };
+  }
+
+  async getBookingEngineTraefikEnv(user: SessionUser) {
+    this.assertSuperAdmin(user);
+    const hosts = await this.listBookingEngineHostnames();
+    return this.buildBookingEngineTraefikEnvBlock(hosts);
+  }
+
+  private async upsertBookingEngineDomainRow(
+    companyId: string,
+    hostname: string,
+  ): Promise<DomainRow | null> {
+    if (!(await this.assertTableReady())) return null;
+    const hints = this.infrastructureHints();
+    const existing = await this.prisma.platform_custom_domains.findUnique({ where: { hostname } });
+    if (existing) {
+      const updated = await this.prisma.platform_custom_domains.update({
+        where: { id: existing.id },
+        data: {
+          company_id: companyId,
+          service_type: "booking_engine",
+          updated_at: new Date(),
+        },
+        include: { companies: { select: { name: true } } },
+      });
+      return updated;
+    }
+    const row = await this.prisma.platform_custom_domains.create({
+      data: {
+        hostname,
+        company_id: companyId,
+        service_type: "booking_engine",
+        status: "pending_verification",
+        verification_token: generateDomainVerificationToken(),
+        infra_cname_target: hints.cnameTarget,
+        infra_a_target: hints.aTarget,
+      },
+      include: { companies: { select: { name: true } } },
+    });
+    return row;
+  }
+
+  async verifyBookingEngineForCompany(user: SessionUser, companyId: string) {
+    if (!canAccessCompany(user.isSuperAdmin, user.companyIds ?? [], companyId)) {
+      throw new ForbiddenException("Sem permissão para esta empresa");
+    }
+    const company = await this.prisma.companies.findUnique({
+      where: { id: companyId },
+      select: { id: true, name: true, booking_engine_custom_domain: true, booking_engine_enabled: true },
+    });
+    if (!company?.booking_engine_custom_domain?.trim()) {
+      throw new BadRequestException("Empresa sem domínio personalizado do motor");
+    }
+    const hostname = normalizeHostname(company.booking_engine_custom_domain);
+    if (!hostname) throw new BadRequestException("Domínio inválido");
+
+    const settings = await this.prisma.site_settings.findUnique({
+      where: { id: SITE_SETTINGS_ID },
+      select: { pms_base_url: true },
+    });
+    if (this.collectPmsHostnames(settings?.pms_base_url).has(hostname)) {
+      throw new BadRequestException("Este hostname é do painel PMS, não do motor de reservas");
+    }
+
+    const domainRow = await this.upsertBookingEngineDomainRow(companyId, hostname);
+    const hints = this.infrastructureHints();
+    if (!domainRow) {
+      const checks = await this.runDnsChecks(hostname, generateDomainVerificationToken(), hints);
+      const traefik = this.buildBookingEngineTraefikEnvBlock([hostname]);
+      return {
+        company_id: companyId,
+        hostname,
+        checks,
+        domain: null,
+        traefik,
+        ssl_issue: checks.dnsPointsOk && !checks.sslOk ? this.bookingEngineSslHint() : null,
+      };
+    }
+
+    const checks = await this.runDnsChecks(hostname, domainRow.verification_token, hints);
+    const allHosts = await this.listBookingEngineHostnames();
+    if (!allHosts.includes(hostname)) allHosts.push(hostname);
+    const traefik = this.buildBookingEngineTraefikEnvBlock(allHosts);
+
+    let status: PlatformDomainStatus = domainRow.status as PlatformDomainStatus;
+    let ownershipVerified = domainRow.ownership_verified_at;
+    let dnsStatus = checks.dnsPointsOk ? "ok" : checks.txtOk ? "partial" : "failed";
+    let sslStatus = checks.sslOk ? "active" : "pending";
+    let lastError: string | null = null;
+
+    if (checks.txtOk) ownershipVerified = ownershipVerified ?? new Date();
+
+    if (checks.dnsPointsOk && checks.sslOk) {
+      status = "active";
+      ownershipVerified = ownershipVerified ?? new Date();
+      dnsStatus = "ok";
+      sslStatus = "active";
+    } else if (checks.dnsPointsOk && !checks.sslOk) {
+      status = "pending_dns";
+      lastError = this.bookingEngineSslHint();
+    } else if (!checks.dnsPointsOk) {
+      status = "pending_dns";
+      lastError = "DNS ainda não aponta para a infraestrutura do PMS (CNAME)";
+    }
+
+    if (checks.dnsPointsOk && checks.sslOk) {
+      status = "active";
+      lastError = null;
+    }
+
+    const updated = await this.prisma.platform_custom_domains.update({
+      where: { id: domainRow.id },
+      data: {
+        status,
+        ownership_verified_at: ownershipVerified,
+        dns_last_checked_at: new Date(),
+        dns_status: dnsStatus,
+        ssl_status: sslStatus,
+        last_error: lastError,
+      },
+      include: { companies: { select: { id: true, name: true } } },
+    });
+
+    return {
+      company_id: companyId,
+      hostname,
+      checks,
+      domain: this.serializeDomain(updated, hints),
+      traefik,
+      ssl_issue: checks.dnsPointsOk && !checks.sslOk ? this.bookingEngineSslHint() : null,
+    };
+  }
+
+  private bookingEngineSslHint(): string {
+    return (
+      "Certificado inválido (Traefik DEFAULT CERT / ERR_CERT_AUTHORITY_INVALID). " +
+      "No Dokploy: defina BOOKING_ENGINE_TRAEFIK_RULE com Host(`seu-dominio`), redeploy do frontend e aguarde o Let's Encrypt."
+    );
+  }
+
+  async ensureBookingEngineForCompany(user: SessionUser, companyId: string) {
+    if (!canAccessCompany(user.isSuperAdmin, user.companyIds ?? [], companyId)) {
+      throw new ForbiddenException("Sem permissão para esta empresa");
+    }
+    const company = await this.prisma.companies.findUnique({
+      where: { id: companyId },
+      select: { booking_engine_custom_domain: true },
+    });
+    const hostname = normalizeHostname(company?.booking_engine_custom_domain ?? "");
+    if (!hostname) return { ok: true, skipped: true as const };
+    await this.upsertBookingEngineDomainRow(companyId, hostname);
+    const traefik = this.buildBookingEngineTraefikEnvBlock(
+      await this.listBookingEngineHostnames(),
+    );
+    return { ok: true, hostname, traefik };
   }
 }

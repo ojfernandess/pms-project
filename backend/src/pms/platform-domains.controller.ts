@@ -40,6 +40,33 @@ export class PlatformDomainsController {
     return this.domains.importLegacyFromSiteSettings(user);
   }
 
+  @Get("booking-engine/traefik-env")
+  bookingEngineTraefikEnv(@CurrentUser() user: SessionUser) {
+    return this.domains.getBookingEngineTraefikEnv(user);
+  }
+
+  @Post("booking-engine/ensure")
+  ensureBookingEngine(
+    @CurrentUser() user: SessionUser,
+    @Body() body: { company_id?: string },
+  ) {
+    if (!body.company_id) {
+      return { ok: false, error: "company_id obrigatório" };
+    }
+    return this.domains.ensureBookingEngineForCompany(user, body.company_id);
+  }
+
+  @Post("booking-engine/verify")
+  verifyBookingEngine(
+    @CurrentUser() user: SessionUser,
+    @Body() body: { company_id?: string },
+  ) {
+    if (!body.company_id) {
+      return { ok: false, error: "company_id obrigatório" };
+    }
+    return this.domains.verifyBookingEngineForCompany(user, body.company_id);
+  }
+
   @Post(":id/verify")
   verify(@CurrentUser() user: SessionUser, @Param("id") id: string) {
     return this.domains.verify(user, id);
