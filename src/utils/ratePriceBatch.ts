@@ -33,16 +33,17 @@ interface PriceResult {
  * Faz requisições em batch com limite de concorrência e retry para erros de rede
  * @param requests Array de requisições
  * @param supabase Cliente Supabase
- * @param maxConcurrent Número máximo de requisições simultâneas (padrão: 2, evita ERR_FAILED)
+ * @param maxConcurrent Número máximo de requisições simultâneas (padrão: 5, alinhado à camada de resiliência)
  * @param abortSignal Signal para cancelar requisições
+ * @param interBatchDelayMs Pausa entre lotes (0 = confiar no rate limit da resiliência; checkout pode usar 400)
  * @returns Array de resultados na mesma ordem das requisições
  */
 export async function batchCalculateRatePrice(
   requests: PriceRequest[],
   supabase: any,
-  /** 1 = menos pressão no PostgREST (recomendado com muitas noites/planos) */
-  maxConcurrent: number = 1,
-  abortSignal?: AbortSignal
+  maxConcurrent: number = 5,
+  abortSignal?: AbortSignal,
+  interBatchDelayMs: number = 0
 ): Promise<PriceResult[]> {
   if (requests.length === 0) return [];
 
@@ -146,9 +147,8 @@ export async function batchCalculateRatePrice(
       results[i + batchIndex] = result;
     });
 
-    // Delay entre lotes para evitar 502/ERR_FAILED na API (muitas RPCs seguidas)
-    if (i + maxConcurrent < requests.length) {
-      await new Promise((resolve) => setTimeout(resolve, 400));
+    if (interBatchDelayMs > 0 && i + maxConcurrent < requests.length) {
+      await new Promise((resolve) => setTimeout(resolve, interBatchDelayMs));
     }
   }
 

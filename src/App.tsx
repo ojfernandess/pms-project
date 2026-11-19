@@ -179,6 +179,15 @@ const AppRoutesWithMeta = () => {
   if (!hostResolutionError && resolution?.mode === "booking_engine" && resolution.active) {
     return (
       <Routes>
+        {/* Checkout e páginas públicas ligadas ao motor (mesmo host personalizado) */}
+        <Route path="/reservar/:establishmentSlug" element={<PublicReservation />} />
+        <Route path="/categoria/:categoryId" element={<CategoryDetailPage />} />
+        <Route path="/reserva/:reservationId" element={<ReservationDetailPage />} />
+        <Route path="/politica/:policyId" element={<PublicCancellationPolicy />} />
+        <Route path="/payment/checkin/:token" element={<CheckinChargePaymentPage />} />
+        <Route path="/payment/:paymentIntentId" element={<Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p>Carregando...</p></div>}><PaymentPage /></Suspense>} />
+        <Route path="/payment/success/:paymentIntentId" element={<PaymentSuccess />} />
+        <Route path="/payment/return" element={<PaymentSuccess />} />
         <Route path="/*" element={<BookingEnginePage />} />
       </Routes>
     );

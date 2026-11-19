@@ -1852,7 +1852,8 @@ const PublicReservation = () => {
           priceRequests,
           supabase,
           1, // maxConcurrent: reduz 502 no PostgREST com muitas RPCs
-          abortController.signal
+          abortController.signal,
+          400
         );
 
         if (abortController.signal.aborted) {
@@ -2014,7 +2015,8 @@ const PublicReservation = () => {
               priceRequests,
               supabase,
               1, // maxConcurrent: reduz 502 no PostgREST com muitas RPCs
-              abortController.signal
+              abortController.signal,
+              400
             );
 
             if (abortController.signal.aborted) {

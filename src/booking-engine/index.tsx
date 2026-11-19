@@ -2041,21 +2041,17 @@ const BookingEnginePage = () => {
           return;
         }
 
-        // Buscar hotel_settings para cada estabelecimento único
         const establishmentIds = [...new Set(roomCategories.map((cat: any) => cat.establishment_id))];
         const hotelSettingsMap: Record<string, any> = {};
-        
-        for (const estId of establishmentIds) {
-          if (abortController.signal.aborted) break;
-          
-          const { data: settingsData } = await supabase
+
+        if (establishmentIds.length > 0) {
+          const { data: settingsRows } = await supabase
             .from("hotel_settings" as any)
             .select("*")
-            .eq("establishment_id", estId)
-            .maybeSingle();
-          if (settingsData) {
-            hotelSettingsMap[estId] = settingsData;
-          }
+            .in("establishment_id", establishmentIds);
+          (settingsRows || []).forEach((row: any) => {
+            if (row?.establishment_id) hotelSettingsMap[row.establishment_id] = row;
+          });
         }
 
         if (abortController.signal.aborted) {
@@ -2063,8 +2059,32 @@ const BookingEnginePage = () => {
           return;
         }
 
-        // Verificar rate_sales_status (tarifa fechada) antes de calcular preços
         const { checkPeriodAvailabilityForSale } = await import("@/lib/ariAvailabilityUtils");
+
+        const closedCategories = new Set<string>();
+        if (checkin && checkout && checkin < checkout) {
+          const [cy, cm, cd] = checkin.split("-").map(Number);
+          const [coy, com, cod] = checkout.split("-").map(Number);
+          const checkinDate = new Date(cy, cm - 1, cd);
+          const checkoutDate = new Date(coy, com - 1, cod);
+          const PERIOD_CHECK_CONCURRENCY = 6;
+          for (let c = 0; c < roomCategories.length; c += PERIOD_CHECK_CONCURRENCY) {
+            if (abortController.signal.aborted) break;
+            const chunk = roomCategories.slice(c, c + PERIOD_CHECK_CONCURRENCY);
+            await Promise.all(
+              chunk.map(async (cat: any) => {
+                const periodCheck = await checkPeriodAvailabilityForSale(
+                  cat.establishment_id,
+                  cat.id,
+                  checkinDate,
+                  checkoutDate,
+                  "booking_engine"
+                );
+                if (!periodCheck.available) closedCategories.add(cat.id);
+              })
+            );
+          }
+        }
 
         // Preparar requisições (mesma lógica do mapa de tarifas e grid ARI: calculate_rate_price)
         // Usa planos de pricingPlansByCategory quando disponível, senão plan1/plan2 de hotel_settings
@@ -2082,22 +2102,10 @@ const BookingEnginePage = () => {
         for (const cat of roomCategories) {
           const establishmentId = cat.establishment_id;
 
-          // Se há datas selecionadas, verificar se período está aberto para venda (rate_sales_status)
-          if (checkin && checkout && checkin < checkout) {
-            const [cy, cm, cd] = checkin.split("-").map(Number);
-            const [coy, com, cod] = checkout.split("-").map(Number);
-            const periodCheck = await checkPeriodAvailabilityForSale(
-              establishmentId,
-              cat.id,
-              new Date(cy, cm - 1, cd),
-              new Date(coy, com - 1, cod),
-              "booking_engine"
-            );
-            if (!periodCheck.available) {
-              pricesPlan1[cat.id] = null;
-              pricesPlan2[cat.id] = null;
-              continue; // Período fechado - não calcular preço
-            }
+          if (closedCategories.has(cat.id)) {
+            pricesPlan1[cat.id] = null;
+            pricesPlan2[cat.id] = null;
+            continue;
           }
 
           const settings = hotelSettingsMap[establishmentId];
@@ -2161,8 +2169,9 @@ const BookingEnginePage = () => {
         const results = await batchCalculateRatePrice(
           priceRequests,
           supabase,
-          1, // maxConcurrent: reduz 502/timeout no PostgREST ao calcular muitas noites
-          abortController.signal
+          5,
+          abortController.signal,
+          0
         );
 
         if (abortController.signal.aborted) {
@@ -3511,19 +3520,21 @@ const BookingEnginePage = () => {
               <Button
                 className={`w-full h-14 ${theme.primaryButton} ${theme.primaryButtonHover} rounded-xl font-semibold text-base flex items-center justify-center gap-2 mb-4`}
                 onClick={() => {
-                  // selectedRoomId é o categoryId (id da categoria)
-                  // Se há uma categoria selecionada, usar seu ID
-                  if (selectedRoomId) {
-                    handleSubmit(selectedRoomId);
-                  } else if (selectedRoom?.id) {
-                    // Fallback: usar o ID do selectedRoom se existir
-                    handleSubmit(selectedRoom.id);
-                  } else {
-                    // Se não há categoria selecionada, não fazer nada
-                    handleSubmit();
-                  }
+                  const categoryId = selectedRoom?.categoryId || selectedRoomId;
+                  if (!categoryId) return;
+                  const planUuid =
+                    selectedPlan?.planId ||
+                    (selectedPlanId && selectedPlan ? selectedPlan.planId : null) ||
+                    undefined;
+                  handleSubmit(categoryId, planUuid || undefined);
                 }}
-                disabled={!checkin || !checkout || nights <= 0 || !selectedRoomId}
+                disabled={
+                  !checkin ||
+                  !checkout ||
+                  nights <= 0 ||
+                  !selectedRoomId ||
+                  (!!selectedRoom?.plans?.length && selectedRoom.plans.length > 0 && !selectedPlanId)
+                }
               >
                 <Search className="w-5 h-5" />
                 Continuar para reserva

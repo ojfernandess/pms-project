@@ -66,11 +66,23 @@ export const checkPeriodAvailabilityForSale = async (
 
   const blockedDates: Date[] = [];
 
-  // Verificar cada data
-  for (const date of dates) {
-    const check = await checkDateAvailabilityForSale(establishmentId, categoryId, date, channel);
-    if (!check.available) {
-      blockedDates.push(date);
+  // Verificar datas em paralelo (com limite) — evita N round-trips sequenciais no motor
+  const DATE_CHECK_CONCURRENCY = 8;
+  for (let i = 0; i < dates.length; i += DATE_CHECK_CONCURRENCY) {
+    const chunk = dates.slice(i, i + DATE_CHECK_CONCURRENCY);
+    const chunkResults = await Promise.all(
+      chunk.map(async (date) => {
+        const check = await checkDateAvailabilityForSale(
+          establishmentId,
+          categoryId,
+          date,
+          channel
+        );
+        return { date, available: check.available };
+      })
+    );
+    for (const { date, available } of chunkResults) {
+      if (!available) blockedDates.push(date);
     }
   }
 
