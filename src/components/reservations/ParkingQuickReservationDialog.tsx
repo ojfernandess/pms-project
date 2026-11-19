@@ -79,7 +79,9 @@ export function ParkingQuickReservationDialog({ open, onOpenChange, initialData,
   });
 
   const buildingId = (category as { building_id?: string | null } | undefined)?.building_id ?? null;
-  const { data: parkingConfig, isLoading: loadingConfig } = useParkingFeeConfig(buildingId);
+  const { data: parkingConfig, isLoading: loadingConfig } = useParkingFeeConfig(buildingId, {
+    strictBuildingScope: Boolean(buildingId),
+  });
   const parkingActive = isParkingFeeConfigured(parkingConfig);
 
   const nights = useMemo(() => {
@@ -104,6 +106,7 @@ export function ParkingQuickReservationDialog({ open, onOpenChange, initialData,
         checkinDate,
         checkoutDate,
         search: lodgingSearch,
+        lodgingBuildingScope: buildingId,
       }),
   });
 
@@ -132,8 +135,20 @@ export function ParkingQuickReservationDialog({ open, onOpenChange, initialData,
       toast.error("Selecione a reserva de hospedagem para vincular");
       return;
     }
-    if (!parkingActive || !parkingConfig?.serviceFeeId || !parkingConfig.parkingCategoryId) {
-      toast.error("Configure o estacionamento em Serviços do estabelecimento");
+    if (!parkingActive || !parkingConfig?.serviceFeeId) {
+      toast.error(
+        buildingId
+          ? "Configure o estacionamento deste prédio em Unidades → Serviços do prédio"
+          : "Configure o estacionamento em Serviços do estabelecimento",
+      );
+      return;
+    }
+    const parkingCategoryId = initialData.category_id;
+    if (
+      parkingConfig.parkingCategoryId &&
+      parkingConfig.parkingCategoryId !== parkingCategoryId
+    ) {
+      toast.error("Esta vaga não pertence ao mapa de estacionamento configurado para este escopo");
       return;
     }
     setSaving(true);
@@ -141,7 +156,7 @@ export function ParkingQuickReservationDialog({ open, onOpenChange, initialData,
       await createParkingSpotReservationOnMap({
         lodgingReservation: selectedLodging,
         establishmentId,
-        parkingCategoryId: parkingConfig.parkingCategoryId,
+        parkingCategoryId,
         parkingRoomId: initialData.room_id,
       });
 

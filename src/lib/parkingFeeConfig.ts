@@ -75,12 +75,16 @@ async function findLinkedServiceFeeId(establishmentId: string, sourceServiceId: 
 const ESTABLISHMENT_SERVICE_SELECT =
   "id, establishment_id, building_id, default_amount, is_active, parking_billing_mode, parking_spot_count, parking_category_id";
 
-/** Resolve estacionamento: prédio da categoria tem prioridade; senão usa o do hotel/estabelecimento. */
+/**
+ * Resolve estacionamento: prédio da categoria tem prioridade; senão usa o do hotel/estabelecimento.
+ * `strictBuildingScope`: no mapa do prédio, não faz fallback ao estacionamento do estabelecimento.
+ */
 export async function fetchParkingFeeConfig(params: {
   establishmentId: string;
   buildingId?: string | null;
+  strictBuildingScope?: boolean;
 }): Promise<ParkingFeeConfig | null> {
-  const { establishmentId, buildingId } = params;
+  const { establishmentId, buildingId, strictBuildingScope } = params;
 
   if (buildingId) {
     const { data: buildingRow } = await supabase
@@ -97,6 +101,9 @@ export async function fetchParkingFeeConfig(params: {
     ) {
       const serviceFeeId = await findLinkedServiceFeeId(establishmentId, buildingRow.id);
       return mapRow(buildingRow, serviceFeeId);
+    }
+    if (strictBuildingScope) {
+      return null;
     }
   }
 
@@ -124,7 +131,16 @@ export async function syncParkingSpots(params: {
   if (count <= 0) return params.existingCategoryId ?? null;
 
   let categoryId = params.existingCategoryId ?? null;
-  const categoryName = buildingId ? "Estacionamento (prédio)" : "Estacionamento";
+  let categoryName = "Estacionamento";
+  if (buildingId) {
+    const { data: bld } = await supabase
+      .from("buildings")
+      .select("name")
+      .eq("id", buildingId)
+      .maybeSingle();
+    const bName = String(bld?.name ?? "").trim();
+    categoryName = bName ? `Estacionamento — ${bName}` : "Estacionamento (prédio)";
+  }
 
   if (categoryId) {
     const { error } = await supabase

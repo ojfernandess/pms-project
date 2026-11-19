@@ -545,12 +545,7 @@ export const ReservationCalendarMap = ({
             a.room_number.localeCompare(b.room_number, undefined, { numeric: true })
           )
       }))
-        .sort((a: any, b: any) => {
-          const aParking = a.category_kind === "parking" ? 1 : 0;
-          const bParking = b.category_kind === "parking" ? 1 : 0;
-          if (aParking !== bParking) return aParking - bParking;
-          return String(a.name).localeCompare(String(b.name));
-        });
+        .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
 
       console.log("✅ Categorias processadas:", categoriesWithRooms);
       console.log("📊 Total de categorias:", categoriesWithRooms.length);
@@ -3342,7 +3337,46 @@ export const ReservationCalendarMap = ({
               });
               
               const result: JSX.Element[] = [];
-              
+
+              const splitLodgingAndParking = (cats: any[]) => ({
+                lodging: cats.filter((c) => c.category_kind !== "parking"),
+                parking: cats.filter((c) => c.category_kind === "parking"),
+              });
+
+              const renderParkingSectionHeader = (title: string, key: string) => (
+                <div
+                  key={key}
+                  className="flex border-b border-slate-300 bg-slate-600/95 overflow-visible"
+                  style={{ minHeight: "30px", width: "100%" }}
+                >
+                  <div className="w-32 sm:w-48 md:w-56 flex-shrink-0 px-2 py-1 border-r border-slate-500 bg-slate-600/95 flex items-center gap-1.5">
+                    <span className="font-semibold text-[10px] sm:text-[11px] uppercase text-slate-50 tracking-wide truncate">
+                      🅿️ {title}
+                    </span>
+                  </div>
+                  <div
+                    className="flex-1 overflow-visible"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: `repeat(${visibleDates.length}, 1fr)`,
+                      width: "100%",
+                      minWidth: `${visibleDates.length * (viewDays <= 14 ? 90 : viewDays <= 30 ? 70 : viewDays <= 60 ? 50 : 40)}px`,
+                    }}
+                  >
+                    {visibleDates.map((date) => (
+                      <div
+                        key={date.toISOString()}
+                        className="border-r border-slate-500/50 last:border-r-0 bg-slate-600/80"
+                        style={{
+                          minWidth: viewDays <= 14 ? "90px" : viewDays <= 30 ? "70px" : viewDays <= 60 ? "50px" : "40px",
+                          minHeight: "30px",
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+
               // Função para renderizar uma categoria
               const renderCategory = (category: any) => {
                 const isExpanded = expandedCategories.has(category.id);
@@ -4135,11 +4169,19 @@ export const ReservationCalendarMap = ({
               );
               };
               
-              // Renderizar categorias sem prédio primeiro
               const categoriesWithoutBuilding = categoriesByBuilding.get(null) || [];
-              categoriesWithoutBuilding.forEach((category: any) => {
+              const noBuildingSplit = splitLodgingAndParking(categoriesWithoutBuilding);
+              noBuildingSplit.lodging.forEach((category: any) => {
                 result.push(renderCategory(category));
               });
+              if (noBuildingSplit.parking.length > 0) {
+                result.push(
+                  renderParkingSectionHeader("Estacionamento — estabelecimento", "parking-section-est"),
+                );
+                noBuildingSplit.parking.forEach((category: any) => {
+                  result.push(renderCategory(category));
+                });
+              }
               
               // Renderizar prédios com suas categorias
               Array.from(categoriesByBuilding.entries())
@@ -4192,10 +4234,23 @@ export const ReservationCalendarMap = ({
                         </div>
                       </div>
                       
-                      {/* Categorias do prédio */}
-                      {isBuildingExpanded && buildingCategories.map((category: any) => {
-                        return renderCategory(category);
-                      })}
+                      {isBuildingExpanded && (() => {
+                        const { lodging, parking } = splitLodgingAndParking(buildingCategories);
+                        return (
+                          <>
+                            {lodging.map((category: any) => renderCategory(category))}
+                            {parking.length > 0 && (
+                              <>
+                                {renderParkingSectionHeader(
+                                  `Estacionamento — ${buildingName}`,
+                                  `parking-section-${buildingId}`,
+                                )}
+                                {parking.map((category: any) => renderCategory(category))}
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   );
                 });

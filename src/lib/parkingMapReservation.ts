@@ -25,6 +25,8 @@ export async function lodgingReservationsForParkingLink(params: {
   checkinDate: string;
   checkoutDate: string;
   search?: string;
+  /** Escopo do mapa: só hospedagens do mesmo prédio ou do hotel (sem prédio). */
+  lodgingBuildingScope?: string | null;
 }): Promise<LodgingReservationPick[]> {
   const { data, error } = await supabase
     .from("reservations")
@@ -42,16 +44,24 @@ export async function lodgingReservationsForParkingLink(params: {
 
   const rows = data ?? [];
   const categoryIds = [...new Set(rows.map((r) => r.category_id).filter(Boolean))];
-  let parkingCategoryIds = new Set<string>();
+  const categoryMeta = new Map<string, { category_kind?: string; building_id?: string | null }>();
   if (categoryIds.length > 0) {
     const { data: cats } = await supabase
       .from("room_categories")
-      .select("id, category_kind")
+      .select("id, category_kind, building_id")
       .in("id", categoryIds);
-    parkingCategoryIds = new Set(
-      (cats ?? []).filter((c) => c.category_kind === "parking").map((c) => c.id),
-    );
+    for (const c of cats ?? []) {
+      categoryMeta.set(c.id, {
+        category_kind: c.category_kind,
+        building_id: c.building_id ?? null,
+      });
+    }
   }
+  const parkingCategoryIds = new Set(
+    [...categoryMeta.entries()]
+      .filter(([, meta]) => meta.category_kind === "parking")
+      .map(([id]) => id),
+  );
 
   const q = String(params.search ?? "")
     .trim()
@@ -61,6 +71,16 @@ export async function lodgingReservationsForParkingLink(params: {
 
   return rows.filter((row) => {
     if (row.category_id && parkingCategoryIds.has(row.category_id)) return false;
+
+    if (params.lodgingBuildingScope !== undefined && row.category_id) {
+      const meta = categoryMeta.get(row.category_id);
+      const rowBuilding = meta?.building_id ?? null;
+      if (params.lodgingBuildingScope === null) {
+        if (rowBuilding !== null) return false;
+      } else if (rowBuilding !== params.lodgingBuildingScope) {
+        return false;
+      }
+    }
 
     const rowCin = String(row.checkin_date).split("T")[0];
     const rowCout = String(row.checkout_date).split("T")[0];
