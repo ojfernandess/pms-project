@@ -4,7 +4,6 @@ DECLARE
   t text;
   tables_select text[] := ARRAY[
     'reservations',
-    'clients',
     'rooms',
     'room_categories',
     'buildings',
@@ -57,6 +56,14 @@ BEGIN
 
   IF to_regclass('public.guest_accounts') IS NOT NULL THEN
     GRANT SELECT, INSERT, UPDATE ON TABLE public.guest_accounts TO anon;
+  END IF;
+
+  IF to_regclass('public.clients') IS NOT NULL THEN
+    GRANT SELECT, INSERT ON TABLE public.clients TO anon;
+  END IF;
+
+  IF to_regclass('public.quotes') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON TABLE public.quotes TO anon;
   END IF;
 
   FOR fn IN
