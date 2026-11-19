@@ -3343,11 +3343,6 @@ serve(async (req) => {
               // Não lançar erro aqui para não quebrar o processamento do webhook
             }
           }
-          
-          // Log adicional se quoteId foi encontrado mas não processado
-          if (quoteId && !payment?.reservation_id) {
-            console.warn(`[Webhook] ⚠️ Quote ID encontrado (${quoteId}) mas não foi processado. Payment type: ${payment?.payment_type}, Reservation ID: ${payment?.reservation_id}`);
-          }
 
           processed = true;
           break;

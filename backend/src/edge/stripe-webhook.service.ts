@@ -374,6 +374,11 @@ export class StripeWebhookService {
     if (quoteId) {
       try {
         await this.processQuotePayment(quoteId, payment, paymentIntent);
+        if (payment.payment_type === "quote_payment" && !payment.reservation_id) {
+          console.log(
+            `[Webhook] Orçamento ${quoteId} processado (quote_payment; reservation_id vinculado via notas do quote ou após conversão).`,
+          );
+        }
       } catch (quoteError) {
         console.error(`[Webhook] Erro ao processar pagamento de orçamento ${quoteId}:`, this.errorText(quoteError));
         try {
@@ -385,12 +390,6 @@ export class StripeWebhookService {
           console.error("[Webhook] Erro ao atualizar status do quote após erro:", this.errorText(updateError));
         }
       }
-    }
-
-    if (quoteId && !payment.reservation_id) {
-      console.warn(
-        `[Webhook] Quote ID encontrado (${quoteId}) mas o pagamento não tinha reservation_id no início. Payment type: ${payment.payment_type}`,
-      );
     }
   }
 
