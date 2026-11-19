@@ -1082,8 +1082,12 @@ const BuildingServicesManager = ({
   saveServices: (services: Array<{ id?: string; name: string; description?: string; is_active: boolean }>) => Promise<any>;
   isSaving: boolean;
 }) => {
-  const { data: cleaningConfig, isLoading: isLoadingCleaning } = useCleaningFeeConfig(buildingId);
-  const { data: parkingConfig, isLoading: isLoadingParking } = useParkingFeeConfig(buildingId);
+  const { data: cleaningConfig, isLoading: isLoadingCleaning } = useCleaningFeeConfig(buildingId, {
+    strictBuildingScope: true,
+  });
+  const { data: parkingConfig, isLoading: isLoadingParking } = useParkingFeeConfig(buildingId, {
+    strictBuildingScope: true,
+  });
   const [localServices, setLocalServices] = useState<Array<{ id?: string; name: string; description: string; is_active: boolean }>>([]);
   const [newServiceName, setNewServiceName] = useState("");
   const [newServiceDescription, setNewServiceDescription] = useState("");

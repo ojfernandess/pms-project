@@ -8,6 +8,7 @@ import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { upsertCleaningFeeConfig, type CleaningFeeConfig } from "@/lib/cleaningFeeConfig";
+import { existingServiceRowIdForScope } from "@/lib/serviceFeeScope";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@/lib/reservationUtils";
 
@@ -60,7 +61,7 @@ export function CleaningFeeSettingCard({
         buildingId: buildingId ?? null,
         amount: isActive ? parsed : 0,
         isActive,
-        existingServiceRowId: initialConfig?.id ?? null,
+        existingServiceRowId: existingServiceRowIdForScope(initialConfig, buildingId ?? null),
       });
       await queryClient.invalidateQueries({ queryKey: ["cleaning_fee_config"] });
       await queryClient.invalidateQueries({ queryKey: ["service_fees"] });

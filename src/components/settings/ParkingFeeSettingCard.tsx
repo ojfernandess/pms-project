@@ -12,6 +12,7 @@ import {
   type ParkingBillingMode,
   type ParkingFeeConfig,
 } from "@/lib/parkingFeeConfig";
+import { existingServiceRowIdForScope } from "@/lib/serviceFeeScope";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@/lib/reservationUtils";
 import {
@@ -89,7 +90,7 @@ export function ParkingFeeSettingCard({
         isActive,
         billingMode,
         spotCount: isActive ? spots : 0,
-        existingServiceRowId: initialConfig?.id ?? null,
+        existingServiceRowId: existingServiceRowIdForScope(initialConfig, buildingId ?? null),
       });
       await queryClient.invalidateQueries({ queryKey: ["parking_fee_config"] });
       await queryClient.invalidateQueries({ queryKey: ["service_fees"] });

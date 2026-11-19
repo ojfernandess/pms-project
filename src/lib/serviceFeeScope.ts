@@ -11,6 +11,24 @@ export type ServiceFeeRow = {
   building_id?: string | null;
 };
 
+/** Mesmo escopo: estabelecimento (buildingId null) vs prédio específico. */
+export function serviceFeeScopeMatches(
+  configBuildingId: string | null | undefined,
+  targetBuildingId: string | null | undefined,
+): boolean {
+  return (configBuildingId ?? null) === (targetBuildingId ?? null);
+}
+
+/** Não reutiliza id de config de outro escopo (ex. estabelecimento ao salvar prédio). */
+export function existingServiceRowIdForScope(
+  config: { id?: string; buildingId?: string | null } | null | undefined,
+  targetBuildingId?: string | null,
+): string | null {
+  if (!config?.id) return null;
+  if (!serviceFeeScopeMatches(config.buildingId, targetBuildingId)) return null;
+  return config.id;
+}
+
 /** Taxas automáticas (limpeza/estacionamento): só a do hotel ou a do prédio da categoria da reserva. */
 export function filterServiceFeesForReservation(
   fees: ServiceFeeRow[],

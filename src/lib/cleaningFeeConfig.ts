@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { serviceFeeScopeMatches } from "@/lib/serviceFeeScope";
 
 export const CLEANING_FEE_KIND = "cleaning_fee";
 export const CLEANING_FEE_NAME = "Taxa de limpeza";
@@ -20,8 +21,9 @@ export function isCleaningFeeConfigured(config: CleaningFeeConfig | null | undef
 export async function fetchCleaningFeeConfig(params: {
   establishmentId: string;
   buildingId?: string | null;
+  strictBuildingScope?: boolean;
 }): Promise<CleaningFeeConfig | null> {
-  const { establishmentId, buildingId } = params;
+  const { establishmentId, buildingId, strictBuildingScope } = params;
 
   if (buildingId) {
     const { data: buildingRow } = await supabase
@@ -31,13 +33,12 @@ export async function fetchCleaningFeeConfig(params: {
       .eq("service_kind", CLEANING_FEE_KIND)
       .maybeSingle();
 
-    if (
-      buildingRow &&
-      Boolean(buildingRow.is_active) &&
-      Number(buildingRow.default_amount || 0) > 0
-    ) {
+    if (buildingRow && Boolean(buildingRow.is_active) && Number(buildingRow.default_amount || 0) > 0) {
       const serviceFeeId = await findLinkedServiceFeeId(establishmentId, buildingRow.id);
       return mapRow(buildingRow, serviceFeeId);
+    }
+    if (strictBuildingScope) {
+      return null;
     }
   }
 
@@ -84,6 +85,41 @@ async function findLinkedServiceFeeId(establishmentId: string, sourceServiceId: 
   return data?.id ?? null;
 }
 
+async function resolveCleaningEstablishmentServiceRowId(params: {
+  establishmentId: string;
+  buildingId?: string | null;
+  existingServiceRowId?: string | null;
+}): Promise<string | null> {
+  const expectedBuilding = params.buildingId ?? null;
+
+  if (params.existingServiceRowId) {
+    const { data: row } = await supabase
+      .from("establishment_services")
+      .select("id, building_id, establishment_id, service_kind")
+      .eq("id", params.existingServiceRowId)
+      .maybeSingle();
+    if (
+      row?.service_kind === CLEANING_FEE_KIND &&
+      serviceFeeScopeMatches(row.building_id, expectedBuilding) &&
+      (expectedBuilding !== null || row.establishment_id === params.establishmentId)
+    ) {
+      return row.id;
+    }
+  }
+
+  let lookup = supabase
+    .from("establishment_services")
+    .select("id")
+    .eq("service_kind", CLEANING_FEE_KIND);
+  if (expectedBuilding) {
+    lookup = lookup.eq("building_id", expectedBuilding);
+  } else {
+    lookup = lookup.eq("establishment_id", params.establishmentId).is("building_id", null);
+  }
+  const { data: found } = await lookup.maybeSingle();
+  return found?.id ?? null;
+}
+
 /** Persiste configuração e espelha em service_fees (Financeiro → Taxas). */
 export async function upsertCleaningFeeConfig(params: {
   establishmentId: string;
@@ -103,7 +139,11 @@ export async function upsertCleaningFeeConfig(params: {
     building_id: buildingId ?? null,
   };
 
-  let serviceRowId = existingServiceRowId;
+  let serviceRowId = await resolveCleaningEstablishmentServiceRowId({
+    establishmentId,
+    buildingId: buildingId ?? null,
+    existingServiceRowId,
+  });
 
   if (serviceRowId) {
     const { error } = await supabase.from("establishment_services").update(payload).eq("id", serviceRowId);

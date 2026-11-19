@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { validateRoomAvailability } from "@/lib/reservationUtils";
+import { serviceFeeScopeMatches } from "@/lib/serviceFeeScope";
 
 export const PARKING_FEE_KIND = "parking_fee";
 export const PARKING_FEE_NAME = "Estacionamento";
@@ -131,6 +132,22 @@ export async function syncParkingSpots(params: {
   if (count <= 0) return params.existingCategoryId ?? null;
 
   let categoryId = params.existingCategoryId ?? null;
+  if (categoryId) {
+    const { data: existingCat } = await supabase
+      .from("room_categories")
+      .select("id, building_id, category_kind")
+      .eq("id", categoryId)
+      .maybeSingle();
+    const expectedBuilding = buildingId ?? null;
+    const actualBuilding = existingCat?.building_id ?? null;
+    if (
+      !existingCat ||
+      existingCat.category_kind !== PARKING_CATEGORY_KIND ||
+      actualBuilding !== expectedBuilding
+    ) {
+      categoryId = null;
+    }
+  }
   let categoryName = "Estacionamento";
   if (buildingId) {
     const { data: bld } = await supabase
@@ -222,6 +239,41 @@ export async function syncParkingSpots(params: {
   return categoryId;
 }
 
+async function resolveParkingEstablishmentServiceRowId(params: {
+  establishmentId: string;
+  buildingId?: string | null;
+  existingServiceRowId?: string | null;
+}): Promise<string | null> {
+  const expectedBuilding = params.buildingId ?? null;
+
+  if (params.existingServiceRowId) {
+    const { data: row } = await supabase
+      .from("establishment_services")
+      .select("id, building_id, establishment_id, service_kind")
+      .eq("id", params.existingServiceRowId)
+      .maybeSingle();
+    if (
+      row?.service_kind === PARKING_FEE_KIND &&
+      serviceFeeScopeMatches(row.building_id, expectedBuilding) &&
+      (expectedBuilding !== null || row.establishment_id === params.establishmentId)
+    ) {
+      return row.id;
+    }
+  }
+
+  let lookup = supabase
+    .from("establishment_services")
+    .select("id")
+    .eq("service_kind", PARKING_FEE_KIND);
+  if (expectedBuilding) {
+    lookup = lookup.eq("building_id", expectedBuilding);
+  } else {
+    lookup = lookup.eq("establishment_id", params.establishmentId).is("building_id", null);
+  }
+  const { data: found } = await lookup.maybeSingle();
+  return found?.id ?? null;
+}
+
 export async function upsertParkingFeeConfig(params: {
   establishmentId: string;
   buildingId?: string | null;
@@ -237,23 +289,28 @@ export async function upsertParkingFeeConfig(params: {
       ? "Cobrança por diária da reserva"
       : "Valor único para todo o período da reserva";
 
+  const serviceRowId = await resolveParkingEstablishmentServiceRowId({
+    establishmentId,
+    buildingId: buildingId ?? null,
+    existingServiceRowId,
+  });
+
   let parkingCategoryId: string | null = null;
   if (isActive && amount > 0 && spotCount > 0) {
-    const existing =
-      existingServiceRowId != null
-        ? (
-            await supabase
-              .from("establishment_services")
-              .select("parking_category_id")
-              .eq("id", existingServiceRowId)
-              .maybeSingle()
-          ).data?.parking_category_id
-        : null;
+    let existingCategoryId: string | null = null;
+    if (serviceRowId) {
+      const { data: svc } = await supabase
+        .from("establishment_services")
+        .select("parking_category_id")
+        .eq("id", serviceRowId)
+        .maybeSingle();
+      existingCategoryId = svc?.parking_category_id ?? null;
+    }
     parkingCategoryId = await syncParkingSpots({
       establishmentId,
       buildingId: buildingId ?? null,
       spotCount,
-      existingCategoryId: existing,
+      existingCategoryId,
     });
   }
 
@@ -270,15 +327,18 @@ export async function upsertParkingFeeConfig(params: {
     parking_category_id: parkingCategoryId,
   };
 
-  let serviceRowId = existingServiceRowId;
+  let persistedServiceRowId = serviceRowId;
 
-  if (serviceRowId) {
-    const { error } = await supabase.from("establishment_services").update(payload).eq("id", serviceRowId);
+  if (persistedServiceRowId) {
+    const { error } = await supabase
+      .from("establishment_services")
+      .update(payload)
+      .eq("id", persistedServiceRowId);
     if (error) throw error;
   } else {
     const { data, error } = await supabase.from("establishment_services").insert(payload).select("id").single();
     if (error) throw error;
-    serviceRowId = data.id;
+    persistedServiceRowId = data.id;
   }
 
   let feeQuery = supabase
@@ -298,7 +358,7 @@ export async function upsertParkingFeeConfig(params: {
     service_kind: PARKING_FEE_KIND,
     default_amount: amount,
     is_active: isActive && amount > 0,
-    source_service_id: serviceRowId,
+    source_service_id: persistedServiceRowId,
     building_id: buildingId ?? null,
   };
 
@@ -314,7 +374,7 @@ export async function upsertParkingFeeConfig(params: {
   }
 
   return {
-    id: serviceRowId!,
+    id: persistedServiceRowId!,
     establishmentId: buildingId ? null : establishmentId,
     buildingId: buildingId ?? null,
     amount,
