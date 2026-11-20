@@ -4365,3 +4365,399 @@ model BackendPasswordReset {
   @@map("backend_password_resets")
   @@schema("public")
 }
+
+/// StayOS CRM — perfil unificado (company-scoped). Não substitui clients.
+model crm_contacts {
+  id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id         String                     @db.Uuid
+  full_name          String
+  email              String?
+  phone              String?
+  whatsapp           String?
+  document_type      String?
+  document_number    String?
+  source             String?
+  tags               Json                       @default("[]")
+  classification     String?
+  owner_employee_id  String?                    @db.Uuid
+  notes              String?
+  deleted_at         DateTime?                  @db.Timestamptz(6)
+  created_at         DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime                   @default(now()) @db.Timestamptz(6)
+  client_links       crm_contact_client_links[]
+  activities         crm_activities[]
+  consents           crm_consent[]
+  audit_logs         crm_audit_logs[]
+  deals              crm_deals[]
+  campaign_recipients crm_campaign_recipients[]
+  company_links      crm_company_contacts[]
+  loyalty_accounts   crm_loyalty_accounts[]
+  loyalty_transactions crm_loyalty_transactions[]
+
+  @@index([company_id], map: "idx_crm_contacts_company_id")
+  @@index([company_id, email], map: "idx_crm_contacts_company_email")
+  @@index([company_id, phone], map: "idx_crm_contacts_company_phone")
+  @@index([company_id, document_number], map: "idx_crm_contacts_company_document")
+  @@index([deleted_at], map: "idx_crm_contacts_deleted_at")
+  @@schema("public")
+}
+
+model crm_contact_client_links {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  crm_contact_id   String       @db.Uuid
+  client_id        String       @db.Uuid
+  establishment_id String?      @db.Uuid
+  created_at       DateTime     @default(now()) @db.Timestamptz(6)
+  crm_contact      crm_contacts @relation(fields: [crm_contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([crm_contact_id, client_id])
+  @@index([client_id], map: "idx_crm_contact_client_links_client")
+  @@index([crm_contact_id], map: "idx_crm_contact_client_links_contact")
+  @@schema("public")
+}
+
+model crm_activities {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id     String       @db.Uuid
+  crm_contact_id String       @db.Uuid
+  activity_type  String
+  subject        String?
+  body           String?
+  metadata       Json         @default("{}")
+  created_by     String?      @db.Uuid
+  created_at     DateTime     @default(now()) @db.Timestamptz(6)
+  crm_contact    crm_contacts @relation(fields: [crm_contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([crm_contact_id, created_at(sort: Desc)], map: "idx_crm_activities_contact")
+  @@index([company_id, created_at(sort: Desc)], map: "idx_crm_activities_company")
+  @@schema("public")
+}
+
+model crm_consent {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id     String       @db.Uuid
+  crm_contact_id String       @db.Uuid
+  channel        String
+  purpose        String
+  granted        Boolean      @default(false)
+  granted_at     DateTime?    @db.Timestamptz(6)
+  revoked_at     DateTime?    @db.Timestamptz(6)
+  metadata       Json         @default("{}")
+  created_at     DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime     @default(now()) @db.Timestamptz(6)
+  crm_contact    crm_contacts @relation(fields: [crm_contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([crm_contact_id, channel, purpose])
+  @@index([crm_contact_id], map: "idx_crm_consent_contact")
+  @@schema("public")
+}
+
+model crm_outbox_events {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id       String?   @db.Uuid
+  establishment_id String?   @db.Uuid
+  event_type       String
+  payload          Json      @default("{}")
+  idempotency_key  String    @unique
+  processed_at     DateTime? @db.Timestamptz(6)
+  error            String?
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([company_id, created_at(sort: Desc)], map: "idx_crm_outbox_company")
+  @@schema("public")
+}
+
+model crm_audit_logs {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id     String        @db.Uuid
+  crm_contact_id String?       @db.Uuid
+  action         String
+  actor_user_id  String?       @db.Uuid
+  before_data    Json?
+  after_data     Json?
+  metadata       Json          @default("{}")
+  created_at     DateTime      @default(now()) @db.Timestamptz(6)
+  crm_contact    crm_contacts? @relation(fields: [crm_contact_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([company_id, created_at(sort: Desc)], map: "idx_crm_audit_logs_company")
+  @@index([crm_contact_id, created_at(sort: Desc)], map: "idx_crm_audit_logs_contact")
+  @@schema("public")
+}
+
+/// StayOS CRM Etapa 2 — pipelines / stages / deals
+model crm_pipelines {
+  id         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id String                 @db.Uuid
+  name       String
+  is_default Boolean                @default(false)
+  is_active  Boolean                @default(true)
+  created_at DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at DateTime               @default(now()) @db.Timestamptz(6)
+  stages     crm_pipeline_stages[]
+  deals      crm_deals[]
+
+  @@index([company_id], map: "idx_crm_pipelines_company")
+  @@schema("public")
+}
+
+model crm_pipeline_stages {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pipeline_id String        @db.Uuid
+  name        String
+  position    Int           @default(0)
+  stage_key   String
+  is_won      Boolean       @default(false)
+  is_lost     Boolean       @default(false)
+  created_at  DateTime      @default(now()) @db.Timestamptz(6)
+  pipeline    crm_pipelines @relation(fields: [pipeline_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  deals       crm_deals[]
+
+  @@unique([pipeline_id, stage_key])
+  @@unique([pipeline_id, position])
+  @@index([pipeline_id, position], map: "idx_crm_pipeline_stages_pipeline")
+  @@schema("public")
+}
+
+model crm_deals {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id         String               @db.Uuid
+  pipeline_id        String               @db.Uuid
+  stage_id           String               @db.Uuid
+  crm_contact_id     String?              @db.Uuid
+  title              String
+  amount             Decimal              @default(0) @db.Decimal(12, 2)
+  currency           String               @default("BRL")
+  source             String?
+  status             String               @default("open")
+  quote_id           String?              @db.Uuid
+  reservation_id     String?              @db.Uuid
+  establishment_id   String?              @db.Uuid
+  owner_employee_id  String?              @db.Uuid
+  metadata           Json                 @default("{}")
+  lost_reason        String?
+  converted_at       DateTime?            @db.Timestamptz(6)
+  deleted_at         DateTime?            @db.Timestamptz(6)
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime             @default(now()) @db.Timestamptz(6)
+  pipeline           crm_pipelines        @relation(fields: [pipeline_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  stage              crm_pipeline_stages  @relation(fields: [stage_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  crm_contact        crm_contacts?       @relation(fields: [crm_contact_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([company_id, stage_id], map: "idx_crm_deals_company_stage")
+  @@index([pipeline_id], map: "idx_crm_deals_pipeline")
+  @@index([crm_contact_id], map: "idx_crm_deals_contact")
+  @@index([quote_id], map: "idx_crm_deals_quote")
+  @@index([reservation_id], map: "idx_crm_deals_reservation")
+  @@schema("public")
+}
+
+/// StayOS CRM Etapa 4 — segmentos / campanhas / recipients
+model crm_segments {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id  String          @db.Uuid
+  name        String
+  description String?
+  rules       Json            @default("{}")
+  is_active   Boolean         @default(true)
+  created_at  DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime        @default(now()) @db.Timestamptz(6)
+  campaigns   crm_campaigns[]
+
+  @@index([company_id], map: "idx_crm_segments_company")
+  @@schema("public")
+}
+
+model crm_campaigns {
+  id           String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id   String                    @db.Uuid
+  segment_id   String?                   @db.Uuid
+  name         String
+  channel      String                    @default("email")
+  subject      String?
+  body         String                    @default("")
+  status       String                    @default("draft")
+  scheduled_at DateTime?                 @db.Timestamptz(6)
+  started_at   DateTime?                 @db.Timestamptz(6)
+  completed_at DateTime?                 @db.Timestamptz(6)
+  created_by   String?                   @db.Uuid
+  metadata     Json                      @default("{}")
+  created_at   DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime                  @default(now()) @db.Timestamptz(6)
+  segment      crm_segments?             @relation(fields: [segment_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  recipients   crm_campaign_recipients[]
+
+  @@index([company_id, created_at(sort: Desc)], map: "idx_crm_campaigns_company")
+  @@index([status, scheduled_at], map: "idx_crm_campaigns_status")
+  @@schema("public")
+}
+
+model crm_campaign_recipients {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign_id    String        @db.Uuid
+  crm_contact_id String        @db.Uuid
+  channel        String
+  address        String?
+  status         String        @default("pending")
+  skip_reason    String?
+  error          String?
+  queued_at      DateTime?     @db.Timestamptz(6)
+  sent_at        DateTime?     @db.Timestamptz(6)
+  created_at     DateTime      @default(now()) @db.Timestamptz(6)
+  campaign       crm_campaigns @relation(fields: [campaign_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  crm_contact    crm_contacts  @relation(fields: [crm_contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([campaign_id, crm_contact_id])
+  @@index([campaign_id, status], map: "idx_crm_campaign_recipients_campaign")
+  @@index([crm_contact_id], map: "idx_crm_campaign_recipients_contact")
+  @@schema("public")
+}
+
+/// StayOS CRM Etapa 5 — automações
+model crm_automation_templates {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  template_key String   @unique
+  name         String
+  description  String?
+  trigger_type String
+  conditions   Json     @default("[]")
+  actions      Json     @default("[]")
+  is_system    Boolean  @default(true)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@schema("public")
+}
+
+model crm_automations {
+  id           String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id   String                @db.Uuid
+  name         String
+  description  String?
+  template_key String?
+  trigger_type String
+  conditions   Json                  @default("[]")
+  actions      Json                  @default("[]")
+  is_active    Boolean               @default(true)
+  created_by   String?               @db.Uuid
+  created_at   DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime              @default(now()) @db.Timestamptz(6)
+  runs         crm_automation_runs[]
+
+  @@index([company_id], map: "idx_crm_automations_company")
+  @@index([trigger_type], map: "idx_crm_automations_trigger")
+  @@schema("public")
+}
+
+model crm_automation_runs {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id      String          @db.Uuid
+  automation_id   String          @db.Uuid
+  trigger_type    String
+  trigger_payload Json            @default("{}")
+  status          String          @default("pending")
+  result          Json            @default("{}")
+  error           String?
+  started_at      DateTime?       @db.Timestamptz(6)
+  finished_at     DateTime?       @db.Timestamptz(6)
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+  automation      crm_automations @relation(fields: [automation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([automation_id, created_at(sort: Desc)], map: "idx_crm_automation_runs_automation")
+  @@index([company_id, created_at(sort: Desc)], map: "idx_crm_automation_runs_company")
+  @@schema("public")
+}
+
+/// StayOS CRM Etapa 6 — B2B + fidelidade
+model crm_companies {
+  id               String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id       String                 @db.Uuid
+  legal_name       String
+  trade_name       String?
+  document_number  String?
+  partner_type     String                 @default("corporate")
+  email            String?
+  phone            String?
+  address          String?
+  commercial_owner String?
+  notes            String?
+  commercial_terms Json                   @default("{}")
+  metadata         Json                   @default("{}")
+  deleted_at       DateTime?              @db.Timestamptz(6)
+  created_at       DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime               @default(now()) @db.Timestamptz(6)
+  contacts         crm_company_contacts[]
+
+  @@index([company_id], map: "idx_crm_companies_tenant")
+  @@index([company_id, document_number], map: "idx_crm_companies_document")
+  @@schema("public")
+}
+
+model crm_company_contacts {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  crm_company_id String        @db.Uuid
+  crm_contact_id String        @db.Uuid
+  role           String?
+  is_primary     Boolean       @default(false)
+  created_at     DateTime      @default(now()) @db.Timestamptz(6)
+  crm_company    crm_companies @relation(fields: [crm_company_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  crm_contact    crm_contacts  @relation(fields: [crm_contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([crm_company_id, crm_contact_id])
+  @@index([crm_contact_id], map: "idx_crm_company_contacts_contact")
+  @@schema("public")
+}
+
+model crm_loyalty_programs {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id           String                 @db.Uuid
+  name                 String
+  is_active            Boolean                @default(true)
+  points_per_currency  Decimal                @default(1) @db.Decimal(12, 4)
+  currency             String                 @default("BRL")
+  tiers                Json                   @default("[{\"key\":\"bronze\",\"name\":\"Bronze\",\"min_points\":0},{\"key\":\"silver\",\"name\":\"Prata\",\"min_points\":500},{\"key\":\"gold\",\"name\":\"Ouro\",\"min_points\":1500},{\"key\":\"platinum\",\"name\":\"Platinum\",\"min_points\":4000}]")
+  rules                Json                   @default("{}")
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  accounts             crm_loyalty_accounts[]
+
+  @@index([company_id], map: "idx_crm_loyalty_programs_company")
+  @@schema("public")
+}
+
+model crm_loyalty_accounts {
+  id               String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id       String                     @db.Uuid
+  program_id       String                     @db.Uuid
+  crm_contact_id   String                     @db.Uuid
+  points_balance   Decimal                    @default(0) @db.Decimal(14, 2)
+  lifetime_points  Decimal                    @default(0) @db.Decimal(14, 2)
+  tier_key         String                     @default("bronze")
+  created_at       DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime                   @default(now()) @db.Timestamptz(6)
+  program          crm_loyalty_programs       @relation(fields: [program_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  crm_contact      crm_contacts               @relation(fields: [crm_contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  transactions     crm_loyalty_transactions[]
+
+  @@unique([program_id, crm_contact_id])
+  @@index([company_id], map: "idx_crm_loyalty_accounts_company")
+  @@index([crm_contact_id], map: "idx_crm_loyalty_accounts_contact")
+  @@schema("public")
+}
+
+model crm_loyalty_transactions {
+  id               String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id       String               @db.Uuid
+  account_id       String               @db.Uuid
+  crm_contact_id   String               @db.Uuid
+  tx_type          String
+  points           Decimal              @db.Decimal(14, 2)
+  reservation_id   String?              @db.Uuid
+  idempotency_key  String?
+  note             String?
+  metadata         Json                 @default("{}")
+  created_at       DateTime             @default(now()) @db.Timestamptz(6)
+  account          crm_loyalty_accounts @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  crm_contact      crm_contacts         @relation(fields: [crm_contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([account_id, created_at(sort: Desc)], map: "idx_crm_loyalty_tx_account")
+  @@schema("public")
+}

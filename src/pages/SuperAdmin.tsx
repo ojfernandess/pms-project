@@ -3222,6 +3222,7 @@ const FeatureFlagsManager = () => {
     stay_reviews: { enabled: false, establishment_ids: [] },
     dynamic_pricing_automation: { enabled: false, company_ids: [] },
     checkin_charge_enabled: { enabled: false, company_ids: [] },
+    crm: { enabled: false, company_ids: [] },
     client_deduplication: { enabled: false, establishment_ids: [] },
     rate_recommendations: { enabled: false, establishment_ids: [] },
     availability_map: { enabled: false, establishment_ids: [] },
@@ -3272,6 +3273,9 @@ const FeatureFlagsManager = () => {
         checkin_charge_enabled: typeof fe.checkin_charge_enabled === 'boolean'
           ? { enabled: fe.checkin_charge_enabled, company_ids: [] }
           : (fe.checkin_charge_enabled || { enabled: false, company_ids: [] }),
+        crm: typeof fe.crm === 'boolean'
+          ? { enabled: fe.crm, company_ids: [] }
+          : (fe.crm || { enabled: false, company_ids: [] }),
       });
     }
   }, [settings]);
@@ -3293,7 +3297,8 @@ const FeatureFlagsManager = () => {
       feature === 'booking_engine_themes_enabled' ||
       feature === 'booking_engine_custom_domain_enabled' ||
       feature === 'booking_engine_advanced_customization_enabled' ||
-      feature === 'checkin_charge_enabled';
+      feature === 'checkin_charge_enabled' ||
+      feature === 'crm';
 
     if (isStructured) {
       // Determinar qual tipo de ID usar baseado na feature
@@ -3302,7 +3307,8 @@ const FeatureFlagsManager = () => {
                             feature === 'booking_engine_themes_enabled' ||
                             feature === 'booking_engine_custom_domain_enabled' ||
                             feature === 'booking_engine_advanced_customization_enabled' ||
-                            feature === 'checkin_charge_enabled';
+                            feature === 'checkin_charge_enabled' ||
+                            feature === 'crm';
       const idKey = usesCompanyIds ? 'company_ids' : 'establishment_ids';
       
       const currentConfig = typeof newFeatures[feature] === 'object' && newFeatures[feature] !== null
@@ -3322,7 +3328,8 @@ const FeatureFlagsManager = () => {
                               feature === 'booking_engine_themes_enabled' ||
                               feature === 'booking_engine_custom_domain_enabled' ||
                               feature === 'booking_engine_advanced_customization_enabled' ||
-                              feature === 'checkin_charge_enabled';
+                              feature === 'checkin_charge_enabled' ||
+                              feature === 'crm';
         const idKey = usesCompanyIds ? 'company_ids' : 'establishment_ids';
         
         return {
@@ -3614,6 +3621,14 @@ const FeatureFlagsManager = () => {
       label: "Mensagens & Cobranças",
       description: "Permite envio de mensagens e cobranças por WhatsApp, Chatwoot ou Evolution API, com link de pagamento e web check-in",
       icon: CreditCard,
+      supportsCompanies: true,
+      supportsEstablishments: false,
+    },
+    {
+      key: "crm" as const,
+      label: "CRM StayOS",
+      description: "Habilita o CRM nativo (contatos 360, timeline e integrações com reservas/orçamentos). Escopo por empresa.",
+      icon: Users,
       supportsCompanies: true,
       supportsEstablishments: false,
     },

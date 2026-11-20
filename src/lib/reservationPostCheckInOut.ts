@@ -43,6 +43,23 @@ export async function runAfterCheckIn(updatedReservation: ReservationLike): Prom
   } catch (emailError) {
     console.error("runAfterCheckIn: e-mail", emailError);
   }
+
+  try {
+    const { enqueueCrmOutbox } = await import("@/lib/crm/crmOutbox");
+    await enqueueCrmOutbox({
+      eventType: "booking.checked_in",
+      establishmentId: (updatedReservation.establishment_id as string) || null,
+      idempotencyKey: `booking.checked_in:${updatedReservation.id}`,
+      payload: {
+        reservation_id: updatedReservation.id,
+        reservation_code: updatedReservation.reservation_code,
+        client_id: (updatedReservation.client_id as string) || (updatedReservation.guest_id as string) || null,
+        source: "pms_checkin",
+      },
+    });
+  } catch (crmError) {
+    console.warn("runAfterCheckIn: CRM outbox", crmError);
+  }
 }
 
 export async function runAfterCheckOut(
@@ -165,5 +182,27 @@ export async function runAfterCheckOut(
     await sendStayReviewRequestEmail(updatedReservation, reviewLink);
   } catch (error) {
     console.warn("runAfterCheckOut: avaliação", error);
+  }
+
+  try {
+    if (updatedReservation.id) {
+      const { enqueueCrmOutbox } = await import("@/lib/crm/crmOutbox");
+      await enqueueCrmOutbox({
+        eventType: "booking.checked_out",
+        establishmentId: (updatedReservation.establishment_id as string) || null,
+        idempotencyKey: `booking.checked_out:${updatedReservation.id}`,
+        payload: {
+          reservation_id: updatedReservation.id,
+          reservation_code: updatedReservation.reservation_code,
+          client_id:
+            (updatedReservation.client_id as string) ||
+            (updatedReservation.guest_id as string) ||
+            null,
+          source: "pms_checkout",
+        },
+      });
+    }
+  } catch (crmError) {
+    console.warn("runAfterCheckOut: CRM outbox", crmError);
   }
 }

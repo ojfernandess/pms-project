@@ -197,10 +197,34 @@ export const useQuotes = () => {
       }
 
       toast.success("Orçamento criado com sucesso");
+
+      try {
+        const companyId = selectedEstablishment?.company_id;
+        if (companyId && data?.id) {
+          const { upsertDealFromQuote } = await import("@/lib/crm/crmDeals");
+          await upsertDealFromQuote({
+            companyId,
+            establishmentId: establishmentId || data.establishment_id,
+            quoteId: data.id,
+            title: `Orçamento ${data.quote_code}`,
+            amount: Number(data.total_amount || 0),
+            fullName: data.guest_name || data.client?.full_name || data.guest?.full_name || null,
+            email: data.guest_email || data.client?.email || data.guest?.email || null,
+            phone: data.guest_phone || data.client?.phone || data.guest?.phone || null,
+            clientId: data.client_id || data.guest_id || null,
+            source: "quote_staff",
+            stageKey: "proposal",
+          });
+        }
+      } catch (crmErr) {
+        console.warn("CRM deal from quote:", crmErr);
+      }
+
       return data as Quote;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      queryClient.invalidateQueries({ queryKey: ["crm-board"] });
     },
   });
 

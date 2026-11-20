@@ -5,10 +5,13 @@ import { validateEnv } from "./config/env.validation";
 import { EdgeModule } from "./edge/edge.module";
 import { InfraModule } from "./infra/infra.module";
 import { PrismaModule } from "./prisma/prisma.module";
-import { PMS_QUEUE, SYSTEM_QUEUE } from "./queues/queue.constants";
+import { CRM_QUEUE, PMS_QUEUE, SYSTEM_QUEUE } from "./queues/queue.constants";
 import { PmsScheduleProcessor } from "./queues/pms-schedule.processor";
 import { RedisModule } from "./redis/redis.module";
 import { SystemProcessor } from "./queues/system.processor";
+import { AuthModule } from "./auth/auth.module";
+import { CrmModule } from "./crm/crm.module";
+import { CrmCampaignProcessor } from "./crm/crm-campaign.processor";
 
 @Module({
   imports: [
@@ -21,6 +24,8 @@ import { SystemProcessor } from "./queues/system.processor";
     }),
     PrismaModule,
     RedisModule,
+    AuthModule,
+    CrmModule,
     EdgeModule,
     InfraModule,
     BullModule.forRootAsync({
@@ -30,8 +35,12 @@ import { SystemProcessor } from "./queues/system.processor";
         connection: { url: config.getOrThrow<string>("REDIS_URL") },
       }),
     }),
-    BullModule.registerQueue({ name: SYSTEM_QUEUE }, { name: PMS_QUEUE }),
+    BullModule.registerQueue(
+      { name: SYSTEM_QUEUE },
+      { name: PMS_QUEUE },
+      { name: CRM_QUEUE },
+    ),
   ],
-  providers: [SystemProcessor, PmsScheduleProcessor],
+  providers: [SystemProcessor, PmsScheduleProcessor, CrmCampaignProcessor],
 })
 export class WorkerModule {}

@@ -4,6 +4,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { triggerEmail } from "@/lib/emailService";
 import { invokePmsFunction } from "@/lib/pmsApi";
 import { maybeFinalizeOtaCancellationAfterPmsCancel } from "@/lib/otaFinalizeCancellationAfterPms";
+import { enqueueBookingCancelled, enqueueBookingCreated } from "@/lib/crm/crmOutbox";
 
 type CreatedReservation = {
   id: string;
@@ -15,8 +16,10 @@ type CreatedReservation = {
   paid_amount?: number | null;
   payment_status?: string | null;
   status?: string | null;
-  guest?: { full_name?: string; email?: string } | null;
-  financial_responsible?: { full_name?: string; email?: string } | null;
+  client_id?: string | null;
+  guest_id?: string | null;
+  guest?: { full_name?: string; email?: string; phone?: string } | null;
+  financial_responsible?: { full_name?: string; email?: string; phone?: string } | null;
   guest_name?: string | null;
 };
 
@@ -30,6 +33,8 @@ type CancelledReservationPayload = {
   payment_status?: string | null;
   paid_amount?: number | null;
   guest_name?: string | null;
+  client_id?: string | null;
+  guest_id?: string | null;
   guest?: { full_name?: string } | null;
   financial_responsible?: { full_name?: string } | null;
 };
@@ -211,6 +216,31 @@ export async function runAfterReservationCreated(newReservation: CreatedReservat
   } catch (logError) {
     console.error("runAfterReservationCreated: activity log", logError);
   }
+
+  try {
+    const establishmentId = newReservation.establishment_id || getSelectedEstablishmentId();
+    if (establishmentId && newReservation.id) {
+      const guestName =
+        newReservation.guest?.full_name ||
+        newReservation.financial_responsible?.full_name ||
+        newReservation.guest_name ||
+        null;
+      await enqueueBookingCreated({
+        establishmentId,
+        reservationId: newReservation.id,
+        reservationCode: newReservation.reservation_code,
+        clientId: newReservation.client_id || newReservation.guest_id || null,
+        guestName,
+        email: newReservation.guest?.email || newReservation.financial_responsible?.email || null,
+        phone: newReservation.guest?.phone || newReservation.financial_responsible?.phone || null,
+        totalAmount: newReservation.total_amount,
+        status: newReservation.status,
+        source: "pms_staff",
+      });
+    }
+  } catch (crmError) {
+    console.warn("runAfterReservationCreated: CRM outbox", crmError);
+  }
 }
 
 export async function runAfterReservationCancelled(reservationData: CancelledReservationPayload): Promise<void> {
@@ -284,5 +314,22 @@ export async function runAfterReservationCancelled(reservationData: CancelledRes
     await triggerEmail("reservation.cancelled", reservationData);
   } catch (emailError) {
     console.error("runAfterReservationCancelled: e-mail", emailError);
+  }
+
+  try {
+    const establishmentId = reservationData.establishment_id || getSelectedEstablishmentId();
+    await enqueueBookingCancelled({
+      establishmentId,
+      reservationId: reservationData.id,
+      reservationCode: reservationData.reservation_code,
+      clientId: reservationData.client_id || reservationData.guest_id || null,
+      guestName:
+        reservationData.guest?.full_name ||
+        reservationData.financial_responsible?.full_name ||
+        reservationData.guest_name ||
+        null,
+    });
+  } catch (crmError) {
+    console.warn("runAfterReservationCancelled: CRM outbox", crmError);
   }
 }

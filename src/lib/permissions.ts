@@ -122,6 +122,16 @@ export const routeToFeature: Record<string, string> = {
   "/reservas": "reservations",
   "/orcamentos": "quotes",
   "/clientes": "clients",
+  "/crm": "crm",
+  "/crm/contatos": "crm_contacts",
+  "/crm/pipeline": "crm_deals",
+  "/crm/central": "crm",
+  "/crm/segmentos": "crm_campaigns",
+  "/crm/campanhas": "crm_campaigns",
+  "/crm/automacoes": "crm_automations",
+  "/crm/empresas": "crm_b2b",
+  "/crm/fidelidade": "crm_loyalty",
+  "/crm/relatorios": "crm_reports",
   "/unidades": "units",
   "/financeiro": "financial",
   "/tarifario": "pricing",
@@ -167,6 +177,42 @@ export const getFeatureFromPath = (pathname: string): string | null => {
   
   if (normalizedPath.startsWith('/clientes/')) {
     return "clients";
+  }
+
+  if (normalizedPath.startsWith('/crm/contatos')) {
+    return "crm_contacts";
+  }
+
+  if (normalizedPath.startsWith('/crm/pipeline')) {
+    return "crm_deals";
+  }
+
+  if (normalizedPath.startsWith('/crm/central')) {
+    return "crm";
+  }
+
+  if (normalizedPath.startsWith('/crm/segmentos') || normalizedPath.startsWith('/crm/campanhas')) {
+    return "crm_campaigns";
+  }
+
+  if (normalizedPath.startsWith('/crm/automacoes')) {
+    return "crm_automations";
+  }
+
+  if (normalizedPath.startsWith('/crm/empresas')) {
+    return "crm_b2b";
+  }
+
+  if (normalizedPath.startsWith('/crm/fidelidade')) {
+    return "crm_loyalty";
+  }
+
+  if (normalizedPath.startsWith('/crm/relatorios')) {
+    return "crm_reports";
+  }
+
+  if (normalizedPath.startsWith('/crm')) {
+    return "crm";
   }
   
   // Se for apenas o establishmentId (path === "/" após normalização)

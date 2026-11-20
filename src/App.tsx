@@ -33,6 +33,17 @@ import PublicPolicies from "./pages/PublicPolicies";
 import PublicCancellationPolicy from "./pages/PublicCancellationPolicy";
 import Clients from "./pages/Clients";
 import ClientDeduplication from "./pages/ClientDeduplication";
+import CrmDashboard from "./pages/crm/CrmDashboard";
+import CrmContacts from "./pages/crm/CrmContacts";
+import CrmContact360 from "./pages/crm/CrmContact360";
+import CrmPipeline from "./pages/crm/CrmPipeline";
+import CrmCentral from "./pages/crm/CrmCentral";
+import CrmSegments from "./pages/crm/CrmSegments";
+import CrmCampaigns from "./pages/crm/CrmCampaigns";
+import CrmAutomations from "./pages/crm/CrmAutomations";
+import CrmCompanies from "./pages/crm/CrmCompanies";
+import CrmLoyalty from "./pages/crm/CrmLoyalty";
+import CrmReports from "./pages/crm/CrmReports";
 import Units from "./pages/Units";
 import Financial from "./pages/Financial";
 import Maintenance from "./pages/Maintenance";
@@ -254,6 +265,17 @@ const AppRoutesWithMeta = () => {
             <Route path="/:establishmentId/documentation" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Documentation /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/clientes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Clients /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/clientes/centralizacao" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ClientDeduplication /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmDashboard /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm/contatos" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmContacts /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm/contatos/:contactId" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmContact360 /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm/pipeline" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmPipeline /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm/central" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmCentral /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm/segmentos" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmSegments /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm/campanhas" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmCampaigns /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm/automacoes" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmAutomations /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm/empresas" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmCompanies /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm/fidelidade" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmLoyalty /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/crm/relatorios" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><CrmReports /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/unidades" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Units /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/financeiro" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Financial /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/tarifario" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><PMSRateSystem /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />

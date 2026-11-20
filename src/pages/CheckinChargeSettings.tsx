@@ -315,12 +315,29 @@ interface PendingReservationRow {
   paid_amount: number;
   status: string;
   client_id: string;
+  guest_id?: string | null;
   guest_name: string | null;
   guest_phone: string | null;
   charge_id?: string | null;
   charge_status?: string | null;
   charge_sent_at?: string | null;
 }
+
+export type CheckinChargeFocusReservation = {
+  id: string;
+  reservation_code?: string | null;
+  client_id?: string | null;
+  guest_id?: string | null;
+  guest_name?: string | null;
+  guest_phone?: string | null;
+};
+
+export type CheckinChargeSettingsProps = {
+  /** Quando true, omite título/ajuda da página (uso na Central CRM). */
+  embedded?: boolean;
+  focusedReservationId?: string | null;
+  onFocusReservation?: (row: CheckinChargeFocusReservation) => void;
+};
 
 type PaymentListView = "recent_and_future" | "today_only" | "all";
 
@@ -361,6 +378,8 @@ function ReservationsChargeTable({
   phoneOverrides,
   onPhoneOverride,
   useCheckoutDate,
+  focusedReservationId,
+  onFocusReservation,
 }: {
   list: PendingReservationRow[];
   selectedIds: string[];
@@ -376,6 +395,8 @@ function ReservationsChargeTable({
   phoneOverrides?: Record<string, string>;
   onPhoneOverride?: (reservationId: string, phone: string) => void;
   useCheckoutDate?: boolean;
+  focusedReservationId?: string | null;
+  onFocusReservation?: (row: CheckinChargeFocusReservation) => void;
 }) {
   const dateLabel = useCheckoutDate ? "Check-out" : "Check-in";
   const dateField = useCheckoutDate ? "checkout_date" : "checkin_date";
@@ -405,12 +426,25 @@ function ReservationsChargeTable({
           const isPaid = r.charge_status === "paid" || pending <= 0;
           const dateVal = r[dateField as keyof PendingReservationRow] as string | undefined;
           const phoneVal = (phoneOverrides && phoneOverrides[r.id] !== undefined) ? phoneOverrides[r.id] : (r.guest_phone ?? "");
+          const isFocused = focusedReservationId === r.id;
           return (
             <TableRow
               key={r.id}
-              className="hover:bg-primary/5 transition-colors border-b border-border/50 last:border-b-0"
+              className={`hover:bg-primary/5 transition-colors border-b border-border/50 last:border-b-0 ${
+                isFocused ? "bg-primary/10 ring-1 ring-inset ring-primary/30" : ""
+              } ${onFocusReservation ? "cursor-pointer" : ""}`}
+              onClick={() =>
+                onFocusReservation?.({
+                  id: r.id,
+                  reservation_code: r.reservation_code,
+                  client_id: r.client_id,
+                  guest_id: r.guest_id,
+                  guest_name: r.guest_name,
+                  guest_phone: r.guest_phone,
+                })
+              }
             >
-              <TableCell>
+              <TableCell onClick={(e) => e.stopPropagation()}>
                 <Checkbox checked={selectedIds.includes(r.id)} onCheckedChange={() => onToggleOne(r.id)} />
               </TableCell>
               <TableCell>
@@ -427,7 +461,7 @@ function ReservationsChargeTable({
               </TableCell>
               <TableCell className="font-mono text-sm">{r.reservation_code}</TableCell>
               {showPhone && (
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-2">
                     <Input
                       type="tel"
@@ -473,7 +507,7 @@ function ReservationsChargeTable({
                   ? fmtDate(new Date(r.charge_sent_at), "dd/MM/yyyy HH:mm", { locale: ptBR })
                   : "—"}
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                 <Button
                   size="sm"
                   onClick={() => onSendOne(r.id)}
@@ -499,7 +533,11 @@ function getCheckinDateRange(dateStr: string): { start: string; end: string } {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-export default function CheckinChargeSettings() {
+export default function CheckinChargeSettings({
+  embedded = false,
+  focusedReservationId = null,
+  onFocusReservation,
+}: CheckinChargeSettingsProps = {}) {
   const { establishmentId } = useParams<{ establishmentId?: string }>();
   const { selectedEstablishment } = useEstablishment();
   const { settings: siteSettings } = useSiteSettings();
@@ -1407,7 +1445,8 @@ export default function CheckinChargeSettings() {
 
   return (
     <TooltipProvider>
-    <div className="p-6 space-y-6">
+    <div className={embedded ? "p-4 space-y-4" : "p-6 space-y-6"}>
+      {!embedded && (
       <div className="flex items-center gap-3">
         <div className="p-2 rounded-xl bg-[#25D366]/10 ring-1 ring-[#25D366]/30 flex items-center justify-center">
           <svg viewBox="0 0 24 24" className="h-7 w-7 shrink-0" fill="#25D366" aria-hidden>
@@ -1427,6 +1466,12 @@ export default function CheckinChargeSettings() {
           </Button>
         </Link>
       </div>
+      )}
+      {embedded && (
+        <p className="text-xs text-muted-foreground px-1">
+          Clique em uma reserva para carregar o contexto CRM 360 ao lado. Envios usam o canal já configurado.
+        </p>
+      )}
 
       {/* Cards de resumo */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2219,6 +2264,8 @@ export default function CheckinChargeSettings() {
                     showPhone
                     phoneOverrides={phoneOverrides}
                     onPhoneOverride={handlePhoneOverride}
+                    focusedReservationId={focusedReservationId}
+                    onFocusReservation={onFocusReservation}
                   />
                 </div>
               )}
@@ -2315,6 +2362,8 @@ export default function CheckinChargeSettings() {
                     showPhone
                     phoneOverrides={phoneOverrides}
                     onPhoneOverride={handlePhoneOverride}
+                    focusedReservationId={focusedReservationId}
+                    onFocusReservation={onFocusReservation}
                   />
                 </div>
               )}
@@ -2411,6 +2460,8 @@ export default function CheckinChargeSettings() {
                     phoneOverrides={phoneOverrides}
                     onPhoneOverride={handlePhoneOverride}
                     useCheckoutDate
+                    focusedReservationId={focusedReservationId}
+                    onFocusReservation={onFocusReservation}
                   />
                 </div>
               )}
@@ -2543,6 +2594,8 @@ export default function CheckinChargeSettings() {
                     showPhone
                     phoneOverrides={phoneOverrides}
                     onPhoneOverride={handlePhoneOverride}
+                    focusedReservationId={focusedReservationId}
+                    onFocusReservation={onFocusReservation}
                   />
                 </div>
               )}

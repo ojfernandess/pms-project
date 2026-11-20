@@ -1,7 +1,7 @@
 import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
-import { PMS_QUEUE, SYSTEM_QUEUE } from "./queue.constants";
+import { CRM_QUEUE, PMS_QUEUE, SYSTEM_QUEUE } from "./queue.constants";
 import { InfraSyncQueueService } from "./infra-sync-queue.service";
 import { SystemQueueController } from "./system-queue.controller";
 import { SystemQueueService } from "./system-queue.service";
@@ -15,10 +15,14 @@ import { SystemQueueService } from "./system-queue.service";
         connection: { url: config.getOrThrow<string>("REDIS_URL") },
       }),
     }),
-    BullModule.registerQueue({ name: SYSTEM_QUEUE }, { name: PMS_QUEUE }),
+    BullModule.registerQueue(
+      { name: SYSTEM_QUEUE },
+      { name: PMS_QUEUE },
+      { name: CRM_QUEUE },
+    ),
   ],
   controllers: [SystemQueueController],
   providers: [SystemQueueService, InfraSyncQueueService],
-  exports: [SystemQueueService, InfraSyncQueueService],
+  exports: [SystemQueueService, InfraSyncQueueService, BullModule],
 })
 export class QueuesModule {}

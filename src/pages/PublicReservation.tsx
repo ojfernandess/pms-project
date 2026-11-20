@@ -562,6 +562,7 @@ const PublicReservation = () => {
   const [pmsLogoUrl, setPmsLogoUrl] = useState<string | null>(null);
   const { settings: siteSettings } = useSiteSettings();
   useMotorMeta(company, siteSettings ?? undefined);
+  const bookingCompletedRef = useRef(false);
 
   // Form data
   const [formData, setFormData] = useState({
@@ -579,11 +580,14 @@ const PublicReservation = () => {
     document_type: "CPF",
     document_number: "",
   });
+  const formDataRef = useRef(formData);
+  const establishmentRef = useRef(establishment);
   
   // Estado para controlar se é estrangeiro
   const [isForeigner, setIsForeigner] = useState(false);
 
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
+  const calculatedPriceRef = useRef(calculatedPrice);
   const [calculatingPrice, setCalculatingPrice] = useState(false);
   const [categoryPrices, setCategoryPrices] = useState<Record<string, number>>({});
   const [publicPricingPlanId, setPublicPricingPlanId] = useState<string | null>(null);
@@ -673,6 +677,44 @@ const PublicReservation = () => {
   const contactWhatsappDdi = company?.booking_engine_contact_whatsapp_ddi || null;
   const contactWhatsappNumber = company?.booking_engine_contact_whatsapp_number || hotelSettings?.whatsapp || null;
   const contactCnpj = company?.booking_engine_contact_cnpj || hotelSettings?.establishment_cnpj || null;
+
+  useEffect(() => {
+    formDataRef.current = formData;
+  }, [formData]);
+  useEffect(() => {
+    establishmentRef.current = establishment;
+  }, [establishment]);
+  useEffect(() => {
+    calculatedPriceRef.current = calculatedPrice;
+  }, [calculatedPrice]);
+
+  // Lead de abandono: usuário preencheu contato e saiu sem concluir reserva/orçamento
+  useEffect(() => {
+    const flushAbandonedLead = () => {
+      if (bookingCompletedRef.current || isSubmitting) return;
+      const fd = formDataRef.current;
+      const est = establishmentRef.current as { id?: string; company_id?: string } | null;
+      if (!est?.id || !est?.company_id) return;
+      if (!fd?.email && !fd?.phone) return;
+      if (!fd?.firstName && !fd?.email) return;
+      const key = `motor_abandon:${est.id}:${(fd.email || fd.phone || "").toLowerCase()}:${fd.checkinDate || ""}`;
+      void import("@/lib/crm/crmDeals").then(({ upsertAbandonedMotorLead }) =>
+        upsertAbandonedMotorLead({
+          companyId: est.company_id!,
+          establishmentId: est.id!,
+          fullName: `${fd.firstName || ""} ${fd.lastName || ""}`.trim() || fd.email || "Lead",
+          email: fd.email || null,
+          phone: fd.phone || null,
+          amount: calculatedPriceRef.current || 0,
+          checkinDate: fd.checkinDate || null,
+          checkoutDate: fd.checkoutDate || null,
+          idempotencyKey: key,
+        }),
+      );
+    };
+    window.addEventListener("pagehide", flushAbandonedLead);
+    return () => window.removeEventListener("pagehide", flushAbandonedLead);
+  }, [isSubmitting]);
 
   // Atualizar título da página (aba do navegador) com o título do motor de reservas
   useEffect(() => {
@@ -2936,6 +2978,32 @@ const PublicReservation = () => {
             children: finalChildren,
           });
           console.log(`[Reservation] ✅ Reserva criada - ID: ${reservationResult.reservation_id}, Cliente: ${roomClientId}, Nome: ${roomGuestName}, roomIndex: ${roomIndex}`);
+          try {
+            const { enqueueBookingCreated, enqueueContactUpserted } = await import("@/lib/crm/crmOutbox");
+            if (roomClientId) {
+              await enqueueContactUpserted({
+                establishmentId: establishment.id,
+                companyId: establishment.company_id,
+                clientId: roomClientId,
+                fullName: roomGuestName || "Hóspede",
+                email: formData.email || null,
+                phone: formData.phone || null,
+                source: "motor_public",
+              });
+            }
+            await enqueueBookingCreated({
+              establishmentId: establishment.id,
+              companyId: establishment.company_id,
+              reservationId: reservationResult.reservation_id!,
+              clientId: roomClientId || null,
+              guestName: roomGuestName || null,
+              email: formData.email || null,
+              phone: formData.phone || null,
+              source: "motor_public",
+            });
+          } catch (crmHookError) {
+            console.warn("[PublicReservation] CRM outbox", crmHookError);
+          }
           roomIndex++; // Incrementar índice global do quarto
         }
       }
@@ -3061,6 +3129,28 @@ const PublicReservation = () => {
         })
         .eq("id", quote.id);
 
+      try {
+        const { upsertDealFromQuote } = await import("@/lib/crm/crmDeals");
+        if (establishment.company_id && quote.id) {
+          await upsertDealFromQuote({
+            companyId: establishment.company_id,
+            establishmentId: establishment.id,
+            quoteId: quote.id,
+            title: `Orçamento ${quote.quote_code}`,
+            amount: Number(totalAmount || 0),
+            fullName: `${formData.firstName} ${formData.lastName}`.trim(),
+            email: formData.email || null,
+            phone: formData.phone || null,
+            clientId: mainClientId,
+            source: "quote_motor",
+            stageKey: "proposal",
+          });
+        }
+      } catch (crmDealErr) {
+        console.warn("[PublicReservation] CRM deal from quote", crmDealErr);
+      }
+
+      bookingCompletedRef.current = true;
       toast.success(t("publicReservation.errors.quoteCreatedSuccess"));
       
       // Redirecionar para página de pagamento
