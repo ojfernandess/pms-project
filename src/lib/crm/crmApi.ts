@@ -185,7 +185,7 @@ export async function upsertCrmContact(body: Record<string, unknown>) {
       method: "POST",
       body: JSON.stringify(body),
     });
-  } catch {
+  } catch (nestError) {
     const { data, error } = await (supabase as any).rpc("crm_upsert_contact_from_client", {
       p_company_id: body.companyId,
       p_client_id: body.clientId || null,
@@ -197,32 +197,36 @@ export async function upsertCrmContact(body: Record<string, unknown>) {
       p_document_number: body.documentNumber || null,
       p_source: body.source || "manual",
     });
-    if (error) {
-      // Manual insert without client link
-      const { data: created, error: insertError } = await (supabase as any)
+    if (!error && data) {
+      const { data: contact } = await (supabase as any)
         .from("crm_contacts")
-        .insert({
-          company_id: body.companyId,
-          full_name: body.fullName,
-          email: body.email || null,
-          phone: body.phone || null,
-          whatsapp: body.whatsapp || body.phone || null,
-          document_type: body.documentType || null,
-          document_number: body.documentNumber || null,
-          source: body.source || "manual",
-          notes: body.notes || null,
-        })
         .select("*")
+        .eq("id", data)
         .single();
-      if (insertError) throw insertError;
-      return created as CrmContact;
+      if (contact) return contact as CrmContact;
     }
-    const { data: contact } = await (supabase as any)
+    const { data: created, error: insertError } = await (supabase as any)
       .from("crm_contacts")
+      .insert({
+        company_id: body.companyId,
+        full_name: body.fullName,
+        email: body.email || null,
+        phone: body.phone || null,
+        whatsapp: body.whatsapp || body.phone || null,
+        document_type: body.documentType || null,
+        document_number: body.documentNumber || null,
+        source: body.source || "manual",
+        notes: body.notes || null,
+      })
       .select("*")
-      .eq("id", data)
       .single();
-    return contact as CrmContact;
+    if (insertError) {
+      throw new Error(
+        insertError.message ||
+          (nestError instanceof Error ? nestError.message : "Erro ao criar contato CRM"),
+      );
+    }
+    return created as CrmContact;
   }
 }
 

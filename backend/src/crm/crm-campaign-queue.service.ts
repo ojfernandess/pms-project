@@ -1,11 +1,20 @@
 import { InjectQueue } from "@nestjs/bullmq";
-import { Injectable } from "@nestjs/common";
+import { Injectable, OnModuleInit } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { CRM_QUEUE } from "../queues/queue.constants";
 
 @Injectable()
-export class CrmCampaignQueueService {
+export class CrmCampaignQueueService implements OnModuleInit {
   constructor(@InjectQueue(CRM_QUEUE) private readonly queue: Queue) {}
+
+  async onModuleInit(): Promise<void> {
+    // Drena outbox residual a cada minuto (motor/staff já processam na hora via enqueue)
+    await this.queue.upsertJobScheduler(
+      "crm-outbox-drain",
+      { pattern: "* * * * *" },
+      { name: "outbox.drain", data: {} },
+    );
+  }
 
   enqueueSendCampaign(campaignId: string) {
     return this.queue.add(

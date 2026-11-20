@@ -4,6 +4,7 @@ import { Job } from "bullmq";
 import { CRM_QUEUE } from "../queues/queue.constants";
 import { CrmCampaignsService } from "./crm-campaigns.service";
 import { CrmAutomationsService } from "./crm-automations.service";
+import { CrmService } from "./crm.service";
 
 @Processor(CRM_QUEUE)
 export class CrmCampaignProcessor extends WorkerHost {
@@ -12,6 +13,7 @@ export class CrmCampaignProcessor extends WorkerHost {
   constructor(
     private readonly campaigns: CrmCampaignsService,
     private readonly automations: CrmAutomationsService,
+    private readonly crm: CrmService,
   ) {
     super();
   }
@@ -24,6 +26,9 @@ export class CrmCampaignProcessor extends WorkerHost {
     if (job.name === "automation.run") {
       this.logger.log(`Processing automation.run ${job.data.runId}`);
       return this.automations.processRunJob(job.data.runId);
+    }
+    if (job.name === "outbox.drain") {
+      return this.crm.processPendingOutbox(50);
     }
     throw new Error(`Unsupported CRM job: ${job.name}`);
   }

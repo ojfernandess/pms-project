@@ -47,9 +47,18 @@ export class PrismaAuthDirectory implements AuthDirectory {
           WHERE user_id = ${userId}::uuid
         ), false) AS is_super_admin,
         (
-          SELECT array_agg(company_id::text)
-          FROM public.user_companies
-          WHERE user_id = ${userId}::uuid
+          SELECT array_agg(DISTINCT cid)
+          FROM (
+            SELECT company_id::text AS cid
+            FROM public.user_companies
+            WHERE user_id = ${userId}::uuid
+            UNION
+            SELECT est.company_id::text AS cid
+            FROM public.employees emp
+            JOIN public.establishments est ON est.id = emp.establishment_id
+            WHERE emp.user_id = ${userId}::uuid
+              AND COALESCE(emp.is_active, true) = true
+          ) scope_companies
         ) AS company_ids
     `;
     const row = rows[0];

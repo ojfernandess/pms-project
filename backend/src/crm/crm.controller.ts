@@ -300,7 +300,8 @@ export class CrmController {
 
   @Post("outbox/process")
   processOutbox(@CurrentUser() user: SessionUser, @Query("limit") limit?: string) {
-    if (!user.isSuperAdmin) {
+    // Staff autenticado pode drenar a fila da empresa; útil após deploy / recovery
+    if (!user.isSuperAdmin && !(user.companyIds?.length > 0)) {
       return { processed: 0, results: [], error: "forbidden" };
     }
     return this.crm.processPendingOutbox(limit ? Number(limit) : 50);

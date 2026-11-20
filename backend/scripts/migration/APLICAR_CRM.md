@@ -29,7 +29,14 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/crm/20261120160000_
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/crm/20261120170000_crm_automations.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/crm/20261120180000_crm_advanced.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/crm/20261120181000_crm_role_permissions.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/crm/20261120182000_crm_rpcs.sql
 ```
+
+## Diagnóstico “nada aparece no CRM”
+
+1. `crm_enqueue_outbox` precisa existir no Postgres e estar no allowlist Nest (`DataService` RPCs).
+2. Motor/staff chamam outbox; a RPC (ou `POST /crm/outbox`) deve criar `crm_contacts` na hora.
+3. Sem isso, reservas nunca viram contato — o menu CRM fica vazio.
 
 ## Verificação
 

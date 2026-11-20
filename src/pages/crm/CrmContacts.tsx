@@ -89,7 +89,7 @@ const CrmContacts = () => {
           <h1 className="text-3xl font-bold text-foreground">Contatos CRM</h1>
           <p className="text-muted-foreground">Perfis unificados vinculados aos clientes do PMS</p>
         </div>
-        {canCreate("crm_contacts") && (
+        {(canCreate("crm") || canCreate("crm_contacts")) && (
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
             Novo contato

@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { resolvePmsApiUrl } from "@/lib/runtimeConfig";
 
 export type CrmOutboxEventType =
   | "contact.upserted"
@@ -24,7 +25,59 @@ export type CrmOutboxPayload = {
   [key: string]: unknown;
 };
 
-/** Enfileira evento CRM via RPC (idempotente) e sincroniza contato quando houver client_id. */
+async function resolveCompanyId(
+  establishmentId?: string | null,
+  companyId?: string | null,
+): Promise<string | null> {
+  if (companyId) return companyId;
+  if (!establishmentId) return null;
+  const { data } = await supabase
+    .from("establishments")
+    .select("company_id")
+    .eq("id", establishmentId)
+    .maybeSingle();
+  return (data as { company_id?: string } | null)?.company_id ?? null;
+}
+
+async function enqueueViaNestApi(input: {
+  eventType: CrmOutboxEventType;
+  payload: CrmOutboxPayload;
+  idempotencyKey: string;
+  establishmentId?: string | null;
+  companyId?: string | null;
+}): Promise<{ id: string | null; error: string | null }> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token;
+  if (!token) return { id: null, error: "no_session" };
+
+  const base = resolvePmsApiUrl().replace(/\/$/, "");
+  const response = await fetch(`${base}/crm/outbox`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      eventType: input.eventType,
+      payload: input.payload,
+      idempotencyKey: input.idempotencyKey,
+      establishmentId: input.establishmentId ?? undefined,
+      companyId: input.companyId ?? undefined,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    return { id: null, error: body.message || body.error || `CRM outbox ${response.status}` };
+  }
+  const body = (await response.json()) as { id?: string };
+  return { id: body.id ?? null, error: null };
+}
+
+/**
+ * Enfileira evento CRM no Postgres.
+ * 1) Nest /crm/outbox (com sessão) — processa na hora
+ * 2) RPC crm_enqueue_outbox (anon/motor) — SECURITY DEFINER + sync contato
+ */
 export async function enqueueCrmOutbox(input: {
   eventType: CrmOutboxEventType;
   payload: CrmOutboxPayload;
@@ -33,16 +86,29 @@ export async function enqueueCrmOutbox(input: {
   companyId?: string | null;
 }): Promise<{ id: string | null; error: string | null }> {
   try {
+    const companyId = await resolveCompanyId(input.establishmentId, input.companyId);
+    const payload = {
+      ...input.payload,
+      ...(companyId ? { company_id: companyId } : {}),
+    };
+
+    const viaNest = await enqueueViaNestApi({
+      ...input,
+      companyId,
+      payload,
+    });
+    if (!viaNest.error && viaNest.id) return viaNest;
+
     const { data, error } = await (supabase as any).rpc("crm_enqueue_outbox", {
       p_event_type: input.eventType,
-      p_payload: input.payload ?? {},
+      p_payload: payload ?? {},
       p_idempotency_key: input.idempotencyKey,
       p_establishment_id: input.establishmentId ?? null,
-      p_company_id: input.companyId ?? null,
+      p_company_id: companyId,
     });
     if (error) {
-      console.warn("enqueueCrmOutbox:", error.message);
-      return { id: null, error: error.message };
+      console.warn("enqueueCrmOutbox:", viaNest.error || error.message);
+      return { id: null, error: error.message || viaNest.error };
     }
     return { id: data as string, error: null };
   } catch (e) {

@@ -389,10 +389,20 @@ export class CrmService {
     payload: unknown;
     idempotencyKey: string;
   }) {
+    let companyId = input.companyId || null;
+    if (!companyId && input.establishmentId) {
+      const est = await this.prisma.establishments.findUnique({
+        where: { id: input.establishmentId },
+        select: { company_id: true },
+      });
+      companyId = est?.company_id ?? null;
+    }
+
+    let event;
     try {
-      return await this.prisma.crm_outbox_events.create({
+      event = await this.prisma.crm_outbox_events.create({
         data: {
-          company_id: input.companyId || null,
+          company_id: companyId,
           establishment_id: input.establishmentId || null,
           event_type: input.eventType,
           payload: (input.payload ?? {}) as Prisma.InputJsonValue,
@@ -401,17 +411,25 @@ export class CrmService {
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-        return this.prisma.crm_outbox_events.findUnique({
+        event = await this.prisma.crm_outbox_events.findUnique({
           where: { idempotency_key: input.idempotencyKey },
         });
+      } else {
+        throw err;
       }
-      throw err;
     }
+
+    // Processa na hora (não depende de cron) para motor/staff verem o contato imediatamente
+    if (event?.id && !event.processed_at) {
+      await this.processPendingOutbox(1, event.id);
+      return this.prisma.crm_outbox_events.findUnique({ where: { id: event.id } });
+    }
+    return event;
   }
 
-  async processPendingOutbox(limit = 50) {
+  async processPendingOutbox(limit = 50, onlyId?: string) {
     const pending = await this.prisma.crm_outbox_events.findMany({
-      where: { processed_at: null },
+      where: onlyId ? { id: onlyId, processed_at: null } : { processed_at: null },
       orderBy: { created_at: "asc" },
       take: limit,
     });
@@ -420,12 +438,32 @@ export class CrmService {
 
     for (const event of pending) {
       try {
-        if (event.event_type === "contact.upserted" || event.event_type === "booking.created") {
-          const payload = event.payload as Record<string, unknown>;
-          const companyId = String(event.company_id || payload.company_id || "");
+        const payload = (event.payload || {}) as Record<string, unknown>;
+        let companyId = event.company_id || (payload.company_id ? String(payload.company_id) : null);
+        if (!companyId && event.establishment_id) {
+          const est = await this.prisma.establishments.findUnique({
+            where: { id: event.establishment_id },
+            select: { company_id: true },
+          });
+          companyId = est?.company_id ?? null;
+          if (companyId) {
+            await this.prisma.crm_outbox_events.update({
+              where: { id: event.id },
+              data: { company_id: companyId },
+            });
+          }
+        }
+
+        const syncTypes = new Set([
+          "contact.upserted",
+          "booking.created",
+          "booking.checked_in",
+          "booking.checked_out",
+        ]);
+        if (syncTypes.has(event.event_type) && companyId) {
           const clientId = payload.client_id ? String(payload.client_id) : null;
-          const fullName = String(payload.full_name || payload.guest_name || "Contato");
-          if (companyId && clientId) {
+          const fullName = String(payload.full_name || payload.guest_name || "").trim();
+          if (fullName) {
             const systemUser = {
               id: "00000000-0000-0000-0000-000000000000",
               email: "system@crm.local",
@@ -445,19 +483,20 @@ export class CrmService {
             });
           }
         }
+
         await this.prisma.crm_outbox_events.update({
           where: { id: event.id },
           data: { processed_at: new Date(), error: null },
         });
 
-        if (this.automations && event.company_id) {
+        if (this.automations && companyId) {
           try {
             await this.automations.onOutboxEvent({
-              companyId: event.company_id,
+              companyId,
               eventType: event.event_type,
               payload: {
-                ...((event.payload as Record<string, unknown>) || {}),
-                company_id: event.company_id,
+                ...payload,
+                company_id: companyId,
                 establishment_id: event.establishment_id,
               },
             });
