@@ -2,20 +2,20 @@ import { getFeatureFromPath, checkPermission } from "@/lib/permissions";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
 
 describe("CRM permissions + flag smoke", () => {
-  it("maps CRM routes to features", () => {
+  it("maps all CRM routes to feature crm", () => {
     expect(getFeatureFromPath("/12/crm")).toBe("crm");
-    expect(getFeatureFromPath("/12/crm/contatos")).toBe("crm_contacts");
-    expect(getFeatureFromPath("/12/crm/contatos/abc")).toBe("crm_contacts");
-    expect(getFeatureFromPath("/12/crm/pipeline")).toBe("crm_deals");
-    expect(getFeatureFromPath("/12/crm/segmentos")).toBe("crm_campaigns");
-    expect(getFeatureFromPath("/12/crm/campanhas")).toBe("crm_campaigns");
-    expect(getFeatureFromPath("/12/crm/automacoes")).toBe("crm_automations");
-    expect(getFeatureFromPath("/12/crm/empresas")).toBe("crm_b2b");
-    expect(getFeatureFromPath("/12/crm/fidelidade")).toBe("crm_loyalty");
-    expect(getFeatureFromPath("/12/crm/relatorios")).toBe("crm_reports");
+    expect(getFeatureFromPath("/12/crm/contatos")).toBe("crm");
+    expect(getFeatureFromPath("/12/crm/contatos/abc")).toBe("crm");
+    expect(getFeatureFromPath("/12/crm/pipeline")).toBe("crm");
+    expect(getFeatureFromPath("/12/crm/segmentos")).toBe("crm");
+    expect(getFeatureFromPath("/12/crm/campanhas")).toBe("crm");
+    expect(getFeatureFromPath("/12/crm/automacoes")).toBe("crm");
+    expect(getFeatureFromPath("/12/crm/empresas")).toBe("crm");
+    expect(getFeatureFromPath("/12/crm/fidelidade")).toBe("crm");
+    expect(getFeatureFromPath("/12/crm/relatorios")).toBe("crm");
   });
 
-  it("allows manager crm_contacts permission object", () => {
+  it("allows manager crm permission object", () => {
     const role = {
       id: "1",
       code: "manager",

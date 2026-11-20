@@ -28,6 +28,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/crm/20261120150000_
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/crm/20261120160000_crm_campaigns_segments.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/crm/20261120170000_crm_automations.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/crm/20261120180000_crm_advanced.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/crm/20261120181000_crm_role_permissions.sql
 ```
 
 ## Verificação

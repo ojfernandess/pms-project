@@ -19,12 +19,6 @@ import {
   Map,
   Receipt,
   ContactRound,
-  Kanban,
-  MessagesSquare,
-  Megaphone,
-  Filter,
-  Workflow,
-  Award,
 } from "lucide-react";
 
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -60,15 +54,6 @@ const getMenuItems = (t: (key: string) => string) => [
   { icon: Receipt, label: "Orçamentos", path: "/orcamentos", feature: "quotes" },
   { icon: Users, label: t("sidebar.clients"), path: "/clientes", feature: "clients" },
   { icon: ContactRound, label: "CRM", path: "/crm", feature: "crm" },
-  { icon: ContactRound, label: "CRM Contatos", path: "/crm/contatos", feature: "crm_contacts" },
-  { icon: Kanban, label: "CRM Pipeline", path: "/crm/pipeline", feature: "crm_deals" },
-  { icon: MessagesSquare, label: "CRM Central", path: "/crm/central", feature: "crm" },
-  { icon: Filter, label: "CRM Segmentos", path: "/crm/segmentos", feature: "crm_campaigns" },
-  { icon: Megaphone, label: "CRM Campanhas", path: "/crm/campanhas", feature: "crm_campaigns" },
-  { icon: Workflow, label: "CRM Automações", path: "/crm/automacoes", feature: "crm_automations" },
-  { icon: Building2, label: "CRM Empresas", path: "/crm/empresas", feature: "crm_b2b" },
-  { icon: Award, label: "CRM Fidelidade", path: "/crm/fidelidade", feature: "crm_loyalty" },
-  { icon: BarChart3, label: "CRM Relatórios", path: "/crm/relatorios", feature: "crm_reports" },
   { icon: Building2, label: t("sidebar.units"), path: "/unidades", feature: "units" },
   { icon: DollarSign, label: t("sidebar.financial"), path: "/financeiro", feature: "financial" },
   { icon: ClipboardList, label: t("sidebar.pricing"), path: "/tarifario", feature: "pricing" },
@@ -199,17 +184,8 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
       return checkPermission(role, "settings", undefined, customPermissions);
     }
 
-    // CRM: flag por empresa + permissões crm / crm_contacts / crm_deals / …
-    if (
-      item.feature === "crm" ||
-      item.feature === "crm_contacts" ||
-      item.feature === "crm_deals" ||
-      item.feature === "crm_campaigns" ||
-      item.feature === "crm_automations" ||
-      item.feature === "crm_b2b" ||
-      item.feature === "crm_loyalty" ||
-      item.feature === "crm_reports"
-    ) {
+    // CRM: um único item no menu; flag por empresa + permissão `crm`
+    if (item.feature === "crm") {
       if (!selectedEstablishment?.company_id) {
         return false;
       }
@@ -221,26 +197,7 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
       if (!isCrmEnabled) {
         return false;
       }
-      const permFeature =
-        item.feature === "crm_contacts"
-          ? "crm_contacts"
-          : item.feature === "crm_deals"
-            ? "crm_deals"
-            : item.feature === "crm_campaigns"
-              ? "crm_campaigns"
-              : item.feature === "crm_automations"
-                ? "crm_automations"
-                : item.feature === "crm_b2b"
-                  ? "crm_b2b"
-                  : item.feature === "crm_loyalty"
-                    ? "crm_loyalty"
-                    : item.feature === "crm_reports"
-                      ? "crm_reports"
-                      : "crm";
-      return (
-        checkPermission(role, permFeature, undefined, customPermissions) ||
-        checkPermission(role, "crm", undefined, customPermissions)
-      );
+      return checkPermission(role, "crm", undefined, customPermissions);
     }
 
     // Verificar permissão para o recurso (usando customPermissions se disponível)

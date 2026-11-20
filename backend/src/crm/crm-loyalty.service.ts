@@ -23,18 +23,45 @@ export class CrmLoyaltyService {
 
   async ensureProgram(user: SessionUser, companyId: string) {
     this.auth.assertCompany(user, companyId);
-    const existing = await this.prisma.crm_loyalty_programs.findFirst({
+    const active = await this.prisma.crm_loyalty_programs.findFirst({
       where: { company_id: companyId, is_active: true },
     });
-    if (existing) return existing;
-    return this.prisma.crm_loyalty_programs.create({
-      data: {
-        company_id: companyId,
-        name: "Programa StayOS",
-        points_per_currency: new Prisma.Decimal(1),
-        tiers: DEFAULT_LOYALTY_TIERS as unknown as Prisma.InputJsonValue,
-      },
+    if (active) return active;
+
+    const any = await this.prisma.crm_loyalty_programs.findFirst({
+      where: { company_id: companyId },
+      orderBy: { created_at: "asc" },
     });
+    if (any) {
+      if (!any.is_active) {
+        return this.prisma.crm_loyalty_programs.update({
+          where: { id: any.id },
+          data: { is_active: true, updated_at: new Date() },
+        });
+      }
+      return any;
+    }
+
+    try {
+      return await this.prisma.crm_loyalty_programs.create({
+        data: {
+          company_id: companyId,
+          name: "Programa StayOS",
+          points_per_currency: new Prisma.Decimal(1),
+          tiers: DEFAULT_LOYALTY_TIERS as unknown as Prisma.InputJsonValue,
+        },
+      });
+    } catch (e) {
+      // Corrida entre requests paralelos (unique company_id ativo)
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        const again = await this.prisma.crm_loyalty_programs.findFirst({
+          where: { company_id: companyId },
+          orderBy: { created_at: "asc" },
+        });
+        if (again) return again;
+      }
+      throw e;
+    }
   }
 
   async getProgram(user: SessionUser, companyId: string) {

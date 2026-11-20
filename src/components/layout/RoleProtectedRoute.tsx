@@ -162,8 +162,11 @@ export const RoleProtectedRoute = ({ children }: RoleProtectedRouteProps) => {
       return;
     }
 
-      // Verificar permissão baseada no role (usando customPermissions se disponível)
-    const access = checkPermission(effectiveRole, feature, undefined, effectiveCustomPermissions);
+    // CRM: qualquer sub-rota aceita permissão `crm` (feature flag da empresa é checada no CrmFeatureGate)
+    let access = checkPermission(effectiveRole, feature, undefined, effectiveCustomPermissions);
+    if (!access && (feature === "crm" || feature.startsWith("crm_"))) {
+      access = checkPermission(effectiveRole, "crm", undefined, effectiveCustomPermissions);
+    }
     setHasAccess(access);
     setHasChecked(true);
     
