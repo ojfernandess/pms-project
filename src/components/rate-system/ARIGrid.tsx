@@ -24,6 +24,24 @@ import { ARIBulkEditDialog } from "./ARIBulkEditDialog";
 import { OccupancyPriceEditDialog } from "./OccupancyPriceEditDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useLazyCalendarRange } from "@/lib/rateSystem";
+import {
+  computeCategoryDayInventory,
+  mergeInventoryPreferLive,
+  type AriReservationLite,
+} from "@/lib/ariLiveInventory";
+import { PARKING_CATEGORY_KIND } from "@/lib/parkingFeeConfig";
+
+const ARI_ACTIVE_STATUSES = new Set([
+  "pending",
+  "confirmed",
+  "checkedin",
+  "blocked",
+  "preregistration",
+]);
+
+function categoryHasRoomId(category: { rooms?: Array<{ id: string }> }, roomId: string): boolean {
+  return Array.isArray(category.rooms) && category.rooms.some((r) => r.id === roomId);
+}
 
 /** Alinha chaves do mapa com format(date) yyyy-MM-dd (PostgREST pode devolver date como ISO; evita perder entry e sobrescrever preço com valor base). */
 function normalizeRateCalendarDateKey(raw: unknown): string {
@@ -249,6 +267,28 @@ export const ARIGrid = ({
     retry: false, // Não tentar novamente se a tabela não existir
   });
 
+  // Reservas do período — fonte viva para Quartos à venda / Ocupação (independente de rate_inventory stale)
+  const { data: ariReservations = [] } = useQuery({
+    queryKey: ["ari_live_reservations", selectedEstablishment?.id, startDateStr, endDateStr, refetchTrigger],
+    queryFn: async (): Promise<AriReservationLite[]> => {
+      if (!selectedEstablishment?.id || !startDateStr || !endDateStr) return [];
+      const { data, error } = await supabase
+        .from("reservations")
+        .select("id, room_id, category_id, checkin_date, checkout_date, status")
+        .eq("establishment_id", selectedEstablishment.id)
+        .neq("status", "cancelled")
+        .lte("checkin_date", endDateStr)
+        .gt("checkout_date", startDateStr);
+      if (error) {
+        console.warn("[ARIGrid] falha ao carregar reservas para inventário live:", error);
+        return [];
+      }
+      return (data || []) as AriReservationLite[];
+    },
+    enabled: !!selectedEstablishment?.id && !!startDateStr && !!endDateStr,
+    staleTime: 30_000,
+  });
+
   // Estado para controlar sincronização automática (evitar múltiplas execuções)
   const [autoSyncDone, setAutoSyncDone] = useState(false);
 
@@ -286,12 +326,21 @@ export const ARIGrid = ({
         });
       });
 
-      // Inventário stale: tem quartos físicos mas total_rooms ficou 0 (sync antigo)
+      // Inventário stale: total 0, ou sem reservas efetivas apesar de haver quartos (sync antigo)
       const staleZeroTotal =
         physicalRooms > 0 &&
         categoryData.some((inv: any) => Number(inv.total_rooms || 0) === 0);
+      const staleZeroConfirmed =
+        physicalRooms > 0 &&
+        categoryData.length > 0 &&
+        categoryData.every((inv: any) => Number(inv.confirmed_reservations || 0) === 0) &&
+        ariReservations.some((res) => {
+          if (!ARI_ACTIVE_STATUSES.has(String(res.status || ""))) return false;
+          if (res.room_id && categoryHasRoomId(category, res.room_id)) return true;
+          return !res.room_id && String(res.category_id) === String(category.id);
+        });
       
-      if (datesWithoutData.length > 0 || staleZeroTotal) {
+      if (datesWithoutData.length > 0 || staleZeroTotal || staleZeroConfirmed) {
         categoriesNeedingSync.push(category.id);
       }
     });
@@ -343,7 +392,16 @@ export const ARIGrid = ({
 
       syncData();
     }
-  }, [allInventoryData, visibleDates, filteredCategories, selectedEstablishment?.id, isLoadingInventory, autoSyncDone, queryClient]);
+  }, [
+    allInventoryData,
+    visibleDates,
+    filteredCategories,
+    selectedEstablishment?.id,
+    isLoadingInventory,
+    autoSyncDone,
+    queryClient,
+    ariReservations,
+  ]);
 
   // Query única para buscar status de venda de todas as categorias
   const { 
@@ -488,46 +546,30 @@ export const ARIGrid = ({
     return 'no_price';
   };
 
-  // Função para obter inventário de uma data (síncrona para uso no render)
+  // Inventário por data: rate_inventory + fallback live (quartos + reservas do mapa)
   const getInventoryForDate = (categoryId: string, date: Date) => {
-    const dateStr = format(date, 'yyyy-MM-dd');
-    
-    // Normalizar categoryId para busca
+    const dateStr = format(date, "yyyy-MM-dd");
     const normalizedCategoryId = String(categoryId);
-    
-    // Tentar encontrar o mapa usando o ID normalizado
-    let inventoryMap = inventoryMaps[normalizedCategoryId];
-    
-    // Se não encontrar, tentar buscar por comparação direta
-    if (!inventoryMap) {
-      const matchingKey = Object.keys(inventoryMaps).find(key => String(key) === normalizedCategoryId);
-      if (matchingKey) {
-        inventoryMap = inventoryMaps[matchingKey];
-      }
-    }
-    
-    if (inventoryMap) {
-      const inv = inventoryMap.get(dateStr);
-      if (inv) {
-        return {
-          total_rooms: Number(inv.total_rooms || 0),
-          available_rooms: Number(inv.available_rooms || 0),
-          confirmed_reservations: Number(inv.confirmed_reservations || 0),
-          blocked_rooms: Number(inv.blocked_rooms || 0),
-          occupancy_percentage: Number(inv.occupancy_percentage || 0),
-        };
-      }
-    }
+    const category =
+      filteredCategories.find((c) => String(c.id) === normalizedCategoryId) ?? null;
+    const rooms = Array.isArray(category?.rooms) ? category.rooms : [];
+    const live = computeCategoryDayInventory({
+      rooms,
+      reservations: ariReservations,
+      categoryId: normalizedCategoryId,
+      date: dateStr,
+    });
 
-    // Se não houver dados no mapa, retornar valores padrão
-    // (a sincronização automática será feita em background)
-    return {
-      total_rooms: 0,
-      available_rooms: 0,
-      confirmed_reservations: 0,
-      blocked_rooms: 0,
-      occupancy_percentage: 0,
-    };
+    let inventoryMap = inventoryMaps[normalizedCategoryId];
+    if (!inventoryMap) {
+      const matchingKey = Object.keys(inventoryMaps).find(
+        (key) => String(key) === normalizedCategoryId,
+      );
+      if (matchingKey) inventoryMap = inventoryMaps[matchingKey];
+    }
+    const stored = inventoryMap?.get(dateStr) ?? null;
+
+    return mergeInventoryPreferLive(stored, live, rooms.length);
   };
 
   // Função para obter preço de um plano em uma data
@@ -2182,10 +2224,12 @@ export const ARIGrid = ({
                 </div>
               </div>
 
-              {/* Quartos à venda */}
+              {/* Quartos / vagas à venda */}
               <div className="flex border-b border-gray-100">
                 <div className="w-64 flex-shrink-0 p-3 border-r border-gray-200 bg-gray-50 font-medium text-sm">
-                  Quartos à venda
+                  {category.category_kind === PARKING_CATEGORY_KIND
+                    ? "Vagas à venda"
+                    : "Quartos à venda"}
                 </div>
                 <div className="flex-1 flex">
                   {visibleDates.map((date) => (

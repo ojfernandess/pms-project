@@ -93,10 +93,10 @@ const PMSRateSystem = () => {
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ["rate_system_categories", establishmentIdForCategories],
     enabled: enableCategoriesLoad,
-    staleTime: 5 * 60 * 1000, // 5 minutos - evitar refetch desnecessário
-    gcTime: 10 * 60 * 1000, // 10 minutos - manter em cache
-    refetchOnWindowFocus: false, // Não refazer fetch ao focar na janela
-    refetchOnMount: false, // Não refazer fetch ao montar se já tiver dados
+    staleTime: 60 * 1000, // 1 min — espelha base_price/parking atualizados em Serviços
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: true,
     queryFn: async () => {
       const establishmentId = establishmentIdForCategories;
       if (!establishmentId) return [];
@@ -160,18 +160,60 @@ const PMSRateSystem = () => {
         (roomsData || []).forEach((room: any) => {
           if (room.is_active === false) return;
           const categoryId = room.category_id;
+          // Inclui categoria vinda só do join do quarto (ex.: parking criado via serviços)
+          if (categoryId && !categoriesMap.has(categoryId) && room.room_categories) {
+            categoriesMap.set(categoryId, {
+              ...room.room_categories,
+              rooms: [],
+            });
+          }
           if (categoryId && categoriesMap.has(categoryId)) {
             categoriesMap.get(categoryId).rooms.push(room);
           }
         });
 
-        return Array.from(categoriesMap.values())
-          .map((category: any) => ({
+        // Estacionamento: se base_price da categoria está 0, usa valor de Serviços do Estabelecimento
+        const parkingCategoryIds = Array.from(categoriesMap.values())
+          .filter((c: any) => c.category_kind === "parking" || String(c.type || "").toLowerCase() === "parking")
+          .map((c: any) => c.id as string)
+          .filter(Boolean);
+
+        const parkingAmountByCategory = new Map<string, number>();
+        if (parkingCategoryIds.length > 0) {
+          const { data: parkingServices } = await supabase
+            .from("establishment_services")
+            .select("parking_category_id, default_amount, is_active, building_id, establishment_id")
+            .eq("service_kind", "parking_fee")
+            .eq("is_active", true)
+            .in("parking_category_id", parkingCategoryIds);
+
+          for (const row of parkingServices || []) {
+            const catId = row.parking_category_id;
+            const amount = Number(row.default_amount || 0);
+            if (!catId || amount <= 0) continue;
+            if (!parkingAmountByCategory.has(catId) || row.building_id == null) {
+              parkingAmountByCategory.set(catId, amount);
+            }
+          }
+        }
+
+        return Array.from(categoriesMap.values()).map((category: any) => {
+          const rooms = category.rooms.sort((a: any, b: any) =>
+            a.room_number.localeCompare(b.room_number, undefined, { numeric: true }),
+          );
+          const parkingAmount = parkingAmountByCategory.get(category.id);
+          const basePrice =
+            Number(category.base_price || 0) > 0
+              ? Number(category.base_price)
+              : parkingAmount && parkingAmount > 0
+                ? parkingAmount
+                : Number(category.base_price || 0);
+          return {
             ...category,
-            rooms: category.rooms.sort((a: any, b: any) =>
-              a.room_number.localeCompare(b.room_number, undefined, { numeric: true })
-            )
-          }));
+            base_price: basePrice,
+            rooms,
+          };
+        });
       });
     },
   });
