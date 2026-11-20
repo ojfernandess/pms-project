@@ -7,11 +7,24 @@ import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { logActivity, createReservationUpdateDescription } from "@/lib/activityLogger";
 import { useEffect } from "react";
 import { useEstablishmentReservationRealtime } from "@/hooks/useEstablishmentReservationRealtime";
-import { format } from "date-fns";
 import { recalculatePolicyAfterDateChange } from "@/utils/cancellationPolicyDateChange";
 import { recordProcessedRefund } from "@/services/financial/refundService";
 import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
+import { runAfterReservationCreated, runAfterReservationCancelled } from "@/lib/reservationPostCommit";
+import {
+  applyReservationMapDelta,
+  invalidateReservationViews,
+  patchReservationsInQueryCache,
+  upsertReservationInQueryCache,
+} from "@/lib/reservationQuerySync";
+import { runAfterCheckIn, runAfterCheckOut } from "@/lib/reservationPostCheckInOut";
+import { startReservationTrace } from "@/lib/reservationOperationTrace";
 import { maybeFinalizeOtaCancellationAfterPmsCancel } from "@/lib/otaFinalizeCancellationAfterPms";
+import { reconcileLoadedReservationsPaymentStatus } from "@/lib/reservationPaymentStatusReconcile";
+import {
+  type ReservationCreatePayload,
+  stripClientOnlyReservationFields,
+} from "@/lib/reservationCreateTypes";
 import {
   RESERVATION_RELATIONS_LIST_SELECT,
   RESERVATION_RELATIONS_ROOMS_CATEGORIES_SELECT,
@@ -92,112 +105,12 @@ export const useReservations = () => {
         throw error;
       }
 
-      // Atualizar status das reservas baseado em pagamento (para reservas antigas)
-      // Isso garante que reservas sem pagamento tenham status "unpaid" mesmo que estejam como "confirmed"
-      // IMPORTANTE: Esta atualização é feita de forma assíncrona e não bloqueia o carregamento
       if (data && data.length > 0) {
-        // Executar atualizações em background sem bloquear a resposta
-        setTimeout(async () => {
-          try {
-            const updates: Array<{ id: string; status: string }> = [];
-            
-            for (const reservation of data) {
-              // Pular status especiais que não dependem de pagamento
-              if (['blocked', 'cancelled', 'checkedin', 'checkedout', 'noshow', 'preregistration'].includes(reservation.status)) {
-                continue;
-              }
-
-              const paidAmount = Number(reservation.paid_amount || 0);
-              const baseTotalAmount = Number(reservation.total_amount || 0);
-
-              // Taxas já vêm no embed `reservation_service_fees` do select principal — evita N+1 GETs
-              // que sobrecarregavam o PostgREST e geravam 502 Bad Gateway em produção.
-              const embeddedFees = Array.isArray(
-                (reservation as { reservation_service_fees?: unknown }).reservation_service_fees,
-              )
-                ? (reservation as { reservation_service_fees: Array<{ amount?: unknown; quantity?: unknown }> })
-                    .reservation_service_fees
-                : [];
-              const serviceFeesTotal = embeddedFees.reduce((sum: number, fee) => {
-                return sum + (Number(fee.amount || 0) * Number(fee.quantity || 1));
-              }, 0);
-              
-              const totalWithFees = baseTotalAmount + serviceFeesTotal;
-              
-              let newStatus: string | null = null;
-              
-              // Determinar novo status baseado na nova lógica:
-              // - "unpaid": sem pagamento
-              // - "confirmed": valor base original pago (paid_amount >= total_amount base)
-              // - "pending": há taxas pendentes OU base não paga completamente
-              if (paidAmount === 0) {
-                // Sem pagamento = Não Pago
-                if (reservation.status !== "unpaid" && reservation.status !== "pending") {
-                  newStatus = "unpaid";
-                }
-              } else if (paidAmount >= baseTotalAmount && baseTotalAmount > 0) {
-                // Valor base pago: verificar se há taxas pendentes
-                if (serviceFeesTotal > 0 && paidAmount < totalWithFees) {
-                  // Base paga MAS com taxas pendentes = Pendente
-                  if (reservation.status !== "pending") {
-                    newStatus = "pending";
-                  }
-                } else {
-                  // Base paga E sem taxas pendentes = Confirmada
-                  if (reservation.status !== "confirmed" && reservation.status !== "checkedin" && reservation.status !== "checkedout") {
-                    newStatus = "confirmed";
-                  }
-                }
-              } else {
-                // Base não paga completamente = Pendente
-                if (reservation.status !== "pending") {
-                  newStatus = "pending";
-                }
-              }
-              
-              if (newStatus) {
-                updates.push({ id: reservation.id, status: newStatus });
-              }
-            }
-            
-            // Atualizar status em lote (apenas se houver atualizações)
-            if (updates.length > 0) {
-              // Fazer atualizações uma por uma para evitar sobrecarga e melhor tratamento de erros
-              for (const update of updates) {
-                try {
-                  const { error } = await supabase
-                    .from("reservations")
-                    .update({ status: update.status })
-                    .eq("id", update.id);
-                  
-                  if (error) {
-                    // Se o erro for porque o status não existe no enum, usar "pending" como fallback
-                    if (error.code === '23502' || error.message?.includes('invalid input value') || error.message?.includes('enum')) {
-                      console.warn(`Status "${update.status}" não disponível no enum, usando "pending" para reserva ${update.id}`);
-                      // Tentar com "pending" se "unpaid" falhar
-                      if (update.status === "unpaid") {
-                        const { error: fallbackError } = await supabase
-                          .from("reservations")
-                          .update({ status: "pending" })
-                          .eq("id", update.id);
-                        if (fallbackError) {
-                          console.warn(`Erro ao atualizar status da reserva ${update.id} com fallback:`, fallbackError);
-                        }
-                      }
-                    } else {
-                      console.warn(`Erro ao atualizar status da reserva ${update.id}:`, error);
-                    }
-                  }
-                } catch (error: any) {
-                  console.warn(`Erro ao atualizar status da reserva ${update.id}:`, error);
-                }
-              }
-            }
-          } catch (error) {
-            console.error("Erro ao atualizar status das reservas:", error);
-            // Não bloquear o carregamento se houver erro
-          }
-        }, 100); // Executar após 100ms para não bloquear o carregamento
+        setTimeout(() => {
+          void reconcileLoadedReservationsPaymentStatus(data, establishmentId).catch((error) => {
+            console.error("Erro ao reconciliar status por pagamento:", error);
+          });
+        }, 100);
       }
 
       return data;
@@ -206,7 +119,7 @@ export const useReservations = () => {
 
   // Criar nova reserva com proteção contra race conditions
   const createReservation = useMutation({
-    mutationFn: async (reservation: Omit<ReservationInsert, "reservation_code">) => {
+    mutationFn: async (reservation: ReservationCreatePayload) => {
       const { data: { user } } = await supabase.auth.getUser();
       const establishmentId = getEstablishmentId();
       
@@ -214,18 +127,21 @@ export const useReservations = () => {
         throw new Error("Estabelecimento não selecionado");
       }
 
+      const skipPreCheck = Boolean(reservation.skipPreCreateAvailabilityCheck);
+      const reservationForDb = stripClientOnlyReservationFields(reservation);
+
       // Importar validação de disponibilidade
       const { validateRoomAvailability, validateCategoryAvailability } = await import("@/lib/reservationUtils");
       const { logError } = await import("@/lib/errorLogger");
       const { monitorOperation } = await import("@/lib/monitoring");
 
-      // Validar disponibilidade ANTES de tentar criar
-      if (reservation.room_id && reservation.checkin_date && reservation.checkout_date) {
+      // Validar disponibilidade ANTES do lock (opcional se o mapa já validou)
+      if (!skipPreCheck && reservationForDb.room_id && reservationForDb.checkin_date && reservationForDb.checkout_date) {
         // Validar quarto específico
         const availability = await validateRoomAvailability(
-          reservation.room_id,
-          reservation.checkin_date,
-          reservation.checkout_date
+          reservationForDb.room_id,
+          reservationForDb.checkin_date,
+          reservationForDb.checkout_date,
         );
 
         if (!availability.available) {
@@ -234,19 +150,23 @@ export const useReservations = () => {
             context: "reservations.createReservation",
             severity: "medium",
             metadata: {
-              room_id: reservation.room_id,
-              checkin_date: reservation.checkin_date,
-              checkout_date: reservation.checkout_date,
+              room_id: reservationForDb.room_id,
+              checkin_date: reservationForDb.checkin_date,
+              checkout_date: reservationForDb.checkout_date,
             },
           });
           throw new Error(availability.reason || "Quarto não disponível no período solicitado");
         }
-      } else if (reservation.category_id && reservation.checkin_date && reservation.checkout_date) {
-        // Validar categoria (sem quarto específico)
+      } else if (
+        !skipPreCheck &&
+        reservationForDb.category_id &&
+        reservationForDb.checkin_date &&
+        reservationForDb.checkout_date
+      ) {
         const categoryAvailability = await validateCategoryAvailability(
-          reservation.category_id,
-          reservation.checkin_date,
-          reservation.checkout_date
+          reservationForDb.category_id,
+          reservationForDb.checkin_date,
+          reservationForDb.checkout_date,
         );
 
         if (!categoryAvailability.available) {
@@ -255,9 +175,9 @@ export const useReservations = () => {
             context: "reservations.createReservation",
             severity: "medium",
             metadata: {
-              category_id: reservation.category_id,
-              checkin_date: reservation.checkin_date,
-              checkout_date: reservation.checkout_date,
+              category_id: reservationForDb.category_id,
+              checkin_date: reservationForDb.checkin_date,
+              checkout_date: reservationForDb.checkout_date,
               available_rooms: categoryAvailability.availableRooms || 0,
             },
           });
@@ -265,31 +185,30 @@ export const useReservations = () => {
         }
       }
 
-      // Usar função com lock para criar reserva (proteção contra race conditions)
       return await monitorOperation("createReservation", async () => {
-        // Preparar dados para a função
+        const endCritical = startReservationTrace("createReservation.critical");
         const reservationData = {
           establishment_id: establishmentId,
-          room_id: reservation.room_id || null,
-          category_id: reservation.category_id || null,
-          guest_id: reservation.guest_id || null,
-          client_id: reservation.client_id || null,
-          financial_responsible_id: reservation.financial_responsible_id || null,
-          guest_name: reservation.guest_name || null,
-          adults: reservation.adults || 1,
-          children: reservation.children || 0,
-          total_amount: reservation.total_amount || 0,
-          paid_amount: reservation.paid_amount || 0,
-          payment_status: reservation.payment_status || "pending",
-          status: reservation.status || "pending",
-          notes: reservation.notes || null,
-          checkin_time: reservation.checkin_time || null,
-          checkout_time: reservation.checkout_time || null,
-          pricing_plan_id: reservation.pricing_plan_id || null,
+          room_id: reservationForDb.room_id || null,
+          category_id: reservationForDb.category_id || null,
+          guest_id: reservationForDb.guest_id || null,
+          client_id: reservationForDb.client_id || null,
+          financial_responsible_id: reservationForDb.financial_responsible_id || null,
+          guest_name: reservationForDb.guest_name || null,
+          adults: reservationForDb.adults || 1,
+          children: reservationForDb.children || 0,
+          total_amount: reservationForDb.total_amount || 0,
+          paid_amount: reservationForDb.paid_amount || 0,
+          payment_status: reservationForDb.payment_status || "pending",
+          status: reservationForDb.status || "pending",
+          notes: reservationForDb.notes || null,
+          checkin_time: reservationForDb.checkin_time || null,
+          checkout_time: reservationForDb.checkout_time || null,
+          pricing_plan_id: reservationForDb.pricing_plan_id || null,
           created_by: user?.id || null,
-          expiration_date: reservation.expiration_date || null,
-          channel: reservation.channel || "direct",
-          coupon_id: (reservation as any).coupon_id || null,
+          expiration_date: reservationForDb.expiration_date || null,
+          channel: reservationForDb.channel || "direct",
+          coupon_id: (reservationForDb as { coupon_id?: string | null }).coupon_id || null,
         };
 
         // Chamar função com lock (ordem: obrigatórios primeiro, opcionais depois)
@@ -299,11 +218,11 @@ export const useReservations = () => {
         try {
           lockResult = await createReservationWithLock({
             p_reservation_data: reservationData,
-            p_checkin_date: reservation.checkin_date,
-            p_checkout_date: reservation.checkout_date,
+            p_checkin_date: reservationForDb.checkin_date,
+            p_checkout_date: reservationForDb.checkout_date,
             p_establishment_id: establishmentId,
-            p_room_id: reservation.room_id || null,
-            p_category_id: reservation.category_id || null,
+            p_room_id: reservationForDb.room_id || null,
+            p_category_id: reservationForDb.category_id || null,
           });
         } catch (error) {
           lockError = { message: error instanceof Error ? error.message : "Erro ao criar reserva com lock" };
@@ -377,245 +296,17 @@ export const useReservations = () => {
           throw fetchError || new Error("Erro ao buscar reserva criada");
         }
 
+        endCritical();
         return newReservation;
       });
     },
-        onSuccess: async (newReservation) => {
-          // Criar notificação para nova reserva
-          try {
-            const establishmentId = getEstablishmentId();
-            if (establishmentId && newReservation) {
-              // Buscar dados do hóspede para a mensagem
-              const guestName =
-                newReservation.guest?.full_name ||
-                newReservation.financial_responsible?.full_name ||
-                (newReservation.guest_name && String(newReservation.guest_name).trim()) ||
-                "Hóspede";
-              
-              await supabase.rpc("create_notification_for_establishment", {
-                p_establishment_id: establishmentId,
-                p_type: "new_reservation",
-                p_title: "Nova Reserva Criada",
-                p_message: `Nova reserva ${newReservation.reservation_code || ''} criada para ${guestName}`,
-                p_priority: "medium",
-                p_metadata: {
-                  reservation_id: newReservation.id,
-                  reservation_code: newReservation.reservation_code,
-                },
-              });
-            }
-          } catch (error) {
-            console.error("Erro ao criar notificação de nova reserva:", error);
-            // Não bloquear a criação da reserva se a notificação falhar
-          }
-
-          // Criar web check-in para a nova reserva
-          try {
-            // Obter establishmentId dentro do onSuccess
-            const establishmentId = getEstablishmentId();
-            
-            if (newReservation?.id && establishmentId) {
-              let reservationCode = String(newReservation.reservation_code ?? "").trim();
-              let checkinForWeb = newReservation.checkin_date;
-
-              if (!reservationCode) {
-                let attempts = 0;
-                const maxAttempts = 2;
-                while (attempts < maxAttempts && !reservationCode) {
-                  await new Promise((resolve) => setTimeout(resolve, 300 * (attempts + 1)));
-                  const { data } = await supabase
-                    .from("reservations")
-                    .select("reservation_code, checkin_date")
-                    .eq("id", newReservation.id)
-                    .maybeSingle();
-                  if (data?.reservation_code) {
-                    reservationCode = data.reservation_code;
-                    checkinForWeb = data.checkin_date ?? checkinForWeb;
-                    break;
-                  }
-                  attempts++;
-                }
-              }
-
-              if (!reservationCode) {
-                console.error("Reservation code não gerado após criação:", newReservation.id);
-                return;
-              }
-              
-              const { locatorService } = await import("@/lib/locatorService");
-              
-              // Gerar token único
-              const token = locatorService.generateWebCheckinToken(
-                newReservation.id,
-                reservationCode
-              );
-
-              // Calcular data de expiração (7 dias antes do check-in ou no check-in, o que for menor)
-              const checkinDate = new Date(checkinForWeb);
-              const expiresAt = new Date();
-              expiresAt.setDate(expiresAt.getDate() + 7);
-              
-              if (checkinDate < expiresAt) {
-                expiresAt.setTime(checkinDate.getTime());
-              }
-
-              // Verificar se já existe web_checkin para esta reserva
-              const { data: existingWebCheckin } = await supabase
-                .from("web_checkin")
-                .select("id, locator")
-                .eq("reservation_id", newReservation.id)
-                .maybeSingle();
-
-              if (!existingWebCheckin) {
-                // Criar web check-in
-                const { error: webCheckinError } = await supabase
-                  .from("web_checkin")
-                  .insert({
-                    reservation_id: newReservation.id,
-                    establishment_id: establishmentId,
-                    token: token,
-                    locator: reservationCode,
-                    expires_at: expiresAt.toISOString(),
-                    status: "pending",
-                  });
-
-                if (webCheckinError) {
-                  console.error("Erro ao criar web check-in:", webCheckinError);
-                } else {
-                  console.log("✅ Web check-in criado com sucesso para reserva:", reservationCode);
-                }
-              } else {
-                // Atualizar web_checkin existente com o locator correto se necessário
-                if (existingWebCheckin.locator !== reservationCode) {
-                  const { error: updateError } = await supabase
-                    .from("web_checkin")
-                    .update({
-                      locator: reservationCode,
-                      token: token,
-                      expires_at: expiresAt.toISOString(),
-                    })
-                    .eq("id", existingWebCheckin.id);
-
-                  if (updateError) {
-                    console.error("Erro ao atualizar web check-in:", updateError);
-                  } else {
-                    console.log("✅ Web check-in atualizado com localizador:", reservationCode);
-                  }
-                }
-              }
-              
-              // Disparar e-mail de confirmação de reserva (pagamento pendente)
-              // Apenas se não houver pagamento confirmado
-              if (newReservation.payment_status !== 'paid') {
-                try {
-                  const { triggerEmail } = await import("@/lib/emailService");
-                  await triggerEmail('reservation.created', newReservation);
-                } catch (emailError) {
-                  console.error("Erro ao disparar e-mail de reserva:", emailError);
-                  // Não bloquear a criação da reserva se o e-mail falhar
-                }
-              }
-
-              // Disparar webhook da empresa (Configurações Avançadas do motor), se configurado
-              if (newReservation.establishment_id) {
-                try {
-                  const payload = {
-                    reservation_id: newReservation.id,
-                    reservation_code: newReservation.reservation_code,
-                    checkin_date: newReservation.checkin_date,
-                    checkout_date: newReservation.checkout_date,
-                    total_amount: newReservation.total_amount,
-                    status: newReservation.status,
-                    payment_status: newReservation.payment_status,
-                    guest_name: newReservation.guest?.full_name ?? newReservation.financial_responsible?.full_name ?? null,
-                    guest_email: newReservation.guest?.email ?? newReservation.financial_responsible?.email ?? null,
-                  };
-                  await (await import("@/lib/pmsApi")).invokePmsFunction("call-company-webhook", {
-                    body: {
-                      establishment_id: newReservation.establishment_id,
-                      event: "reservation.created",
-                      payload,
-                    },
-                  });
-                } catch (webhookError) {
-                  console.error("Erro ao disparar webhook da empresa:", webhookError);
-                }
-              }
-            }
-          } catch (error) {
-            console.error("Erro ao criar web check-in:", error);
-            // Não bloquear a criação da reserva se o web check-in falhar
-          }
-
-          // Mensagens & Cobranças: envio automático "Após confirmação da reserva" quando reserva é criada já confirmada
-          if (newReservation?.status === "confirmed" && newReservation?.establishment_id) {
-            try {
-              const { data: ccConfig } = await supabase
-                .from("checkin_charge_config")
-                .select("send_timing")
-                .eq("establishment_id", newReservation.establishment_id)
-                .eq("enabled", true)
-                .maybeSingle();
-              if (ccConfig?.send_timing === "after_confirmation") {
-                await (await import("@/lib/pmsApi")).invokePmsFunction("send-checkin-charge", {
-                  body: { reservation_id: newReservation.id, intent: "checkin_reminder" },
-                });
-              }
-            } catch (e) {
-              console.warn("Mensagens & Cobranças (after_confirmation, create):", e);
-            }
-          }
-
-          // Mensagens & Cobranças: ao criar reserva, enviar mensagem de Pagamento Pendente quando houver valor a pagar
-          const totalAmount = Number(newReservation?.total_amount ?? 0);
-          const paidAmount = Number(newReservation?.paid_amount ?? 0);
-          if (newReservation?.establishment_id && totalAmount > 0 && paidAmount < totalAmount) {
-            try {
-              const { data: ccConfig } = await supabase
-                .from("checkin_charge_config")
-                .select("id")
-                .eq("establishment_id", newReservation.establishment_id)
-                .eq("enabled", true)
-                .maybeSingle();
-              if (ccConfig) {
-                await (await import("@/lib/pmsApi")).invokePmsFunction("send-checkin-charge", {
-                  body: { reservation_id: newReservation.id, intent: "payment_pending" },
-                });
-              }
-            } catch (e) {
-              console.warn("Mensagens & Cobranças (payment_pending, create):", e);
-            }
-          }
-
-          // Registrar log de criação
-          try {
-            await logActivity({
-              actionType: "created",
-              entityType: "reservation",
-              entityId: newReservation.id,
-              entityCode: newReservation.reservation_code,
-              description: `Reserva ${newReservation.reservation_code} criada`,
-              newValues: {
-                checkin_date: newReservation.checkin_date,
-                checkout_date: newReservation.checkout_date,
-                room_id: newReservation.room_id,
-                category_id: newReservation.category_id,
-                total_amount: newReservation.total_amount,
-                payment_status: newReservation.payment_status,
-                status: newReservation.status,
-              },
-            });
-          } catch (logError) {
-            console.error("Erro ao registrar log de criação:", logError);
-          }
-
-          // Invalidar todas as queries de reservas (com e sem establishmentId)
-          queryClient.invalidateQueries({ queryKey: ["reservations"] });
-          queryClient.invalidateQueries({ queryKey: ["rooms"] });
-          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-          scheduleChannelSyncAfterInventoryChange(getEstablishmentId());
-          toast.success("Reserva criada com sucesso!");
-        },
+    onSuccess: (newReservation) => {
+      upsertReservationInQueryCache(queryClient, newReservation);
+      invalidateReservationViews(queryClient, [["web_checkin"]]);
+      scheduleChannelSyncAfterInventoryChange(getEstablishmentId());
+      toast.success("Reserva criada com sucesso!");
+      void runAfterReservationCreated(newReservation);
+    },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao criar reserva");
     },
@@ -908,16 +599,9 @@ export const useReservations = () => {
       
       // Invalidar cache de web_checkin sempre que a reserva for atualizada
       // Isso garante que datas, quarto, categoria e outros dados sejam atualizados no check-in web
-      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
-      // Invalidar também o mapa de ocupação para refletir mudanças imediatamente
-      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-      // Invalidar reservas para atualizar listas
-      queryClient.invalidateQueries({ queryKey: ["reservations"] });
-      // Forçar refetch imediato para atualizar o mapa em tempo real
-      await queryClient.refetchQueries({ queryKey: ["reservations"] });
-      await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
-
-      scheduleChannelSyncAfterInventoryChange(data.establishment_id);
+      queryClient.invalidateQueries({ queryKey: ["web_checkin"], refetchType: "active" });
+      patchReservationsInQueryCache(queryClient, [{ id: data.id, patch: data as Record<string, unknown> }]);
+      invalidateReservationViews(queryClient);
 
       return data;
     },
@@ -932,7 +616,8 @@ export const useReservations = () => {
   // Deletar/Cancelar reserva
   const cancelReservation = useMutation({
     mutationFn: async ({ id, reason, refundPayments = false }: { id: string; reason: string; refundPayments?: boolean }) => {
-      // Obter usuário atual
+      const endCritical = startReservationTrace("cancelReservation.critical");
+      try {
       const { data: { user } } = await supabase.auth.getUser();
       
       // Buscar dados da reserva antes de cancelar
@@ -976,32 +661,31 @@ export const useReservations = () => {
               { reservationId: id, reservationCode: reservationData.reservation_code }
             );
           } else {
-            for (const payment of payments) {
-              const amount = Number(payment.amount || 0);
-              if (!payment.id || !amount) continue;
-
-              const refundResult = await recordProcessedRefund({
-                establishment_id: establishmentIdForRefund,
-                payment_id: payment.id,
-                reservation_id: reservationData.id,
-                amount,
-                reason: reason
-                  ? `Estorno por cancelamento da reserva ${reservationData.reservation_code}: ${reason}`
-                  : `Estorno por cancelamento da reserva ${reservationData.reservation_code}`,
-                metadata: {
-                  cancellation_reason: reason || null,
-                  reservation_code: reservationData.reservation_code,
-                },
-              });
-
-              if (!refundResult.success) {
-                console.error(
-                  "Erro ao registrar estorno financeiro ao cancelar reserva:",
-                  refundResult.error
-                );
-                // Não bloquear o cancelamento; apenas logar o erro
-              }
-            }
+            await Promise.all(
+              payments.map(async (payment) => {
+                const amount = Number(payment.amount || 0);
+                if (!payment.id || !amount) return;
+                const refundResult = await recordProcessedRefund({
+                  establishment_id: establishmentIdForRefund,
+                  payment_id: payment.id,
+                  reservation_id: reservationData.id,
+                  amount,
+                  reason: reason
+                    ? `Estorno por cancelamento da reserva ${reservationData.reservation_code}: ${reason}`
+                    : `Estorno por cancelamento da reserva ${reservationData.reservation_code}`,
+                  metadata: {
+                    cancellation_reason: reason || null,
+                    reservation_code: reservationData.reservation_code,
+                  },
+                });
+                if (!refundResult.success) {
+                  console.error(
+                    "Erro ao registrar estorno financeiro ao cancelar reserva:",
+                    refundResult.error,
+                  );
+                }
+              }),
+            );
           }
 
           // Remover todos os pagamentos
@@ -1047,111 +731,40 @@ export const useReservations = () => {
       } catch {
         /* FNRH opcional */
       }
-      
-      return { ...reservationData, refundPayments, originalStatus, cancellation_reason: reason };
-    },
-    onSuccess: async (reservationData) => {
-      // Registrar log de cancelamento
-      if (reservationData) {
-        try {
-          const description = reservationData.refundPayments
-            ? `Reserva ${reservationData.reservation_code} cancelada com estorno de pagamentos`
-            : `Reserva ${reservationData.reservation_code} cancelada sem estorno`;
 
-          await logActivity({
-            actionType: "cancelled",
-            entityType: "reservation",
-            entityId: reservationData.id,
-            entityCode: reservationData.reservation_code,
-            description,
-            oldValues: { 
-              status: "active", 
-              payment_status: reservationData.payment_status,
-              paid_amount: reservationData.paid_amount || 0,
-            },
-            newValues: { 
+      return { ...reservationData, refundPayments, originalStatus, cancellation_reason: reason };
+      } finally {
+        endCritical();
+      }
+    },
+    onSuccess: (reservationData) => {
+      if (reservationData?.id) {
+        applyReservationMapDelta(
+          queryClient,
+          {
+            id: reservationData.id,
+            patch: {
               status: "cancelled",
               payment_status: reservationData.refundPayments ? "pending" : reservationData.payment_status,
-              paid_amount: reservationData.refundPayments ? 0 : reservationData.paid_amount || 0,
+              paid_amount: reservationData.refundPayments ? 0 : reservationData.paid_amount,
             },
-            metadata: {
-              refund_payments: reservationData.refundPayments || false,
-              cancellation_reason: reservationData.cancellation_reason,
-            },
-          });
-        } catch (logError) {
-          console.error("Erro ao registrar log de cancelamento:", logError);
-        }
-      }
-      
-      queryClient.invalidateQueries({ queryKey: ["reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["reservation_payments"] });
-      queryClient.invalidateQueries({ queryKey: ["refunds"] });
-      queryClient.invalidateQueries({ queryKey: ["pending"] });
-
-      await queryClient.refetchQueries({ queryKey: ["reservations"], exact: false });
-      await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
-
-      try {
-        if (reservationData?.id) {
-          await maybeFinalizeOtaCancellationAfterPmsCancel(reservationData.id);
-        }
-      } catch (finalizeErr) {
-        console.warn(
-          "Cancelamento no PMS: finalização OTA/Channex (pendência) opcional falhou — use Pendências se necessário.",
-          finalizeErr,
+          },
+          [["reservation_payments"], ["refunds"], ["pending"], ["web_checkin"]],
         );
+      } else {
+        invalidateReservationViews(queryClient, [
+          ["reservation_payments"],
+          ["refunds"],
+          ["pending"],
+        ]);
       }
-
       scheduleChannelSyncAfterInventoryChange(
-        reservationData.establishment_id || getEstablishmentId()
+        reservationData.establishment_id || getEstablishmentId(),
       );
-
-      // Criar notificação se for pré-reserva cancelada
-      // Usar originalStatus que foi guardado antes do cancelamento
-      if (reservationData && reservationData.originalStatus === 'preregistration') {
-        try {
-          const establishmentId = reservationData.establishment_id || getEstablishmentId();
-          if (establishmentId) {
-            const guestName = reservationData.guest?.full_name || 
-                             reservationData.financial_responsible?.full_name || 
-                             reservationData.guest_name ||
-                             "Hóspede";
-            
-            await supabase.rpc("create_notification_for_establishment", {
-              p_establishment_id: establishmentId,
-              p_type: "reservation_cancelled",
-              p_title: "Pré-reserva Cancelada",
-              p_message: `Pré-reserva ${reservationData.reservation_code || ''} de ${guestName} foi cancelada${reservationData.cancellation_reason ? ': ' + reservationData.cancellation_reason : ''}`,
-              p_priority: "medium",
-              p_metadata: {
-                reservation_id: reservationData.id,
-                reservation_code: reservationData.reservation_code,
-                cancellation_reason: reservationData.cancellation_reason,
-                was_preregistration: true,
-              },
-            });
-          }
-        } catch (notificationError) {
-          console.error("Erro ao criar notificação de cancelamento de pré-reserva:", notificationError);
-          // Não bloquear o cancelamento se a notificação falhar
-        }
-      }
-      
-      // Disparar e-mail de cancelamento
-      if (reservationData) {
-        try {
-          const { triggerEmail } = await import("@/lib/emailService");
-          await triggerEmail('reservation.cancelled', reservationData);
-        } catch (emailError) {
-          console.error("Erro ao disparar e-mail de cancelamento:", emailError);
-          // Não bloquear o cancelamento se o e-mail falhar
-        }
-      }
-
       toast.success("Reserva cancelada com sucesso!");
+      if (reservationData) {
+        void runAfterReservationCancelled(reservationData);
+      }
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao cancelar reserva");
@@ -1212,28 +825,34 @@ export const useReservations = () => {
         }
       }
 
-      queryClient.invalidateQueries({ queryKey: ["reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["reservation"] });
-      queryClient.invalidateQueries({ queryKey: ["rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["reservation_payments"] });
-      queryClient.invalidateQueries({ queryKey: ["pending"] });
-      await queryClient.refetchQueries({ queryKey: ["reservations"], exact: false });
-      await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
-
-      try {
-        if (reservationData?.id) {
-          await maybeFinalizeOtaCancellationAfterPmsCancel(reservationData.id);
-        }
-      } catch (finalizeErr) {
-        console.warn(
-          "No-show no PMS: finalização OTA/Channex (pendência) opcional falhou — use Pendências se necessário.",
-          finalizeErr,
+      if (reservationData?.id) {
+        applyReservationMapDelta(
+          queryClient,
+          {
+            id: reservationData.id,
+            patch: {
+              status: "noshow",
+              penalty: payload.penalty,
+            },
+          },
+          [["reservation"], ["reservation_payments"], ["pending"]],
         );
+      } else {
+        invalidateReservationViews(queryClient, [
+          ["reservation"],
+          ["reservation_payments"],
+          ["pending"],
+        ]);
+      }
+
+      if (reservationData?.id) {
+        void maybeFinalizeOtaCancellationAfterPmsCancel(reservationData.id).catch((finalizeErr) => {
+          console.warn("No-show: finalização OTA opcional falhou", finalizeErr);
+        });
       }
 
       scheduleChannelSyncAfterInventoryChange(
-        reservationData?.establishment_id || getEstablishmentId()
+        reservationData?.establishment_id || getEstablishmentId(),
       );
 
       toast.success("Reserva marcada como no-show.");
@@ -1247,53 +866,30 @@ export const useReservations = () => {
   // Check-in
   const checkIn = useMutation({
     mutationFn: async ({ id, roomId, skipEmail }: { id: string; roomId?: string; skipEmail?: boolean }) => {
-      const { checkInReservation } = await import("@/lib/pmsApi");
-      const data = await checkInReservation(id, roomId);
-      return { ...data, _skipEmail: skipEmail };
+      const endCritical = startReservationTrace("checkIn.critical");
+      try {
+        const { checkInReservation } = await import("@/lib/pmsApi");
+        const data = await checkInReservation(id, roomId);
+        return { ...data, _skipEmail: skipEmail };
+      } finally {
+        endCritical();
+      }
     },
-        onSuccess: async (updatedReservation) => {
-          // Registrar log de check-in
-          try {
-            await logActivity({
-              actionType: "checked_in",
-              entityType: "reservation",
-              entityId: updatedReservation.id,
-              entityCode: updatedReservation.reservation_code,
-              description: `Check-in realizado para reserva ${updatedReservation.reservation_code}`,
-              oldValues: { status: "confirmed" },
-              newValues: { status: "checkedin", room_id: updatedReservation.room_id },
-            });
-          } catch (logError) {
-            console.error("Erro ao registrar log de check-in:", logError);
-          }
-          
-          // Invalidar e refetch todas as queries relacionadas para atualizar o mapa em tempo real
-          queryClient.invalidateQueries({ queryKey: ["reservations"] });
-          queryClient.invalidateQueries({ queryKey: ["rooms"] });
-          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-          // Invalidar web check-in para atualizar dados da acomodação
-          queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
-          // Forçar refetch imediato para atualizar o mapa
-          await queryClient.refetchQueries({ queryKey: ["reservations"] });
-          await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
-
+        onSuccess: (updatedReservation) => {
+          applyReservationMapDelta(
+            queryClient,
+            {
+              id: updatedReservation.id,
+              patch: {
+                status: "checkedin",
+                room_id: updatedReservation.room_id,
+              },
+            },
+            [["web_checkin"]],
+          );
           scheduleChannelSyncAfterInventoryChange(updatedReservation.establishment_id);
-
-          // Disparar e-mail de check-in confirmado apenas se não foi solicitado para pular
-          // (o email já foi enviado pelo web check-in)
-          if (!updatedReservation._skipEmail) {
-          try {
-            const { triggerEmail } = await import("@/lib/emailService");
-            await triggerEmail('checkin.confirmed', updatedReservation);
-          } catch (emailError) {
-            console.error("Erro ao disparar e-mail de check-in confirmado:", emailError);
-            // Não bloquear o check-in se o e-mail falhar
-            }
-          } else {
-            console.log('ℹ️ Email de check-in confirmado não será enviado (já foi enviado pelo web check-in)');
-          }
-          
           toast.success("Check-in realizado com sucesso!");
+          void runAfterCheckIn(updatedReservation as Record<string, unknown> & { id: string; _skipEmail?: boolean });
         },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao realizar check-in");
@@ -1303,174 +899,33 @@ export const useReservations = () => {
   // Check-out
   const checkOut = useMutation({
     mutationFn: async (id: string) => {
-      const { checkOutReservation } = await import("@/lib/pmsApi");
-      const data = await checkOutReservation(id);
+      const endCritical = startReservationTrace("checkOut.critical");
       try {
-        const { invokeFnrhLifecycle } = await import("@/lib/fnrh/invokeFnrhLifecycle");
-        void invokeFnrhLifecycle(id, "checkout");
-      } catch {
-        /* FNRH opcional */
+        const { checkOutReservation } = await import("@/lib/pmsApi");
+        const data = await checkOutReservation(id);
+        try {
+          const { invokeFnrhLifecycle } = await import("@/lib/fnrh/invokeFnrhLifecycle");
+          void invokeFnrhLifecycle(id, "checkout");
+        } catch {
+          /* FNRH opcional */
+        }
+        return data;
+      } finally {
+        endCritical();
       }
-      return data;
     },
-        onSuccess: async (updatedReservation) => {
-          // Criar notificação de limpeza imediatamente após check-out
-          const reservationAny = updatedReservation as any;
-          if (reservationAny.room_id && reservationAny.establishment_id) {
-            try {
-              // Buscar informações do quarto e do hóspede
-              const room = reservationAny.rooms;
-              const guestName = reservationAny.guest?.full_name || 
-                              reservationAny.financial_responsible?.full_name || 
-                              reservationAny.guest_name || 
-                              "Hóspede";
-
-              // Verificar se notificações de limpeza estão habilitadas
-              const { data: hotelSettings } = await (supabase as any)
-                .from("hotel_settings")
-                .select("enable_cleaning_notifications")
-                .eq("establishment_id", reservationAny.establishment_id)
-                .single();
-
-              const isCleaningNotificationsEnabled = hotelSettings?.enable_cleaning_notifications !== false;
-
-              if (isCleaningNotificationsEnabled) {
-                // Verificar se já existe notificação recente (últimas 2 horas) para evitar duplicatas
-                const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-                const { data: recentNotifications } = await (supabase as any)
-                  .from("notifications")
-                  .select("id, metadata")
-                  .eq("establishment_id", reservationAny.establishment_id)
-                  .eq("type", "cleaning_required")
-                  .eq("metadata->>room_id", reservationAny.room_id)
-                  .gte("created_at", twoHoursAgo.toISOString())
-                  .limit(1);
-
-                // Só criar notificação se não existir uma recente
-                if (!recentNotifications || recentNotifications.length === 0) {
-                  await (supabase as any).rpc("create_notification_for_establishment", {
-                    p_establishment_id: reservationAny.establishment_id,
-                    p_type: "cleaning_required",
-                    p_title: "Quarto Precisa de Limpeza",
-                    p_message: `O quarto ${room?.room_number || "N/A"} precisa de limpeza após check-out da reserva ${reservationAny.reservation_code || ""} (${guestName})`,
-                    p_priority: "high",
-                    p_metadata: {
-                      room_id: reservationAny.room_id,
-                      room_number: room?.room_number || "N/A",
-                      reservation_id: reservationAny.id,
-                      reservation_code: reservationAny.reservation_code || "",
-                      guest_name: guestName,
-                      checkout_date: reservationAny.checkout_date || format(new Date(), "yyyy-MM-dd"),
-                      checkout_time: reservationAny.checkout_time || format(new Date(), "HH:mm"),
-                      checkin_date: reservationAny.checkin_date,
-                    },
-                  });
-
-                  console.log("[checkOut] Notificação de limpeza criada imediatamente após check-out");
-                  
-                  // Invalidar queries de notificações para atualizar a UI
-                  queryClient.invalidateQueries({ queryKey: ["notifications"] });
-                }
-              }
-            } catch (notificationError) {
-              // Não bloquear o check-out se houver erro ao criar notificação
-              console.error("Erro ao criar notificação de limpeza após check-out:", notificationError);
-            }
-          }
-          // Invalidar e refetch todas as queries relacionadas para atualizar o mapa em tempo real
-          queryClient.invalidateQueries({ queryKey: ["reservations"] });
-          queryClient.invalidateQueries({ queryKey: ["reservation"] });
-          queryClient.invalidateQueries({ queryKey: ["rooms"] });
-          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-          // Invalidar também para atualizar informações dos hóspedes (próximas entradas)
-          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-          // Forçar refetch imediato para atualizar o mapa
-          await queryClient.refetchQueries({ queryKey: ["reservations"] });
-          await queryClient.refetchQueries({ queryKey: ["occupancy_map_rooms"] });
-
+        onSuccess: (updatedReservation) => {
+          applyReservationMapDelta(
+            queryClient,
+            {
+              id: updatedReservation.id,
+              patch: { status: "checkedout" },
+            },
+            [["reservation"], ["web_checkin"]],
+          );
           scheduleChannelSyncAfterInventoryChange(updatedReservation.establishment_id);
-
-          // Disparar evento genérico de check-out concluído
-          try {
-            const { triggerEmail } = await import("@/lib/emailService");
-            
-            // Verificar se a data de check-out já passou (incluindo hoje)
-            const checkoutDate = updatedReservation.checkout_date ? new Date(updatedReservation.checkout_date) : null;
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            if (checkoutDate) {
-              checkoutDate.setHours(0, 0, 0, 0);
-              
-              // Enviar se a data de check-out já passou ou é hoje
-              if (checkoutDate <= today) {
-                // Disparar evento genérico de check-out concluído
-                await triggerEmail('checkout.completed', updatedReservation);
-              }
-            }
-          } catch (error) {
-            console.warn("⚠️ Erro ao disparar evento de check-out concluído:", error);
-            // Não bloquear o checkout se houver erro no envio de email
-          }
-          
-          // Verificar se deve enviar email de solicitação de avaliação
-          try {
-            // Verificar feature flag para o estabelecimento
-            const { data: siteSettings } = await supabase
-              .from("site_settings")
-              .select("features_enabled")
-              .eq("id", "00000000-0000-0000-0000-000000000001")
-              .maybeSingle();
-            
-            const { isFeatureEnabledForEstablishment } = await import("@/lib/featureAccess");
-            const isStayReviewsEnabled = isFeatureEnabledForEstablishment(
-              siteSettings?.features_enabled?.stay_reviews,
-              updatedReservation.establishment_id
-            );
-            
-            if (isStayReviewsEnabled) {
-              const { sendStayReviewRequestEmail } = await import("@/lib/emailService");
-              
-              // Buscar configurações de avaliação do estabelecimento
-              const { data: reviewSettings } = await supabase
-                .from("establishment_review_settings")
-                .select("is_enabled, send_email_after_checkout, email_delay_hours")
-                .eq("establishment_id", updatedReservation.establishment_id)
-                .maybeSingle();
-              
-              if (reviewSettings?.is_enabled && reviewSettings?.send_email_after_checkout) {
-                // Verificar se a data de check-out já passou (incluindo hoje)
-                const checkoutDate = updatedReservation.checkout_date ? new Date(updatedReservation.checkout_date) : null;
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                
-                if (checkoutDate) {
-                  checkoutDate.setHours(0, 0, 0, 0);
-                  
-                  // Enviar se a data de check-out já passou ou é hoje
-                  if (checkoutDate <= today) {
-                    // Gerar link de avaliação
-                    const baseUrl = typeof window !== 'undefined' 
-                      ? window.location.origin 
-                      : (import.meta.env.VITE_APP_URL || 'http://localhost:8080');
-                    
-                    // Usar reservation_code ou identification_number para o link
-                    const locator = updatedReservation.identification_number || updatedReservation.reservation_code;
-                    const reviewLink = `${baseUrl}/review/${locator}`;
-                    
-                    // Se houver delay configurado, agendar o envio (por enquanto, enviar imediatamente)
-                    // Em produção, poderia usar uma função edge ou cron job para enviar após o delay
-                    await sendStayReviewRequestEmail(updatedReservation, reviewLink);
-                  }
-                }
-              }
-            }
-          } catch (error) {
-            console.warn("⚠️ Erro ao enviar email de solicitação de avaliação:", error);
-            // Não bloquear o checkout se houver erro no envio de email
-          }
-          
           toast.success("Check-out realizado com sucesso!");
+          void runAfterCheckOut(updatedReservation as Record<string, unknown> & { id: string }, queryClient);
         },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao realizar check-out");
@@ -1561,12 +1016,21 @@ export const useReservations = () => {
       }
       return data;
     },
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ["reservations"] });
-          queryClient.invalidateQueries({ queryKey: ["rooms"] });
-          queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-          // Invalidar web check-in para atualizar dados da acomodação
-          queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
+        onSuccess: (data) => {
+          if (data?.id) {
+            patchReservationsInQueryCache(queryClient, [
+              {
+                id: data.id,
+                patch: {
+                  room_id: data.room_id,
+                  category_id: data.category_id,
+                  rooms: data.rooms,
+                  room_categories: data.room_categories,
+                },
+              },
+            ]);
+          }
+          invalidateReservationViews(queryClient, [["web_checkin"]]);
           toast.success("Quarto substituído com sucesso!");
         },
     onError: (error: any) => {
@@ -1612,27 +1076,25 @@ export const useReservations = () => {
       if (error) throw error;
       return data;
     },
-    onSuccess: async (updatedReservation) => {
-      // Registrar log de efetivação
-      try {
-        await logActivity({
-          actionType: "updated",
-          entityType: "reservation",
-          entityId: updatedReservation.id,
-          entityCode: updatedReservation.reservation_code,
-          description: `Pré-reserva ${updatedReservation.reservation_code} efetivada`,
-          oldValues: { status: "preregistration" },
-          newValues: { status: updatedReservation.status },
-        });
-      } catch (logError) {
-        console.error("Erro ao registrar log de efetivação:", logError);
-      }
-
-      queryClient.invalidateQueries({ queryKey: ["reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["web_checkin"] });
-      
+    onSuccess: (updatedReservation) => {
+      upsertReservationInQueryCache(queryClient, updatedReservation);
+      invalidateReservationViews(queryClient, [["web_checkin"]]);
       toast.success("Pré-reserva efetivada com sucesso!");
+      void (async () => {
+        try {
+          await logActivity({
+            actionType: "updated",
+            entityType: "reservation",
+            entityId: updatedReservation.id,
+            entityCode: updatedReservation.reservation_code,
+            description: `Pré-reserva ${updatedReservation.reservation_code} efetivada`,
+            oldValues: { status: "preregistration" },
+            newValues: { status: updatedReservation.status },
+          });
+        } catch (logError) {
+          console.error("Erro ao registrar log de efetivação:", logError);
+        }
+      })();
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao efetivar pré-reserva");

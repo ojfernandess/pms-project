@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { reservation_status, room_status } from "@prisma/client";
 import { AuthService, SessionUser } from "../auth/auth.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -13,6 +13,8 @@ export interface ReservationListQuery {
 
 @Injectable()
 export class ReservationsService {
+  private readonly logger = new Logger(ReservationsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly auth: AuthService,
@@ -52,6 +54,7 @@ export class ReservationsService {
     if (!body?.p_reservation_data || !body.p_checkin_date || !body.p_checkout_date || !body.p_establishment_id) {
       throw new BadRequestException("Dados da reserva incompletos");
     }
+    const startedAt = performance.now();
     const rows = await this.prisma.$queryRaw<Array<{ result: { success?: boolean; error?: string; reservation_id?: string } }>>`
       SELECT public.create_reservation_with_lock(
         ${JSON.stringify(body.p_reservation_data)}::jsonb,
@@ -63,6 +66,12 @@ export class ReservationsService {
       ) AS result
     `;
     const result = rows[0]?.result ?? { success: false, error: "A função de reserva não retornou resultado" };
+    const ms = Math.round(performance.now() - startedAt);
+    if (ms >= 400 || process.env.PMS_LOG_RESERVATION_LOCK_TIMING === "1") {
+      this.logger.log(
+        `createWithLock ${ms}ms success=${Boolean(result.success)} establishment=${body.p_establishment_id}`,
+      );
+    }
     if (result.success && result.reservation_id) {
       this.realtime?.publish({
         table: "reservations",

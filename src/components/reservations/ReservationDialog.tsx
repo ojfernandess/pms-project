@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -2364,10 +2364,13 @@ export const ReservationDialog = ({
         
         console.log("📤 Dados da reserva a serem enviados:", cleanReservationData);
         
-        const created = await createReservation(cleanReservationData);
+        const created = await createReservation({
+          ...cleanReservationData,
+          skipPreCreateAvailabilityCheck: Boolean(cleanReservationData.room_id),
+        });
         if (created?.id) {
-          await persistCleaningFeeIfNeeded(created.id);
-          await persistParkingIfNeeded(created);
+          void persistCleaningFeeIfNeeded(created.id);
+          void persistParkingIfNeeded(created);
         }
       }
 
@@ -4245,7 +4248,10 @@ export const ReservationDialog = ({
                     cleanReservationData.checkout_time = null;
                   }
                   
-                  const createdPast = await createReservation(cleanReservationData);
+                  const createdPast = await createReservation({
+                    ...cleanReservationData,
+                    skipPreCreateAvailabilityCheck: Boolean(cleanReservationData.room_id),
+                  });
                   if (createdPast?.id) {
                     await persistCleaningFeeIfNeeded(createdPast.id);
                     await persistParkingIfNeeded(createdPast);
