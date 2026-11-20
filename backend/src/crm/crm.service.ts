@@ -139,13 +139,19 @@ export class CrmService {
             where: { id: { in: clientIds } },
             select: { id: true, document_type: true, document_number: true },
           })
-        : Promise.resolve([]),
+        : Promise.resolve(
+            [] as Array<{
+              id: string;
+              document_type: string | null;
+              document_number: string | null;
+            }>,
+          ),
     ]);
 
     // Documento costuma existir em clients e faltar no crm_contacts (outbox antigo sem document_*).
     let enrichedContact = contact;
     if (!contact.document_number && linkedClients.length) {
-      const withDoc = linkedClients.find((c) => c.document_number);
+      const withDoc = linkedClients.find((c) => Boolean(c.document_number));
       if (withDoc?.document_number) {
         enrichedContact = {
           ...contact,
