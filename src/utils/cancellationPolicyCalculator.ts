@@ -33,7 +33,10 @@ export interface ReservationData {
   id: string;
   checkin_date: string;
   checkout_date: string;
+  /** Valor de hospedagem (diárias). Preferir `service_fees_total` à parte. */
   total_amount: number;
+  /** Soma de taxas da reserva (limpeza, estacionamento, etc.). Incluída na base da multa. */
+  service_fees_total?: number;
   paid_amount: number;
   pricing_plan_id: string | null;
   pricing_plan?: {
@@ -44,6 +47,12 @@ export interface ReservationData {
   establishment_id: string;
   created_at: string;
   channel?: string; // 'direct', 'booking', 'expedia', etc.
+}
+
+function resolvePenaltyBaseAmount(reservation: ReservationData): number {
+  const lodging = Number(reservation.total_amount || 0);
+  const fees = Number(reservation.service_fees_total || 0);
+  return Math.max(0, lodging + fees);
 }
 
 export interface CancellationCalculationResult {
@@ -157,7 +166,7 @@ export function calculateCancellationPenalty(
   const checkinZoned = new Date(checkinDate);
   const cancellationZoned = new Date(cancellationDate);
   
-  const baseAmount = reservation.total_amount;
+  const baseAmount = resolvePenaltyBaseAmount(reservation);
   let penalty = 0;
   let penaltyType: "none" | "cancellation" | "no_show" = "none";
   let reason = "";
@@ -326,7 +335,7 @@ export function calculateNoShowPenalty(
   const checkinZoned = new Date(checkinDate);
   const noShowZoned = new Date(noShowDate);
   
-  const baseAmount = reservation.total_amount;
+  const baseAmount = resolvePenaltyBaseAmount(reservation);
   let penalty = 0;
   
   if (policy.no_show_fee_type === "same_as_cancellation") {
@@ -417,7 +426,8 @@ export function simulateCancellation(
   checkinDate: string,
   totalAmount: number,
   cancellationDate: Date = new Date(),
-  reservationCreatedAt?: Date
+  reservationCreatedAt?: Date,
+  serviceFeesTotal: number = 0,
 ): CancellationCalculationResult {
   // Se não fornecida, calcular data de criação como 30 dias antes do check-in
   const defaultCreatedAt = reservationCreatedAt || (() => {
@@ -437,6 +447,7 @@ export function simulateCancellation(
     checkin_date: checkinDate,
     checkout_date: checkout.toISOString(),
     total_amount: totalAmount,
+    service_fees_total: serviceFeesTotal,
     paid_amount: 0,
     pricing_plan_id: null,
     status: "confirmed",

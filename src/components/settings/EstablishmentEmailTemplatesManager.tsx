@@ -30,6 +30,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Edit, Eye, Loader2, Mail, RotateCcw } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { extractVariables } from "@/lib/emailTemplateEngine";
 import { EMAIL_TEMPLATE_VARIABLES } from "@/lib/emailTemplateConstants";
 import {
@@ -44,7 +45,7 @@ type EstablishmentEmailTemplatesManagerProps = {
 export function EstablishmentEmailTemplatesManager({
   establishmentId,
 }: EstablishmentEmailTemplatesManagerProps) {
-  const { templates, isLoading, saveOverride, resetToDefault } =
+  const { templates, isLoading, saveOverride, resetToDefault, setTemplateEnabled } =
     useEstablishmentEmailTemplates(establishmentId);
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -136,8 +137,9 @@ export function EstablishmentEmailTemplatesManager({
           Templates de E-mail
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Personalize os e-mails automáticos do seu hotel. Os templates padrão do sistema continuam
-          disponíveis e podem ser restaurados a qualquer momento.
+          Personalize os e-mails automáticos do seu hotel. Use o interruptor para ativar ou
+          desativar o envio de cada template. Os padrões do sistema podem ser restaurados a qualquer
+          momento.
         </p>
       </div>
 
@@ -148,30 +150,63 @@ export function EstablishmentEmailTemplatesManager({
               <TableHead>Evento</TableHead>
               <TableHead>Assunto</TableHead>
               <TableHead>Origem</TableHead>
+              <TableHead className="w-[120px]">Ativo</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {availableTemplates.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
                   Nenhum template padrão disponível para este estabelecimento.
                 </TableCell>
               </TableRow>
             ) : (
               availableTemplates.map((item) => (
-                <TableRow key={item.event_type}>
+                <TableRow key={item.event_type} className={!item.isEnabled ? "opacity-60" : undefined}>
                   <TableCell>
                     <div className="font-medium">{item.event_label}</div>
                     <div className="text-xs text-muted-foreground">{item.event_type}</div>
                   </TableCell>
                   <TableCell className="max-w-md truncate">
-                    {String(item.resolved?.subject || item.globalTemplate?.subject || "—")}
+                    {String(
+                      item.resolved?.subject ||
+                        item.override?.subject ||
+                        item.globalTemplate?.subject ||
+                        "—",
+                    )}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={item.isCustomized ? "default" : "secondary"}>
-                      {item.isCustomized ? "Personalizado" : "Padrão do sistema"}
-                    </Badge>
+                    <div className="flex flex-wrap gap-1">
+                      <Badge variant={item.isCustomized ? "default" : "secondary"}>
+                        {item.isCustomized ? "Personalizado" : "Padrão do sistema"}
+                      </Badge>
+                      {!item.isEnabled && (
+                        <Badge variant="outline" className="text-muted-foreground">
+                          Desativado
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={item.isEnabled}
+                        disabled={setTemplateEnabled.isPending}
+                        onCheckedChange={(checked) => {
+                          void setTemplateEnabled.mutateAsync({
+                            event_type: item.event_type,
+                            enabled: checked,
+                            globalTemplate: item.globalTemplate,
+                            existingOverride: item.override,
+                          });
+                        }}
+                        aria-label={`${item.isEnabled ? "Desativar" : "Ativar"} ${item.event_label}`}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {item.isEnabled ? "Sim" : "Não"}
+                      </span>
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
@@ -183,6 +218,7 @@ export function EstablishmentEmailTemplatesManager({
                           setPreviewOpen(true);
                         }}
                         title="Visualizar"
+                        disabled={!item.isEnabled && !item.isCustomized}
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
@@ -338,16 +374,33 @@ export function EstablishmentEmailTemplatesManager({
             <DialogTitle>Preview: {selected?.event_label}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
+            {!selected?.isEnabled && (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                Este template está desativado — o e-mail não será enviado automaticamente.
+              </p>
+            )}
             <div>
               <Label>Assunto</Label>
-              <p className="text-sm mt-1">{String(selected?.resolved?.subject || "—")}</p>
+              <p className="text-sm mt-1">
+                {String(
+                  selected?.resolved?.subject ||
+                    selected?.override?.subject ||
+                    selected?.globalTemplate?.subject ||
+                    "—",
+                )}
+              </p>
             </div>
             <div>
               <Label>HTML</Label>
               <div
                 className="mt-2 rounded-md border p-4 bg-white prose prose-sm max-w-none"
                 dangerouslySetInnerHTML={{
-                  __html: String(selected?.resolved?.body_html || "<p>Sem conteúdo</p>"),
+                  __html: String(
+                    selected?.resolved?.body_html ||
+                      selected?.override?.body_html ||
+                      selected?.globalTemplate?.body_html ||
+                      "<p>Sem conteúdo</p>",
+                  ),
                 }}
               />
             </div>

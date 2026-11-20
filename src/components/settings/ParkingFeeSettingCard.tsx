@@ -97,7 +97,10 @@ export function ParkingFeeSettingCard({
       await queryClient.invalidateQueries({ queryKey: ["establishment_services"] });
       await queryClient.invalidateQueries({ queryKey: ["building_services"] });
       await queryClient.invalidateQueries({ queryKey: ["occupancy_map_rooms"] });
-      toast.success("Estacionamento salvo. Vagas sincronizadas no mapa de reservas.");
+      await queryClient.invalidateQueries({ queryKey: ["rate_system_categories"] });
+      await queryClient.invalidateQueries({ queryKey: ["rate_calendar"] });
+      await queryClient.invalidateQueries({ queryKey: ["ari_inventory_bulk"] });
+      toast.success("Estacionamento salvo. Vagas e valor base sincronizados no tarifário.");
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Erro ao salvar estacionamento");
     } finally {

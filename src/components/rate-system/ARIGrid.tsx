@@ -275,8 +275,9 @@ export const ARIGrid = ({
       const categoryData = allInventoryData.filter((inv: any) => 
         String(inv.category_id) === String(category.id)
       );
+      const physicalRooms = Array.isArray(category.rooms) ? category.rooms.length : 0;
       
-      // Verificar se há datas sem dados para esta categoria
+      // Datas sem linha em rate_inventory
       const datesWithoutData = visibleDates.filter(date => {
         const dateStr = format(date, 'yyyy-MM-dd');
         return !categoryData.some((inv: any) => {
@@ -284,9 +285,13 @@ export const ARIGrid = ({
           return invDate === dateStr;
         });
       });
+
+      // Inventário stale: tem quartos físicos mas total_rooms ficou 0 (sync antigo)
+      const staleZeroTotal =
+        physicalRooms > 0 &&
+        categoryData.some((inv: any) => Number(inv.total_rooms || 0) === 0);
       
-      // Se houver datas sem dados, adicionar categoria à lista de sincronização
-      if (datesWithoutData.length > 0) {
+      if (datesWithoutData.length > 0 || staleZeroTotal) {
         categoriesNeedingSync.push(category.id);
       }
     });
@@ -681,10 +686,17 @@ export const ARIGrid = ({
     return { ...entry, base_price: dynamicPrice };
   };
 
-  // Função para calcular ocupação
+  // Ocupação = quartos indisponíveis / total (alinha com disponível e RPC occupancy_percentage)
   const calculateOccupancy = (inventory: any): number => {
     if (!inventory || inventory.total_rooms === 0) return 0;
-    return Math.round((inventory.confirmed_reservations / inventory.total_rooms) * 100);
+    if (Number(inventory.occupancy_percentage) > 0) {
+      return Math.round(Number(inventory.occupancy_percentage));
+    }
+    const occupied = Math.max(
+      0,
+      Number(inventory.total_rooms) - Number(inventory.available_rooms || 0),
+    );
+    return Math.round((occupied / Number(inventory.total_rooms)) * 100);
   };
 
   // Função para obter cor do status

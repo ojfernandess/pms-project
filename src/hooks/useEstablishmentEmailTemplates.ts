@@ -55,6 +55,8 @@ export type EstablishmentEmailTemplateView = {
   override: EstablishmentEmailTemplateRow | null;
   resolved: Record<string, unknown> | null;
   isCustomized: boolean;
+  /** false = estabelecimento desativou o envio deste template */
+  isEnabled: boolean;
 };
 
 export function useEstablishmentEmailTemplates(establishmentId?: string) {
@@ -107,6 +109,7 @@ export function useEstablishmentEmailTemplates(establishmentId?: string) {
             override,
             resolved: resolved as Record<string, unknown> | null,
             isCustomized: Boolean(override?.use_custom_template),
+            isEnabled: override ? override.is_active !== false : true,
           };
         }),
       );
@@ -198,6 +201,82 @@ export function useEstablishmentEmailTemplates(establishmentId?: string) {
     },
   });
 
+  const setTemplateEnabled = useMutation({
+    mutationFn: async ({
+      event_type,
+      enabled,
+      globalTemplate,
+      existingOverride,
+    }: {
+      event_type: string;
+      enabled: boolean;
+      globalTemplate: Record<string, unknown> | null;
+      existingOverride: EstablishmentEmailTemplateRow | null;
+    }) => {
+      if (!establishmentId) throw new Error("Estabelecimento não selecionado");
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (existingOverride?.id) {
+        // Reativar template só com flag de disable (sem personalização): remover a linha
+        if (enabled && !existingOverride.use_custom_template) {
+          const { error } = await supabase
+            .from("establishment_email_templates")
+            .delete()
+            .eq("id", existingOverride.id);
+          if (error) throw error;
+          return { deleted: true };
+        }
+
+        const { data, error } = await supabase
+          .from("establishment_email_templates")
+          .update({ is_active: enabled })
+          .eq("id", existingOverride.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      }
+
+      if (enabled) {
+        // Sem override e ativado = padrão (nada a gravar)
+        return { noop: true };
+      }
+
+      // Desativar template padrão: cria preferência is_active=false
+      const { data, error } = await supabase
+        .from("establishment_email_templates")
+        .insert([
+          {
+            establishment_id: establishmentId,
+            event_type,
+            parent_template_id: globalTemplate?.id ? String(globalTemplate.id) : null,
+            use_custom_template: false,
+            name: globalTemplate?.name ? String(globalTemplate.name) : null,
+            subject: globalTemplate?.subject ? String(globalTemplate.subject) : null,
+            body_html: globalTemplate?.body_html ? String(globalTemplate.body_html) : null,
+            body_text: globalTemplate?.body_text ? String(globalTemplate.body_text) : null,
+            is_active: false,
+            created_by: user?.id ?? null,
+          },
+        ])
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["establishment_email_templates", establishmentId] });
+      toast.success(
+        variables.enabled
+          ? "Template ativado — e-mails deste evento serão enviados"
+          : "Template desativado — e-mails deste evento não serão enviados",
+      );
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Erro ao atualizar status do template");
+    },
+  });
+
   return {
     templates: templatesQuery.data || [],
     isLoading: templatesQuery.isLoading,
@@ -205,5 +284,6 @@ export function useEstablishmentEmailTemplates(establishmentId?: string) {
     refetch: templatesQuery.refetch,
     saveOverride,
     resetToDefault,
+    setTemplateEnabled,
   };
 }

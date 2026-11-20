@@ -62,14 +62,15 @@ BEGIN
 
   v_available_rooms := GREATEST(0, v_total_rooms - v_unavailable_rooms - v_unassigned_reservations);
 
+  -- Contar pela categoria do quarto (não só reservation.category_id) e incluir pending
   SELECT COUNT(DISTINCT res.room_id) INTO v_confirmed_reservations
   FROM public.reservations res
+  INNER JOIN public.rooms rm ON rm.id = res.room_id
   WHERE res.establishment_id = p_establishment_id
-    AND res.category_id = p_category_id
+    AND rm.category_id = p_category_id
     AND res.checkin_date <= p_date
     AND res.checkout_date > p_date
-    AND res.status IN ('confirmed', 'checkedin', 'blocked', 'preregistration')
-    AND res.room_id IS NOT NULL;
+    AND res.status IN ('pending', 'confirmed', 'checkedin', 'blocked', 'preregistration');
 
   v_blocked_rooms := GREATEST(0, v_unavailable_rooms - COALESCE(v_confirmed_reservations, 0));
 

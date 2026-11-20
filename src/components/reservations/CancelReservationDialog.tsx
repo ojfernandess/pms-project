@@ -85,6 +85,16 @@ export const CancelReservationDialog = ({
 
         if (cancelled) return;
 
+        const { data: feeRows } = await supabase
+          .from("reservation_service_fees")
+          .select("amount, quantity")
+          .eq("reservation_id", reservationId);
+
+        if (cancelled) return;
+
+        const { sumReservationServiceFees } = await import("@/lib/reservationServiceFeesTotal");
+        const serviceFeesTotal = sumReservationServiceFees(feeRows);
+
         const checkin =
           reservation?.checkin_date || reservationData?.checkin_date || "";
         const checkout =
@@ -100,6 +110,7 @@ export const CancelReservationDialog = ({
           checkout_date: checkout,
           total_amount:
             reservation?.total_amount ?? reservationData?.total_amount ?? 0,
+          service_fees_total: serviceFeesTotal,
           paid_amount: reservation?.paid_amount ?? paidAmount ?? 0,
           pricing_plan_id:
             reservation?.pricing_plan_id ?? reservationData?.pricing_plan_id ?? null,
@@ -245,6 +256,12 @@ export const CancelReservationDialog = ({
                     <p className="text-sm text-amber-700">
                       {penaltyCalculation.reason}
                     </p>
+                    {penaltyCalculation.calculationDetails?.baseAmount != null && (
+                      <p className="text-xs text-muted-foreground">
+                        Base do cálculo (diárias + taxas):{" "}
+                        {formatCurrency(penaltyCalculation.calculationDetails.baseAmount)}
+                      </p>
+                    )}
                     {penaltyCalculation.freeDeadline && (
                       <p className="text-xs text-muted-foreground">
                         Prazo de cancelamento gratuito: {new Date(penaltyCalculation.freeDeadline).toLocaleString('pt-BR')}

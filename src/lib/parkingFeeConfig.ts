@@ -126,6 +126,8 @@ export async function syncParkingSpots(params: {
   buildingId?: string | null;
   spotCount: number;
   existingCategoryId?: string | null;
+  /** Valor padrão (Serviços do Estabelecimento) → base_price da categoria no tarifário. */
+  basePrice?: number;
 }): Promise<string | null> {
   const { establishmentId, buildingId, spotCount } = params;
   const count = Math.max(0, Math.min(500, Math.floor(spotCount)));
@@ -159,16 +161,22 @@ export async function syncParkingSpots(params: {
     categoryName = bName ? `Estacionamento — ${bName}` : "Estacionamento (prédio)";
   }
 
+  const basePrice = Math.max(0, Number(params.basePrice ?? 0));
+
   if (categoryId) {
+    const updatePayload: Record<string, unknown> = {
+      name: categoryName,
+      category_kind: PARKING_CATEGORY_KIND,
+      show_in_public: false,
+      establishment_id: establishmentId,
+      building_id: buildingId ?? null,
+    };
+    if (basePrice > 0) {
+      updatePayload.base_price = basePrice;
+    }
     const { error } = await supabase
       .from("room_categories")
-      .update({
-        name: categoryName,
-        category_kind: PARKING_CATEGORY_KIND,
-        show_in_public: false,
-        establishment_id: establishmentId,
-        building_id: buildingId ?? null,
-      })
+      .update(updatePayload)
       .eq("id", categoryId);
     if (error) throw error;
   } else {
@@ -181,7 +189,7 @@ export async function syncParkingSpots(params: {
         building_id: buildingId ?? null,
         capacity_adults: 1,
         capacity_children: 0,
-        base_price: 0,
+        base_price: basePrice,
         show_in_public: false,
         type: "Parking",
         color: "#64748b",
@@ -311,7 +319,15 @@ export async function upsertParkingFeeConfig(params: {
       buildingId: buildingId ?? null,
       spotCount,
       existingCategoryId,
+      basePrice: amount,
     });
+    if (parkingCategoryId && amount > 0) {
+      await seedParkingRateCalendarFromServiceAmount({
+        establishmentId,
+        categoryId: parkingCategoryId,
+        amount,
+      });
+    }
   }
 
   const payload = {
@@ -384,6 +400,137 @@ export async function upsertParkingFeeConfig(params: {
     spotCount,
     parkingCategoryId,
   };
+}
+
+/**
+ * Preenche rate_calendar (plano BAR ou primeiro ativo) só onde ainda não há preço > 0,
+ * usando o valor de Serviços do Estabelecimento como base.
+ */
+export async function seedParkingRateCalendarFromServiceAmount(params: {
+  establishmentId: string;
+  categoryId: string;
+  amount: number;
+  daysAhead?: number;
+}): Promise<void> {
+  const amount = Math.max(0, Number(params.amount || 0));
+  if (!amount || !params.categoryId) return;
+
+  const { data: plans } = await supabase
+    .from("pricing_plans")
+    .select("id, code, is_active")
+    .eq("establishment_id", params.establishmentId)
+    .eq("is_active", true)
+    .order("code");
+
+  const planId =
+    plans?.find((p) => String(p.code || "").toUpperCase() === "BAR")?.id ??
+    plans?.[0]?.id ??
+    null;
+  if (!planId) return;
+
+  const days = Math.max(1, Math.min(365, params.daysAhead ?? 90));
+  const start = new Date();
+  start.setHours(12, 0, 0, 0);
+  const entries: Array<{
+    establishment_id: string;
+    pricing_plan_id: string;
+    category_id: string;
+    date: string;
+    base_price: number;
+  }> = [];
+
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    entries.push({
+      establishment_id: params.establishmentId,
+      pricing_plan_id: planId,
+      category_id: params.categoryId,
+      date: d.toISOString().slice(0, 10),
+      base_price: amount,
+    });
+  }
+
+  const dateFrom = entries[0]?.date;
+  const dateTo = entries[entries.length - 1]?.date;
+  if (!dateFrom || !dateTo) return;
+
+  const { data: existing } = await supabase
+    .from("rate_calendar")
+    .select("date, base_price")
+    .eq("establishment_id", params.establishmentId)
+    .eq("category_id", params.categoryId)
+    .eq("pricing_plan_id", planId)
+    .gte("date", dateFrom)
+    .lte("date", dateTo);
+
+  const pricedDates = new Set(
+    (existing ?? [])
+      .filter((row) => Number(row.base_price || 0) > 0)
+      .map((row) => String(row.date).slice(0, 10)),
+  );
+
+  const toUpsert = entries.filter((e) => !pricedDates.has(e.date));
+  if (toUpsert.length === 0) return;
+
+  const chunkSize = 100;
+  for (let i = 0; i < toUpsert.length; i += chunkSize) {
+    const chunk = toUpsert.slice(i, i + chunkSize);
+    const { error } = await supabase.from("rate_calendar").upsert(chunk, {
+      onConflict: "establishment_id,pricing_plan_id,category_id,date",
+    });
+    if (error) {
+      console.warn("seedParkingRateCalendarFromServiceAmount:", error);
+      break;
+    }
+  }
+}
+
+/** Quando o tarifário da categoria parking muda, esse valor vira o padrão em Serviços. */
+export async function promoteParkingTariffToServiceDefault(params: {
+  establishmentId: string;
+  categoryId: string;
+  amount: number;
+}): Promise<void> {
+  const amount = Math.max(0, Number(params.amount || 0));
+  if (!amount) return;
+
+  const { data: serviceRow } = await supabase
+    .from("establishment_services")
+    .select("id, building_id")
+    .eq("parking_category_id", params.categoryId)
+    .eq("service_kind", PARKING_FEE_KIND)
+    .maybeSingle();
+
+  if (!serviceRow?.id) return;
+
+  const { error: svcErr } = await supabase
+    .from("establishment_services")
+    .update({ default_amount: amount, is_active: true })
+    .eq("id", serviceRow.id);
+  if (svcErr) throw svcErr;
+
+  await supabase
+    .from("room_categories")
+    .update({ base_price: amount })
+    .eq("id", params.categoryId);
+
+  let feeQuery = supabase
+    .from("service_fees")
+    .select("id")
+    .eq("establishment_id", params.establishmentId)
+    .eq("service_kind", PARKING_FEE_KIND)
+    .eq("source_service_id", serviceRow.id);
+  feeQuery = serviceRow.building_id
+    ? feeQuery.eq("building_id", serviceRow.building_id)
+    : feeQuery.is("building_id", null);
+  const { data: fee } = await feeQuery.maybeSingle();
+  if (fee?.id) {
+    await supabase
+      .from("service_fees")
+      .update({ default_amount: amount, is_active: true })
+      .eq("id", fee.id);
+  }
 }
 
 export async function attachParkingFeeToReservation(params: {

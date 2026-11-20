@@ -1,4 +1,4 @@
--- Origem: supabase/migrations/20260824140000_establishment_email_templates.sql (só funções)
+-- Origem: supabase/migrations/20260824140000_establishment_email_templates.sql (+ disable por estabelecimento)
 -- Requer: email_templates, establishment_email_templates, email_event_type
 
 CREATE OR REPLACE FUNCTION public.email_template_allows_establishment(
@@ -62,13 +62,18 @@ BEGIN
     RETURN to_jsonb(v_global);
   END IF;
 
+  -- Preferência do estabelecimento (ativo ou desativado)
   SELECT *
   INTO v_override
   FROM public.establishment_email_templates eet
   WHERE eet.establishment_id = p_establishment_id
     AND eet.event_type = p_event_type
-    AND eet.is_active = TRUE
   LIMIT 1;
+
+  -- Desativado no estabelecimento: não enviar (não cair no global)
+  IF FOUND AND v_override.is_active IS NOT TRUE THEN
+    RETURN NULL;
+  END IF;
 
   IF NOT FOUND OR v_override.use_custom_template IS NOT TRUE THEN
     RETURN to_jsonb(v_global);
@@ -100,6 +105,6 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.get_resolved_email_template IS
-  'Template de e-mail efetivo: override do estabelecimento ou padrão global.';
+  'Template efetivo: personalização do estabelecimento, padrão global, ou NULL se desativado no estabelecimento.';
 
 GRANT EXECUTE ON FUNCTION public.get_resolved_email_template(public.email_event_type, UUID) TO authenticated, service_role;

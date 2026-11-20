@@ -102,8 +102,9 @@ export async function resolveEmailTemplate(
       p_establishment_id: establishmentId,
     });
 
-    if (!rpcError && rpcData) {
-      return rpcData as EmailTemplateRecord;
+    // RPC ok (mesmo com null): null = sem template ou desativado no estabelecimento
+    if (!rpcError) {
+      return (rpcData as EmailTemplateRecord) ?? null;
     }
   }
 
@@ -115,12 +116,16 @@ export async function resolveEmailTemplate(
     .select("*")
     .eq("establishment_id", establishmentId)
     .eq("event_type", eventType)
-    .eq("is_active", true)
     .maybeSingle();
 
   if (overrideError) {
     // Tabela ainda não migrada ou indisponível — manter comportamento anterior
     return globalTemplate;
+  }
+
+  // is_active=false → estabelecimento desativou o envio deste evento
+  if (override && override.is_active === false) {
+    return null;
   }
 
   if (!override?.use_custom_template) return globalTemplate;

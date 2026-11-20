@@ -9,6 +9,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { sumReservationServiceFees } from "@/lib/reservationServiceFeesTotal";
 import {
   CancellationPolicy,
   ReservationData,
@@ -18,6 +19,18 @@ import {
   calculateNoShowPenalty,
   isNoShow,
 } from "./cancellationPolicyCalculator";
+
+async function fetchReservationServiceFeesTotal(reservationId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from("reservation_service_fees")
+    .select("amount, quantity")
+    .eq("reservation_id", reservationId);
+  if (error) {
+    console.warn("fetchReservationServiceFeesTotal:", error);
+    return 0;
+  }
+  return sumReservationServiceFees(data);
+}
 
 /**
  * Buscar política de cancelamento de um orçamento (quote)
@@ -211,12 +224,15 @@ export async function applyCancellation(
       };
     }
 
-    // Preparar dados da reserva
+    const serviceFeesTotal = await fetchReservationServiceFeesTotal(reservationId);
+
+    // Preparar dados da reserva (diárias + taxas inclusas na base da multa)
     const reservationData: ReservationData = {
       id: reservation.id,
       checkin_date: reservation.checkin_date,
       checkout_date: reservation.checkout_date,
       total_amount: reservation.total_amount || 0,
+      service_fees_total: serviceFeesTotal,
       paid_amount: reservation.paid_amount || 0,
       pricing_plan_id: (reservation as any).pricing_plan_id || null,
       pricing_plan: (reservation as any).pricing_plans ? {
@@ -331,11 +347,14 @@ async function applyNoShowCore(
     };
   }
 
+  const serviceFeesTotal = await fetchReservationServiceFeesTotal(reservationId);
+
   const reservationData: ReservationData = {
     id: reservation.id as string,
     checkin_date: reservation.checkin_date as string,
     checkout_date: reservation.checkout_date as string,
     total_amount: (reservation.total_amount as number) || 0,
+    service_fees_total: serviceFeesTotal,
     paid_amount: (reservation.paid_amount as number) || 0,
     pricing_plan_id: (reservation as any).pricing_plan_id || null,
     pricing_plan: (reservation as any).pricing_plans

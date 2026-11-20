@@ -716,6 +716,46 @@ export const useRateSystem = (options?: UseRateSystemOptions) => {
         } else {
           flushChannelSyncAfterBulkCalendarSave(estId);
         }
+
+        // Estacionamento: preço editado no tarifário vira padrão em Serviços do Estabelecimento
+        if (updateSource === "manual" && estId) {
+          void (async () => {
+            try {
+              const { PARKING_CATEGORY_KIND, promoteParkingTariffToServiceDefault } = await import(
+                "@/lib/parkingFeeConfig"
+              );
+              const byCategory = new Map<string, number>();
+              for (const entry of entries) {
+                const categoryId = entry.category_id;
+                const price = Number(entry.base_price || 0);
+                if (!categoryId || price <= 0) continue;
+                byCategory.set(categoryId, price);
+              }
+              if (byCategory.size === 0) return;
+              const categoryIds = [...byCategory.keys()];
+              const { data: cats } = await supabase
+                .from("room_categories")
+                .select("id, category_kind")
+                .in("id", categoryIds);
+              for (const cat of cats ?? []) {
+                if (cat.category_kind !== PARKING_CATEGORY_KIND) continue;
+                const amount = byCategory.get(cat.id);
+                if (!amount) continue;
+                await promoteParkingTariffToServiceDefault({
+                  establishmentId: estId,
+                  categoryId: cat.id,
+                  amount,
+                });
+              }
+              queryClient.invalidateQueries({ queryKey: ["parking_fee_config"] });
+              queryClient.invalidateQueries({ queryKey: ["establishment_services"] });
+              queryClient.invalidateQueries({ queryKey: ["service_fees"] });
+              queryClient.invalidateQueries({ queryKey: ["rate_system_categories"] });
+            } catch (err) {
+              console.warn("[useRateSystem] promote parking tariff default:", err);
+            }
+          })();
+        }
       }
     },
     onError: (error: unknown) => {
