@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { logActivity } from "@/lib/activityLogger";
-import { getEstablishmentId } from "@/lib/establishmentUtils";
+import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { triggerEmail } from "@/lib/emailService";
 import { invokePmsFunction } from "@/lib/pmsApi";
 import { maybeFinalizeOtaCancellationAfterPmsCancel } from "@/lib/otaFinalizeCancellationAfterPms";
@@ -37,7 +37,7 @@ type CancelledReservationPayload = {
 /** Efeitos após persistência — não bloquear UI (chamar com void). */
 export async function runAfterReservationCreated(newReservation: CreatedReservation): Promise<void> {
   try {
-    const establishmentId = newReservation.establishment_id || getEstablishmentId();
+    const establishmentId = newReservation.establishment_id || getSelectedEstablishmentId();
     if (establishmentId) {
       const guestName =
         newReservation.guest?.full_name ||
@@ -61,7 +61,7 @@ export async function runAfterReservationCreated(newReservation: CreatedReservat
   }
 
   try {
-    const establishmentId = newReservation.establishment_id || getEstablishmentId();
+    const establishmentId = newReservation.establishment_id || getSelectedEstablishmentId();
     if (!newReservation.id || !establishmentId) return;
 
     let reservationCode = String(newReservation.reservation_code ?? "").trim();
@@ -246,7 +246,7 @@ export async function runAfterReservationCancelled(reservationData: CancelledRes
 
   if (reservationData.originalStatus === "preregistration") {
     try {
-      const establishmentId = reservationData.establishment_id || getEstablishmentId();
+      const establishmentId = reservationData.establishment_id || getSelectedEstablishmentId();
       if (establishmentId) {
         const guestName =
           reservationData.guest?.full_name ||
