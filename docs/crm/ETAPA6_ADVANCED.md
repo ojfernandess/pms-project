@@ -35,3 +35,10 @@
 ## Roadmap CRM completo
 
 Etapas 1–6 entregues. Evoluções futuras: resgate de pontos integrado ao tarifário, contratos B2B ↔ rate plans, inteligência preditiva.
+
+## Migrations (Postgres)
+
+Aplicar no **Postgres do PMS** (`DATABASE_URL` Easypanel/Dokploy), nunca via Supabase CLI.
+
+- Script deploy: `backend/scripts/migration/apply-crm.sh` (entrypoint do backend)
+- Guia: `backend/scripts/migration/APLICAR_CRM.md`

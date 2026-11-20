@@ -1,3 +1,5 @@
+-- LEGADO / espelho — NÃO aplicar via Supabase.
+-- Produção Postgres: backend/scripts/migration/apply-crm.sh (ver APLICAR_CRM.md)
 -- StayOS CRM Foundation (ETAPA 1)
 -- Company-scoped CRM tables linked to operational clients; no reservation copies.
 

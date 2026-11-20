@@ -15,6 +15,10 @@ Documento de mapeamento: o que reutilizar vs. o que é novo. Não altera regras 
 | Permissões | `src/lib/permissions.ts`, `employee_roles` | Chaves `crm`, `crm_contacts` |
 | Filas | BullMQ `system`/`pms`, `email_queue` | Consumo futuro do outbox CRM |
 
+## Migrations
+
+DDL CRM vive em `backend/prisma/migrations/20261120*crm*` e é aplicado no **Postgres** via `backend/scripts/migration/apply-crm.sh` no restart do backend. Não usar `supabase db push`.
+
 ## Novo (ETAPA 1)
 
 | Artefato | Descrição |
