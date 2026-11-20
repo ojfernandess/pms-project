@@ -136,6 +136,12 @@ if [ "${CRM_MIGRATION_ON_START:-true}" = "true" ] \
     || echo "WARN: apply-crm.sh falhou" >&2
 fi
 
+# Channel Manager: multi-Bukly por prédio (HotelCode / Basic Auth)
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/ota_channels_building_multi.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/ota_channels_building_multi.sql \
+    || echo "WARN: ota_channels_building_multi.sql falhou" >&2
+fi
+
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/site_settings_storage_config.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/site_settings_storage_config.sql \
     || echo "WARN: site_settings_storage_config.sql falhou" >&2

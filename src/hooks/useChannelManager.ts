@@ -18,7 +18,7 @@ export const useChannelManager = () => {
     queryKey: ["ota_channels"],
     queryFn: async () => {
       const establishmentId = getSelectedEstablishmentId();
-      let query = supabase.from("ota_channels").select("*");
+      let query = supabase.from("ota_channels").select("*, buildings(id, name)");
       
       if (establishmentId) {
         query = query.eq("establishment_id", establishmentId);
@@ -115,6 +115,7 @@ export const useChannelManager = () => {
       const payload = {
         ...channel,
         establishment_id: establishmentId || undefined,
+        building_id: channel?.building_id === "" ? null : channel?.building_id ?? null,
         channex_property_id:
           channel?.channex_property_id === "" ? null : channel?.channex_property_id,
       };
@@ -143,6 +144,9 @@ export const useChannelManager = () => {
       const sanitized = { ...updates };
       if (sanitized.channex_property_id === "") {
         sanitized.channex_property_id = null;
+      }
+      if (sanitized.building_id === "") {
+        sanitized.building_id = null;
       }
       const { data, error } = await supabase
         .from("ota_channels")
@@ -512,19 +516,6 @@ export const useChannelManager = () => {
     },
   });
 
-  const syncBuklyReservationsMutation = useMutation({
-    mutationFn: async (args: { channelId: string; establishmentId: string }) => {
-      return invokeBuklyReservations(args.channelId, args.establishmentId);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["ota_reservations"] });
-      queryClient.invalidateQueries({ queryKey: ["reservations"] });
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || "Erro ao importar reservas Bukly");
-    },
-  });
-
   const syncChannexReservationsMutation = useMutation({
     mutationFn: async (args: { channelId: string; establishmentId: string }) => {
       return invokeChannexReservationsSync(args.channelId, args.establishmentId);
@@ -543,6 +534,19 @@ export const useChannelManager = () => {
     },
     onError: (error: Error) => {
       toast.error(error.message || "Erro ao sincronizar reservas Channex");
+    },
+  });
+
+  const syncBuklyReservationsMutation = useMutation({
+    mutationFn: async (args: { channelId: string; establishmentId: string }) => {
+      return invokeBuklyReservations(args.channelId, args.establishmentId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ota_reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["reservations"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Erro ao importar reservas Bukly");
     },
   });
 

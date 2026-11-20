@@ -306,6 +306,39 @@ export class BuklySyncService {
       };
     }
 
+    // Escopo por prédio: cada building pode ter HotelCode + Basic Auth próprios (docs Bukly HotelCode).
+    // building_id NULL = comportamento legado (todo o establishment).
+    const buildingId =
+      typeof (channel as { building_id?: string | null }).building_id === "string"
+        ? String((channel as { building_id?: string | null }).building_id).trim()
+        : "";
+
+    let buildingCategoryIds: Set<string> | null = null;
+    if (buildingId) {
+      try {
+        const cats = await this.prisma.room_categories.findMany({
+          where: { establishment_id: establishmentId, building_id: buildingId },
+          select: { id: true },
+        });
+        buildingCategoryIds = new Set(cats.map((c) => String(c.id)));
+        if (buildingCategoryIds.size === 0) {
+          return {
+            status: 400,
+            body: {
+              success: false,
+              error:
+                "Canal Bukly vinculado a um prédio sem categorias. Cadastre categorias no prédio ou remova o vínculo.",
+            },
+          };
+        }
+      } catch (error) {
+        return {
+          status: 500,
+          body: { success: false, error: errorMessage(error, "Erro ao filtrar categorias do prédio") },
+        };
+      }
+    }
+
     let pricingRows: Array<{
       category_id: string;
       pricing_plan_id: string | null;
@@ -337,6 +370,10 @@ export class BuklySyncService {
       const rate = normalizeCode(row.channel_rate_plan_code);
       const categoryId = String(row.category_id || "");
       if (!categoryId) continue;
+      if (buildingCategoryIds && !buildingCategoryIds.has(categoryId)) {
+        skippedUnmapped.push(`categoria ${categoryId}: fora do prédio do canal`);
+        continue;
+      }
       if (!room || !rate) {
         skippedUnmapped.push(`categoria ${categoryId}: faltam InvTypeCode/RatePlanCode`);
         continue;
@@ -378,7 +415,12 @@ export class BuklySyncService {
             establishment_id: establishmentId,
             sync_type: "full",
             status: "pending",
-            sync_data: { hotelCode, mappingCount: mappings.length, skippedUnmapped } as Prisma.InputJsonValue,
+            sync_data: {
+              hotelCode,
+              buildingId: buildingId || null,
+              mappingCount: mappings.length,
+              skippedUnmapped,
+            } as Prisma.InputJsonValue,
           },
           select: { id: true },
         });
@@ -387,16 +429,29 @@ export class BuklySyncService {
         this.logger.warn(`bukly_sync_logs insert skipped: ${errorMessage(error, "erro")}`);
       }
 
-      const rateCalendar = await this.fetchAllRateCalendar(establishmentId, today, futureDateStr);
+      const rateCalendarAll = await this.fetchAllRateCalendar(establishmentId, today, futureDateStr);
+      const rateCalendar =
+        buildingCategoryIds == null
+          ? rateCalendarAll
+          : rateCalendarAll.filter((row) => buildingCategoryIds!.has(String(row.category_id)));
+
+      const roomWhere: Prisma.roomsWhereInput = { establishment_id: establishmentId };
+      if (buildingCategoryIds) {
+        roomWhere.category_id = { in: [...buildingCategoryIds] };
+      }
+
       const [rooms, reservations, maintenanceTickets] = await Promise.all([
         this.prisma.rooms.findMany({
-          where: { establishment_id: establishmentId },
+          where: roomWhere,
           select: { id: true, category_id: true, is_blocked: true },
         }),
         this.prisma.reservations.findMany({
           where: {
             establishment_id: establishmentId,
             status: { in: ["pending", "confirmed", "checkedin", "blocked", "preregistration"] },
+            ...(buildingCategoryIds
+              ? { category_id: { in: [...buildingCategoryIds] } }
+              : {}),
           },
           select: {
             id: true,
@@ -422,11 +477,15 @@ export class BuklySyncService {
         }),
       ]);
 
+      const roomIdSet = new Set(rooms.map((r) => String(r.id)));
       const roomRows = rooms.map((room) => ({
         id: String(room.id),
         category_id: room.category_id ? String(room.category_id) : null,
         is_blocked: room.is_blocked,
       }));
+      const scopedMaintenance = buildingCategoryIds
+        ? maintenanceTickets.filter((t) => roomIdSet.has(String(t.room_id)))
+        : maintenanceTickets;
 
       const sellableByCategory = baseSellableRoomsByCategory(roomRows);
 
@@ -440,7 +499,7 @@ export class BuklySyncService {
           checkout_date: reservation.checkout_date,
           status: reservation.status,
         })),
-        maintenanceTickets: maintenanceTickets.map((ticket) => ({
+        maintenanceTickets: scopedMaintenance.map((ticket) => ({
           room_id: String(ticket.room_id),
           maintenance_start_date: ticket.maintenance_start_date,
           maintenance_end_date: ticket.maintenance_end_date,

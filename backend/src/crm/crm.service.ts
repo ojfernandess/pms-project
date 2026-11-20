@@ -101,7 +101,7 @@ export class CrmService {
     const contact = await this.getContact(user, contactId);
     const clientIds = contact.client_links.map((l) => l.client_id);
 
-    const [reservations, quotes] = await Promise.all([
+    const [reservations, quotes, linkedClients] = await Promise.all([
       clientIds.length
         ? this.prisma.reservations.findMany({
             where: {
@@ -134,7 +134,37 @@ export class CrmService {
             take: 50,
           })
         : Promise.resolve([]),
+      clientIds.length
+        ? this.prisma.clients.findMany({
+            where: { id: { in: clientIds } },
+            select: { id: true, document_type: true, document_number: true },
+          })
+        : Promise.resolve([]),
     ]);
+
+    // Documento costuma existir em clients e faltar no crm_contacts (outbox antigo sem document_*).
+    let enrichedContact = contact;
+    if (!contact.document_number && linkedClients.length) {
+      const withDoc = linkedClients.find((c) => c.document_number);
+      if (withDoc?.document_number) {
+        enrichedContact = {
+          ...contact,
+          document_type: contact.document_type || withDoc.document_type || null,
+          document_number: withDoc.document_number,
+        };
+        // Backfill assíncrono — não bloqueia a resposta
+        void this.prisma.crm_contacts
+          .update({
+            where: { id: contact.id },
+            data: {
+              document_type: enrichedContact.document_type,
+              document_number: enrichedContact.document_number,
+              updated_at: new Date(),
+            },
+          })
+          .catch(() => undefined);
+      }
+    }
 
     const indicators = computeLtv(
       reservations.map((r) => ({
@@ -145,7 +175,7 @@ export class CrmService {
     );
 
     return {
-      contact,
+      contact: enrichedContact,
       reservations,
       quotes,
       indicators,
@@ -185,12 +215,13 @@ export class CrmService {
       email: dto.email?.trim() || null,
       phone: dto.phone?.trim() || null,
       whatsapp: dto.whatsapp?.trim() || dto.phone?.trim() || null,
-      document_type: dto.documentType || null,
-      document_number: dto.documentNumber || null,
-      source: dto.source || null,
+      // Não apagar documento já salvo quando o payload não traz doc (outbox parcial)
+      document_type: dto.documentType || existing?.document_type || null,
+      document_number: dto.documentNumber || existing?.document_number || null,
+      source: dto.source || existing?.source || null,
       tags: (dto.tags ?? []) as Prisma.InputJsonValue,
-      classification: dto.classification || null,
-      notes: dto.notes || null,
+      classification: dto.classification || existing?.classification || null,
+      notes: dto.notes || existing?.notes || null,
       updated_at: new Date(),
     };
 
@@ -462,7 +493,37 @@ export class CrmService {
         ]);
         if (syncTypes.has(event.event_type) && companyId) {
           const clientId = payload.client_id ? String(payload.client_id) : null;
-          const fullName = String(payload.full_name || payload.guest_name || "").trim();
+          let fullName = String(payload.full_name || payload.guest_name || "").trim();
+          let email = (payload.email as string) || null;
+          let phone = (payload.phone as string) || null;
+          let documentType = (payload.document_type as string) || null;
+          let documentNumber = (payload.document_number as string) || null;
+
+          // Completar documento/nome a partir do cliente PMS quando o outbox veio incompleto
+          if (clientId && (!documentNumber || !fullName)) {
+            try {
+              const client = await this.prisma.clients.findUnique({
+                where: { id: clientId },
+                select: {
+                  full_name: true,
+                  email: true,
+                  phone: true,
+                  document_type: true,
+                  document_number: true,
+                },
+              });
+              if (client) {
+                if (!fullName) fullName = String(client.full_name || "").trim();
+                if (!email) email = client.email || null;
+                if (!phone) phone = client.phone || null;
+                if (!documentType) documentType = client.document_type || null;
+                if (!documentNumber) documentNumber = client.document_number || null;
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+
           if (fullName) {
             const systemUser = {
               id: "00000000-0000-0000-0000-000000000000",
@@ -476,9 +537,10 @@ export class CrmService {
               clientId,
               establishmentId: event.establishment_id,
               fullName,
-              email: (payload.email as string) || null,
-              phone: (payload.phone as string) || null,
-              documentNumber: (payload.document_number as string) || null,
+              email,
+              phone,
+              documentType,
+              documentNumber,
               source: String(payload.source || event.event_type),
             });
           }

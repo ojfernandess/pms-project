@@ -138,9 +138,10 @@ export async function getCrmContact360ViaSupabase(contactId: string): Promise<Cr
 
   let reservations: Array<Record<string, unknown>> = [];
   let quotes: Array<Record<string, unknown>> = [];
+  let enrichedContact = contact;
 
   if (clientIds.length) {
-    const [resResult, quotesResult] = await Promise.all([
+    const [resResult, quotesResult, clientsResult] = await Promise.all([
       supabase
         .from("reservations")
         .select(
@@ -155,9 +156,35 @@ export async function getCrmContact360ViaSupabase(contactId: string): Promise<Cr
         .or(`client_id.in.(${clientIds.join(",")}),guest_id.in.(${clientIds.join(",")})`)
         .order("created_at", { ascending: false })
         .limit(50),
+      supabase
+        .from("clients")
+        .select("id, document_type, document_number")
+        .in("id", clientIds),
     ]);
     reservations = (resResult.data || []) as Array<Record<string, unknown>>;
     quotes = (quotesResult.data || []) as Array<Record<string, unknown>>;
+
+    if (!contact.document_number) {
+      const withDoc = (clientsResult.data || []).find(
+        (c: { document_number?: string | null }) => c.document_number,
+      ) as { document_type?: string | null; document_number?: string | null } | undefined;
+      if (withDoc?.document_number) {
+        enrichedContact = {
+          ...contact,
+          document_type: contact.document_type || withDoc.document_type || null,
+          document_number: withDoc.document_number,
+        };
+        void (supabase as any)
+          .from("crm_contacts")
+          .update({
+            document_type: enrichedContact.document_type,
+            document_number: enrichedContact.document_number,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", contact.id)
+          .then(() => undefined);
+      }
+    }
   }
 
   const excluded = new Set(["cancelled", "no_show", "draft"]);
@@ -166,7 +193,7 @@ export async function getCrmContact360ViaSupabase(contactId: string): Promise<Cr
   const stayCount = eligible.length;
 
   return {
-    contact,
+    contact: enrichedContact,
     reservations,
     quotes,
     indicators: {

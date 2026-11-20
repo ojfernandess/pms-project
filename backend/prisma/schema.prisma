@@ -861,6 +861,7 @@ model buildings {
   establishment_services establishment_services[]
   service_fees           service_fees[]
   room_categories        room_categories[]
+  ota_channels           ota_channels[]
 
   @@index([establishment_id], map: "idx_buildings_establishment_id")
   @@schema("public")
@@ -2500,7 +2501,7 @@ model notifications {
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model ota_channels {
   id                                  String                      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  name                                String                      @unique
+  name                                String
   api_key                             String?
   api_secret                          String?
   is_active                           Boolean?                    @default(true)
@@ -2512,6 +2513,7 @@ model ota_channels {
   created_at                          DateTime                    @default(now()) @db.Timestamptz(6)
   updated_at                          DateTime                    @default(now()) @db.Timestamptz(6)
   establishment_id                    String?                     @db.Uuid
+  building_id                         String?                     @db.Uuid
   channel_type                        String?                     @default("ota")
   channel_manager_type                String?
   bukly_api_url                       String?
@@ -2543,10 +2545,12 @@ model ota_channels {
   channex_booking_revisions           channex_booking_revisions[]
   channex_sync_logs                   channex_sync_logs[]
   establishments                      establishments?             @relation(fields: [establishment_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  buildings                           buildings?                  @relation(fields: [building_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   ota_reservations                    ota_reservations[]
   simplified_pricing                  simplified_pricing[]
 
   @@index([establishment_id], map: "idx_ota_channels_establishment_id")
+  @@index([building_id], map: "idx_ota_channels_building_id")
   @@schema("public")
 }
 

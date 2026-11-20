@@ -54,6 +54,12 @@ export const SyncStatusCard = ({
           <div>
             <h3 className="font-medium">{channel.name}</h3>
             <p className="text-sm text-muted-foreground">
+              {channel.buildings?.name
+                ? `Prédio: ${channel.buildings.name}`
+                : channel.building_id
+                  ? "Prédio vinculado"
+                  : null}
+              {channel.buildings?.name || channel.building_id ? " · " : null}
               {channel.last_sync_at
                 ? `Última sincronização: ${formatDate(channel.last_sync_at)}`
                 : "Nunca sincronizado"}
@@ -84,6 +90,9 @@ export const SyncStatusCard = ({
             Reservas: pull <code className="text-[10px]">OTA_ReadRQ</code> Undelivered + confirmação{" "}
             <code className="text-[10px]">OTA_NotifReportRQ</code>. Mapeie InvTypeCode / RatePlanCode em Tarifas por canal.
           </p>
+          {channel.bukly_hotel_id && (
+            <p className="mt-1">HotelCode: {channel.bukly_hotel_id}</p>
+          )}
           {channel.bukly_last_sync_at && (
             <p className="mt-1">Último sync: {formatDate(channel.bukly_last_sync_at)}</p>
           )}

@@ -2980,6 +2980,16 @@ const PublicReservation = () => {
           console.log(`[Reservation] ✅ Reserva criada - ID: ${reservationResult.reservation_id}, Cliente: ${roomClientId}, Nome: ${roomGuestName}, roomIndex: ${roomIndex}`);
           try {
             const { enqueueBookingCreated, enqueueContactUpserted } = await import("@/lib/crm/crmOutbox");
+            const crmDocumentType = isForeigner
+              ? formData.document_type || null
+              : formData.cpf
+                ? "CPF"
+                : null;
+            const crmDocumentNumber = isForeigner
+              ? formData.document_number || null
+              : formData.cpf
+                ? formData.cpf.replace(/\D/g, "")
+                : null;
             if (roomClientId) {
               await enqueueContactUpserted({
                 establishmentId: establishment.id,
@@ -2988,6 +2998,8 @@ const PublicReservation = () => {
                 fullName: roomGuestName || "Hóspede",
                 email: formData.email || null,
                 phone: formData.phone || null,
+                documentType: crmDocumentType,
+                documentNumber: crmDocumentNumber,
                 source: "motor_public",
               });
             }

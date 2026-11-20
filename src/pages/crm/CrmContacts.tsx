@@ -25,6 +25,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { usePermissions } from "@/hooks/usePermissions";
 import { CrmFeatureGate } from "@/components/crm/CrmFeatureGate";
+import { formatCrmSource } from "@/lib/crm/crmLabels";
 
 const CrmContacts = () => {
   const { establishmentId } = useParams<{ establishmentId?: string }>();
@@ -149,7 +150,7 @@ const CrmContacts = () => {
                   </TableCell>
                   <TableCell>{contact.email || "—"}</TableCell>
                   <TableCell>{contact.phone || "—"}</TableCell>
-                  <TableCell>{contact.source || "—"}</TableCell>
+                  <TableCell>{formatCrmSource(contact.source)}</TableCell>
                   <TableCell>{contact.client_links?.length ?? 0}</TableCell>
                 </TableRow>
               ))

@@ -67,6 +67,12 @@ export const ChannelPricingDialog = ({
     selectedChannel?.channel_manager_type === "bukly" ||
     selectedChannel?.channel_manager_type === "channex";
 
+  const categoriesForChannel = (categories || []).filter((cat: any) => {
+    const buildingId = selectedChannel?.building_id;
+    if (!buildingId) return true;
+    return cat.building_id === buildingId;
+  });
+
   useEffect(() => {
     if (pricingId && open) {
       const pricing = channelPricing.find((p: any) => p.id === pricingId);
@@ -207,7 +213,7 @@ export const ChannelPricingDialog = ({
                   <SelectValue placeholder="Selecione uma categoria" />
                 </SelectTrigger>
                 <SelectContent>
-                  {categories?.map((category: any) => (
+                  {categoriesForChannel.map((category: any) => (
                     <SelectItem key={category.id} value={category.id}>
                       {category.name}
                     </SelectItem>

@@ -22,6 +22,14 @@ import { buildCrmCentralPath } from "@/lib/crm/crmCentral";
 import { upsertCrmConsent } from "@/lib/crm/crmCampaigns";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import {
+  formatCrmActivityType,
+  formatCrmDate,
+  formatCrmDocument,
+  formatCrmQuoteStatus,
+  formatCrmReservationStatus,
+  formatCrmSource,
+} from "@/lib/crm/crmLabels";
 
 const money = (n: number) =>
   n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -138,13 +146,11 @@ const CrmContact360 = () => {
           <Card className="p-4 grid gap-2 md:grid-cols-2 text-sm">
             <div>
               <p className="text-muted-foreground">Documento</p>
-              <p>
-                {contact.document_type || "—"} {contact.document_number || ""}
-              </p>
+              <p>{formatCrmDocument(contact.document_type, contact.document_number)}</p>
             </div>
             <div>
               <p className="text-muted-foreground">Origem</p>
-              <p>{contact.source || "—"}</p>
+              <p>{formatCrmSource(contact.source)}</p>
             </div>
             <div>
               <p className="text-muted-foreground">Classificação</p>
@@ -191,9 +197,9 @@ const CrmContact360 = () => {
                           "—"
                         )}
                       </TableCell>
-                      <TableCell>{String(r.checkin_date || "—")}</TableCell>
-                      <TableCell>{String(r.checkout_date || "—")}</TableCell>
-                      <TableCell>{String(r.status || "—")}</TableCell>
+                      <TableCell>{formatCrmDate(r.checkin_date)}</TableCell>
+                      <TableCell>{formatCrmDate(r.checkout_date)}</TableCell>
+                      <TableCell>{formatCrmReservationStatus(r.status)}</TableCell>
                       <TableCell>{money(Number(r.total_amount || 0))}</TableCell>
                     </TableRow>
                   ))
@@ -225,8 +231,8 @@ const CrmContact360 = () => {
                   quotes.map((q) => (
                     <TableRow key={String(q.id)}>
                       <TableCell>{String(q.quote_code || q.id)}</TableCell>
-                      <TableCell>{String(q.status || "—")}</TableCell>
-                      <TableCell>{String(q.checkin_date || "—")}</TableCell>
+                      <TableCell>{formatCrmQuoteStatus(q.status)}</TableCell>
+                      <TableCell>{formatCrmDate(q.checkin_date)}</TableCell>
                       <TableCell>{money(Number(q.total_amount || 0))}</TableCell>
                     </TableRow>
                   ))
@@ -267,7 +273,7 @@ const CrmContact360 = () => {
                 ) : (
                   (contact.activities || []).map((a: Record<string, unknown>) => (
                     <TableRow key={String(a.id)}>
-                      <TableCell>{String(a.activity_type || "—")}</TableCell>
+                      <TableCell>{formatCrmActivityType(a.activity_type)}</TableCell>
                       <TableCell>{String(a.subject || "—")}</TableCell>
                       <TableCell className="max-w-md truncate">{String(a.body || "—")}</TableCell>
                       <TableCell>

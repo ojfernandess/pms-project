@@ -122,7 +122,9 @@ const ChannelManager = () => {
       }
     }
     try {
-      if (channel?.channel_manager_type === "channex") {
+      if (channel?.channel_manager_type === "bukly") {
+        await syncBuklyReservations({ channelId, establishmentId: est });
+      } else if (channel?.channel_manager_type === "channex") {
         await syncChannexReservations({ channelId, establishmentId: est });
       } else {
         await syncAiosellReservations({ channelId, establishmentId: est, pull: true });
@@ -227,8 +229,9 @@ const ChannelManager = () => {
                       <h4 className="font-semibold text-blue-900 mb-2">Bukly Channel Manager</h4>
                       <p className="text-sm text-blue-800 mb-2">
                         Integração OTA oficial (<code className="text-xs">https://pms.bukly.com</code>):
-                        push de tarifas e disponibilidade em XML. Configure HotelCode, Basic Auth e os
-                        códigos InvTypeCode / RatePlanCode em Tarifas por canal.
+                        push de tarifas e disponibilidade em XML. Com vários prédios, cadastre um canal
+                        Bukly por prédio (HotelCode + usuário/senha). Mapeie InvTypeCode / RatePlanCode em
+                        Tarifas por canal.
                       </p>
                       <ul className="text-sm text-blue-700 list-disc list-inside space-y-1 mb-2">
                         <li>Booking.com</li>
@@ -321,6 +324,7 @@ const ChannelManager = () => {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Nome</TableHead>
+                    <TableHead>Prédio</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Sincronização</TableHead>
                     <TableHead>Comissão</TableHead>
@@ -330,7 +334,19 @@ const ChannelManager = () => {
                 <TableBody>
                   {activeChannels.map((channel: any) => (
                     <TableRow key={channel.id}>
-                      <TableCell className="font-medium">{channel.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <div>
+                          {channel.name}
+                          {channel.channel_manager_type === "bukly" && channel.bukly_hotel_id && (
+                            <p className="text-xs text-muted-foreground font-normal mt-0.5">
+                              HotelCode: {channel.bukly_hotel_id}
+                            </p>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {channel.buildings?.name || (channel.building_id ? "—" : "Todos")}
+                      </TableCell>
                       <TableCell>
                         <Badge variant="default">Ativo</Badge>
                       </TableCell>

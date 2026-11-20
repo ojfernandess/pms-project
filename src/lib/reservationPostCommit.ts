@@ -225,14 +225,42 @@ export async function runAfterReservationCreated(newReservation: CreatedReservat
         newReservation.financial_responsible?.full_name ||
         newReservation.guest_name ||
         null;
+      const clientId = newReservation.client_id || newReservation.guest_id || null;
+      const email =
+        newReservation.guest?.email || newReservation.financial_responsible?.email || null;
+      const phone =
+        newReservation.guest?.phone || newReservation.financial_responsible?.phone || null;
+      const documentType =
+        newReservation.guest?.document_type ||
+        newReservation.financial_responsible?.document_type ||
+        null;
+      const documentNumber =
+        newReservation.guest?.document_number ||
+        newReservation.financial_responsible?.document_number ||
+        null;
+
+      if (clientId && guestName) {
+        const { enqueueContactUpserted } = await import("@/lib/crm/crmOutbox");
+        await enqueueContactUpserted({
+          establishmentId,
+          clientId,
+          fullName: guestName,
+          email,
+          phone,
+          documentType,
+          documentNumber,
+          source: "pms_staff",
+        });
+      }
+
       await enqueueBookingCreated({
         establishmentId,
         reservationId: newReservation.id,
         reservationCode: newReservation.reservation_code,
-        clientId: newReservation.client_id || newReservation.guest_id || null,
+        clientId,
         guestName,
-        email: newReservation.guest?.email || newReservation.financial_responsible?.email || null,
-        phone: newReservation.guest?.phone || newReservation.financial_responsible?.phone || null,
+        email,
+        phone,
         totalAmount: newReservation.total_amount,
         status: newReservation.status,
         source: "pms_staff",

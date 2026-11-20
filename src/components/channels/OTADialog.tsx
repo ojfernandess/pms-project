@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useChannelManager } from "@/hooks/useChannelManager";
 import { supabase } from "@/integrations/supabase/client";
+import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import {
   Loader2,
   Globe,
@@ -110,6 +112,22 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
   const [showWebhookSecret, setShowWebhookSecret] = useState(false);
   const [copiedWebhookSecret, setCopiedWebhookSecret] = useState(false);
 
+  const establishmentId = getSelectedEstablishmentId();
+  const { data: buildings = [] } = useQuery({
+    queryKey: ["buildings", establishmentId, "ota-dialog"],
+    enabled: open && !!establishmentId,
+    queryFn: async () => {
+      if (!establishmentId) return [];
+      const { data, error } = await supabase
+        .from("buildings")
+        .select("id, name")
+        .eq("establishment_id", establishmentId)
+        .order("name");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
   const [formData, setFormData] = useState({
     name: "",
     api_key: "",
@@ -119,6 +137,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
     commission_rate: "0",
     channel_type: "ota" as "ota" | "channel_manager",
     channel_manager_type: null as string | null,
+    building_id: "" as string,
     bukly_api_url: "https://pms.bukly.com",
     bukly_hotel_id: "",
     bukly_webhook_secret: "",
@@ -151,6 +170,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
           commission_rate: String(channel.commission_rate || 0),
           channel_type: channel.channel_type || "ota",
           channel_manager_type: channel.channel_manager_type || null,
+          building_id: channel.building_id || "",
           bukly_api_url: channel.bukly_api_url || "https://pms.bukly.com",
           bukly_hotel_id: channel.bukly_hotel_id || "",
           bukly_webhook_secret: channel.bukly_webhook_secret || "",
@@ -189,6 +209,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
         commission_rate: "0",
         channel_type: "ota",
         channel_manager_type: null,
+        building_id: "",
         bukly_api_url: "https://pms.bukly.com",
         bukly_hotel_id: "",
         bukly_webhook_secret: "",
@@ -230,6 +251,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
         ),
         channel_manager_type: formData.channel_manager_type || null,
         // UUID: Postgres rejeita "" — usar null quando vazio (ex.: canal Aiosell/Bukly)
+        building_id: emptyToNull(formData.building_id),
         channex_property_id: emptyToNull(formData.channex_property_id),
         channex_base_url: emptyToNull(formData.channex_base_url),
         channex_api_key: emptyToNull(formData.channex_api_key),
@@ -242,21 +264,19 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
       };
 
       if (!channelId) {
-        const establishmentId = localStorage.getItem("selectedEstablishmentId");
+        const estId = getSelectedEstablishmentId();
         let query = supabase
           .from("ota_channels")
           .select("id, name, establishment_id")
           .eq("name", formData.name);
-        
+
+        if (estId) query = query.eq("establishment_id", estId);
+
         const { data: existingChannels } = await query;
-        
-        const filteredChannels = establishmentId
-          ? existingChannels?.filter((c: any) => c.establishment_id === establishmentId) || []
-          : existingChannels || [];
-        
-        if (filteredChannels.length > 0) {
+
+        if ((existingChannels || []).length > 0) {
           toast.error(
-            `Já existe um canal OTA com o nome "${formData.name}". Por favor, escolha outro nome ou edite o canal existente.`
+            `Já existe um canal com o nome "${formData.name}" neste estabelecimento. Use outro nome (ex.: inclua o prédio).`
           );
           setLoading(false);
           return;
@@ -278,9 +298,16 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
         error?.message?.includes("duplicate key") ||
         error?.message?.includes("unique constraint")
       ) {
-        toast.error(
-          `Já existe um canal OTA com o nome "${formData.name}". Por favor, escolha outro nome ou edite o canal existente.`
-        );
+        const msg = String(error?.message || "");
+        if (msg.includes("bukly_hotel") || msg.includes("bukly_hotel_id")) {
+          toast.error("Já existe um canal Bukly ativo com este HotelCode neste estabelecimento.");
+        } else if (msg.includes("bukly_building") || msg.includes("building_id")) {
+          toast.error("Já existe um canal Bukly ativo para este prédio. Edite o existente ou escolha outro prédio.");
+        } else {
+          toast.error(
+            `Já existe um canal com o nome "${formData.name}" neste estabelecimento. Escolha outro nome.`
+          );
+        }
       } else {
         toast.error(error?.message || "Erro ao salvar canal OTA. Tente novamente.");
       }
@@ -401,10 +428,16 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
                   value={formData.channel_manager_type || ""}
                   onValueChange={(value) => {
                         const manager = CHANNEL_MANAGER_OPTIONS.find((m) => m.value === value);
+                        const buildingName = buildings.find((b: { id: string }) => b.id === formData.building_id)?.name;
+                        const baseLabel = manager?.label || "";
+                        const nextName =
+                          buildingName && value === "bukly"
+                            ? `${baseLabel} — ${buildingName}`
+                            : baseLabel;
                     setFormData({ 
                       ...formData, 
                       channel_manager_type: value,
-                      name: manager?.label || "",
+                      name: nextName,
                           ...(value === "aiosell"
                             ? { aiosell_webhook_trust_hotel_only: true }
                             : {}),
@@ -424,9 +457,92 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
                   </SelectContent>
                 </Select>
               ) : (
-                    <Input id="channel_manager_type" value={formData.name} disabled className="bg-muted/50" />
+                    <Input
+                      id="channel_manager_type"
+                      value={
+                        CHANNEL_MANAGER_OPTIONS.find((m) => m.value === formData.channel_manager_type)?.label ||
+                        formData.name
+                      }
+                      disabled
+                      className="bg-muted/50"
+                    />
               )}
             </div>
+          )}
+
+          {formData.channel_type === "channel_manager" && formData.channel_manager_type && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="channel_display_name" className={labelClass}>
+                  Nome do canal *
+                </Label>
+                <Input
+                  id="channel_display_name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="Ex.: Bukly Channel Manager — Torre A"
+                  required
+                />
+                <FieldHint>
+                  Com vários prédios, use um nome distinto por HotelCode (ex.: inclua o prédio).
+                </FieldHint>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="building_id" className={labelClass}>
+                  Prédio {formData.channel_manager_type === "bukly" ? "(recomendado)" : "(opcional)"}
+                </Label>
+                <Select
+                  value={formData.building_id || "__all__"}
+                  onValueChange={(value) => {
+                    const buildingId = value === "__all__" ? "" : value;
+                    const buildingName = buildings.find((b: { id: string }) => b.id === buildingId)?.name;
+                    const manager = CHANNEL_MANAGER_OPTIONS.find(
+                      (m) => m.value === formData.channel_manager_type
+                    );
+                    const baseLabel = manager?.label || formData.name;
+                    const looksAuto =
+                      !formData.name ||
+                      formData.name === baseLabel ||
+                      formData.name.startsWith(`${baseLabel} —`);
+                    const nextName =
+                      looksAuto && buildingName && formData.channel_manager_type === "bukly"
+                        ? `${baseLabel} — ${buildingName}`
+                        : looksAuto && !buildingName
+                          ? baseLabel
+                          : formData.name;
+                    setFormData({ ...formData, building_id: buildingId, name: nextName });
+                  }}
+                >
+                  <SelectTrigger id="building_id" className="w-full">
+                    <SelectValue placeholder="Todos os prédios" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todos os prédios (legado)</SelectItem>
+                    {buildings.map((b: { id: string; name: string }) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldHint>
+                  {formData.channel_manager_type === "bukly" ? (
+                    <>
+                      Na Bukly cada prédio pode ter <strong>HotelCode</strong>, usuário e senha próprios. O sync
+                      ARI fica limitado às categorias desse prédio.
+                    </>
+                  ) : (
+                    <>Opcional: escopo do canal a um prédio do estabelecimento.</>
+                  )}
+                </FieldHint>
+                {buildings.length === 0 && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    Nenhum prédio cadastrado. Cadastre prédios em Configurações para vincular um HotelCode por
+                    torre.
+                  </p>
+                )}
+              </div>
+            </>
           )}
 
           {formData.channel_type === "ota" && (
@@ -462,7 +578,7 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
             <>
                 <FormSection
                   title="Integração Bukly (OTA XML)"
-                  description="API oficial em https://pms.bukly.com — HTTP Basic Auth e mensagens OTA 2013A."
+                  description="API oficial em https://pms.bukly.com — HTTP Basic Auth e mensagens OTA 2013A. Um HotelCode por propriedade/prédio."
                   icon={Globe}
                 >
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -493,6 +609,10 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
                         placeholder="Código do hotel no Bukly (HotelCode)"
                   required={formData.channel_manager_type === "bukly"}
                 />
+                      <FieldHint>
+                        <code className="text-xs">HotelRef@HotelCode</code> nas mensagens OTA. Com vários prédios,
+                        cada um usa o HotelCode fornecido pela Bukly para aquela propriedade.
+                      </FieldHint>
               </div>
                   </div>
                 </FormSection>
@@ -542,11 +662,17 @@ export const OTADialog = ({ open, onOpenChange, onSuccess, channelId }: OTADialo
                       <ul className="text-xs sm:text-sm text-blue-800/90 dark:text-blue-200/90 space-y-1.5 list-disc list-inside leading-relaxed">
                         <li>Conecta Booking.com, Expedia, Decolar e outras OTAs</li>
                         <li>
+                          Vários prédios: cadastre um canal Bukly por prédio (HotelCode + usuário/senha Basic)
+                        </li>
+                        <li>
                           Configure Room Code (InvTypeCode) e Rate Plan Code em <strong>Tarifas por canal</strong> —
                           obrigatório para o push ARI/tarifas
                         </li>
                         <li>Push de tarifas e disponibilidade via Edge Function <code className="text-xs">bukly-sync</code></li>
-                        <li>Reservas: pull OTA (fase seguinte) — não depende de webhook PMS</li>
+                        <li>
+                          Reservas: pull <code className="text-xs">OTA_ReadRQ</code> (Undelivered) +{" "}
+                          <code className="text-xs">OTA_NotifReportRQ</code>
+                        </li>
                       </ul>
                       <a
                         href="https://bukly.com/pmsapidoc/"

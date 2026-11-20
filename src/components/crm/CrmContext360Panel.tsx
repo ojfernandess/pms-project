@@ -6,6 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { getCrmContact360 } from "@/lib/crm/crmApi";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { ExternalLink, Loader2, UserRound } from "lucide-react";
+import {
+  formatCrmDate,
+  formatCrmReservationStatus,
+  formatCrmSource,
+} from "@/lib/crm/crmLabels";
 
 const money = (n: number) =>
   n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -81,7 +86,9 @@ export function CrmContext360Panel({ contactId, reservationId, emptyHint }: Prop
         <p className="text-xs text-muted-foreground">
           {[contact.email, contact.phone].filter(Boolean).join(" · ") || "Sem contato"}
         </p>
-        {contact.source && <Badge variant="secondary">{contact.source}</Badge>}
+        {contact.source && (
+          <Badge variant="secondary">{formatCrmSource(contact.source)}</Badge>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-center">
@@ -104,9 +111,11 @@ export function CrmContext360Panel({ contactId, reservationId, emptyHint }: Prop
           <p className="font-medium">Reserva em foco</p>
           <p className="font-mono">{String(focused.reservation_code || focused.id)}</p>
           <p className="text-muted-foreground">
-            {String(focused.checkin_date || "—")} → {String(focused.checkout_date || "—")}
+            {formatCrmDate(focused.checkin_date)} → {formatCrmDate(focused.checkout_date)}
           </p>
-          <p>{String(focused.status || "—")} · {money(Number(focused.total_amount || 0))}</p>
+          <p>
+            {formatCrmReservationStatus(focused.status)} · {money(Number(focused.total_amount || 0))}
+          </p>
           {focused.reservation_code && (
             <Button asChild variant="link" className="h-auto p-0 text-xs">
               <Link to={`${base}/reservas/${focused.reservation_code}`}>Abrir no PMS</Link>
@@ -121,7 +130,9 @@ export function CrmContext360Panel({ contactId, reservationId, emptyHint }: Prop
           {reservations.slice(0, 5).map((r) => (
             <li key={String(r.id)} className="text-xs flex justify-between gap-2 border-b border-border/40 pb-1">
               <span className="font-mono truncate">{String(r.reservation_code || r.id)}</span>
-              <span className="text-muted-foreground shrink-0">{String(r.status || "")}</span>
+              <span className="text-muted-foreground shrink-0">
+                {formatCrmReservationStatus(r.status)}
+              </span>
             </li>
           ))}
           {!reservations.length && (
