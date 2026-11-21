@@ -31,7 +31,8 @@ for f in \
   20261120170000_crm_automations.sql \
   20261120180000_crm_advanced.sql \
   20261120181000_crm_role_permissions.sql \
-  20261120182000_crm_rpcs.sql
+  20261120182000_crm_rpcs.sql \
+  20261121110000_crm_booking_paid_automation.sql
 do
   path="$MIG_DIR/$f"
   if [ ! -f "$path" ]; then

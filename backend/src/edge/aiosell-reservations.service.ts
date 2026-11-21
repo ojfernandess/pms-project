@@ -1409,10 +1409,23 @@ export class AiosellReservationsService {
       const rows = await this.prisma.$queryRaw<Array<{ template: unknown }>>`
         SELECT public.get_resolved_email_template(${eventType}::email_event_type, ${establishmentId}::uuid) AS template
       `;
-      const resolved = asRecord(parseRpcObject(rows[0]?.template) ?? rows[0]?.template);
-      if (resolved?.id) return resolved;
+      // RPC ok: null = desativado no estabelecimento — não cair no global
+      const raw = rows[0]?.template;
+      if (raw == null) return null;
+      const resolved = asRecord(parseRpcObject(raw) ?? raw);
+      return resolved?.id ? resolved : null;
     } catch (error) {
       this.logger.warn(`get_resolved_email_template ${errorMessage(error)}`);
+    }
+    // Fallback só se a RPC falhar: ainda respeita is_active=false
+    try {
+      const override = await this.prisma.establishment_email_templates.findFirst({
+        where: { establishment_id: establishmentId, event_type: eventType as never },
+        select: { is_active: true },
+      });
+      if (override && override.is_active === false) return null;
+    } catch {
+      /* ignore */
     }
     const templates = await this.prisma.email_templates.findMany({ where: { event_type: prismaEvent, is_active: true } });
     return pickEmailTemplate(templates.map((template) => ({ ...template })), establishmentId);
@@ -2441,6 +2454,11 @@ function processTemplate(template: string, variables: TemplateVariables): string
     const value = getNestedValue(variables, path);
     return value == null ? "" : String(value);
   });
+  // Segurança: tags Handlebars órfãs (legado / aninhamento)
+  processed = processed
+    .replace(/\{\{\/if\}\}/g, "")
+    .replace(/\{\{else\}\}/g, "")
+    .replace(/\{\{#if\s+[\w.]+\}\}/g, "");
   return processed;
 }
 

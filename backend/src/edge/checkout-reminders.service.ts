@@ -4,6 +4,11 @@ import { PrismaService } from "../prisma/prisma.service";
 import { EmailDispatchService } from "./email-dispatch.service";
 import { SITE_SETTINGS_ID } from "./robots.service";
 import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
+import {
+  renderEmailTemplate,
+  resolveEstablishmentEmailTemplate,
+  type ResolvedEmailTemplate,
+} from "./email-template.util";
 
 type RequestHints = { origin?: string; referer?: string; forwardedHost?: string; forwardedProto?: string };
 
@@ -44,16 +49,13 @@ export class CheckoutRemindersService {
     if (!reservations.length) return { status: 200, body: { success: true, sent: 0, errors: 0, message: "Nenhuma reserva encontrada" } };
     const settings = await this.prisma.email_settings.findFirst({ where: { is_active: true } });
     if (!settings) return { status: 400, body: { success: false, error: "Configurações de e-mail não encontradas ou inativas" } };
-    const template = await this.prisma.email_templates.findFirst({
-      where: { event_type: email_event_type.checkout_reminder, is_active: true },
-      orderBy: { updated_at: "desc" },
-    });
-    if (!template) return { status: 400, body: { success: false, error: "Template de e-mail não encontrado" } };
     const site = await this.prisma.site_settings.findUnique({ where: { id: SITE_SETTINGS_ID } });
     let sent = 0;
     let errors = 0;
+    let skippedDisabled = 0;
     const errorsDetails: Array<{ reservation_id: string; error: string }> = [];
     const today = new Date().toISOString().split("T")[0];
+    const templateCache = new Map<string, ResolvedEmailTemplate | null>();
 
     for (const reservation of reservations) {
       try {
@@ -62,6 +64,24 @@ export class CheckoutRemindersService {
           select: { id: true },
         });
         if (existing) continue;
+
+        const estId = reservation.establishment_id || "";
+        let template: ResolvedEmailTemplate | null;
+        if (templateCache.has(estId)) {
+          template = templateCache.get(estId) ?? null;
+        } else {
+          template = await resolveEstablishmentEmailTemplate(
+            this.prisma,
+            "checkout.reminder",
+            reservation.establishment_id,
+          );
+          templateCache.set(estId, template);
+        }
+        if (!template) {
+          skippedDisabled += 1;
+          continue;
+        }
+
         const guest = reservation.clients_reservations_guest_idToclients;
         const payer = reservation.clients_reservations_client_idToclients;
         const ota = reservation.ota_reservations[0];
@@ -95,11 +115,12 @@ export class CheckoutRemindersService {
           hotel_address: [hotel?.street, hotel?.number, hotel?.neighborhood, hotel?.city].filter(Boolean).join(", "),
           hotel_website: hotel?.website || "",
           logo_url: hotel?.logo_url || site?.logo_url || "",
+          hotel_logo: hotel?.logo_url || site?.logo_url || "",
           web_checkin_link: locator ? buildWebCheckinLocatorUrl(locator, site) : "",
           policies_link: policiesLink(baseUrl, hotel?.name || "hotel", buildingId ? "building" : "establishment", buildingId || reservation.establishment_id),
         };
-        const subject = fill(template.subject, variables);
-        const bodyHtml = fill(template.body_html, variables);
+        const subject = renderEmailTemplate(template.subject, variables);
+        const bodyHtml = renderEmailTemplate(template.body_html, variables);
         const queued = await this.prisma.email_queue.create({
           data: {
             template_id: template.id,
@@ -121,7 +142,17 @@ export class CheckoutRemindersService {
         errorsDetails.push({ reservation_id: reservation.id, error: error instanceof Error ? error.message : "Erro desconhecido" });
       }
     }
-    return { status: 200, body: { success: true, sent, errors, total: reservations.length, errorsDetails: errors ? errorsDetails : undefined } };
+    return {
+      status: 200,
+      body: {
+        success: true,
+        sent,
+        errors,
+        skippedDisabled,
+        total: reservations.length,
+        errorsDetails: errors ? errorsDetails : undefined,
+      },
+    };
   }
 
   private async sendNow(queueId: string, settings: { provider: string; api_key: string | null; sender_email: string; sender_name: string; reply_to_email: string | null; smtp_host: string | null; smtp_port: number | null; smtp_secure: boolean | null; smtp_username: string | null; smtp_password: string | null }) {
@@ -162,33 +193,6 @@ export class CheckoutRemindersService {
       return false;
     }
   }
-}
-
-function fill(template: string, variables: Record<string, string>): string {
-  let result = processConditionals(template, variables);
-  for (const [key, value] of Object.entries(variables)) result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value || "");
-  return result;
-}
-
-function processConditionals(template: string, variables: Record<string, string>): string {
-  let result = template;
-  for (let pass = 0; pass < 20; pass += 1) {
-    const before = result;
-    result = result.replace(/\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{else\}\}([\s\S]*?)\{\{\/if\}\}/g, (_match, name, yes, no) => (variables[name]?.trim() ? yes : no));
-    let inner = result;
-    for (let nested = 0; nested < 10; nested += 1) {
-      const previous = inner;
-      inner = inner.replace(/\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g, (match, name, content) => {
-        if (/\{\{#if\s+\w+\}\}/.test(content)) return match;
-        return variables[name]?.trim() ? content : "";
-      });
-      if (inner === previous) break;
-    }
-    result = inner;
-    if (result === before) break;
-  }
-  if (/\{\{#if\s+\w+\}\}/.test(result)) result = result.replace(/\{\{#if\s+\w+\}\}[\s\S]*?\{\{\/if\}\}/g, "").replace(/\{\{else\}\}/g, "").replace(/\{\{\/if\}\}/g, "");
-  return result;
 }
 
 function resolveBase(pmsBase: string | null | undefined, hints: RequestHints): string {

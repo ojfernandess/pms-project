@@ -108,6 +108,12 @@ export class AuthController {
     return this.auth.forgotPassword(body.email);
   }
 
+  @Post("guest-forgot-password")
+  @HttpCode(202)
+  guestForgotPassword(@Body() body: ForgotPasswordDto) {
+    return this.auth.guestForgotPassword(body.email);
+  }
+
   @Post("reset-password")
   @HttpCode(204)
   resetPassword(@Body() body: ResetPasswordDto) {

@@ -34,9 +34,10 @@ import { SiteSettingsService } from "./site-settings.service";
 import { PlatformDomainsService } from "./platform-domains.service";
 import { InfraModule } from "../infra/infra.module";
 import { QueuesModule } from "../queues/queues.module";
+import { CrmModule } from "../crm/crm.module";
 
 @Module({
-  imports: [AuthModule, DataModule, InfraModule, QueuesModule],
+  imports: [AuthModule, DataModule, InfraModule, QueuesModule, CrmModule],
   controllers: [FunctionsCompatController],
   providers: [
     HealthCheckService,

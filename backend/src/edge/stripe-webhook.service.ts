@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { connect as netConnect, Socket } from "net";
 import { connect as tlsConnect } from "tls";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import {
   Prisma,
   email_event_type,
@@ -13,6 +13,7 @@ import {
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
+import { CrmService } from "../crm/crm.service";
 
 const STRIPE_API = "https://api.stripe.com/v1";
 const STRIPE_VERSION = "2023-10-16";
@@ -119,7 +120,10 @@ type ReservationEmailRow = Prisma.reservationsGetPayload<{ include: typeof reser
 
 @Injectable()
 export class StripeWebhookService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly crm?: CrmService,
+  ) {}
 
   async handle(rawBody: string, signature: string | undefined): Promise<{ status: number; body: unknown }> {
     try {
@@ -348,6 +352,17 @@ export class StripeWebhookService {
             console.error(`[Webhook] Erro ao enviar email para reserva ${payment.reservation_id}:`, this.errorText(emailError));
           }
 
+          if (newPaidAmount >= totalAmount && totalAmount > 0) {
+            await this.notifyCrmBookingPaid({
+              reservationId: payment.reservation_id,
+              establishmentId: reservation.establishment_id,
+              quoteId: this.jsonQuoteId(payment.metadata) || payment.quote_id || paymentIntent.metadata?.quote_id || null,
+              paymentIntentId: paymentIntent.id,
+              paidAmount: newPaidAmount,
+              totalAmount,
+            });
+          }
+
           if (newPaidAmount >= totalAmount && totalAmount > 0 && reservation.establishment_id) {
             try {
               const ccConfig = await this.prisma.checkin_charge_config.findFirst({
@@ -436,6 +451,14 @@ export class StripeWebhookService {
         await this.sendPaymentConfirmedEmail(reservationIds[0]);
       } catch (emailError) {
         console.error("[Webhook] Erro ao enviar email:", this.errorText(emailError));
+      }
+      for (const rid of reservationIds) {
+        await this.notifyCrmBookingPaid({
+          reservationId: rid,
+          establishmentId: quote.establishment_id,
+          quoteId,
+          paymentIntentId: paymentIntent.id,
+        });
       }
       return;
     }
@@ -538,6 +561,14 @@ export class StripeWebhookService {
     } catch (emailError) {
       console.error(`[Webhook] Erro ao enviar email para reserva ${newReservationId}:`, this.errorText(emailError));
     }
+    await this.notifyCrmBookingPaid({
+      reservationId: newReservationId,
+      establishmentId: quote.establishment_id,
+      quoteId,
+      paymentIntentId: paymentIntent.id,
+      paidAmount: Number(quote.total_amount || 0),
+      totalAmount: Number(quote.total_amount || 0),
+    });
   }
 
   private async onPaymentIntentFailed(paymentIntent: StripePaymentIntent): Promise<void> {
@@ -746,6 +777,15 @@ export class StripeWebhookService {
           }
         }
         await this.prisma.reservations.update({ where: { id: reservationId }, data: reservationUpdate });
+        if (reservationUpdate.payment_status === payment_status.paid) {
+          await this.notifyCrmBookingPaid({
+            reservationId,
+            establishmentId,
+            paymentIntentId: paymentIntent.id,
+            paidAmount: newPaidAmount,
+            totalAmount: totalAmountReservation,
+          });
+        }
       } catch (error) {
         console.error(`[Webhook] Erro ao processar reserva ${reservationId}:`, this.errorText(error));
       }
@@ -1254,6 +1294,59 @@ export class StripeWebhookService {
       await this.processQueuedEmail(emailQueue.id, emailSettings);
     } catch (error) {
       console.error("Erro geral ao enviar email de múltiplas reservas criadas:", this.errorText(error));
+    }
+  }
+
+  /** Notifica CRM: lead quitou a reserva (outbox booking.paid → deal ganho). */
+  private async notifyCrmBookingPaid(input: {
+    reservationId: string;
+    establishmentId?: string | null;
+    quoteId?: string | null;
+    paymentIntentId?: string | null;
+    paidAmount?: number | null;
+    totalAmount?: number | null;
+  }): Promise<void> {
+    if (!this.crm || !input.reservationId) return;
+    try {
+      const reservation = await this.prisma.reservations.findUnique({
+        where: { id: input.reservationId },
+        select: {
+          id: true,
+          establishment_id: true,
+          reservation_code: true,
+          guest_name: true,
+          client_id: true,
+          guest_id: true,
+          total_amount: true,
+          paid_amount: true,
+          clients_reservations_guest_idToclients: { select: { email: true, phone: true, full_name: true } },
+          clients_reservations_client_idToclients: { select: { email: true, phone: true, full_name: true } },
+        },
+      });
+      if (!reservation) return;
+      const guest = reservation.clients_reservations_guest_idToclients;
+      const payer = reservation.clients_reservations_client_idToclients;
+      await this.crm.enqueueOutbox({
+        eventType: "booking.paid",
+        establishmentId: input.establishmentId || reservation.establishment_id,
+        idempotencyKey: `booking.paid:${input.reservationId}:${input.paymentIntentId || "stripe"}`,
+        payload: {
+          reservation_id: reservation.id,
+          reservation_code: reservation.reservation_code,
+          quote_id: input.quoteId || null,
+          client_id: reservation.client_id || reservation.guest_id || null,
+          guest_name: guest?.full_name || payer?.full_name || reservation.guest_name || null,
+          full_name: guest?.full_name || payer?.full_name || reservation.guest_name || null,
+          email: guest?.email || payer?.email || null,
+          phone: guest?.phone || payer?.phone || null,
+          total_amount: input.totalAmount ?? Number(reservation.total_amount || 0),
+          paid_amount: input.paidAmount ?? Number(reservation.paid_amount || 0),
+          payment_intent_id: input.paymentIntentId || null,
+          source: "stripe",
+        },
+      });
+    } catch (error) {
+      console.warn("[Webhook] CRM booking.paid:", this.errorText(error));
     }
   }
 

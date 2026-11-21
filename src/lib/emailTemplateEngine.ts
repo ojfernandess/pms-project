@@ -221,25 +221,25 @@ export function processTemplate(template: string, variables: TemplateVariables):
     conditionalChanged = beforeConditionals !== processed;
   }
   
-  // Limpeza final: remover qualquer {{/if}} solto que possa ter sobrado
-  // Isso pode acontecer se houver um erro no processamento de condicionais aninhadas
-  // Contar quantos {{#if}} e {{/if}} existem para garantir que não removemos demais
+  // Limpeza final: tags Handlebars órfãs (ex.: {{/if}} após #if/else aninhados mal processados)
   const ifCount = (processed.match(/\{\{#if\s+\w+(?:\.\w+)*\}\}/g) || []).length;
   const endifCount = (processed.match(/\{\{\/if\}\}/g) || []).length;
-  
-  // Se há mais {{/if}} do que {{#if}}, remover os extras
   if (endifCount > ifCount) {
-    // Remover apenas os {{/if}} extras (a diferença)
     let removed = 0;
     const toRemove = endifCount - ifCount;
     processed = processed.replace(/\{\{\/if\}\}/g, (match) => {
       if (removed < toRemove) {
         removed++;
-        return '';
+        return "";
       }
       return match;
     });
   }
+  // Segurança: após processar condicionais, não deve restar tag de bloco
+  processed = processed
+    .replace(/\{\{\/if\}\}/g, "")
+    .replace(/\{\{else\}\}/g, "")
+    .replace(/\{\{#if\s+[\w.]+\}\}/g, "");
 
   // Por último, substituir variáveis no formato {{variable_name}} ou {{variable.path}}
   // Processar variáveis aninhadas primeiro (ex: {{main_guest.name}})

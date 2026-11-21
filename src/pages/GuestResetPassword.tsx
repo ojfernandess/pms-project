@@ -7,7 +7,20 @@ import { Building2, Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft } from "lucid
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
-import { sendGuestPasswordResetEmail } from "@/lib/emailService";
+import { resolvePmsApiUrl } from "@/lib/runtimeConfig";
+
+async function requestGuestForgotPassword(email: string): Promise<void> {
+  const base = resolvePmsApiUrl().replace(/\/$/, "");
+  const response = await fetch(`${base}/auth/guest-forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({} as { message?: string }));
+    throw new Error(body.message || "Erro ao enviar email de recuperação");
+  }
+}
 
 const GuestResetPassword = () => {
   const navigate = useNavigate();
@@ -22,14 +35,12 @@ const GuestResetPassword = () => {
   const [step, setStep] = useState<"request" | "reset">("request");
   const [isCheckingToken, setIsCheckingToken] = useState(true);
 
-  // Verificar se o usuário veio do link de recuperação de senha
   useEffect(() => {
     const checkResetToken = async () => {
       try {
         const token = searchParams.get("token");
-        
+
         if (token) {
-          // Verificar se o token é válido
           const { data: account, error } = await supabase
             .from("guest_accounts")
             .select("id, email, reset_token_expires_at")
@@ -39,19 +50,15 @@ const GuestResetPassword = () => {
           if (error || !account) {
             toast.error("Link inválido ou expirado. Solicite um novo link de recuperação.");
             setStep("request");
-            setIsCheckingToken(false);
             return;
           }
 
-          // Verificar se token não expirou
           if (account.reset_token_expires_at && new Date(account.reset_token_expires_at) < new Date()) {
             toast.error("Link expirado. Solicite um novo link de recuperação.");
             setStep("request");
-            setIsCheckingToken(false);
             return;
           }
 
-          // Token válido, mostrar formulário de reset
           setStep("reset");
           toast.success("Link válido! Defina sua nova senha.");
         } else {
@@ -86,36 +93,8 @@ const GuestResetPassword = () => {
         return;
       }
 
-      // Chamar função RPC para solicitar reset
-      const { data, error } = await supabase.rpc("request_guest_password_reset", {
-        p_email: email.trim(),
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      // Sempre mostrar sucesso (mesmo se email não existir, por segurança)
+      await requestGuestForgotPassword(email.trim());
       toast.success("Se o email estiver cadastrado, você receberá um link de recuperação em breve.");
-      
-      // Se retornou token, enviar email de reset
-      if (data && Array.isArray(data) && data.length > 0 && data[0].reset_token) {
-        const resetData = data[0];
-        
-        // Enviar email de reset de senha
-        try {
-          await sendGuestPasswordResetEmail(
-            resetData.email,
-            resetData.full_name || resetData.email.split('@')[0],
-            resetData.reset_token
-          );
-          console.log("✅ E-mail de reset de senha enviado com sucesso");
-        } catch (emailError) {
-          console.error("❌ Erro ao enviar e-mail de reset de senha:", emailError);
-          // Não mostrar erro ao usuário para manter segurança (não revelar se email existe)
-        }
-      }
-
       setEmail("");
     } catch (error: any) {
       console.error("Erro ao solicitar reset de senha:", error);
@@ -143,8 +122,8 @@ const GuestResetPassword = () => {
         return;
       }
 
-      if (password.length < 6) {
-        toast.error("A senha deve ter pelo menos 6 caracteres");
+      if (password.length < 8) {
+        toast.error("A senha deve ter pelo menos 8 caracteres");
         setLoading(false);
         return;
       }
@@ -155,7 +134,6 @@ const GuestResetPassword = () => {
         return;
       }
 
-      // Chamar função RPC para resetar senha
       const { data, error } = await supabase.rpc("reset_guest_password", {
         p_reset_token: token,
         p_new_password: password,
@@ -287,7 +265,7 @@ const GuestResetPassword = () => {
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         required
-                        minLength={6}
+                        minLength={8}
                         className="pl-10 pr-10 h-12 rounded-xl border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                       />
                       <button
@@ -303,7 +281,7 @@ const GuestResetPassword = () => {
                       </button>
                     </div>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Mínimo de 6 caracteres
+                      Mínimo de 8 caracteres
                     </p>
                   </div>
 
@@ -321,7 +299,7 @@ const GuestResetPassword = () => {
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         required
-                        minLength={6}
+                        minLength={8}
                         className="pl-10 pr-10 h-12 rounded-xl border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                       />
                       <button

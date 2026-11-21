@@ -178,35 +178,11 @@ serve(async (req) => {
       );
     }
 
-    // Buscar template ativo para o evento
-    const { data: templates, error: templateError } = await supabase
-      .from("email_templates")
-      .select("*")
-      .eq("event_type", "checkout.reminder")
-      .eq("is_active", true)
-      .order("updated_at", { ascending: false })
-      .limit(1);
-
-    if (templateError || !templates || templates.length === 0) {
-      console.error("❌ Template não encontrado para evento: checkout.reminder");
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Template de e-mail não encontrado",
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    const template = templates[0];
-    console.log("✅ Template encontrado:", template.id);
-
     let sent = 0;
     let errors = 0;
+    let skippedDisabled = 0;
     const errorsDetails: Array<{ reservation_id: string; error: string }> = [];
+    const templateCache = new Map<string, Record<string, unknown> | null>();
 
     // Processar cada reserva
     for (const reservation of reservations) {
@@ -225,6 +201,22 @@ serve(async (req) => {
           console.log(
             `⏭️ E-mail de lembrete já enviado hoje para reserva ${reservation.id}`
           );
+          continue;
+        }
+
+        const estId = String(reservation.establishment_id || "");
+        let template: Record<string, unknown> | null;
+        if (templateCache.has(estId)) {
+          template = templateCache.get(estId) ?? null;
+        } else {
+          template = await resolveCheckoutReminderTemplate(supabase, estId || null);
+          templateCache.set(estId, template);
+        }
+        if (!template) {
+          console.log(
+            `⏭️ Template checkout.reminder desativado/ausente para establishment ${estId || "(sem id)"}`
+          );
+          skippedDisabled++;
           continue;
         }
 
@@ -505,11 +497,10 @@ serve(async (req) => {
         };
 
         // Processar template (suporta Handlebars simples)
-        let subject = template.subject;
-        let bodyHtml = template.body_html;
+        let subject = String(template.subject ?? "");
+        let bodyHtml = String(template.body_html ?? "");
 
         // IMPORTANTE: Processar condicionais ANTES de substituir variáveis simples
-        // Isso evita que variáveis dentro de condicionais sejam substituídas antes do processamento
         console.log("🔄 Processando condicionais Handlebars...");
         console.log("📋 Variáveis disponíveis:", Object.keys(variables).filter(k => variables[k] && variables[k].trim() !== "").join(", "));
         console.log("📋 Variáveis vazias:", Object.keys(variables).filter(k => !variables[k] || variables[k].trim() === "").join(", "));
@@ -549,7 +540,7 @@ serve(async (req) => {
         const { data: queueItem, error: queueError } = await supabase
           .from("email_queue")
           .insert({
-            template_id: template.id,
+            template_id: String(template.id),
             event_type: "checkout.reminder",
             recipient_email: recipientEmail,
             recipient_name: recipientName,
@@ -622,7 +613,7 @@ serve(async (req) => {
     }
 
     console.log(
-      `✅ Processamento concluído: ${sent} enviado(s), ${errors} erro(s)`
+      `✅ Processamento concluído: ${sent} enviado(s), ${errors} erro(s), ${skippedDisabled} desativado(s)`
     );
 
     return new Response(
@@ -630,6 +621,7 @@ serve(async (req) => {
         success: true,
         sent,
         errors,
+        skippedDisabled,
         total: reservations.length,
         errorsDetails: errors > 0 ? errorsDetails : undefined,
       }),
@@ -945,93 +937,98 @@ async function sendViaSMTP(
   }
 }
 
+/** Resolve template por estabelecimento; null se desativado (is_active=false). */
+async function resolveCheckoutReminderTemplate(
+  supabase: SupabaseClient,
+  establishmentId: string | null,
+): Promise<Record<string, unknown> | null> {
+  if (establishmentId) {
+    const { data, error } = await supabase.rpc("get_resolved_email_template", {
+      p_event_type: "checkout.reminder",
+      p_establishment_id: establishmentId,
+    });
+    if (!error) {
+      if (data == null) return null;
+      return data as Record<string, unknown>;
+    }
+    const { data: override } = await supabase
+      .from("establishment_email_templates")
+      .select("is_active")
+      .eq("establishment_id", establishmentId)
+      .eq("event_type", "checkout.reminder")
+      .maybeSingle();
+    if (override && override.is_active === false) return null;
+  }
+
+  const { data: templates } = await supabase
+    .from("email_templates")
+    .select("*")
+    .eq("event_type", "checkout.reminder")
+    .eq("is_active", true)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  return templates?.[0] ?? null;
+}
+
 /**
- * Processa condicionais Handlebars simples {{#if variavel}} ... {{/if}} e {{#if variavel}} ... {{else}} ... {{/if}}
+ * Processa {{#if}}/{{else}}/{{/if}} com profundidade (suporta aninhamento logo_url/hotel_logo).
  */
 function processHandlebarsConditionals(template: string, variables: Record<string, string>): string {
-  let result = template;
-  let changed = true;
-  let iterations = 0;
-  const maxIterations = 20; // Aumentar limite para lidar com múltiplos condicionais
+  let result = template || "";
 
-  // Processar condicionais em loop até não haver mais mudanças (para lidar com condicionais aninhados)
-  while (changed && iterations < maxIterations) {
-    changed = false;
-    iterations++;
+  const isTruthy = (name: string) => {
+    const value = variables[name] || "";
+    return value.trim() !== "";
+  };
 
-    // Processar {{#if variavel}} ... {{else}} ... {{/if}} (precisa processar antes do if simples)
-    // Usar regex não-greedy (.*?) e garantir que captura até o {{/if}} correspondente
-    const ifElsePattern = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{else\}\}([\s\S]*?)\{\{\/if\}\}/g;
-    const beforeIfElse = result;
-    result = result.replace(ifElsePattern, (match, varName, ifContent, elseContent) => {
-      const value = variables[varName] || "";
-      // Se a variável existe e não está vazia, retorna o conteúdo do if, senão retorna o else
-      if (value && value.trim() !== "") {
-        return ifContent;
+  for (let pass = 0; pass < 50; pass += 1) {
+    const startMatch = result.match(/\{\{#if\s+([\w.]+)\}\}/);
+    if (!startMatch || startMatch.index == null) break;
+    const start = startMatch.index;
+    const varName = startMatch[1];
+    const openTag = startMatch[0];
+    let depth = 1;
+    let cursor = start + openTag.length;
+    let elseAt = -1;
+    let resolved = false;
+
+    while (depth > 0 && cursor < result.length) {
+      const nextIf = result.indexOf("{{#if", cursor);
+      const nextElse = result.indexOf("{{else}}", cursor);
+      const nextEnd = result.indexOf("{{/if}}", cursor);
+      if (nextEnd < 0) break;
+
+      if (nextIf >= 0 && nextIf < nextEnd && (nextElse < 0 || nextIf < nextElse)) {
+        depth += 1;
+        cursor = nextIf + 5;
+        continue;
       }
-      return elseContent;
-    });
-    if (result !== beforeIfElse) {
-      changed = true;
-      console.log(`🔄 Processado if-else para: ${ifElsePattern.source}`);
-    }
-
-    // Processar {{#if variavel}} ... {{/if}}
-    // IMPORTANTE: Processar de dentro para fora (condicionais aninhados)
-    // Usar uma abordagem que processa do mais interno para o mais externo
-    let ifPattern = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g;
-    let beforeIf = result;
-    let tempResult = result;
-    
-    // Processar múltiplas vezes até não haver mais mudanças
-    let innerIterations = 0;
-    while (innerIterations < 10) {
-      const beforeInner = tempResult;
-      tempResult = tempResult.replace(ifPattern, (match, varName, content) => {
-        // Verificar se o conteúdo ainda tem condicionais aninhados
-        if (content.match(/\{\{#if\s+\w+\}\}/)) {
-          // Se tem condicionais aninhados, não processar ainda
-          return match;
-        }
-        
-        const value = variables[varName] || "";
-        // Se a variável existe e não está vazia, retorna o conteúdo
-        if (value && value.trim() !== "") {
-          console.log(`  ✅ Condicional if: ${varName} = "${value.substring(0, 30)}" -> mostrando conteúdo`);
-          return content;
-        }
-        console.log(`  ✅ Condicional if: ${varName} = vazio -> removendo conteúdo`);
-        return "";
-      });
-      
-      if (tempResult === beforeInner) {
-        break; // Não houve mudanças, sair do loop
+      if (depth === 1 && nextElse >= 0 && nextElse < nextEnd && elseAt < 0) {
+        elseAt = nextElse;
       }
-      innerIterations++;
+      depth -= 1;
+      if (depth === 0) {
+        const end = nextEnd + "{{/if}}".length;
+        const ifContent =
+          elseAt > start
+            ? result.slice(start + openTag.length, elseAt)
+            : result.slice(start + openTag.length, nextEnd);
+        const elseContent =
+          elseAt > start ? result.slice(elseAt + "{{else}}".length, nextEnd) : "";
+        const replacement = isTruthy(varName) ? ifContent : elseContent;
+        result = result.slice(0, start) + replacement + result.slice(end);
+        resolved = true;
+        break;
+      }
+      cursor = nextEnd + 7;
     }
-    
-    result = tempResult;
-    if (result !== beforeIf) {
-      changed = true;
-    }
+    if (!resolved) break;
   }
 
-  if (iterations >= maxIterations) {
-    console.warn("⚠️ Aviso: processamento de condicionais atingiu o limite de iterações");
-  }
-
-  // Verificar se ainda há condicionais não processados
-  const remainingIf = (result.match(/\{\{#if\s+\w+\}\}/g) || []).length;
-  const remainingEndIf = (result.match(/\{\{\/if\}\}/g) || []).length;
-  const remainingElse = (result.match(/\{\{else\}\}/g) || []).length;
-  
-  if (remainingIf > 0 || remainingEndIf > 0 || remainingElse > 0) {
-    console.warn(`⚠️ Ainda há condicionais não processados: #if=${remainingIf}, /if=${remainingEndIf}, else=${remainingElse}`);
-    // Tentar uma última vez com uma abordagem mais agressiva - remover condicionais não processados
-    result = result.replace(/\{\{#if\s+\w+\}\}[\s\S]*?\{\{\/if\}\}/g, "");
-    result = result.replace(/\{\{else\}\}/g, "");
-    result = result.replace(/\{\{\/if\}\}/g, "");
-  }
+  result = result
+    .replace(/\{\{\/if\}\}/g, "")
+    .replace(/\{\{else\}\}/g, "")
+    .replace(/\{\{#if\s+[\w.]+\}\}/g, "");
 
   return result;
 }

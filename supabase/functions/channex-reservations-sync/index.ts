@@ -357,15 +357,26 @@ async function queueChannelReservationEmail(
       p_establishment_id: args.establishmentId,
     },
   );
-  if (!resolveError && resolvedTemplate) {
-    template = resolvedTemplate as AnyObj;
+  if (!resolveError) {
+    // RPC ok: null = desativado no estabelecimento — não cair no global
+    template = resolvedTemplate ? (resolvedTemplate as AnyObj) : null;
   } else {
-    const { data: templates } = await supabase
-      .from("email_templates")
-      .select("*")
+    const { data: override } = await supabase
+      .from("establishment_email_templates")
+      .select("is_active")
+      .eq("establishment_id", args.establishmentId)
       .eq("event_type", eventType)
-      .eq("is_active", true);
-    template = pickEmailTemplateForEstablishment((templates || []) as AnyObj[], args.establishmentId);
+      .maybeSingle();
+    if (override && override.is_active === false) {
+      template = null;
+    } else {
+      const { data: templates } = await supabase
+        .from("email_templates")
+        .select("*")
+        .eq("event_type", eventType)
+        .eq("is_active", true);
+      template = pickEmailTemplateForEstablishment((templates || []) as AnyObj[], args.establishmentId);
+    }
   }
   if (!template) return;
 

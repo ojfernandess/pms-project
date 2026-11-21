@@ -10,6 +10,7 @@ import { Prisma } from "@prisma/client";
 import { AuthService, SessionUser } from "../auth/auth.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { computeLtv, normalizeContactMatchKey } from "./crm-aggregation";
+import { buildConvertDealPatch } from "./crm-deals.logic";
 import { CrmAutomationsService } from "./crm-automations.service";
 
 export type UpsertContactDto = {
@@ -419,6 +420,173 @@ export class CrmService {
     return this.getContact360(user, target.id);
   }
 
+  /**
+   * Quando o lead quita a reserva: marca deal aberto como ganho e registra atividade.
+   * Busca por quote_id, reservation_id ou contato vinculado ao client_id.
+   */
+  private async applyBookingPaidToDeal(input: {
+    companyId: string;
+    establishmentId?: string | null;
+    payload: Record<string, unknown>;
+  }) {
+    const reservationId = input.payload.reservation_id
+      ? String(input.payload.reservation_id)
+      : "";
+    const quoteId = input.payload.quote_id ? String(input.payload.quote_id) : null;
+    const clientId = input.payload.client_id ? String(input.payload.client_id) : null;
+    if (!reservationId && !quoteId && !clientId) return;
+
+    type DealWithPipeline = {
+      id: string;
+      status: string;
+      amount: Prisma.Decimal | null;
+      crm_contact_id: string | null;
+      establishment_id: string | null;
+      pipeline?: { stages: Array<{ id: string; is_won: boolean; stage_key: string }> } | null;
+    };
+
+    let deal: DealWithPipeline | null = null;
+    const dealInclude = { pipeline: { include: { stages: true as const } } } as const;
+
+    if (quoteId) {
+      deal = (await this.prisma.crm_deals.findFirst({
+        where: {
+          company_id: input.companyId,
+          quote_id: quoteId,
+          deleted_at: null,
+          status: { not: "lost" },
+        },
+        orderBy: { updated_at: "desc" },
+        include: dealInclude,
+      })) as DealWithPipeline | null;
+    }
+
+    if (!deal && reservationId) {
+      deal = (await this.prisma.crm_deals.findFirst({
+        where: {
+          company_id: input.companyId,
+          reservation_id: reservationId,
+          deleted_at: null,
+        },
+        orderBy: { updated_at: "desc" },
+        include: dealInclude,
+      })) as DealWithPipeline | null;
+    }
+
+    if (!deal && clientId) {
+      const link = await this.prisma.crm_contact_client_links.findFirst({
+        where: { client_id: clientId },
+        select: { crm_contact_id: true },
+      });
+      if (link?.crm_contact_id) {
+        deal = (await this.prisma.crm_deals.findFirst({
+          where: {
+            company_id: input.companyId,
+            crm_contact_id: link.crm_contact_id,
+            deleted_at: null,
+            status: "open",
+          },
+          orderBy: { updated_at: "desc" },
+          include: dealInclude,
+        })) as DealWithPipeline | null;
+      }
+    }
+
+    let contactId = deal?.crm_contact_id || null;
+    if (!contactId && clientId) {
+      const link = await this.prisma.crm_contact_client_links.findFirst({
+        where: { client_id: clientId },
+        select: { crm_contact_id: true },
+      });
+      contactId = link?.crm_contact_id ?? null;
+    }
+
+    if (contactId) {
+      try {
+        await this.prisma.crm_activities.create({
+          data: {
+            company_id: input.companyId,
+            crm_contact_id: contactId,
+            activity_type: "system",
+            subject: "Pagamento confirmado",
+            body: reservationId
+              ? `Lead quitou a reserva ${String(input.payload.reservation_code || reservationId)}.`
+              : "Pagamento da reserva confirmado.",
+            metadata: {
+              reservation_id: reservationId || null,
+              quote_id: quoteId,
+              source: input.payload.source || "payment",
+              paid_amount: input.payload.paid_amount ?? null,
+            } as Prisma.InputJsonValue,
+          },
+        });
+      } catch (e) {
+        console.warn("CRM booking.paid activity:", e);
+      }
+    }
+
+    if (!deal || deal.status === "won") return;
+    if (!reservationId) return;
+
+    const stages = deal.pipeline?.stages || [];
+    const wonStage = stages.find((s) => s.is_won || s.stage_key === "won") || null;
+    const patch = buildConvertDealPatch(reservationId, wonStage?.id);
+
+    const nextAmount =
+      Number(deal.amount ?? 0) > 0
+        ? deal.amount
+        : input.payload.total_amount != null
+          ? Number(input.payload.total_amount)
+          : undefined;
+
+    await this.prisma.crm_deals.update({
+      where: { id: deal.id },
+      data: {
+        ...patch,
+        establishment_id: input.establishmentId ?? deal.establishment_id,
+        ...(nextAmount != null ? { amount: nextAmount } : {}),
+      },
+    });
+
+    try {
+      await this.prisma.crm_audit_logs.create({
+        data: {
+          company_id: input.companyId,
+          crm_contact_id: deal.crm_contact_id,
+          action: "deal.convert.payment",
+          actor_user_id: null,
+          before_data: { dealId: deal.id, status: deal.status } as Prisma.InputJsonValue,
+          after_data: {
+            reservationId,
+            dealId: deal.id,
+            trigger: "booking.paid",
+          } as Prisma.InputJsonValue,
+          metadata: {} as Prisma.InputJsonValue,
+        },
+      });
+    } catch {
+      /* ignore */
+    }
+
+    if (this.automations) {
+      try {
+        await this.automations.dispatchTrigger({
+          companyId: input.companyId,
+          triggerType: "deal.won",
+          payload: {
+            company_id: input.companyId,
+            crm_contact_id: deal.crm_contact_id || undefined,
+            reservation_id: reservationId,
+            deal_id: deal.id,
+            source: String(input.payload.source || "payment"),
+          },
+        });
+      } catch (e) {
+        console.warn("CRM deal.won from booking.paid:", e);
+      }
+    }
+  }
+
   async enqueueOutbox(input: {
     companyId?: string | null;
     establishmentId?: string | null;
@@ -494,6 +662,7 @@ export class CrmService {
         const syncTypes = new Set([
           "contact.upserted",
           "booking.created",
+          "booking.paid",
           "booking.checked_in",
           "booking.checked_out",
         ]);
@@ -550,6 +719,14 @@ export class CrmService {
               source: String(payload.source || event.event_type),
             });
           }
+        }
+
+        if (event.event_type === "booking.paid" && companyId) {
+          await this.applyBookingPaidToDeal({
+            companyId,
+            establishmentId: event.establishment_id,
+            payload,
+          });
         }
 
         await this.prisma.crm_outbox_events.update({

@@ -1174,6 +1174,21 @@ export function ReservationPaymentModal({
             console.error("Erro ao disparar e-mail de pagamento confirmado:", emailError);
             // Não bloquear o pagamento se o e-mail falhar
           }
+          try {
+            const { enqueueBookingPaid } = await import("@/lib/crm/crmOutbox");
+            await enqueueBookingPaid({
+              establishmentId: reservationSnapshot.establishment_id,
+              reservationId: reservationSnapshot.id,
+              reservationCode: reservationSnapshot.reservation_code,
+              clientId: reservationSnapshot.client_id || reservationSnapshot.guest_id || null,
+              guestName: reservationSnapshot.guest_name || reservation.guest_name || null,
+              totalAmount: reservationSnapshot.total_amount ?? reservation.total_amount ?? null,
+              paidAmount: newPaidAmount,
+              source: "pms_staff",
+            });
+          } catch (crmError) {
+            console.warn("CRM booking.paid:", crmError);
+          }
         }
       }
 

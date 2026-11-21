@@ -142,6 +142,12 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/ota_channels_building
     || echo "WARN: ota_channels_building_multi.sql falhou" >&2
 fi
 
+# Limpa {{/if}} órfão em templates de e-mail (legado)
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/email_templates_strip_orphan_endif.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/email_templates_strip_orphan_endif.sql \
+    || echo "WARN: email_templates_strip_orphan_endif.sql falhou" >&2
+fi
+
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/site_settings_storage_config.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/site_settings_storage_config.sql \
     || echo "WARN: site_settings_storage_config.sql falhou" >&2

@@ -8,6 +8,7 @@ import { CheckinChargeService } from "./checkin-charge.service";
 import { ChannexOtaService } from "./channex-ota.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { computeWebCheckinExpiresAt } from "../lib/web-checkin-expiry";
+import { renderEmailTemplate } from "./email-template.util";
 
 type AnyObj = Record<string, unknown>;
 type Result = { status: number; body: unknown };
@@ -1694,10 +1695,21 @@ export class ChannexReservationsService {
       const rows = await this.prisma.$queryRaw<Array<{ result: unknown }>>`
         SELECT public.get_resolved_email_template(${eventType}::public.email_event_type, ${establishmentId}::uuid) AS result
       `;
+      // RPC ok: null = desativado — não cair no global
       const resolved = rows[0]?.result;
-      if (resolved && typeof resolved === "object") return resolved as AnyObj;
+      if (resolved == null) return null;
+      if (typeof resolved === "object") return resolved as AnyObj;
     } catch (error) {
       this.logger.warn(`get_resolved_email_template: ${error instanceof Error ? error.message : "erro"}`);
+    }
+    try {
+      const override = await this.prisma.establishment_email_templates.findFirst({
+        where: { establishment_id: establishmentId, event_type: eventType as never },
+        select: { is_active: true },
+      });
+      if (override && override.is_active === false) return null;
+    } catch {
+      /* ignore */
     }
     const templates = await this.prisma.email_templates.findMany({
       where: { event_type: eventType === "payment.confirmed" ? email_event_type.payment_confirmed : email_event_type.reservation_created, is_active: true },
@@ -2397,9 +2409,9 @@ function deriveRevisionStatus(attrs: AnyObj, hasExistingReservation: boolean): R
 }
 
 function replaceVars(template: string, vars: Record<string, string>): string {
-  let out = template || "";
+  let out = renderEmailTemplate(template || "", vars);
   for (const [key, value] of Object.entries(vars)) {
-    out = out.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "gi"), value ?? "").replace(new RegExp(`\\{${key}\\}`, "gi"), value ?? "");
+    out = out.replace(new RegExp(`\\{${key}\\}`, "gi"), value ?? "");
   }
   return out;
 }

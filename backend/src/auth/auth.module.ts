@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { JwtModule } from "@nestjs/jwt";
+import { EmailDispatchService } from "../edge/email-dispatch.service";
 import { AUTH_DIRECTORY, SESSION_STORE } from "./auth.tokens";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
@@ -9,6 +10,7 @@ import { AuthAccountService } from "./auth-account.service";
 import { PrismaAuthDirectory } from "./prisma-auth.directory";
 import { RedisSessionStore } from "./redis-session.store";
 import { StaffIdentityService } from "./staff-identity.service";
+import { PasswordResetMailService } from "./password-reset-mail.service";
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { StaffIdentityService } from "./staff-identity.service";
     AuthAccountService,
     { provide: AUTH_DIRECTORY, useExisting: PrismaAuthDirectory },
     { provide: SESSION_STORE, useExisting: RedisSessionStore },
+    EmailDispatchService,
+    PasswordResetMailService,
     AuthService,
     JwtAuthGuard,
     StaffIdentityService,

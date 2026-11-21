@@ -188,6 +188,14 @@ const INCREMENTAL_PATCHES = [
       { name: "verify_guest_password", args: "p_account_id uuid, p_password text" },
     ],
   },
+  {
+    sql: "guest_password_reset_rpcs.sql",
+    requiresPgcrypto: true,
+    checks: [
+      { name: "request_guest_password_reset", args: "p_email text" },
+      { name: "reset_guest_password", args: "p_reset_token text, p_new_password text" },
+    ],
+  },
 ];
 
 async function applyIncrementalPatches(client, url, rpcDir) {

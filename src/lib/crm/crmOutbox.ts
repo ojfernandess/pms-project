@@ -4,6 +4,7 @@ import { resolvePmsApiUrl } from "@/lib/runtimeConfig";
 export type CrmOutboxEventType =
   | "contact.upserted"
   | "booking.created"
+  | "booking.paid"
   | "booking.cancelled"
   | "booking.checked_in"
   | "booking.checked_out";
@@ -147,6 +148,45 @@ export async function enqueueBookingCreated(input: {
       total_amount: input.totalAmount,
       status: input.status,
       source: input.source || "pms",
+    },
+  });
+}
+
+/** Lead/hóspede quitou a reserva (pagamento total). */
+export async function enqueueBookingPaid(input: {
+  establishmentId?: string | null;
+  companyId?: string | null;
+  reservationId: string;
+  reservationCode?: string | null;
+  quoteId?: string | null;
+  clientId?: string | null;
+  guestName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  totalAmount?: number | null;
+  paidAmount?: number | null;
+  paymentIntentId?: string | null;
+  source?: string;
+}) {
+  const payKey = input.paymentIntentId || "full";
+  return enqueueCrmOutbox({
+    eventType: "booking.paid",
+    establishmentId: input.establishmentId,
+    companyId: input.companyId,
+    idempotencyKey: `booking.paid:${input.reservationId}:${payKey}`,
+    payload: {
+      reservation_id: input.reservationId,
+      reservation_code: input.reservationCode,
+      quote_id: input.quoteId,
+      client_id: input.clientId,
+      guest_name: input.guestName,
+      full_name: input.guestName,
+      email: input.email,
+      phone: input.phone,
+      total_amount: input.totalAmount,
+      paid_amount: input.paidAmount,
+      payment_intent_id: input.paymentIntentId,
+      source: input.source || "payment",
     },
   });
 }

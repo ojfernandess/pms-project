@@ -21,7 +21,8 @@ $files = @(
   "scripts/migration/crm/20261120170000_crm_automations.sql",
   "scripts/migration/crm/20261120180000_crm_advanced.sql",
   "scripts/migration/crm/20261120181000_crm_role_permissions.sql",
-  "scripts/migration/crm/20261120182000_crm_rpcs.sql"
+  "scripts/migration/crm/20261120182000_crm_rpcs.sql",
+  "scripts/migration/crm/20261121110000_crm_booking_paid_automation.sql"
 )
 
 $env:DATABASE_URL = $DatabaseUrl

@@ -1427,15 +1427,28 @@ async function notifyGuestAfterOtaReservationBooked(
         p_establishment_id: establishmentId,
       },
     );
-    if (!resolveError && resolvedTemplate) {
-      template = resolvedTemplate as Record<string, unknown>;
+    if (!resolveError) {
+      // RPC ok: null = desativado no estabelecimento — não cair no global
+      template = resolvedTemplate
+        ? (resolvedTemplate as Record<string, unknown>)
+        : null;
     } else {
-      const { data: templates } = await supabase
-        .from("email_templates")
-        .select("*")
+      const { data: override } = await supabase
+        .from("establishment_email_templates")
+        .select("is_active")
+        .eq("establishment_id", establishmentId)
         .eq("event_type", eventType)
-        .eq("is_active", true);
-      template = pickEmailTemplateForEstablishment(templates || [], establishmentId);
+        .maybeSingle();
+      if (override && override.is_active === false) {
+        template = null;
+      } else {
+        const { data: templates } = await supabase
+          .from("email_templates")
+          .select("*")
+          .eq("event_type", eventType)
+          .eq("is_active", true);
+        template = pickEmailTemplateForEstablishment(templates || [], establishmentId);
+      }
     }
     if (!template) {
       console.warn(`${logPrefix}: sem template ativo para ${eventType}`);

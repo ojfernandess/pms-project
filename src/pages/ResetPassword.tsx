@@ -5,9 +5,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Building2, Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { resolvePmsApiUrl } from "@/lib/runtimeConfig";
 
 async function resetWithToken(token: string, password: string): Promise<{ error: { message: string } | null }> {
-  const base = String(import.meta.env.VITE_PMS_API_URL || "").replace(/\/$/, "");
+  const base = resolvePmsApiUrl().replace(/\/$/, "");
   const response = await fetch(`${base}/auth/reset-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -17,8 +20,6 @@ async function resetWithToken(token: string, password: string): Promise<{ error:
   const body = await response.json().catch(() => ({} as { message?: string }));
   return { error: { message: body.message || "Link inválido ou expirado" } };
 }
-import { toast } from "sonner";
-import { useSiteSettings } from "@/hooks/useSiteSettings";
 
 const ResetPassword = () => {
   const navigate = useNavigate();
@@ -33,72 +34,24 @@ const ResetPassword = () => {
   const [step, setStep] = useState<"request" | "reset">("request");
   const [isCheckingSession, setIsCheckingSession] = useState(true);
 
-  // Verificar se o usuário veio do link de recuperação de senha
   useEffect(() => {
     const checkRecoverySession = async () => {
       try {
-        // Verificar hash da URL (Supabase usa hash para tokens)
-        const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        const type = hashParams.get("type");
-        const accessToken = hashParams.get("access_token");
-        
-        // Verificar query params também (caso o Supabase use)
-        const queryType = searchParams.get("type");
         const queryToken = searchParams.get("token");
-
-        // Se houver tipo de recuperação na URL ou hash
-        if ((type === "recovery" || queryType === "recovery") && queryToken && !accessToken) {
+        const queryType = searchParams.get("type");
+        if (queryToken && (queryType === "recovery" || !queryType)) {
           sessionStorage.setItem("pms.resetToken", queryToken);
           setStep("reset");
-          setIsCheckingSession(false);
+          toast.success("Link válido! Defina sua nova senha.");
           return;
         }
 
-        if ((type === "recovery" || queryType === "recovery") && (accessToken || queryToken)) {
-          // Tentar estabelecer sessão com o token
-          if (accessToken) {
-            const { error: sessionError } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: hashParams.get("refresh_token") || "",
-            });
-
-            if (sessionError) {
-              console.error("Erro ao estabelecer sessão:", sessionError);
-              toast.error("Link inválido ou expirado. Solicite um novo link de recuperação.");
-              setStep("request");
-              setIsCheckingSession(false);
-              return;
-            }
-          }
-
-          // Verificar se há sessão ativa de recuperação
-          const { data: { session } } = await supabase.auth.getSession();
-          
-          if (session) {
-            setStep("reset");
-            toast.success("Link válido! Defina sua nova senha.");
-          } else {
-            setStep("request");
-            toast.error("Link inválido ou expirado. Solicite um novo link de recuperação.");
-          }
-        } else {
-          // Verificar se já existe uma sessão de recuperação ativa
-          const { data: { session } } = await supabase.auth.getSession();
-          
-          // Se houver sessão mas não veio do link, pode ser que o usuário já tenha iniciado o processo
-          // Nesse caso, permitir reset se a sessão for válida
-          if (session) {
-            // Verificar se é uma sessão de recuperação (geralmente tem metadata específica)
-            setStep("reset");
-          } else {
-            setStep("request");
-          }
+        const stored = sessionStorage.getItem("pms.resetToken");
+        if (stored) {
+          setStep("reset");
+          return;
         }
-
-        // Limpar hash da URL após processar
-        if (window.location.hash) {
-          window.history.replaceState(null, "", window.location.pathname + window.location.search);
-        }
+        setStep("request");
       } catch (error) {
         console.error("Erro ao verificar sessão de recuperação:", error);
         setStep("request");
@@ -134,7 +87,7 @@ const ResetPassword = () => {
 
       if (error) throw error;
 
-      toast.success("Pedido registado. O envio do e-mail depende do transporte configurado no servidor.");
+      toast.success("Se o email estiver cadastrado, você receberá um link de recuperação em breve.");
       setEmail("");
     } catch (error: any) {
       console.error("Erro ao solicitar reset de senha:", error);
@@ -155,8 +108,8 @@ const ResetPassword = () => {
         return;
       }
 
-      if (password.length < 6) {
-        toast.error("A senha deve ter pelo menos 6 caracteres");
+      if (password.length < 8) {
+        toast.error("A senha deve ter pelo menos 8 caracteres");
         setLoading(false);
         return;
       }
@@ -167,13 +120,17 @@ const ResetPassword = () => {
         return;
       }
 
-      const resetToken = sessionStorage.getItem("pms.resetToken");
-      const { error } = resetToken
-        ? await resetWithToken(resetToken, password)
-        : await supabase.auth.updateUser({ password });
-      if (!error) sessionStorage.removeItem("pms.resetToken");
+      const resetToken = sessionStorage.getItem("pms.resetToken") || searchParams.get("token");
+      if (!resetToken) {
+        toast.error("Link inválido ou expirado. Solicite um novo link de recuperação.");
+        setStep("request");
+        setLoading(false);
+        return;
+      }
 
+      const { error } = await resetWithToken(resetToken, password);
       if (error) throw error;
+      sessionStorage.removeItem("pms.resetToken");
 
       toast.success("Senha alterada com sucesso! Redirecionando para login...");
       setTimeout(() => {
@@ -293,7 +250,7 @@ const ResetPassword = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    minLength={6}
+                    minLength={8}
                     className="pl-10 pr-10 h-12 rounded-xl border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                   />
                   <button
@@ -309,7 +266,7 @@ const ResetPassword = () => {
                   </button>
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Mínimo de 6 caracteres
+                  Mínimo de 8 caracteres
                 </p>
               </div>
 
@@ -327,7 +284,7 @@ const ResetPassword = () => {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
-                    minLength={6}
+                    minLength={8}
                     className="pl-10 pr-10 h-12 rounded-xl border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                   />
                   <button

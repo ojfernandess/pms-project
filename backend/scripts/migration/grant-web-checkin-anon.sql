@@ -71,7 +71,17 @@ BEGIN
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public'
-      AND p.proname IN ('insert_email_queue', 'log_activity', 'complete_web_checkin_by_token', 'get_fnrh_settings_public')
+      AND p.proname IN (
+        'insert_email_queue',
+        'log_activity',
+        'complete_web_checkin_by_token',
+        'get_fnrh_settings_public',
+        'request_guest_password_reset',
+        'reset_guest_password',
+        'verify_guest_password',
+        'create_guest_account',
+        'update_guest_password'
+      )
   LOOP
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%I(%s) TO anon', fn.proname, fn.args);
   END LOOP;

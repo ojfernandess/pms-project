@@ -3,14 +3,18 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Optional,
   UnauthorizedException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
+import { randomUUID } from "crypto";
+import { PrismaService } from "../prisma/prisma.service";
 import { canAccessCompany, canAccessEstablishment } from "./access-scope";
 import { AUTH_DIRECTORY, SESSION_STORE } from "./auth.tokens";
 import { AuthDirectory, AuthUserRecord, ScopeFacts, SessionStore } from "./auth.types";
 import { hashPassword, hashToken, newToken, passwordsMatch } from "./password";
+import { PasswordResetMailService } from "./password-reset-mail.service";
 
 export interface SessionUser extends ScopeFacts {
   id: string;
@@ -37,6 +41,8 @@ export class AuthService {
     @Inject(SESSION_STORE) private readonly sessions: SessionStore,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly resetMail?: PasswordResetMailService,
   ) {}
 
   async login(email: string, password: string): Promise<IssuedSession> {
@@ -110,8 +116,47 @@ export class AuthService {
     const resetToken = newToken();
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
     await this.sessions.savePasswordReset(user.id, hashToken(resetToken), expiresAt);
+    try {
+      await this.resetMail?.sendStaffReset(user.email, resetToken);
+    } catch {
+      /* não revelar falha de e-mail */
+    }
     if (this.config.get<boolean>("PASSWORD_RESET_DEBUG") === true) {
       return { status: "accepted", resetToken };
+    }
+    return { status: "accepted" };
+  }
+
+  /** Recuperação de senha do Web Check-in (hóspede) — gera token e envia e-mail no Nest. */
+  async guestForgotPassword(email: string): Promise<{ status: "accepted" }> {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized || !this.prisma) return { status: "accepted" };
+
+    const account = await this.prisma.guest_accounts.findFirst({
+      where: { email: { equals: normalized, mode: "insensitive" } },
+      select: { id: true, email: true, full_name: true, is_active: true },
+    });
+    if (!account || account.is_active === false) return { status: "accepted" };
+
+    const resetToken = randomUUID();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    await this.prisma.guest_accounts.update({
+      where: { id: account.id },
+      data: {
+        reset_token: resetToken,
+        reset_token_expires_at: expiresAt,
+        updated_at: new Date(),
+      },
+    });
+
+    try {
+      await this.resetMail?.sendGuestReset({
+        email: account.email,
+        fullName: account.full_name,
+        resetToken,
+      });
+    } catch {
+      /* não revelar falha de e-mail */
     }
     return { status: "accepted" };
   }
