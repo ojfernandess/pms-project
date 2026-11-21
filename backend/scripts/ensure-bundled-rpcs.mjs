@@ -196,13 +196,21 @@ const INCREMENTAL_PATCHES = [
       { name: "reset_guest_password", args: "p_reset_token text, p_new_password text" },
     ],
   },
+  {
+    // Reaplica se a RPC existir mas ainda sem o early-return de is_active=false
+    sql: "get_resolved_email_template.sql",
+    checks: [
+      { name: "get_resolved_email_template", args: "p_event_type email_event_type, p_establishment_id uuid" },
+    ],
+    alwaysApply: true,
+  },
 ];
 
 async function applyIncrementalPatches(client, url, rpcDir) {
   const migrationDir = path.join(__dirname, "migration");
   const pgcryptoBootstrap = path.join(migrationDir, "pgcrypto-bootstrap.sql");
   for (const patch of INCREMENTAL_PATCHES) {
-    let needs = false;
+    let needs = Boolean(patch.alwaysApply);
     for (const check of patch.checks) {
       if (!(await hasPublicFunction(client, check.name, check.args))) {
         needs = true;

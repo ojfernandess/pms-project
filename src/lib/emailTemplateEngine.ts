@@ -196,10 +196,14 @@ function processEachLoops(template: string, variables: TemplateVariables): strin
  * e loops no formato {{#each array}}...{{/each}}
  */
 export function processTemplate(template: string, variables: TemplateVariables): string {
-  let processed = template;
+  // Templates corrompidos às vezes guardam "\n" literal (duas chars) — aparece no e-mail
+  let processed = String(template || "")
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, " ");
 
   // Log inicial para debug
-  if (template?.includes('{{review_link}}') || template?.includes('{{{review_link}}}')) {
+  if (processed.includes('{{review_link}}') || processed.includes('{{{review_link}}}')) {
     console.log('🔍 processTemplate: Template contém review_link placeholder', {
       hasReviewLinkVar: 'review_link' in variables,
       reviewLinkValue: variables.review_link,
@@ -398,7 +402,8 @@ export function processTemplate(template: string, variables: TemplateVariables):
     }
   }
 
-  return processed;
+  // Remove quebras entre tags HTML (evita "lixo" visual no rodapé)
+  return processed.replace(/(?<=>)\s*\n+\s*(?=<)/g, "");
 }
 
 /**

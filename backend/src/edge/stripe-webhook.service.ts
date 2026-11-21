@@ -14,6 +14,10 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
 import { CrmService } from "../crm/crm.service";
+import {
+  renderEmailTemplate,
+  resolveEstablishmentEmailTemplate,
+} from "./email-template.util";
 
 const STRIPE_API = "https://api.stripe.com/v1";
 const STRIPE_VERSION = "2023-10-16";
@@ -1102,8 +1106,6 @@ export class StripeWebhookService {
       const loaded = await this.loadReservationEmail(reservationId);
       if (!loaded) return;
       const reservation = this.mapReservation(loaded);
-      const template = await this.singleTemplate(email_event_type.reservation_extended);
-      if (!template) return;
       const emailSettings = await this.activeEmailSettings();
       if (!emailSettings) return;
 
@@ -1117,11 +1119,16 @@ export class StripeWebhookService {
       if (!recipientEmail) return;
 
       const hotelSettings = reservation.establishment_id ? await this.hotelSettings(reservation.establishment_id) : null;
+      const template = await resolveEstablishmentEmailTemplate(
+        this.prisma,
+        "reservation.extended",
+        reservation.establishment_id,
+      );
+      if (!template) return;
       const site = await this.siteSettings();
       const baseUrl = this.baseUrlFromSite(site?.pms_base_url || null);
       const webCheckinLink = await this.webCheckinLink(reservationId, reservation.reservation_code, site);
-      const logoUrl = this.resolveLogo(site?.logo_url || hotelSettings?.logo_url || null);
-      const hotelLogo = this.resolveLogo(hotelSettings?.logo_url || null);
+      const logoUrl = this.resolveLogo(hotelSettings?.logo_url || site?.logo_url || null);
       const checkinTime = this.asClock(reservation.checkin_time, this.asClock(hotelSettings?.checkin_time, "14:00"));
       const checkoutTime = this.asClock(reservation.checkout_time, this.asClock(hotelSettings?.checkout_time, "12:00"));
       const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum, fee) => {
@@ -1151,10 +1158,10 @@ export class StripeWebhookService {
         hotel_website: hotelSettings?.website || "",
         web_checkin_link: webCheckinLink,
         logo_url: logoUrl || "",
-        hotel_logo: hotelLogo || "",
+        hotel_logo: logoUrl || "",
       };
-      const processedSubject = this.processStandardTemplate(template.subject, variables);
-      const processedBody = this.processStandardTemplate(template.body_html, variables);
+      const processedSubject = renderEmailTemplate(template.subject, variables);
+      const processedBody = renderEmailTemplate(template.body_html, variables);
       let emailSent = false;
       if (emailSettings.provider === email_provider.resend || emailSettings.provider === email_provider.sendgrid) {
         const sent = await this.sendProviderEmail(emailSettings, {
@@ -1203,10 +1210,11 @@ export class StripeWebhookService {
         "Hóspede";
       if (!recipientEmail) return;
 
-      const templates = await this.prisma.email_templates.findMany({
-        where: { event_type: email_event_type.reservation_multiple_created, is_active: true },
-      });
-      const template = this.pickEstablishmentTemplate(templates, establishmentId);
+      const template = await resolveEstablishmentEmailTemplate(
+        this.prisma,
+        "reservation.multiple.created",
+        establishmentId,
+      );
       if (!template) return;
 
       const hotelSettings = await this.hotelSettings(establishmentId);
@@ -1274,8 +1282,8 @@ export class StripeWebhookService {
           .join("");
         bodyHtml = bodyHtml.replace(/{{reservations_list}}/g, reservationsHtml);
       }
-      const subject = this.processMultipleTemplate(template.subject || "", variables);
-      bodyHtml = this.processMultipleTemplate(bodyHtml, variables);
+      const subject = renderEmailTemplate(template.subject || "", variables);
+      bodyHtml = renderEmailTemplate(bodyHtml, variables);
 
       const emailSettings = await this.activeEmailSettings();
       if (!emailSettings) return;
@@ -1357,8 +1365,6 @@ export class StripeWebhookService {
       const reservation = this.mapReservation(loaded);
       if (await this.shouldSkipPaymentConfirmedForOverbooking(reservation)) return;
 
-      const template = await this.singleTemplate(email_event_type.payment_confirmed);
-      if (!template) return;
       const emailSettings = await this.activeEmailSettings();
       if (!emailSettings) return;
 
@@ -1373,16 +1379,21 @@ export class StripeWebhookService {
       if (!recipientEmail) return;
 
       const hotelSettings = reservation.establishment_id ? await this.hotelSettings(reservation.establishment_id) : null;
+      const establishmentId = reservation.establishment_id || hotelSettings?.establishment_id || null;
+      const template = await resolveEstablishmentEmailTemplate(
+        this.prisma,
+        "payment.confirmed",
+        establishmentId,
+      );
+      if (!template) return;
       const site = await this.siteSettings();
       const baseUrl = this.baseUrlFromSite(site?.pms_base_url || null);
       const buildingId = reservation.room_categories?.building_id || null;
-      const establishmentId = reservation.establishment_id || hotelSettings?.establishment_id || null;
       const policiesLink = buildingId
         ? this.policiesLink(baseUrl, "building", buildingId, hotelSettings?.name || null)
         : this.policiesLink(baseUrl, "establishment", establishmentId, hotelSettings?.name || null);
       const webCheckinLink = await this.webCheckinLink(reservationId, reservation.reservation_code, site);
-      const logoUrl = this.resolveLogo(site?.logo_url || null);
-      const hotelLogo = "";
+      const logoUrl = this.resolveLogo(hotelSettings?.logo_url || site?.logo_url || null);
       const checkinTime = this.asClock(reservation.checkin_time, this.asClock(hotelSettings?.checkin_time, "14:00"));
       const checkoutTime = this.asClock(reservation.checkout_time, this.asClock(hotelSettings?.checkout_time, "12:00"));
       const hotelPhone = this.hotelPhone(hotelSettings);
@@ -1413,10 +1424,10 @@ export class StripeWebhookService {
         policies_link: policiesLink,
         web_checkin_link: webCheckinLink,
         logo_url: logoUrl || "",
-        hotel_logo: hotelLogo,
+        hotel_logo: logoUrl || "",
       };
-      const subject = this.processPaymentTemplate(template.subject, variables);
-      const bodyHtml = this.processPaymentTemplate(template.body_html, variables);
+      const subject = renderEmailTemplate(template.subject, variables);
+      const bodyHtml = renderEmailTemplate(template.body_html, variables);
       let emailSent = false;
       if (emailSettings.provider === email_provider.resend || emailSettings.provider === email_provider.sendgrid) {
         const sent = await this.sendProviderEmail(emailSettings, {

@@ -1670,7 +1670,9 @@ export class AiosellReservationsService {
     const financial = asRecord(reservation.financial_responsible);
     const room = asRecord(reservation.rooms);
     const category = asRecord(reservation.room_categories);
-    const logos = publicLogoUrls(String(site?.logo_url || hotelRecord.logo_url || ""), String(hotelRecord.logo_url || ""));
+    // Uma única URL para logo_url e hotel_logo — evita logo duplicada se {{#if}} aninhado falhar
+    const preferredLogo = String(hotelRecord.logo_url || site?.logo_url || "");
+    const logos = publicLogoUrls(preferredLogo, preferredLogo);
     return {
       guest_name: stringOrEmpty(guest?.full_name) || stringOrEmpty(financial?.full_name) || otaGuestName(reservation) || stringOrEmpty(reservation.guest_name) || "Hóspede",
       reservation_code: String(reservation.reservation_code || ""),
@@ -2440,7 +2442,11 @@ function isTemplateFalsy(value: unknown): boolean {
 }
 
 function processTemplate(template: string, variables: TemplateVariables): string {
-  let processed = processEach(template, variables);
+  let processed = String(template || "")
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, " ");
+  processed = processEach(processed, variables);
   for (let pass = 0; pass < 50; pass += 1) {
     const next = processIf(processed, variables);
     if (next === processed) break;
@@ -2459,6 +2465,7 @@ function processTemplate(template: string, variables: TemplateVariables): string
     .replace(/\{\{\/if\}\}/g, "")
     .replace(/\{\{else\}\}/g, "")
     .replace(/\{\{#if\s+[\w.]+\}\}/g, "");
+  processed = processed.replace(/(?<=>)\s*\n+\s*(?=<)/g, "");
   return processed;
 }
 

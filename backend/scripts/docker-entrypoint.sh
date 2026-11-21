@@ -148,6 +148,18 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/email_templates_strip
     || echo "WARN: email_templates_strip_orphan_endif.sql falhou" >&2
 fi
 
+# Remove "\n" literal gravado no HTML dos templates (aparece no e-mail)
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/email_templates_strip_literal_newlines.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/email_templates_strip_literal_newlines.sql \
+    || echo "WARN: email_templates_strip_literal_newlines.sql falhou" >&2
+fi
+
+# Garante RPC de resolve com suporte a is_active=false no estabelecimento (CREATE OR REPLACE)
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/rpc/get_resolved_email_template.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/get_resolved_email_template.sql \
+    || echo "WARN: get_resolved_email_template.sql falhou" >&2
+fi
+
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/site_settings_storage_config.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/site_settings_storage_config.sql \
     || echo "WARN: site_settings_storage_config.sql falhou" >&2

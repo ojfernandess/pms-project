@@ -181,12 +181,24 @@ function processOneConditional(template: string, variables: Record<string, unkno
   return template;
 }
 
+/**
+ * Templates corrompidos às vezes guardam a sequência literal "\n" (duas chars)
+ * em vez de quebra de linha — isso aparece no e-mail como texto "\n".
+ */
+export function sanitizeEmailTemplateLiterals(template: string): string {
+  return String(template || "")
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, " ");
+}
+
 /** Condicionais + substituição de {{var}}. */
 export function renderEmailTemplate(
   template: string,
   variables: Record<string, unknown>,
 ): string {
-  let result = processEmailConditionals(template, variables);
+  let result = sanitizeEmailTemplateLiterals(template);
+  result = processEmailConditionals(result, variables);
   result = result.replace(/\{\{\{\s*([\w.]+)\s*\}\}\}/g, (_m, path: string) => {
     const value = getVar(variables, path);
     return value == null ? "" : String(value);
@@ -200,5 +212,7 @@ export function renderEmailTemplate(
     .replace(/\{\{\/if\}\}/g, "")
     .replace(/\{\{else\}\}/g, "")
     .replace(/\{\{#if\s+[\w.]+\}\}/g, "");
+  // Em HTML, quebras literais entre blocos não devem aparecer como texto
+  result = result.replace(/(?<=>)\s*\n+\s*(?=<)/g, "");
   return result;
 }
