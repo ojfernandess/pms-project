@@ -15,6 +15,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
 import { CrmService } from "../crm/crm.service";
 import {
+  emailLogoVariables,
   renderEmailTemplate,
   resolveEstablishmentEmailTemplate,
 } from "./email-template.util";
@@ -1157,8 +1158,7 @@ export class StripeWebhookService {
         hotel_phone: this.hotelPhone(hotelSettings),
         hotel_website: hotelSettings?.website || "",
         web_checkin_link: webCheckinLink,
-        logo_url: logoUrl || "",
-        hotel_logo: logoUrl || "",
+        ...emailLogoVariables(logoUrl),
       };
       const processedSubject = renderEmailTemplate(template.subject, variables);
       const processedBody = renderEmailTemplate(template.body_html, variables);
@@ -1423,8 +1423,7 @@ export class StripeWebhookService {
         hotel_policies: this.jsonToTemplateString(hotelSettings?.policies),
         policies_link: policiesLink,
         web_checkin_link: webCheckinLink,
-        logo_url: logoUrl || "",
-        hotel_logo: logoUrl || "",
+        ...emailLogoVariables(logoUrl),
       };
       const subject = renderEmailTemplate(template.subject, variables);
       const bodyHtml = renderEmailTemplate(template.body_html, variables);

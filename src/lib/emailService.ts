@@ -1326,8 +1326,8 @@ export async function sendGuestPasswordResetEmail(
       hotel_phone: hotelSettings?.phone || siteSettings?.contact_phone || '',
       hotel_address: hotelSettings?.address || '',
       hotel_website: hotelSettings?.website || siteSettings?.site_url || '',
-      hotel_logo: hotelSettings?.logo_url || siteSettings?.logo_url || '',
       logo_url: hotelSettings?.logo_url || siteSettings?.logo_url || '',
+      hotel_logo: '',
     };
 
     // Processar template
@@ -3006,8 +3006,8 @@ export async function sendQuotePaymentLinkEmail(
       quote_code: quote.quote_code || '',
       guest_name: quote.guest_name || 'Hóspede',
       hotel_name: establishment?.name || hotelSettings?.name || 'Hotel',
-      hotel_logo: hotelLogo,
       logo_url: hotelLogo,
+      hotel_logo: '',
       category_name: category?.name || '',
       room_number: room?.room_number || '',
       checkin_date: checkinDate,

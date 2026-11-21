@@ -202,17 +202,29 @@ export function processTemplate(template: string, variables: TemplateVariables):
     .replace(/\\n/g, "\n")
     .replace(/\\t/g, " ");
 
+  // Evita logo duplicada: só uma var (logo_url); hotel_logo só como fallback se logo_url vazio
+  const vars: TemplateVariables = { ...variables };
+  const logo = String(vars.logo_url ?? "").trim();
+  const hotelLogo = String(vars.hotel_logo ?? "").trim();
+  if (logo) {
+    vars.logo_url = logo;
+    vars.hotel_logo = "";
+  } else if (hotelLogo) {
+    vars.logo_url = hotelLogo;
+    vars.hotel_logo = "";
+  }
+
   // Log inicial para debug
   if (processed.includes('{{review_link}}') || processed.includes('{{{review_link}}}')) {
     console.log('🔍 processTemplate: Template contém review_link placeholder', {
-      hasReviewLinkVar: 'review_link' in variables,
-      reviewLinkValue: variables.review_link,
-      allKeys: Object.keys(variables),
+      hasReviewLinkVar: 'review_link' in vars,
+      reviewLinkValue: vars.review_link,
+      allKeys: Object.keys(vars),
     });
   }
 
   // Primeiro, processar loops {{#each array}}...{{/each}}
-  processed = processEachLoops(processed, variables);
+  processed = processEachLoops(processed, vars);
 
   // Depois, processar condicionais {{#if variable}}...{{/if}}
   // Fazer múltiplas passadas até que não haja mais mudanças
@@ -221,7 +233,7 @@ export function processTemplate(template: string, variables: TemplateVariables):
   while (conditionalChanged && conditionalIterations < 50) {
     conditionalIterations++;
     const beforeConditionals = processed;
-  processed = processConditionals(processed, variables);
+  processed = processConditionals(processed, vars);
     conditionalChanged = beforeConditionals !== processed;
   }
   
@@ -258,7 +270,7 @@ export function processTemplate(template: string, variables: TemplateVariables):
   while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
     const fullMatch = nestedMatch[0];
     const path = nestedMatch[1];
-    const value = getNestedValue(variables, path);
+    const value = getNestedValue(vars, path);
     const stringValue = value !== null && value !== undefined ? String(value) : '';
       if (processed.includes(fullMatch)) {
     processed = processed.replace(fullMatch, stringValue);
@@ -282,15 +294,15 @@ export function processTemplate(template: string, variables: TemplateVariables):
     while ((nestedMatch = nestedVarRegex.exec(processed)) !== null) {
       const fullMatch = nestedMatch[0];
       const path = nestedMatch[1];
-      const value = getNestedValue(variables, path);
+      const value = getNestedValue(vars, path);
       const stringValue = value !== null && value !== undefined ? String(value) : '';
       processed = processed.replace(fullMatch, stringValue);
       varChanged = true;
     }
     
     // Substituir variáveis com três chaves {{{variable}}} (HTML não escapado)
-  Object.keys(variables).forEach((key) => {
-    const value = variables[key];
+  Object.keys(vars).forEach((key) => {
+    const value = vars[key];
       if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         const stringValue = value !== null && value !== undefined ? String(value) : '';
         const tripleBraceRegex = new RegExp(`\\{\\{\\{${key}\\}\\}\\}`, 'g');
@@ -304,8 +316,8 @@ export function processTemplate(template: string, variables: TemplateVariables):
     
     // Depois substituir variáveis simples primeiro (formato {{variable}})
     // Processar variáveis simples (strings, números, etc) antes de objetos
-    Object.keys(variables).forEach((key) => {
-      const value = variables[key];
+    Object.keys(vars).forEach((key) => {
+      const value = vars[key];
       
       // Processar apenas valores simples (não objetos ou arrays)
       if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -331,8 +343,8 @@ export function processTemplate(template: string, variables: TemplateVariables):
     });
     
     // Depois processar objetos e arrays (variáveis aninhadas)
-    Object.keys(variables).forEach((key) => {
-      const value = variables[key];
+    Object.keys(vars).forEach((key) => {
+      const value = vars[key];
     
       // Processar objetos e arrays (variáveis aninhadas)
     if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
@@ -393,17 +405,28 @@ export function processTemplate(template: string, variables: TemplateVariables):
     const remainingVars = processed.match(/\{\{[\w.]+(?:\.[\w.]+)*\}\}/g);
     if (remainingVars && remainingVars.length > 0) {
       console.log('⚠️ Variáveis não substituídas no template:', remainingVars);
-      console.log('📋 Variáveis disponíveis:', Object.keys(variables));
+      console.log('📋 Variáveis disponíveis:', Object.keys(vars));
       console.log('🔍 Verificando review_link:', {
-        hasReviewLink: 'review_link' in variables,
-        reviewLinkValue: variables.review_link,
-        reviewLinkType: typeof variables.review_link,
+        hasReviewLink: 'review_link' in vars,
+        reviewLinkValue: vars.review_link,
+        reviewLinkType: typeof vars.review_link,
       });
     }
   }
 
   // Remove quebras entre tags HTML (evita "lixo" visual no rodapé)
-  return processed.replace(/(?<=>)\s*\n+\s*(?=<)/g, "");
+  processed = processed.replace(/(?<=>)\s*\n+\s*(?=<)/g, "");
+
+  // Remove <img> consecutivos com o mesmo src (logo duplicada)
+  for (let i = 0; i < 10; i += 1) {
+    const next = processed.replace(
+      /(<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>)(\s*)(<img\b[^>]*\bsrc\s*=\s*["']\2["'][^>]*>)/gi,
+      "$1",
+    );
+    if (next === processed) break;
+    processed = next;
+  }
+  return processed;
 }
 
 /**
@@ -1248,8 +1271,9 @@ export async function generateReservationVariables(
     hotel_phone: hotelPhone,
     hotel_whatsapp: hotelWhatsApp,
     hotel_website: hotelSettings?.website || '',
-    hotel_logo: logoUrl, // URL do logo do estabelecimento (convertida para pública se necessário)
-    logo_url: logoUrl, // Alias para hotel_logo
+    // Só logo_url; hotel_logo vazio evita duplicata quando o HTML tem dois {{#if}} sem {{else}}
+    logo_url: logoUrl,
+    hotel_logo: "",
     policies_link: policiesLink, // Link para página pública de políticas
     web_checkin_link: webCheckinLink, // Link para web check-in com localizador
     payment_link: paymentLink, // Link para pagamento da reserva (se necessário)

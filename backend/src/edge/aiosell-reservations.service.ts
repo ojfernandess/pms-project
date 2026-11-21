@@ -1670,9 +1670,9 @@ export class AiosellReservationsService {
     const financial = asRecord(reservation.financial_responsible);
     const room = asRecord(reservation.rooms);
     const category = asRecord(reservation.room_categories);
-    // Uma única URL para logo_url e hotel_logo — evita logo duplicada se {{#if}} aninhado falhar
+    // Só logo_url; hotel_logo vazio — evita duplicata em templates com dois {{#if}} sequenciais
     const preferredLogo = String(hotelRecord.logo_url || site?.logo_url || "");
-    const logos = publicLogoUrls(preferredLogo, preferredLogo);
+    const logos = publicLogoUrls(preferredLogo, "");
     return {
       guest_name: stringOrEmpty(guest?.full_name) || stringOrEmpty(financial?.full_name) || otaGuestName(reservation) || stringOrEmpty(reservation.guest_name) || "Hóspede",
       reservation_code: String(reservation.reservation_code || ""),

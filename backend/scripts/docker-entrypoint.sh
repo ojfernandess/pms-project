@@ -154,6 +154,12 @@ if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/email_templates_strip
     || echo "WARN: email_templates_strip_literal_newlines.sql falhou" >&2
 fi
 
+# Colapsa {{#if logo_url}} + {{#if hotel_logo}} sequenciais (logo duplicada)
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/email_templates_dedupe_logo_if.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/email_templates_dedupe_logo_if.sql \
+    || echo "WARN: email_templates_dedupe_logo_if.sql falhou" >&2
+fi
+
 # Garante RPC de resolve com suporte a is_active=false no estabelecimento (CREATE OR REPLACE)
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/rpc/get_resolved_email_template.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/rpc/get_resolved_email_template.sql \

@@ -153,14 +153,24 @@ function processOneConditional(template: string, variables: Record<string, unkno
     const nextEnd = template.indexOf("{{/if}}", cursor);
     if (nextEnd < 0) break;
 
-    if (nextIf >= 0 && nextIf < nextEnd && (nextElse < 0 || nextIf < nextElse)) {
+    // Processar a próxima tag na ordem (if / else / endif) — evita fechar cedo no {{/if}} interno após {{else}}
+    const candidates: Array<{ type: "if" | "else" | "endif"; pos: number }> = [
+      { type: "endif", pos: nextEnd },
+    ];
+    if (nextIf >= 0) candidates.push({ type: "if", pos: nextIf });
+    if (nextElse >= 0) candidates.push({ type: "else", pos: nextElse });
+    candidates.sort((a, b) => a.pos - b.pos);
+    const next = candidates[0];
+
+    if (next.type === "if") {
       depth += 1;
-      cursor = nextIf + 5;
+      cursor = next.pos + 5;
       continue;
     }
-
-    if (depth === 1 && nextElse >= 0 && nextElse < nextEnd && elseAt < 0) {
-      elseAt = nextElse;
+    if (next.type === "else") {
+      if (depth === 1 && elseAt < 0) elseAt = next.pos;
+      cursor = next.pos + "{{else}}".length;
+      continue;
     }
 
     depth -= 1;
@@ -192,19 +202,56 @@ export function sanitizeEmailTemplateLiterals(template: string): string {
     .replace(/\\t/g, " ");
 }
 
+/**
+ * Uma única URL de logo: preenche logo_url e deixa hotel_logo vazio.
+ * Evita duplicata quando o HTML tem dois {{#if}} sequenciais (sem {{else}}).
+ */
+export function emailLogoVariables(logoUrl: string | null | undefined): {
+  logo_url: string;
+  hotel_logo: string;
+} {
+  const url = String(logoUrl || "").trim();
+  return { logo_url: url, hotel_logo: "" };
+}
+
+/** Remove <img> consecutivos com o mesmo src (logo repetida no header). */
+export function dedupeAdjacentSameSrcImages(html: string): string {
+  let result = html || "";
+  for (let i = 0; i < 10; i += 1) {
+    const next = result.replace(
+      /(<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>)(\s*)(<img\b[^>]*\bsrc\s*=\s*["']\2["'][^>]*>)/gi,
+      "$1",
+    );
+    if (next === result) break;
+    result = next;
+  }
+  return result;
+}
+
 /** Condicionais + substituição de {{var}}. */
 export function renderEmailTemplate(
   template: string,
   variables: Record<string, unknown>,
 ): string {
+  // Se ambas as vars de logo estão iguais, zera hotel_logo (fallback só via {{else}})
+  const vars = { ...variables };
+  const logo = String(vars.logo_url ?? "").trim();
+  const hotelLogo = String(vars.hotel_logo ?? "").trim();
+  if (logo && hotelLogo && logo === hotelLogo) {
+    vars.hotel_logo = "";
+  } else if (!logo && hotelLogo) {
+    vars.logo_url = hotelLogo;
+    vars.hotel_logo = "";
+  }
+
   let result = sanitizeEmailTemplateLiterals(template);
-  result = processEmailConditionals(result, variables);
+  result = processEmailConditionals(result, vars);
   result = result.replace(/\{\{\{\s*([\w.]+)\s*\}\}\}/g, (_m, path: string) => {
-    const value = getVar(variables, path);
+    const value = getVar(vars, path);
     return value == null ? "" : String(value);
   });
   result = result.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, path: string) => {
-    const value = getVar(variables, path);
+    const value = getVar(vars, path);
     return value == null ? "" : String(value);
   });
   // Segurança final contra tags Handlebars órfãs
@@ -214,5 +261,5 @@ export function renderEmailTemplate(
     .replace(/\{\{#if\s+[\w.]+\}\}/g, "");
   // Em HTML, quebras literais entre blocos não devem aparecer como texto
   result = result.replace(/(?<=>)\s*\n+\s*(?=<)/g, "");
-  return result;
+  return dedupeAdjacentSameSrcImages(result);
 }
