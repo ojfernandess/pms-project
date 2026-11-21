@@ -19,6 +19,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AiosellSyncService } from "./aiosell-sync.service";
 import { CheckinChargeService } from "./checkin-charge.service";
 import { EmailDispatchService } from "./email-dispatch.service";
+import { dedupeAdjacentSameSrcImages } from "./email-template.util";
 
 /**
  * Aiosell reservation webhook + manual/pull sync.
@@ -1670,9 +1671,17 @@ export class AiosellReservationsService {
     const financial = asRecord(reservation.financial_responsible);
     const room = asRecord(reservation.rooms);
     const category = asRecord(reservation.room_categories);
-    // Só logo_url; hotel_logo vazio — evita duplicata em templates com dois {{#if}} sequenciais
-    const preferredLogo = String(hotelRecord.logo_url || site?.logo_url || "");
-    const logos = publicLogoUrls(preferredLogo, "");
+    // Estabelecimento → sistema; só logo_url (hotel_logo vazio evita duplicata)
+    const logos = publicLogoUrls(
+      String(hotelRecord.logo_url || ""),
+      String(site?.logo_url || ""),
+    );
+    const preferredLogo =
+      (logos.logoUrl && /^https?:\/\//i.test(logos.logoUrl) ? logos.logoUrl : "") ||
+      (logos.hotelLogo && /^https?:\/\//i.test(logos.hotelLogo) ? logos.hotelLogo : "") ||
+      logos.logoUrl ||
+      logos.hotelLogo ||
+      "";
     return {
       guest_name: stringOrEmpty(guest?.full_name) || stringOrEmpty(financial?.full_name) || otaGuestName(reservation) || stringOrEmpty(reservation.guest_name) || "Hóspede",
       reservation_code: String(reservation.reservation_code || ""),
@@ -1701,8 +1710,8 @@ export class AiosellReservationsService {
       hotel_policies: typeof hotelRecord.policies === "string" ? hotelRecord.policies : "",
       policies_link: policiesLink(hotelRecord, reservation, baseUrl),
       web_checkin_link: locator ? buildWebCheckinLocatorUrl(locator, site) : "",
-      logo_url: logos.logoUrl,
-      hotel_logo: logos.hotelLogo,
+      logo_url: preferredLogo,
+      hotel_logo: "",
       payment_link: "",
     };
   }
@@ -2393,20 +2402,29 @@ function policiesLink(hotel: JsonRecord, reservation: JsonRecord, baseUrl: strin
   return `${baseUrl}/policies/${slug}/${token}`;
 }
 
-function publicLogoUrls(logoUrl: string, hotelLogo: string): { logoUrl: string; hotelLogo: string } {
-  const base = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
+function publicLogoUrls(hotelLogo: string, systemLogo: string): { logoUrl: string; hotelLogo: string } {
+  const base =
+    (process.env.SUPABASE_URL ?? "").replace(/\/$/, "") ||
+    (process.env.PUBLIC_APP_URL ?? "").replace(/\/$/, "") ||
+    (process.env.PMS_PUBLIC_URL ?? "").replace(/\/$/, "");
   const resolve = (raw: string): string => {
-    if (!raw || raw.startsWith("http://") || raw.startsWith("https://") || !base) return raw;
+    const value = String(raw || "").trim();
+    if (!value || /^(null|undefined|none|#)$/i.test(value)) return "";
+    if (value.startsWith("http://") || value.startsWith("https://")) return value;
+    if (!base) return "";
     for (const bucket of ["hotel-assets", "uploads", "hotel-logos"]) {
-      let path = raw;
+      let path = value;
       if (bucket === "hotel-assets" && !path.startsWith("hotel/") && !path.includes("/")) path = `hotel/${path}`;
       const embedded = path.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
       if (embedded?.[1]) path = embedded[1];
       return `${base}/storage/v1/object/public/${bucket}/${path}`;
     }
-    return raw;
+    return "";
   };
-  return { logoUrl: resolve(logoUrl), hotelLogo: resolve(hotelLogo) };
+  const hotel = resolve(hotelLogo);
+  const system = resolve(systemLogo);
+  // logoUrl = preferência final (hotel → sistema); hotelLogo legado vazio
+  return { logoUrl: hotel || system, hotelLogo: "" };
 }
 
 function detectBaseUrl(headers?: Record<string, string | undefined>): string {
@@ -2466,7 +2484,7 @@ function processTemplate(template: string, variables: TemplateVariables): string
     .replace(/\{\{else\}\}/g, "")
     .replace(/\{\{#if\s+[\w.]+\}\}/g, "");
   processed = processed.replace(/(?<=>)\s*\n+\s*(?=<)/g, "");
-  return processed;
+  return dedupeAdjacentSameSrcImages(processed);
 }
 
 function processEach(template: string, variables: TemplateVariables): string {

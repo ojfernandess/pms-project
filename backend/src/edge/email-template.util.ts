@@ -202,6 +202,32 @@ export function sanitizeEmailTemplateLiterals(template: string): string {
     .replace(/\\t/g, " ");
 }
 
+/** URL de logo utilizável em e-mail (http/https absoluto). */
+export function isUsableEmailLogoUrl(url: string | null | undefined): boolean {
+  const value = String(url || "").trim();
+  if (!value) return false;
+  if (/^(null|undefined|none|#)$/i.test(value)) return false;
+  return /^https?:\/\//i.test(value);
+}
+
+/**
+ * Estabelecimento → sistema. Só retorna URL http(s) válida.
+ * hotelLogo/siteLogo podem ser caminhos relativos; use resolve antes se necessário.
+ */
+export function pickEmailLogoUrl(
+  hotelLogo: string | null | undefined,
+  systemLogo: string | null | undefined,
+): string {
+  const hotel = String(hotelLogo || "").trim();
+  const system = String(systemLogo || "").trim();
+  if (isUsableEmailLogoUrl(hotel)) return hotel;
+  if (isUsableEmailLogoUrl(system)) return system;
+  // Caminhos relativos ainda não resolvidos: preferir hotel se não for placeholder
+  if (hotel && !/^(null|undefined|none|#)$/i.test(hotel)) return hotel;
+  if (system && !/^(null|undefined|none|#)$/i.test(system)) return system;
+  return "";
+}
+
 /**
  * Uma única URL de logo: preenche logo_url e deixa hotel_logo vazio.
  * Evita duplicata quando o HTML tem dois {{#if}} sequenciais (sem {{else}}).
@@ -211,12 +237,20 @@ export function emailLogoVariables(logoUrl: string | null | undefined): {
   hotel_logo: string;
 } {
   const url = String(logoUrl || "").trim();
-  return { logo_url: url, hotel_logo: "" };
+  const usable = isUsableEmailLogoUrl(url) || (url && !/^(null|undefined|none|#)$/i.test(url));
+  return { logo_url: usable ? url : "", hotel_logo: "" };
 }
 
-/** Remove <img> consecutivos com o mesmo src (logo repetida no header). */
+/** Remove <img> com src vazio/inválido e logos duplicadas no header. */
 export function dedupeAdjacentSameSrcImages(html: string): string {
   let result = html || "";
+
+  // src vazio / placeholder → remove a tag (ícone de imagem quebrada)
+  result = result.replace(
+    /<img\b(?=[^>]*\bsrc\s*=\s*["']\s*(?:null|undefined|none|#)?\s*["'])[^>]*>/gi,
+    "",
+  );
+
   for (let i = 0; i < 10; i += 1) {
     const next = result.replace(
       /(<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>)(\s*)(<img\b[^>]*\bsrc\s*=\s*["']\2["'][^>]*>)/gi,
@@ -225,6 +259,21 @@ export function dedupeAdjacentSameSrcImages(html: string): string {
     if (next === result) break;
     result = next;
   }
+
+  // Header escuro (#1f2937): manter só a primeira <img> (evita logo sistema + logo quebrada)
+  result = result.replace(
+    /(background-color\s*:\s*#1f2937[^>]*>)([\s\S]*?)(<h1\b)/gi,
+    (_full, open: string, mid: string, h1: string) => {
+      let kept = false;
+      const cleaned = mid.replace(/<img\b[^>]*>/gi, (img) => {
+        if (kept) return "";
+        kept = true;
+        return img;
+      });
+      return `${open}${cleaned}${h1}`;
+    },
+  );
+
   return result;
 }
 

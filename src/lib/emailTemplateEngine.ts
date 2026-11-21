@@ -417,6 +417,12 @@ export function processTemplate(template: string, variables: TemplateVariables):
   // Remove quebras entre tags HTML (evita "lixo" visual no rodapé)
   processed = processed.replace(/(?<=>)\s*\n+\s*(?=<)/g, "");
 
+  // Remove <img> com src vazio/placeholder
+  processed = processed.replace(
+    /<img\b(?=[^>]*\bsrc\s*=\s*["']\s*(?:null|undefined|none|#)?\s*["'])[^>]*>/gi,
+    "",
+  );
+
   // Remove <img> consecutivos com o mesmo src (logo duplicada)
   for (let i = 0; i < 10; i += 1) {
     const next = processed.replace(
@@ -426,6 +432,21 @@ export function processTemplate(template: string, variables: TemplateVariables):
     if (next === processed) break;
     processed = next;
   }
+
+  // Header escuro: manter só a primeira <img> (logo sistema hardcoded + variável)
+  processed = processed.replace(
+    /(background-color\s*:\s*#1f2937[^>]*>)([\s\S]*?)(<h1\b)/gi,
+    (_full, open: string, mid: string, h1: string) => {
+      let kept = false;
+      const cleaned = mid.replace(/<img\b[^>]*>/gi, (img) => {
+        if (kept) return "";
+        kept = true;
+        return img;
+      });
+      return `${open}${cleaned}${h1}`;
+    },
+  );
+
   return processed;
 }
 
@@ -1093,120 +1114,63 @@ export async function generateReservationVariables(
     console.log('[Stripe] ✅ Payment Link final gerado:', paymentLink);
   }
 
-  // Converter logo_url para URL pública se necessário
-  // Priorizar logo do hotel_settings, senão usar do site_settings
-  let logoUrl = hotelSettings?.logo_url || siteSettings?.logo_url || '';
-  
-  console.log('🔍 Processando logo_url:', {
-    hasHotelSettings: !!hotelSettings,
-    hasSiteSettings: !!siteSettings,
-    logoUrlFromHotel: hotelSettings?.logo_url || 'N/A',
-    logoUrlFromSite: siteSettings?.logo_url || 'N/A',
-    logoUrlFinal: logoUrl || 'vazio',
-    logoUrlLength: logoUrl?.length || 0,
-    logoUrlType: typeof logoUrl,
-    hotelSettingsKeys: hotelSettings ? Object.keys(hotelSettings) : [],
-    siteSettingsKeys: siteSettings ? Object.keys(siteSettings) : []
-  });
-  
-  if (logoUrl) {
+  // Logo: estabelecimento → sistema (site_settings). Só URL http(s) utilizável.
+  const resolveLogoCandidate = async (raw: string | null | undefined): Promise<string> => {
+    let logoUrl = String(raw || "").trim();
+    if (!logoUrl || /^(null|undefined|none|#)$/i.test(logoUrl)) return "";
+
     try {
-      // Se a logo_url já é uma URL completa (http/https), verificar se é válida
-      if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
-        // Verificar se a URL contém o domínio do Supabase (pode precisar de ajuste)
-        // Se a URL contém "/storage/v1/object/public/", garantir que está correta
-        if (logoUrl.includes('/storage/v1/object/public/')) {
-          // URL do Supabase Storage - garantir que está completa e correta
-          console.log('✅ Logo já é uma URL completa do Supabase Storage:', logoUrl.substring(0, 100) + '...');
-        } else {
-          // URL externa - usar como está
-          console.log('✅ Logo já é uma URL completa (externa):', logoUrl.substring(0, 100) + '...');
-        }
-      } else if (logoUrl.startsWith('data:')) {
-        // Se for data URL, usar como está (não funciona em emails, mas manter para não quebrar)
-        console.log('⚠️ Logo é data URL (pode não funcionar em emails):', logoUrl.substring(0, 50) + '...');
-      } else {
-        // Se não começa com http/https, pode ser:
-        // 1. Um caminho relativo do Supabase Storage (ex: "hotel/logo_123.png")
-        // 2. Uma URL do Supabase Storage sem protocolo (ex: "//storage.supabase.co/...")
-        // 3. Um caminho que precisa ser convertido para URL pública
-        
-        // Se começa com "//", adicionar "https:"
-        if (logoUrl.startsWith('//')) {
-          logoUrl = 'https:' + logoUrl;
-          console.log('✅ Logo corrigida (adicionado https:):', logoUrl.substring(0, 100) + '...');
-        } else if (logoUrl.includes('/storage/v1/object/public/')) {
-          // Se já contém o caminho do Supabase Storage, adicionar protocolo se necessário
-          if (!logoUrl.startsWith('http')) {
-            logoUrl = 'https:' + (logoUrl.startsWith('/') ? '' : '//') + logoUrl;
-            console.log('✅ Logo corrigida (adicionado https ao caminho Supabase):', logoUrl.substring(0, 100) + '...');
+      if (logoUrl.startsWith("http://") || logoUrl.startsWith("https://")) {
+        return logoUrl;
+      }
+      if (logoUrl.startsWith("data:")) {
+        return "";
+      }
+      if (logoUrl.startsWith("//")) {
+        return `https:${logoUrl}`;
+      }
+      if (logoUrl.includes("/storage/v1/object/public/") && !logoUrl.startsWith("http")) {
+        return `https:${logoUrl.startsWith("/") ? "" : "//"}${logoUrl}`;
+      }
+
+      const { supabase: supabaseClient } = await import("@/integrations/supabase/client");
+      const possibleBuckets = ["hotel-assets", "logos", "public", "images", "uploads", "hotel-logos"];
+      for (const bucket of possibleBuckets) {
+        try {
+          let filePath = logoUrl;
+          if (bucket === "hotel-assets" && !filePath.startsWith("hotel/") && !filePath.includes("/")) {
+            filePath = `hotel/${filePath}`;
           }
-        } else {
-          // Tentar converter caminho relativo para URL pública
-          // O sistema salva logos no bucket "hotel-assets" com caminho "hotel/nome_arquivo.ext"
-          const { supabase: supabaseClient } = await import('@/integrations/supabase/client');
-          
-          // Tentar diferentes buckets comuns (incluindo hotel-assets que é usado pelo sistema)
-          const possibleBuckets = ['hotel-assets', 'logos', 'public', 'images', 'uploads', 'hotel-logos'];
-          let publicUrl = '';
-          
-          for (const bucket of possibleBuckets) {
-            try {
-              // Se o logoUrl já contém o caminho completo (ex: "hotel/logo_123.png"), usar direto
-              // Se não, tentar adicionar "hotel/" como prefixo para hotel-assets
-              let filePath = logoUrl;
-              
-              // Se for hotel-assets e o caminho não começar com "hotel/", adicionar
-              if (bucket === 'hotel-assets' && !filePath.startsWith('hotel/') && !filePath.includes('/')) {
-                filePath = `hotel/${filePath}`;
-              }
-              
-              // Se o caminho contém "/storage/v1/object/public/", extrair apenas o caminho do arquivo
-              if (filePath.includes('/storage/v1/object/public/')) {
-                const match = filePath.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
-                if (match && match[1]) {
-                  filePath = match[1];
-                }
-              }
-              
-              const { data } = supabaseClient.storage.from(bucket).getPublicUrl(filePath);
-              if (data?.publicUrl) {
-                publicUrl = data.publicUrl;
-                // Verificar se a URL é válida (começa com http)
-                if (publicUrl.startsWith('http://') || publicUrl.startsWith('https://')) {
-                  logoUrl = publicUrl;
-                  console.log(`✅ Logo convertida para URL pública do bucket "${bucket}":`, logoUrl.substring(0, 100) + '...');
-                  console.log(`📁 Caminho do arquivo usado:`, filePath);
-                  break;
-                }
-              }
-            } catch (error) {
-              // Continuar tentando outros buckets
-              console.warn(`⚠️ Erro ao tentar bucket "${bucket}":`, error);
-              continue;
-            }
+          if (filePath.includes("/storage/v1/object/public/")) {
+            const match = filePath.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
+            if (match?.[1]) filePath = match[1];
           }
-          
-          // Se não encontrou em nenhum bucket, manter a URL original
-          if (!publicUrl) {
-            console.warn('⚠️ Não foi possível converter logo_url para URL pública. Mantendo original:', logoUrl);
-            console.warn('⚠️ Logo URL original:', logoUrl);
+          const { data } = supabaseClient.storage.from(bucket).getPublicUrl(filePath);
+          if (data?.publicUrl?.startsWith("http")) {
+            return data.publicUrl;
           }
+        } catch {
+          continue;
         }
       }
-    } catch (error) {
-      console.error('❌ Erro ao processar logo_url:', error);
-      // Em caso de erro, manter a URL original
+      return "";
+    } catch {
+      return "";
     }
-  } else {
-    console.log('ℹ️ Logo não configurada para este estabelecimento');
-  }
-  
-  // Log final para debug
-  console.log('📧 Logo URL final para email:', {
-    hasLogo: !!logoUrl,
-    logoUrl: logoUrl ? (logoUrl.substring(0, 150) + (logoUrl.length > 150 ? '...' : '')) : 'N/A',
-    isCompleteUrl: logoUrl ? (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) : false
+  };
+
+  let logoUrl =
+    (await resolveLogoCandidate(hotelSettings?.logo_url)) ||
+    (await resolveLogoCandidate(siteSettings?.logo_url)) ||
+    "";
+
+  console.log("🔍 Processando logo_url:", {
+    hasHotelSettings: !!hotelSettings,
+    hasSiteSettings: !!siteSettings,
+    logoUrlFromHotel: hotelSettings?.logo_url || "N/A",
+    logoUrlFromSite: siteSettings?.logo_url || "N/A",
+    logoUrlFinal: logoUrl || "vazio",
+    isCompleteUrl: !!logoUrl && (logoUrl.startsWith("http://") || logoUrl.startsWith("https://")),
   });
 
   // Lidar com rooms que pode ser array ou objeto único

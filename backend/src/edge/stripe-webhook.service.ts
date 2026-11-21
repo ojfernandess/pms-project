@@ -16,6 +16,8 @@ import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
 import { CrmService } from "../crm/crm.service";
 import {
   emailLogoVariables,
+  isUsableEmailLogoUrl,
+  pickEmailLogoUrl,
   renderEmailTemplate,
   resolveEstablishmentEmailTemplate,
 } from "./email-template.util";
@@ -1129,7 +1131,7 @@ export class StripeWebhookService {
       const site = await this.siteSettings();
       const baseUrl = this.baseUrlFromSite(site?.pms_base_url || null);
       const webCheckinLink = await this.webCheckinLink(reservationId, reservation.reservation_code, site);
-      const logoUrl = this.resolveLogo(hotelSettings?.logo_url || site?.logo_url || null);
+      const logoUrl = this.resolvePreferredLogo(hotelSettings?.logo_url, site?.logo_url);
       const checkinTime = this.asClock(reservation.checkin_time, this.asClock(hotelSettings?.checkin_time, "14:00"));
       const checkoutTime = this.asClock(reservation.checkout_time, this.asClock(hotelSettings?.checkout_time, "12:00"));
       const serviceFeesTotal = (reservation.reservation_service_fees || []).reduce((sum, fee) => {
@@ -1393,7 +1395,7 @@ export class StripeWebhookService {
         ? this.policiesLink(baseUrl, "building", buildingId, hotelSettings?.name || null)
         : this.policiesLink(baseUrl, "establishment", establishmentId, hotelSettings?.name || null);
       const webCheckinLink = await this.webCheckinLink(reservationId, reservation.reservation_code, site);
-      const logoUrl = this.resolveLogo(hotelSettings?.logo_url || site?.logo_url || null);
+      const logoUrl = this.resolvePreferredLogo(hotelSettings?.logo_url, site?.logo_url);
       const checkinTime = this.asClock(reservation.checkin_time, this.asClock(hotelSettings?.checkin_time, "14:00"));
       const checkoutTime = this.asClock(reservation.checkout_time, this.asClock(hotelSettings?.checkout_time, "12:00"));
       const hotelPhone = this.hotelPhone(hotelSettings);
@@ -2142,18 +2144,34 @@ export class StripeWebhookService {
     return baseUrl;
   }
 
-  private resolveLogo(url: string | null): string | null {
-    if (!url) return null;
-    if (url.startsWith("http://") || url.startsWith("https://")) return url;
-    const base = process.env.PUBLIC_APP_URL?.replace(/\/$/, "");
-    if (!base) return url;
-    let filePath = url;
+  private resolveLogo(url: string | null | undefined): string | null {
+    const raw = String(url || "").trim();
+    if (!raw || /^(null|undefined|none|#)$/i.test(raw)) return null;
+    if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+    const base =
+      process.env.PUBLIC_APP_URL?.replace(/\/$/, "") ||
+      process.env.PMS_PUBLIC_URL?.replace(/\/$/, "") ||
+      process.env.SITE_URL?.replace(/\/$/, "") ||
+      "";
+    if (!base) return null;
+    let filePath = raw;
     if (filePath.includes("/storage/v1/object/public/")) {
       const match = filePath.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
       if (match?.[1]) filePath = match[1];
     }
     if (!filePath.startsWith("hotel/") && !filePath.includes("/")) filePath = `hotel/${filePath}`;
     return `${base}/storage/v1/object/public/hotel-assets/${filePath}`;
+  }
+
+  /** Logo do estabelecimento se válida; senão logo do sistema (site_settings). */
+  private resolvePreferredLogo(
+    hotelLogo: string | null | undefined,
+    systemLogo: string | null | undefined,
+  ): string {
+    const hotel = this.resolveLogo(hotelLogo);
+    const system = this.resolveLogo(systemLogo);
+    const picked = pickEmailLogoUrl(hotel, system);
+    return isUsableEmailLogoUrl(picked) ? picked : "";
   }
 
   private otaGuestEmail(reservation: { ota_reservations?: { ota_guest_email: string | null }[] | null }): string | null {

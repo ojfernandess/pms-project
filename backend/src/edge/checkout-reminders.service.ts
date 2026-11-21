@@ -6,6 +6,7 @@ import { SITE_SETTINGS_ID } from "./robots.service";
 import { buildWebCheckinLocatorUrl } from "../lib/web-checkin-public-url";
 import {
   emailLogoVariables,
+  pickEmailLogoUrl,
   renderEmailTemplate,
   resolveEstablishmentEmailTemplate,
   type ResolvedEmailTemplate,
@@ -115,7 +116,7 @@ export class CheckoutRemindersService {
           hotel_whatsapp: hotel?.whatsapp || "",
           hotel_address: [hotel?.street, hotel?.number, hotel?.neighborhood, hotel?.city].filter(Boolean).join(", "),
           hotel_website: hotel?.website || "",
-          ...emailLogoVariables(hotel?.logo_url || site?.logo_url || ""),
+          ...emailLogoVariables(pickEmailLogoUrl(hotel?.logo_url, site?.logo_url)),
           web_checkin_link: locator ? buildWebCheckinLocatorUrl(locator, site) : "",
           policies_link: policiesLink(baseUrl, hotel?.name || "hotel", buildingId ? "building" : "establishment", buildingId || reservation.establishment_id),
         };
