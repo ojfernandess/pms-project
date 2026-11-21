@@ -37,7 +37,9 @@ import { useCleaningFeeConfig } from "@/hooks/useCleaningFeeConfig";
 import { useParkingFeeConfig } from "@/hooks/useParkingFeeConfig";
 import { useBuildings } from "@/hooks/useBuildings";
 import { EstablishmentEmailTemplatesManager } from "@/components/settings/EstablishmentEmailTemplatesManager";
+import { ReservationImportExportPanel } from "@/pages/ReservationImportExport";
 import { isFeatureEnabledForEstablishment } from "@/lib/featureAccess";
+import { useReservationImportExportFeature } from "@/hooks/useReservationImportExportFeature";
 import {
   Table,
   TableBody,
@@ -76,6 +78,8 @@ const Settings = () => {
     if (!selectedEstablishment?.id) return false;
     return isFeatureEnabledForEstablishment(emailSystemConfig, selectedEstablishment.id);
   }, [emailSystemConfig, selectedEstablishment?.id]);
+
+  const { enabled: isReservationImportExportEnabled } = useReservationImportExportFeature();
 
   // Ler parâmetro da URL para determinar a aba inicial
   const tabFromUrl = searchParams.get("tab");
@@ -457,6 +461,9 @@ const Settings = () => {
           )}
           {isApiIntegrationsEnabled && (
             <TabsTrigger value="integration">Integrações</TabsTrigger>
+          )}
+          {isReservationImportExportEnabled && (
+            <TabsTrigger value="reservation-import">Importar/Exportar</TabsTrigger>
           )}
           <TabsTrigger value="stripe">Stripe</TabsTrigger>
         </TabsList>
@@ -1103,6 +1110,12 @@ const Settings = () => {
         {isApiIntegrationsEnabled && (
           <TabsContent value="integration">
             <ApiSettingsManager isApiIntegrationsEnabled={isApiIntegrationsEnabled} />
+          </TabsContent>
+        )}
+
+        {isReservationImportExportEnabled && (
+          <TabsContent value="reservation-import">
+            <ReservationImportExportPanel embedded />
           </TabsContent>
         )}
 

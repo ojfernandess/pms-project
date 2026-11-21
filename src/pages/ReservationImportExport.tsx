@@ -32,7 +32,12 @@ import {
   type ReservationImportJob,
 } from "@/lib/reservationImportApi";
 
-export default function ReservationImportExport() {
+type ReservationImportExportProps = {
+  /** Quando true, omite redirect/título de página (uso em Configurações). */
+  embedded?: boolean;
+};
+
+export function ReservationImportExportPanel({ embedded = false }: ReservationImportExportProps) {
   const { establishmentId: routeEstId } = useParams();
   const { enabled, establishmentId } = useReservationImportExportFeature();
   const [checkinFrom, setCheckinFrom] = useState("");
@@ -140,11 +145,12 @@ export default function ReservationImportExport() {
   const progressPct = useMemo(() => job?.progress_pct ?? 0, [job]);
 
   if (!enabled) {
+    if (embedded) return null;
     return <Navigate to={`/${routeEstId || ""}`} replace />;
   }
 
   return (
-    <div className="space-y-6 p-6 max-w-5xl mx-auto">
+    <div className={embedded ? "space-y-6 max-w-5xl" : "space-y-6 p-6 max-w-5xl mx-auto"}>
       <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
         <p className="font-semibold">Modo importação e exportação ativo</p>
         <p className="text-sm text-amber-900/80">
@@ -152,12 +158,14 @@ export default function ReservationImportExport() {
         </p>
       </div>
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Importação e exportação de reservas</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          JSON com hóspede, responsável financeiro, check-in, valores e pagamentos.
-        </p>
-      </div>
+      {!embedded && (
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Importação e exportação de reservas</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            JSON com hóspede, responsável financeiro, check-in, valores e pagamentos.
+          </p>
+        </div>
+      )}
 
       <Card className="p-5 space-y-4">
         <h2 className="text-lg font-medium">Exportar</h2>
@@ -284,4 +292,8 @@ export default function ReservationImportExport() {
       </Card>
     </div>
   );
+}
+
+export default function ReservationImportExport() {
+  return <ReservationImportExportPanel />;
 }

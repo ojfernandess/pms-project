@@ -120,7 +120,6 @@ export const routeToFeature: Record<string, string> = {
   "/disponibilidade": "availability_map",
   "/availability-map": "availability_map",
   "/reservas": "reservations",
-  "/reservas/importacao-exportacao": "reservations",
   "/orcamentos": "quotes",
   "/clientes": "clients",
   "/crm": "crm",
