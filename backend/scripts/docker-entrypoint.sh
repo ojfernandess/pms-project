@@ -136,6 +136,12 @@ if [ "${CRM_MIGRATION_ON_START:-true}" = "true" ] \
     || echo "WARN: apply-crm.sh falhou" >&2
 fi
 
+# Import/Export reservas: external_pms_code + jobs
+if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/reservation_import_export.sql ]; then
+  psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/reservation_import_export.sql \
+    || echo "WARN: reservation_import_export.sql falhou" >&2
+fi
+
 # Channel Manager: multi-Bukly por prédio (HotelCode / Basic Auth)
 if [ -n "$PSQL_DATABASE_URL" ] && [ -f ./scripts/migration/ota_channels_building_multi.sql ]; then
   psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f ./scripts/migration/ota_channels_building_multi.sql \

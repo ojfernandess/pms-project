@@ -11,6 +11,7 @@ import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { toast } from "sonner";
 import { Save, Trash2, RefreshCw, Lock } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { useReservationImportExportFeature } from "@/hooks/useReservationImportExportFeature";
 
 interface RoomDialogProps {
   open: boolean;
@@ -21,6 +22,7 @@ interface RoomDialogProps {
 }
 
 export const RoomDialog = ({ open, onOpenChange, onSuccess, categories, roomId }: RoomDialogProps) => {
+  const { enabled: importExportEnabled } = useReservationImportExportFeature();
   const [loading, setLoading] = useState(false);
   
   // Buscar usuários da empresa do estabelecimento atual
@@ -101,6 +103,7 @@ export const RoomDialog = ({ open, onOpenChange, onSuccess, categories, roomId }
     is_blocked: false,
     floor: "",
     notes: "",
+    external_pms_code: "",
   });
 
   // Carregar dados do quarto se estiver editando
@@ -124,6 +127,7 @@ export const RoomDialog = ({ open, onOpenChange, onSuccess, categories, roomId }
         is_blocked: false,
         floor: "",
         notes: "",
+        external_pms_code: "",
       });
     }
   }, [open, roomId]);
@@ -157,6 +161,7 @@ export const RoomDialog = ({ open, onOpenChange, onSuccess, categories, roomId }
           is_blocked: data.is_blocked || false,
           floor: data.floor?.toString() || "",
           notes: data.notes || "",
+          external_pms_code: data.external_pms_code || "",
         });
       }
     } catch (error: any) {
@@ -193,6 +198,7 @@ export const RoomDialog = ({ open, onOpenChange, onSuccess, categories, roomId }
         is_blocked: formData.is_blocked === true,
         floor: formData.floor ? parseInt(formData.floor) : null,
         notes: formData.notes || null,
+        external_pms_code: formData.external_pms_code?.trim() || null,
         establishment_id: establishmentId || undefined,
       };
 
@@ -397,6 +403,20 @@ export const RoomDialog = ({ open, onOpenChange, onSuccess, categories, roomId }
                 </Select>
               </div>
 
+              {importExportEnabled && (
+                <div>
+                  <Label htmlFor="external_pms_code" className="text-sm font-medium">
+                    Código PMS externo (de-para)
+                  </Label>
+                  <Input
+                    id="external_pms_code"
+                    value={formData.external_pms_code}
+                    onChange={(e) => setFormData({ ...formData, external_pms_code: e.target.value })}
+                    placeholder="Ex: 101"
+                    disabled={loading}
+                  />
+                </div>
+              )}
               <div>
                 <Label htmlFor="room_number" className="text-sm font-medium">
                   Número <span className="text-red-500">*</span>

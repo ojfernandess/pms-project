@@ -24,6 +24,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCancellationPolicies } from "@/hooks/useCancellationPolicies";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { useQuery } from "@tanstack/react-query";
+import { useReservationImportExportFeature } from "@/hooks/useReservationImportExportFeature";
 
 interface RatePlansViewProps {
   ratePlans: RatePlan[];
@@ -48,6 +49,7 @@ export const RatePlansView = ({
   const [searchTerm, setSearchTerm] = useState("");
   const [detailsLoading, setDetailsLoading] = useState(true);
   const { policies } = useCancellationPolicies();
+  const { enabled: importExportEnabled } = useReservationImportExportFeature();
 
   // Buscar categorias
   const { data: categories = [] } = useQuery({
@@ -231,6 +233,7 @@ export const RatePlansView = ({
           <TableHeader>
             <TableRow>
               <TableHead>Nome</TableHead>
+              {importExportEnabled && <TableHead>Código PMS</TableHead>}
               <TableHead>Acomodações</TableHead>
               <TableHead>Tarifa Base</TableHead>
               <TableHead>Plano de Refeições</TableHead>
@@ -243,7 +246,7 @@ export const RatePlansView = ({
           <TableBody>
             {filteredPlans.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={importExportEnabled ? 9 : 8} className="text-center py-8 text-muted-foreground">
                   Nenhum plano tarifário encontrado
                 </TableCell>
               </TableRow>
@@ -256,6 +259,11 @@ export const RatePlansView = ({
                 return (
                   <TableRow key={plan.id}>
                     <TableCell className="font-medium">{plan.name}</TableCell>
+                    {importExportEnabled && (
+                      <TableCell className="font-mono text-xs">
+                        {(plan as any).external_pms_code || "—"}
+                      </TableCell>
+                    )}
                     <TableCell>
                       {planCategories.length > 0 ? (
                         <ul className="list-disc list-inside text-sm">

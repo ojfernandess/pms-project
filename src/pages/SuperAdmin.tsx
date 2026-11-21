@@ -90,7 +90,7 @@ import { slugFromName } from "@/lib/slugUtils";
 import { useSlugValidation } from "@/hooks/useSlugValidation";
 import { StripeGlobalConfigDialog } from "@/components/stripe/StripeGlobalConfigDialog";
 import { useStripe } from "@/hooks/useStripe";
-import { CreditCard, Settings, Zap, Key, Star, Map as MapIcon, LayoutTemplate } from "lucide-react";
+import { CreditCard, Settings, Zap, Key, Star, Map as MapIcon, LayoutTemplate, ArrowLeftRight } from "lucide-react";
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
@@ -3226,6 +3226,7 @@ const FeatureFlagsManager = () => {
     client_deduplication: { enabled: false, establishment_ids: [] },
     rate_recommendations: { enabled: false, establishment_ids: [] },
     availability_map: { enabled: false, establishment_ids: [] },
+    reservation_import_export: { enabled: false, establishment_ids: [] },
   });
   const [expandedFeature, setExpandedFeature] = useState<string | null>(null);
   const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
@@ -3258,6 +3259,9 @@ const FeatureFlagsManager = () => {
         availability_map: typeof fe.availability_map === 'boolean' 
           ? { enabled: fe.availability_map, establishment_ids: [] }
           : (fe.availability_map || { enabled: false, establishment_ids: [] }),
+        reservation_import_export: typeof fe.reservation_import_export === 'boolean'
+          ? { enabled: fe.reservation_import_export, establishment_ids: [] }
+          : (fe.reservation_import_export || { enabled: false, establishment_ids: [] }),
         booking_engine_enabled: typeof fe.booking_engine_enabled === 'boolean'
           ? { enabled: fe.booking_engine_enabled, company_ids: [] }
           : (fe.booking_engine_enabled || { enabled: false, company_ids: [] }),
@@ -3298,7 +3302,8 @@ const FeatureFlagsManager = () => {
       feature === 'booking_engine_custom_domain_enabled' ||
       feature === 'booking_engine_advanced_customization_enabled' ||
       feature === 'checkin_charge_enabled' ||
-      feature === 'crm';
+      feature === 'crm' ||
+      feature === 'reservation_import_export';
 
     if (isStructured) {
       // Determinar qual tipo de ID usar baseado na feature
@@ -3631,6 +3636,14 @@ const FeatureFlagsManager = () => {
       icon: Users,
       supportsCompanies: true,
       supportsEstablishments: false,
+    },
+    {
+      key: "reservation_import_export" as const,
+      label: "Importação e Exportação de Reservas",
+      description: "Permite importar/exportar reservas em JSON com de-para de códigos de outros PMS (prédios, categorias, quartos e planos).",
+      icon: ArrowLeftRight,
+      supportsCompanies: false,
+      supportsEstablishments: true,
     },
   ];
 

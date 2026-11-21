@@ -857,6 +857,7 @@ model buildings {
   policies               Json?                    @default("{}")
   logo_url               String?
   photo_url              String?
+  external_pms_code      String?
   establishments         establishments?          @relation(fields: [establishment_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   establishment_services establishment_services[]
   service_fees           service_fees[]
@@ -2008,6 +2009,7 @@ model establishments {
   stripe_refunds                            stripe_refunds[]
   stripe_webhooks                           stripe_webhooks[]
   web_checkin                               web_checkin[]
+  reservation_import_jobs                   reservation_import_jobs[]
 
   @@index([company_id], map: "idx_establishments_company_id")
   @@index([slug], map: "idx_establishments_slug")
@@ -2717,6 +2719,7 @@ model pricing_plans {
   booking_engine_label                                                   String?
   fluctuation_type                                                       String?
   fluctuation_value                                                      Decimal?                  @db.Decimal(10, 2)
+  external_pms_code                                                      String?
   channel_pricing                                                        channel_pricing[]
   dynamic_pricing_results                                                dynamic_pricing_results[]
   hotel_settings_hotel_settings_public_pricing_plan_1_idTopricing_plans  hotel_settings[]          @relation("hotel_settings_public_pricing_plan_1_idTopricing_plans")
@@ -3201,6 +3204,7 @@ model room_categories {
   rich_description        String?
   type                    String?                   @default("Double")
   slug                    String?
+  external_pms_code       String?
   channel_pricing         channel_pricing[]
   competitor_prices       competitor_prices[]
   dynamic_pricing_results dynamic_pricing_results[]
@@ -3253,6 +3257,7 @@ model rooms {
   display_description                     String?
   display_features                        String[]              @default([])
   show_in_public                          Boolean?              @default(true)
+  external_pms_code                       String?
   maintenance_tickets                     maintenance_tickets[]
   quotes                                  quotes[]
   reservations                            reservations[]
@@ -4763,5 +4768,27 @@ model crm_loyalty_transactions {
   crm_contact      crm_contacts         @relation(fields: [crm_contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([account_id, created_at(sort: Desc)], map: "idx_crm_loyalty_tx_account")
+  @@schema("public")
+}
+
+model reservation_import_jobs {
+  id               String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  establishment_id String         @db.Uuid
+  created_by       String?        @db.Uuid
+  status           String         @default("pending")
+  batch_size       Int            @default(25)
+  total            Int            @default(0)
+  processed        Int            @default(0)
+  created_count    Int            @default(0)
+  updated_count    Int            @default(0)
+  error_count      Int            @default(0)
+  errors           Json           @default("[]")
+  payload          Json           @default("{}")
+  created_at       DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime       @default(now()) @db.Timestamptz(6)
+  establishments   establishments @relation(fields: [establishment_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([establishment_id, created_at(sort: Desc)], map: "idx_reservation_import_jobs_establishment")
+  @@index([status], map: "idx_reservation_import_jobs_status")
   @@schema("public")
 }

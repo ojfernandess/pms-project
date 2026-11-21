@@ -1,7 +1,7 @@
 import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
-import { CRM_QUEUE, PMS_QUEUE, SYSTEM_QUEUE } from "./queue.constants";
+import { CRM_QUEUE, PMS_QUEUE, RESERVATION_IMPORT_QUEUE, SYSTEM_QUEUE } from "./queue.constants";
 import { InfraSyncQueueService } from "./infra-sync-queue.service";
 import { SystemQueueController } from "./system-queue.controller";
 import { SystemQueueService } from "./system-queue.service";
@@ -19,6 +19,7 @@ import { SystemQueueService } from "./system-queue.service";
       { name: SYSTEM_QUEUE },
       { name: PMS_QUEUE },
       { name: CRM_QUEUE },
+      { name: RESERVATION_IMPORT_QUEUE },
     ),
   ],
   controllers: [SystemQueueController],

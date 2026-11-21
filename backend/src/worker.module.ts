@@ -5,13 +5,15 @@ import { validateEnv } from "./config/env.validation";
 import { EdgeModule } from "./edge/edge.module";
 import { InfraModule } from "./infra/infra.module";
 import { PrismaModule } from "./prisma/prisma.module";
-import { CRM_QUEUE, PMS_QUEUE, SYSTEM_QUEUE } from "./queues/queue.constants";
+import { CRM_QUEUE, PMS_QUEUE, RESERVATION_IMPORT_QUEUE, SYSTEM_QUEUE } from "./queues/queue.constants";
 import { PmsScheduleProcessor } from "./queues/pms-schedule.processor";
 import { RedisModule } from "./redis/redis.module";
 import { SystemProcessor } from "./queues/system.processor";
 import { AuthModule } from "./auth/auth.module";
 import { CrmModule } from "./crm/crm.module";
 import { CrmCampaignProcessor } from "./crm/crm-campaign.processor";
+import { ReservationImportModule } from "./reservation-import/reservation-import.module";
+import { ReservationImportProcessor } from "./reservation-import/reservation-import.processor";
 
 @Module({
   imports: [
@@ -26,6 +28,7 @@ import { CrmCampaignProcessor } from "./crm/crm-campaign.processor";
     RedisModule,
     AuthModule,
     CrmModule,
+    ReservationImportModule,
     EdgeModule,
     InfraModule,
     BullModule.forRootAsync({
@@ -39,8 +42,9 @@ import { CrmCampaignProcessor } from "./crm/crm-campaign.processor";
       { name: SYSTEM_QUEUE },
       { name: PMS_QUEUE },
       { name: CRM_QUEUE },
+      { name: RESERVATION_IMPORT_QUEUE },
     ),
   ],
-  providers: [SystemProcessor, PmsScheduleProcessor, CrmCampaignProcessor],
+  providers: [SystemProcessor, PmsScheduleProcessor, CrmCampaignProcessor, ReservationImportProcessor],
 })
 export class WorkerModule {}

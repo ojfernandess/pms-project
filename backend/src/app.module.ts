@@ -5,6 +5,7 @@ import { DataModule } from "./data/data.module";
 import { EdgeModule } from "./edge/edge.module";
 import { HealthModule } from "./health/health.module";
 import { CrmModule } from "./crm/crm.module";
+import { ReservationImportModule } from "./reservation-import/reservation-import.module";
 import { PmsModule } from "./pms/pms.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { QueuesModule } from "./queues/queues.module";
@@ -29,6 +30,7 @@ import { InfraModule } from "./infra/infra.module";
     DataModule,
     PmsModule,
     CrmModule,
+    ReservationImportModule,
     EdgeModule,
     QueuesModule,
     RealtimeModule,

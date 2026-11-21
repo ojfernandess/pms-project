@@ -33,6 +33,7 @@ import PublicPolicies from "./pages/PublicPolicies";
 import PublicCancellationPolicy from "./pages/PublicCancellationPolicy";
 import Clients from "./pages/Clients";
 import ClientDeduplication from "./pages/ClientDeduplication";
+import ReservationImportExport from "./pages/ReservationImportExport";
 import CrmDashboard from "./pages/crm/CrmDashboard";
 import CrmContacts from "./pages/crm/CrmContacts";
 import CrmContact360 from "./pages/crm/CrmContact360";
@@ -226,6 +227,7 @@ const AppRoutesWithMeta = () => {
             <Route path="/:establishmentId/availability-map" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><AvailabilityMap /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/reservas" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><Reservations /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/reservas/pendencias" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><PendingReservations /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
+            <Route path="/:establishmentId/reservas/importacao-exportacao" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ReservationImportExport /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/reservas/:reservationCode" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ReservationDetails /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/:establishmentId/logs" element={<ProtectedRoute><EstablishmentRoute><RoleProtectedRoute><AppLayout><ActivityLogs /></AppLayout></RoleProtectedRoute></EstablishmentRoute></ProtectedRoute>} />
             <Route path="/web-checkin/:locator" element={<WebCheckin />} />

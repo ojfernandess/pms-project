@@ -19,6 +19,7 @@ import {
   Map,
   Receipt,
   ContactRound,
+  ArrowLeftRight,
 } from "lucide-react";
 
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -51,6 +52,7 @@ const getMenuItems = (t: (key: string) => string) => [
   { icon: Bed, label: t("sidebar.occupancyMap"), path: "/ocupacao", feature: "occupancy_map" },
   { icon: Map, label: "Mapa de Disponibilidades", path: "/disponibilidade", feature: "availability_map" },
   { icon: Calendar, label: t("sidebar.reservations"), path: "/reservas", feature: "reservations" },
+  { icon: ArrowLeftRight, label: "Importar/Exportar", path: "/reservas/importacao-exportacao", feature: "reservation_import_export" },
   { icon: Receipt, label: "Orçamentos", path: "/orcamentos", feature: "quotes" },
   { icon: Users, label: t("sidebar.clients"), path: "/clientes", feature: "clients" },
   { icon: ContactRound, label: "CRM", path: "/crm", feature: "crm" },
@@ -166,6 +168,20 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
       }
       // Se o feature flag estiver habilitado, verificar permissão
       return checkPermission(role, item.feature, undefined, customPermissions);
+    }
+
+    if (item.feature === "reservation_import_export") {
+      if (!selectedEstablishment?.id) {
+        return false;
+      }
+      const isImportExportEnabled = isFeatureEnabledForEstablishment(
+        (settings?.features_enabled as Record<string, unknown>)?.reservation_import_export,
+        selectedEstablishment.id,
+      );
+      if (!isImportExportEnabled) {
+        return false;
+      }
+      return checkPermission(role, "reservations", undefined, customPermissions);
     }
 
     // Cobrança de Check-in: habilitado por empresa (company_ids no Super Admin)

@@ -15,6 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getSelectedEstablishmentId } from "@/lib/establishmentUtils";
 import { flushChannelSyncNow } from "@/lib/channelSyncAfterRates";
 import { useQuery } from "@tanstack/react-query";
+import { useReservationImportExportFeature } from "@/hooks/useReservationImportExportFeature";
 
 interface RatePlanDialogProps {
   open: boolean;
@@ -31,8 +32,10 @@ export const RatePlanDialog = ({
 }: RatePlanDialogProps) => {
   const { activePlanTypes } = usePlanTypes();
   const { policies } = useCancellationPolicies();
+  const { enabled: importExportEnabled } = useReservationImportExportFeature();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [externalPmsCode, setExternalPmsCode] = useState("");
   const [description, setDescription] = useState("");
   const [planType, setPlanType] = useState<string>("");
   const [cancellationPolicyId, setCancellationPolicyId] = useState<string>("");
@@ -89,6 +92,7 @@ export const RatePlanDialog = ({
     if (plan && open) {
       setName(plan.name || "");
       setCode(plan.code || "");
+      setExternalPmsCode((plan as any).external_pms_code || "");
       setDescription(plan.description || "");
       // Garantir que planType seja uma string válida
       setPlanType(plan.plan_type || "");
@@ -113,7 +117,8 @@ export const RatePlanDialog = ({
               available_in_booking_engine,
               booking_engine_label,
               fluctuation_type,
-              fluctuation_value
+              fluctuation_value,
+              external_pms_code
             `)
             .eq("id", plan.id)
             .single();
@@ -129,6 +134,7 @@ export const RatePlanDialog = ({
             setImmediateConfirmation(planData.immediate_confirmation ?? true);
             setFluctuationType(planData.fluctuation_type || "");
             setFluctuationValue(planData.fluctuation_value?.toString() || "");
+            setExternalPmsCode(planData.external_pms_code || "");
           }
 
           // Buscar categorias associadas
@@ -159,6 +165,7 @@ export const RatePlanDialog = ({
       // Reset form
       setName("");
       setCode("");
+      setExternalPmsCode("");
       setDescription("");
       setPlanType(activePlanTypes.length > 0 ? activePlanTypes[0].name : "__no_type_available__");
       setCancellationPolicyId("");
@@ -181,6 +188,7 @@ export const RatePlanDialog = ({
       const planData: any = {
         name,
         code: code || undefined,
+        external_pms_code: externalPmsCode.trim() || null,
         description: description || undefined,
         plan_type: (planType && planType !== '__no_type_available__') ? planType : undefined,
         is_active: isActive,
@@ -277,6 +285,16 @@ export const RatePlanDialog = ({
                   required
                 />
               </div>
+              {importExportEnabled && (
+                <div>
+                  <Label>Código PMS externo (de-para)</Label>
+                  <Input
+                    value={externalPmsCode}
+                    onChange={(e) => setExternalPmsCode(e.target.value)}
+                    placeholder="Ex: BAR"
+                  />
+                </div>
+              )}
               <div>
                 <Label>Exigir Cartão (Motor de reservas):</Label>
                 <Select

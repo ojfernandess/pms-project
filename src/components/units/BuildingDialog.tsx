@@ -20,6 +20,7 @@ import { ParkingFeeSettingCard } from "@/components/settings/ParkingFeeSettingCa
 import { CheckinGuestInfoServicesCard } from "@/components/settings/CheckinGuestInfoServicesCard";
 import { useCleaningFeeConfig } from "@/hooks/useCleaningFeeConfig";
 import { useParkingFeeConfig } from "@/hooks/useParkingFeeConfig";
+import { useReservationImportExportFeature } from "@/hooks/useReservationImportExportFeature";
 
 interface BuildingDialogProps {
   open: boolean;
@@ -36,6 +37,7 @@ export const BuildingDialog = ({
 }: BuildingDialogProps) => {
   const { buildings, createBuilding, updateBuilding, isCreating } = useBuildings();
   const { services, isLoading: isLoadingServices, saveServices, isSaving: isSavingServices } = useBuildingServices(buildingId || null);
+  const { enabled: importExportEnabled } = useReservationImportExportFeature();
   const [loading, setLoading] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -60,6 +62,7 @@ export const BuildingDialog = ({
     policies: {} as any,
     logo_url: "",
     photo_url: "",
+    external_pms_code: "",
   });
   
   const [policies, setPolicies] = useState({
@@ -119,6 +122,7 @@ export const BuildingDialog = ({
           policies: building.policies || {},
           logo_url: building.logo_url || "",
           photo_url: building.photo_url || "",
+          external_pms_code: building.external_pms_code || "",
         });
         
         // Carregar previews das imagens
@@ -159,6 +163,7 @@ export const BuildingDialog = ({
         policies: {},
         logo_url: "",
         photo_url: "",
+        external_pms_code: "",
       });
       setLogoFile(null);
       setPhotoFile(null);
@@ -321,6 +326,7 @@ export const BuildingDialog = ({
         logo_url: logoUrl,
         photo_url: photoUrl,
         policies: policies as any,
+        external_pms_code: formData.external_pms_code?.trim() || null,
       };
 
       if (buildingId) {
@@ -379,6 +385,18 @@ export const BuildingDialog = ({
               required
             />
           </div>
+
+          {importExportEnabled && (
+            <div>
+              <Label htmlFor="external_pms_code">Código PMS externo (de-para)</Label>
+              <Input
+                id="external_pms_code"
+                value={formData.external_pms_code}
+                onChange={(e) => setFormData({ ...formData, external_pms_code: e.target.value })}
+                placeholder="Ex: B1"
+              />
+            </div>
+          )}
 
           <div>
             <h3 className="text-lg font-semibold mb-4">Imagens</h3>

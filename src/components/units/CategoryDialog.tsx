@@ -16,6 +16,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { scheduleChannelSyncAfterRateEdit } from "@/lib/channelSyncAfterRates";
 import { Save, Trash2 } from "lucide-react";
 import { RoomsTable } from "./RoomsTable";
+import { useReservationImportExportFeature } from "@/hooks/useReservationImportExportFeature";
 
 interface CategoryDialogProps {
   open: boolean;
@@ -27,6 +28,7 @@ interface CategoryDialogProps {
 
 export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], categoryId }: CategoryDialogProps) => {
   const queryClient = useQueryClient();
+  const { enabled: importExportEnabled } = useReservationImportExportFeature();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("informations");
   const [showRoomsTable, setShowRoomsTable] = useState(false);
@@ -60,6 +62,7 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
     courtesy_limit: "1",
     base_price: "0,00",
     rich_description: "",
+    external_pms_code: "",
   });
   const slugValidation = useSlugValidation({
     entityType: "room_category",
@@ -96,6 +99,7 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
         courtesy_limit: "1",
         base_price: "0,00",
         rich_description: "",
+        external_pms_code: "",
       });
       setShowRoomsTable(false);
       setSavedCategoryId(null);
@@ -162,6 +166,7 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
           courtesy_limit: data.courtesy_limit?.toString() || "1",
           base_price: data.base_price ? (typeof data.base_price === 'number' ? data.base_price.toFixed(2).replace('.', ',') : data.base_price) : "0,00",
           rich_description: data.rich_description || data.display_description || "",
+          external_pms_code: data.external_pms_code || "",
         });
         setPublicDisplayData({
           features: Array.isArray(data.display_features) ? data.display_features : [],
@@ -222,6 +227,7 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
         courtesy_limit: parseInt(formData.courtesy_limit) || 1,
         base_price: basePriceValue,
         rich_description: formData.rich_description || null,
+        external_pms_code: formData.external_pms_code?.trim() || null,
         establishment_id: establishmentId || undefined,
       };
 
@@ -672,6 +678,21 @@ export const CategoryDialog = ({ open, onOpenChange, onSuccess, buildings = [], 
 
                 {/* Coluna 2 */}
                 <div className="space-y-4">
+                  {importExportEnabled && (
+                    <div>
+                      <Label htmlFor="external_pms_code" className="text-sm font-medium">
+                        Código PMS externo (de-para)
+                      </Label>
+                      <Input
+                        id="external_pms_code"
+                        value={formData.external_pms_code}
+                        onChange={(e) => setFormData({ ...formData, external_pms_code: e.target.value })}
+                        placeholder="Ex: STD"
+                        disabled={loading}
+                        className="mt-2"
+                      />
+                    </div>
+                  )}
                   <div>
                     <Label htmlFor="abbreviation" className="text-sm font-medium">
                       Abreviatura da categoria:
