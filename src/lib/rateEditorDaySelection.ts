@@ -54,9 +54,6 @@ export function validateRateDateSelection(
   if (startDate > endDate) return "A data inicial deve ser anterior ou igual à data final.";
   const span = differenceInDays(endDate, startDate) + 1;
   if (span > MAX_INCLUSIVE_DAYS) return `Selecione um período de até ${MAX_INCLUSIVE_DAYS} dias.`;
-  const all = eachDateStringInRange(startDate, endDate);
-  const applicable = filterDatesBySelection(all, mode, selectedWeekdays, specificDates);
-  if (applicable.length === 0) return "Selecione ao menos uma data para aplicar a tarifa.";
   if (mode === "weekdays" && selectedWeekdays.size === 0) {
     return "Marque ao menos um dia da semana.";
   }
@@ -64,6 +61,9 @@ export function validateRateDateSelection(
     if (options?.allowEmptySpecific) return null;
     return "Selecione ao menos uma data específica.";
   }
+  const all = eachDateStringInRange(startDate, endDate);
+  const applicable = filterDatesBySelection(all, mode, selectedWeekdays, specificDates);
+  if (applicable.length === 0) return "Selecione ao menos uma data para aplicar a tarifa.";
   return null;
 }
 
