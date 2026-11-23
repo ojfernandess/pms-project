@@ -45,6 +45,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { scheduleChannelSyncAfterInventoryChange } from "@/lib/channelSyncAfterRates";
 import { OccupancyDashboardPanel } from "@/components/occupancy/OccupancyDashboardPanel";
 import {
+  filterRoomsForOccupancyMetrics,
+  isParkingOccupancyUnit,
+  readIncludeParkingInOccupancyMetrics,
+  writeIncludeParkingInOccupancyMetrics,
+} from "@/lib/occupancyParkingFilter";
+import { computeOccupancyOperationalSummary } from "@/lib/occupancyOperationalSummary";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -180,8 +187,15 @@ const OccupancyMap = () => {
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [maintenanceDialogOpen, setMaintenanceDialogOpen] = useState(false);
   const [newStatus, setNewStatus] = useState<RoomOccupancyStatus | "">("");
-  
-  const { rooms: roomsFromHook, summary: operationalSummary, isLoading } = useOccupancyMap(selectedDate);
+  const [includeParkingInMetrics, setIncludeParkingInMetrics] = useState(() =>
+    readIncludeParkingInOccupancyMetrics(selectedEstablishment?.id),
+  );
+
+  useEffect(() => {
+    setIncludeParkingInMetrics(readIncludeParkingInOccupancyMetrics(selectedEstablishment?.id));
+  }, [selectedEstablishment?.id]);
+
+  const { rooms: roomsFromHook, isLoading } = useOccupancyMap(selectedDate);
   const { reservations, refetch: refetchReservations, checkIn, checkOut } = useReservations();
   const { createTicket } = useMaintenance();
   const { canCreate } = usePermissions();
@@ -199,6 +213,28 @@ const OccupancyMap = () => {
       return room;
     });
   }, [roomsFromHook, localRoomUpdates]);
+
+  const roomsForOccupancyMetrics = useMemo(
+    () => filterRoomsForOccupancyMetrics(rooms, includeParkingInMetrics),
+    [rooms, includeParkingInMetrics],
+  );
+
+  const occupancyMetricsSummary = useMemo(
+    () => computeOccupancyOperationalSummary(roomsForOccupancyMetrics),
+    [roomsForOccupancyMetrics],
+  );
+
+  const handleToggleIncludeParking = (checked: boolean) => {
+    setIncludeParkingInMetrics(checked);
+    writeIncludeParkingInOccupancyMetrics(selectedEstablishment?.id, checked);
+  };
+
+  const hasParkingUnitsOnMap = useMemo(
+    () => rooms.some((r) => isParkingOccupancyUnit(r)),
+    [rooms],
+  );
+
+  const showParkingOccupancyToggle = !isLoading && rooms.length > 0;
 
   // Agrupar quartos por categoria
   const roomsByCategory = useMemo(() => {
@@ -656,10 +692,35 @@ const OccupancyMap = () => {
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Mapa de Ocupação</h1>
           <p className="text-sm sm:text-base text-muted-foreground">Visualização em tempo real dos quartos</p>
         </div>
-        {canCreate("reservations") && (
-          <Button onClick={() => setReservationDialogOpen(true)} className="w-full sm:w-auto">Nova Reserva</Button>
-        )}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+          {showParkingOccupancyToggle && (
+            <div
+              className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/30 px-3 py-2"
+              title="Afeta a taxa de ocupação e o painel consolidado; o mapa de vagas continua visível"
+            >
+              <Checkbox
+                id="include-parking-occupancy"
+                checked={includeParkingInMetrics}
+                onCheckedChange={(v) => handleToggleIncludeParking(v === true)}
+              />
+              <Label htmlFor="include-parking-occupancy" className="text-sm font-medium cursor-pointer leading-tight">
+                Incluir estacionamento nos cálculos
+              </Label>
+            </div>
+          )}
+          {canCreate("reservations") && (
+            <Button onClick={() => setReservationDialogOpen(true)} className="w-full sm:w-auto">
+              Nova Reserva
+            </Button>
+          )}
+        </div>
       </div>
+
+      {showParkingOccupancyToggle && hasParkingUnitsOnMap && !includeParkingInMetrics && (
+        <p className="text-xs sm:text-sm text-muted-foreground -mt-2">
+          Vagas de estacionamento estão fora da taxa de ocupação e do dashboard. Marque a opção acima para incluí-las.
+        </p>
+      )}
 
       {/* Filtros */}
       <Card className="p-3 sm:p-4">
@@ -751,7 +812,11 @@ const OccupancyMap = () => {
         </div>
       </Card>
 
-      <OccupancyDashboardPanel rooms={roomsFromHook} selectedDate={selectedDate} />
+      <OccupancyDashboardPanel
+        rooms={roomsForOccupancyMetrics}
+        selectedDate={selectedDate}
+        includeParkingInMetrics={includeParkingInMetrics}
+      />
 
       <div className="space-y-6">
         {/* Mapa de Quartos */}
@@ -1483,22 +1548,22 @@ const OccupancyMap = () => {
             <div className="space-y-3">
               <div>
                 <div className="text-xs sm:text-sm text-slate-600 mb-1">Total de Quartos</div>
-                <div className="text-xl sm:text-2xl font-bold text-slate-900">{operationalSummary.total_rooms}</div>
+                <div className="text-xl sm:text-2xl font-bold text-slate-900">{occupancyMetricsSummary.total_rooms}</div>
               </div>
 
               <div className="space-y-1.5 pt-2 border-t">
                 <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Movimento do dia</div>
                 <div className="flex items-center justify-between text-xs sm:text-sm">
                   <span>Saídas hoje</span>
-                  <span className="font-semibold">{operationalSummary.saídas_hoje}</span>
+                  <span className="font-semibold">{occupancyMetricsSummary.saídas_hoje}</span>
                 </div>
                 <div className="flex items-center justify-between text-xs sm:text-sm">
                   <span>Entradas hoje</span>
-                  <span className="font-semibold">{operationalSummary.entradas_hoje}</span>
+                  <span className="font-semibold">{occupancyMetricsSummary.entradas_hoje}</span>
                 </div>
                 <div className="flex items-center justify-between text-xs sm:text-sm">
                   <span>Stayovers</span>
-                  <span className="font-semibold">{operationalSummary.stayovers}</span>
+                  <span className="font-semibold">{occupancyMetricsSummary.stayovers}</span>
                 </div>
               </div>
               
@@ -1509,10 +1574,10 @@ const OccupancyMap = () => {
                     <span>Disponíveis</span>
                   </div>
                   <div className="font-semibold text-xs sm:text-sm">
-                    {operationalSummary.disponíveis}
-                    {operationalSummary.total_rooms > 0 && (
+                    {occupancyMetricsSummary.disponíveis}
+                    {occupancyMetricsSummary.total_rooms > 0 && (
                       <span className="text-slate-500 font-normal ml-1">
-                        ({Math.round((operationalSummary.disponíveis / operationalSummary.total_rooms) * 100)}%)
+                        ({Math.round((occupancyMetricsSummary.disponíveis / occupancyMetricsSummary.total_rooms) * 100)}%)
                       </span>
                     )}
                   </div>
@@ -1523,10 +1588,10 @@ const OccupancyMap = () => {
                     <span>Sujo</span>
                   </div>
                   <div className="font-semibold text-xs sm:text-sm">
-                    {operationalSummary.sujo}
-                    {operationalSummary.total_rooms > 0 && (
+                    {occupancyMetricsSummary.sujo}
+                    {occupancyMetricsSummary.total_rooms > 0 && (
                       <span className="text-slate-500 font-normal ml-1">
-                        ({Math.round((operationalSummary.sujo / operationalSummary.total_rooms) * 100)}%)
+                        ({Math.round((occupancyMetricsSummary.sujo / occupancyMetricsSummary.total_rooms) * 100)}%)
                       </span>
                     )}
                   </div>
@@ -1537,10 +1602,10 @@ const OccupancyMap = () => {
                     <span>Manutenção</span>
                   </div>
                   <div className="font-semibold text-xs sm:text-sm">
-                    {operationalSummary.manutenção}
-                    {operationalSummary.total_rooms > 0 && (
+                    {occupancyMetricsSummary.manutenção}
+                    {occupancyMetricsSummary.total_rooms > 0 && (
                       <span className="text-slate-500 font-normal ml-1">
-                        ({Math.round((operationalSummary.manutenção / operationalSummary.total_rooms) * 100)}%)
+                        ({Math.round((occupancyMetricsSummary.manutenção / occupancyMetricsSummary.total_rooms) * 100)}%)
                       </span>
                     )}
                   </div>
@@ -1551,10 +1616,10 @@ const OccupancyMap = () => {
                     <span>Bloqueados</span>
                   </div>
                   <div className="font-semibold text-xs sm:text-sm">
-                    {operationalSummary.bloqueados}
-                    {operationalSummary.total_rooms > 0 && (
+                    {occupancyMetricsSummary.bloqueados}
+                    {occupancyMetricsSummary.total_rooms > 0 && (
                       <span className="text-slate-500 font-normal ml-1">
-                        ({Math.round((operationalSummary.bloqueados / operationalSummary.total_rooms) * 100)}%)
+                        ({Math.round((occupancyMetricsSummary.bloqueados / occupancyMetricsSummary.total_rooms) * 100)}%)
                       </span>
                     )}
                   </div>
@@ -1563,7 +1628,7 @@ const OccupancyMap = () => {
 
               <div className="pt-2 border-t">
                 <div className="text-xs sm:text-sm text-slate-600 mb-1">Taxa de ocupação real do dia</div>
-                <div className="text-lg sm:text-xl font-bold text-slate-900">{operationalSummary.taxa_ocupacao_real}%</div>
+                <div className="text-lg sm:text-xl font-bold text-slate-900">{occupancyMetricsSummary.taxa_ocupacao_real}%</div>
               </div>
             </div>
           </Card>

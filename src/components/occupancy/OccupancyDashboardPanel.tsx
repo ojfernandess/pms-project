@@ -11,6 +11,8 @@ import { computeOccupancyDashboardStats } from "@/lib/occupancyDashboardStats";
 interface OccupancyDashboardPanelProps {
   rooms: RoomOccupancyData[];
   selectedDate: Date;
+  /** Quando false, estacionamento já foi excluído da lista `rooms`. */
+  includeParkingInMetrics?: boolean;
 }
 
 const CHART_COLORS = {
@@ -22,7 +24,11 @@ const CHART_COLORS = {
   other: "#a78bfa",
 };
 
-export const OccupancyDashboardPanel = ({ rooms, selectedDate }: OccupancyDashboardPanelProps) => {
+export const OccupancyDashboardPanel = ({
+  rooms,
+  selectedDate,
+  includeParkingInMetrics = false,
+}: OccupancyDashboardPanelProps) => {
   const stats = useMemo(() => computeOccupancyDashboardStats(rooms), [rooms]);
 
   const chartData = useMemo(() => {
@@ -50,6 +56,7 @@ export const OccupancyDashboardPanel = ({ rooms, selectedDate }: OccupancyDashbo
             <h2 className="text-base sm:text-lg font-semibold text-foreground">Dashboard de Ocupação</h2>
             <p className="text-xs sm:text-sm text-muted-foreground">
               Visão consolidada — {format(selectedDate, "dd 'de' MMMM yyyy", { locale: ptBR })}
+              {!includeParkingInMetrics && " · estacionamento excluído"}
             </p>
           </div>
         </div>

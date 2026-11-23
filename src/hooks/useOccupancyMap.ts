@@ -3,6 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { format, isToday, isTomorrow, parseISO, differenceInDays, subDays, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import {
+  computeOccupancyOperationalSummary,
+  emptyOccupancyOperationalSummary,
+} from "@/lib/occupancyOperationalSummary";
 
 export type RoomOccupancyStatus = 
   | "available"      // 🟢 Disponível/Limpo
@@ -29,6 +33,7 @@ export interface RoomOccupancyData {
   name?: string;
   category_id: string;
   category_name: string;
+  category_kind?: string | null;
   building_name?: string;
   status: RoomOccupancyStatus;
   
@@ -142,17 +147,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         dateStr
       });
       
-      const emptySummary: OccupancyOperationalSummary = {
-        total_rooms: 0,
-        saídas_hoje: 0,
-        entradas_hoje: 0,
-        stayovers: 0,
-        disponíveis: 0,
-        sujo: 0,
-        manutenção: 0,
-        bloqueados: 0,
-        taxa_ocupacao_real: 0,
-      };
+      const emptySummary = emptyOccupancyOperationalSummary();
 
       if (!establishmentId) {
         console.warn("useOccupancyMap: Nenhum estabelecimento selecionado");
@@ -923,6 +918,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
           name: room.name,
           category_id: category?.id || "",
           category_name: category?.name || "Sem categoria",
+          category_kind: category?.category_kind ?? null,
           building_name: buildingName,
           status,
           reservation_id: reservationData?.id,
@@ -971,36 +967,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
         };
       });
 
-      // Resumo operacional do dia
-      summary = {
-        total_rooms: processedRooms.length,
-        saídas_hoje: processedRooms.filter(
-          (r) => r.reservation_operational_type === "checkout_today" || r.status === "last_day"
-        ).length,
-        entradas_hoje: processedRooms.filter(
-          (r) =>
-            r.reservation_operational_type === "checkin_today" ||
-            r.reservation_operational_type === "day_use"
-        ).length,
-        stayovers: processedRooms.filter((r) => r.reservation_operational_type === "stayover").length,
-        disponíveis: processedRooms.filter((r) => r.status === "available").length,
-        sujo: processedRooms.filter((r) => r.status === "dirty" || r.status === "dirty_priority").length,
-        manutenção: processedRooms.filter((r) => r.status === "maintenance").length,
-        bloqueados: processedRooms.filter((r) => r.status === "blocked").length,
-        taxa_ocupacao_real:
-          processedRooms.length > 0
-            ? Math.round(
-                (processedRooms.filter(
-                  (r) =>
-                    r.status === "occupied" ||
-                    r.status === "last_day" ||
-                    r.status === "reserved"
-                ).length /
-                  processedRooms.length) *
-                  100
-              )
-            : 0,
-      };
+      summary = computeOccupancyOperationalSummary(processedRooms);
       } catch (error) {
         console.error("useOccupancyMap: Erro ao processar quartos:", error);
         throw error;
@@ -1017,17 +984,7 @@ export const useOccupancyMap = (selectedDate?: Date) => {
 
   return {
     rooms: rooms?.rooms ?? [],
-    summary: rooms?.summary ?? {
-      total_rooms: 0,
-      saídas_hoje: 0,
-      entradas_hoje: 0,
-      stayovers: 0,
-      disponíveis: 0,
-      sujo: 0,
-      manutenção: 0,
-      bloqueados: 0,
-      taxa_ocupacao_real: 0,
-    },
+    summary: rooms?.summary ?? emptyOccupancyOperationalSummary(),
     isLoading,
   };
 };
