@@ -1109,27 +1109,17 @@ export const RateCalendarGrid = ({
         categories={categories}
         ratePlans={ratePlans}
         onSave={async (data) => {
-          // Criar entradas para todas as datas do período
-          const dates: string[] = [];
-          let currentDate = new Date(data.startDate);
-          const end = new Date(data.endDate);
-
-          while (currentDate <= end) {
-            dates.push(format(currentDate, "yyyy-MM-dd"));
-            currentDate = addDays(currentDate, 1);
-          }
-
-          // Criar entradas para todas as datas do período
-          const entries = dates.map((date) => ({
-            pricing_plan_id: data.planIds[0],
+          const entries = data.entries.map((row) => ({
+            pricing_plan_id: data.planId,
             category_id: data.categoryId,
-            date,
-            base_price: data.basePrice,
-            adult_price: data.adultPrice,
-            child_price: data.childPrice,
+            date: row.date,
+            base_price: row.basePrice,
+            adult_price: row.adultPrice,
+            child_price: row.childPrice,
           }));
-
-          await upsertRateCalendar(entries);
+          if (entries.length > 0) {
+            await upsertRateCalendar(entries);
+          }
         }}
       />
 
@@ -1154,14 +1144,7 @@ export const RateCalendarGrid = ({
               child_price?: number;
             }> = [];
 
-            // Gerar todas as datas do período
-            const dates: string[] = [];
-            let currentDate = new Date(data.startDate);
-            const end = new Date(data.endDate);
-            while (currentDate <= end) {
-              dates.push(format(currentDate, "yyyy-MM-dd"));
-              currentDate = addDays(currentDate, 1);
-            }
+            const dates = data.applicableDates;
 
             // Buscar preços atuais do rate_calendar para calcular os novos valores
             const filteredRateCalendar = rateCalendar.filter(

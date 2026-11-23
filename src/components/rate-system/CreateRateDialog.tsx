@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,18 @@ import { ptBR } from "date-fns/locale";
 import { CalendarIcon } from "lucide-react";
 import { RatePlan } from "@/hooks/useRateSystem";
 import { toast } from "sonner";
+import {
+  RateDaySelectionFields,
+  WeeklyPriceFields,
+} from "@/components/rate-system/RateDaySelectionFields";
+import {
+  eachDateStringInRange,
+  filterDatesBySelection,
+  parseOptionalMoney,
+  resolveCreateBasePriceForDate,
+  validateRateDateSelection,
+  type RateDateSelectionMode,
+} from "@/lib/rateEditorDaySelection";
 
 /** Aplica flutuação ao preço base (mesma lógica da Grade ARI e Edição em lote). */
 function applyPlanFluctuation(basePrice: number, plan: RatePlan): number {
@@ -28,13 +40,14 @@ interface CreateRateDialogProps {
   ratePlans: RatePlan[];
   onSave: (data: {
     categoryId: string;
-    planIds: string[];
-    startDate: Date;
-    endDate: Date;
-    basePrice: number;
-    adultPrice?: number;
-    childPrice?: number;
-  }) => void;
+    planId: string;
+    entries: Array<{
+      date: string;
+      basePrice: number;
+      adultPrice?: number;
+      childPrice?: number;
+    }>;
+  }) => Promise<void>;
 }
 
 export const CreateRateDialog = ({
@@ -51,6 +64,17 @@ export const CreateRateDialog = ({
   const [startDateOpen, setStartDateOpen] = useState(false);
   const [endDateOpen, setEndDateOpen] = useState(false);
   const [prices, setPrices] = useState<Record<string, { basePrice: string; adultPrice: string; childPrice: string }>>({});
+  const [dateMode, setDateMode] = useState<RateDateSelectionMode>("all");
+  const [selectedWeekdays, setSelectedWeekdays] = useState<Set<number>>(
+    () => new Set([0, 1, 2, 3, 4, 5, 6]),
+  );
+  const [specificDates, setSpecificDates] = useState<Set<string>>(() => new Set());
+  const [specificDatePrices, setSpecificDatePrices] = useState<Record<string, string>>({});
+  const [useWeeklyPrices, setUseWeeklyPrices] = useState(false);
+  const [weeklyByDow, setWeeklyByDow] = useState<Record<number, string>>({});
+  const [exceptions, setExceptions] = useState<Record<string, number>>({});
+  const [exceptionDate, setExceptionDate] = useState("");
+  const [exceptionValue, setExceptionValue] = useState("");
 
   // Resetar estado quando o dialog abrir
   useEffect(() => {
@@ -60,6 +84,15 @@ export const CreateRateDialog = ({
       setStartDate(startOfDay(new Date()));
       setEndDate(startOfDay(addDays(new Date(), 1)));
       setPrices({});
+      setDateMode("all");
+      setSelectedWeekdays(new Set([0, 1, 2, 3, 4, 5, 6]));
+      setSpecificDates(new Set());
+      setSpecificDatePrices({});
+      setUseWeeklyPrices(false);
+      setWeeklyByDow({});
+      setExceptions({});
+      setExceptionDate("");
+      setExceptionValue("");
     }
   }, [open]);
 
@@ -142,11 +175,71 @@ export const CreateRateDialog = ({
   };
 
   const handleNextToPrice = () => {
-    if (startDate > endDate) {
-      toast.error("A data inicial deve ser anterior à data final");
+    const err = validateRateDateSelection({
+      startDate,
+      endDate,
+      mode: dateMode,
+      selectedWeekdays,
+      specificDates,
+    });
+    if (err) {
+      toast.error(err);
       return;
     }
     setStep(3);
+  };
+
+  const applicableDates = useMemo(() => {
+    const all = eachDateStringInRange(startDate, endDate);
+    return filterDatesBySelection(all, dateMode, selectedWeekdays, specificDates);
+  }, [startDate, endDate, dateMode, selectedWeekdays, specificDates]);
+
+  const toggleWeekday = (dow: number, checked: boolean) => {
+    setSelectedWeekdays((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(dow);
+      else next.delete(dow);
+      return next;
+    });
+  };
+
+  const toggleSpecificDate = (dateStr: string) => {
+    setSpecificDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(dateStr)) {
+        next.delete(dateStr);
+        setSpecificDatePrices((p) => {
+          const copy = { ...p };
+          delete copy[dateStr];
+          return copy;
+        });
+      } else next.add(dateStr);
+      return next;
+    });
+  };
+
+  const addException = () => {
+    const range = eachDateStringInRange(startDate, endDate);
+    if (!exceptionDate || !range.includes(exceptionDate)) {
+      toast.error("A data da exceção deve estar dentro do período.");
+      return;
+    }
+    const v = parseOptionalMoney(exceptionValue);
+    if (v == null) {
+      toast.error("Informe um valor válido para a exceção.");
+      return;
+    }
+    setExceptions((prev) => ({ ...prev, [exceptionDate]: v }));
+    setExceptionDate("");
+    setExceptionValue("");
+  };
+
+  const removeException = (d: string) => {
+    setExceptions((prev) => {
+      const next = { ...prev };
+      delete next[d];
+      return next;
+    });
   };
 
   const handleBack = () => {
@@ -200,87 +293,115 @@ export const CreateRateDialog = ({
       return;
     }
 
-    if (startDate > endDate) {
-      toast.error("A data inicial deve ser anterior à data final");
+    const selectionErr = validateRateDateSelection({
+      startDate,
+      endDate,
+      mode: dateMode,
+      selectedWeekdays,
+      specificDates,
+    });
+    if (selectionErr) {
+      toast.error(selectionErr);
       return;
     }
 
-    // Validar que todos os preços base foram preenchidos (ou calculados para planos com Tarifa Base)
-    const missingPrices: string[] = [];
-    for (const categoryId of selectedCategories) {
-      const planIds = categoryPlans[categoryId] || [];
-      for (const planId of planIds) {
-        const plan = ratePlans.find((p) => p.id === planId);
-        const derivedPrice = plan ? getDerivedPlanBasePrice(categoryId, plan) : null;
-        if (derivedPrice !== null && derivedPrice > 0) {
-          // Plano derivado: preço calculado pela Tarifa Base + Flutuação
-          continue;
-        }
-        const key = getPriceKey(categoryId, planId);
-        const priceData = prices[key];
-        const basePriceValue = priceData?.basePrice?.replace(",", ".") || "";
-        if (!basePriceValue || parseFloat(basePriceValue) <= 0 || isNaN(parseFloat(basePriceValue))) {
-          const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
-          const planName = ratePlans.find((p) => p.id === planId)?.name || planId;
-          const hint = plan?.base_plan_id_for_rate
-            ? " (preencha o preço do plano base primeiro)"
-            : "";
-          missingPrices.push(`${categoryName} - ${planName}${hint}`);
-        }
+    if (useWeeklyPrices) {
+      const hasAnyWeekly = Object.values(weeklyByDow).some((v) => parseOptionalMoney(v) != null);
+      if (!hasAnyWeekly) {
+        toast.error("Informe ao menos um preço por dia da semana ou desative a opção.");
+        return;
       }
     }
 
-    if (missingPrices.length > 0) {
-      toast.error(`Preencha o preço base para: ${missingPrices.join(', ')}`);
-      return;
+    const weeklyNumeric: Partial<Record<number, number>> = {};
+    if (useWeeklyPrices) {
+      for (let dow = 0; dow < 7; dow++) {
+        const p = parseOptionalMoney(weeklyByDow[dow]);
+        if (p != null) weeklyNumeric[dow] = p;
+      }
     }
 
     try {
       let savedCount = 0;
+      let entryCount = 0;
       const errors: string[] = [];
+      const priceByDateAndPlan = new Map<string, number>();
 
       for (const categoryId of selectedCategories) {
-        const planIds = categoryPlans[categoryId] || [];
-        for (const planId of planIds) {
-          try {
-            const plan = ratePlans.find((p) => p.id === planId);
-            const key = getPriceKey(categoryId, planId);
-            const priceData = prices[key];
+        const planIds = [...(categoryPlans[categoryId] || [])].sort((a, b) => {
+          const planA = ratePlans.find((p) => p.id === a);
+          const planB = ratePlans.find((p) => p.id === b);
+          const hasBaseA = planA?.base_plan_id_for_rate ? 1 : 0;
+          const hasBaseB = planB?.base_plan_id_for_rate ? 1 : 0;
+          return hasBaseA - hasBaseB;
+        });
 
-            // Tarifa Base + Flutuação (mesma lógica da Grade ARI): usar preço calculado do plano base
-            let base: number;
-            const derivedPrice = plan ? getDerivedPlanBasePrice(categoryId, plan) : null;
-            if (derivedPrice !== null && derivedPrice > 0) {
-              base = derivedPrice;
+        for (const planId of planIds) {
+          const plan = ratePlans.find((p) => p.id === planId);
+          const key = getPriceKey(categoryId, planId);
+          const priceData = prices[key];
+          const generalPrice = parseOptionalMoney(priceData?.basePrice);
+          const adultPriceValue = priceData?.adultPrice
+            ? parseFloat(priceData.adultPrice.replace(",", "."))
+            : undefined;
+          const childPriceValue = priceData?.childPrice
+            ? parseFloat(priceData.childPrice.replace(",", "."))
+            : undefined;
+
+          const entries: Array<{
+            date: string;
+            basePrice: number;
+            adultPrice?: number;
+            childPrice?: number;
+          }> = [];
+
+          for (const dateStr of applicableDates) {
+            let basePrice: number | null = null;
+
+            if (plan?.base_plan_id_for_rate && plan.fluctuation_type && plan.fluctuation_value != null) {
+              const baseKey = `${categoryId}|${plan.base_plan_id_for_rate}|${dateStr}`;
+              const basePlanPrice = priceByDateAndPlan.get(baseKey);
+              if (basePlanPrice == null || basePlanPrice <= 0) {
+                const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
+                const basePlanName =
+                  ratePlans.find((p) => p.id === plan.base_plan_id_for_rate)?.name || plan.base_plan_id_for_rate;
+                errors.push(`${categoryName} · ${plan.name}: preço do plano base (${basePlanName}) em ${dateStr}`);
+                continue;
+              }
+              basePrice = Math.round(applyPlanFluctuation(basePlanPrice, plan) * 100) / 100;
             } else {
-              const basePriceStr = (priceData?.basePrice || "0").replace(",", ".");
-              base = parseFloat(basePriceStr);
+              basePrice = resolveCreateBasePriceForDate(dateStr, {
+                mode: dateMode,
+                generalPrice,
+                useWeeklyPrices,
+                weeklyByDow: weeklyNumeric,
+                specificDatePrices,
+                exceptions,
+              });
             }
 
-            if (isNaN(base) || base <= 0) {
+            if (basePrice == null || basePrice <= 0) {
               const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
-              const planName = ratePlans.find((p) => p.id === planId)?.name || planId;
-              errors.push(`${categoryName} - ${planName} (preço inválido)`);
+              const planName = plan?.name || planId;
+              errors.push(`${categoryName} · ${planName} (${dateStr})`);
               continue;
             }
 
-            const adultPriceValue = priceData?.adultPrice
-              ? parseFloat(priceData.adultPrice.replace(",", "."))
-              : undefined;
-            const childPriceValue = priceData?.childPrice
-              ? parseFloat(priceData.childPrice.replace(",", "."))
-              : undefined;
-
-            await onSave({
-              categoryId,
-              planIds: [planId],
-              startDate,
-              endDate,
-              basePrice: base,
+            priceByDateAndPlan.set(`${categoryId}|${planId}|${dateStr}`, basePrice);
+            entries.push({
+              date: dateStr,
+              basePrice,
               adultPrice: adultPriceValue && !isNaN(adultPriceValue) ? adultPriceValue : undefined,
               childPrice: childPriceValue && !isNaN(childPriceValue) ? childPriceValue : undefined,
             });
+          }
+
+          if (entries.length === 0) continue;
+
+          try {
+            await onSave({ categoryId, planId, entries });
             savedCount++;
+            entryCount += entries.length;
           } catch (error: any) {
             const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
             const planName = ratePlans.find((p) => p.id === planId)?.name || planId;
@@ -290,20 +411,21 @@ export const CreateRateDialog = ({
         }
       }
 
-      const totalCombinations = selectedCategories.reduce(
-        (sum, catId) => sum + (categoryPlans[catId]?.length || 0),
-        0
-      );
-
       if (savedCount > 0) {
         if (errors.length > 0) {
-          toast.warning(`${savedCount} de ${totalCombinations} tarifário(s) criado(s). ${errors.length} falharam.`);
+          toast.warning(
+            `${entryCount} diária(s) salva(s) em ${savedCount} plano(s). Alguns itens falharam: ${errors.slice(0, 3).join("; ")}${errors.length > 3 ? "…" : ""}`,
+          );
         } else {
-          toast.success(`${savedCount} tarifário(s) criado(s) com sucesso!`);
+          toast.success(`${entryCount} diária(s) criada(s) com sucesso!`);
         }
         onOpenChange(false);
       } else {
-        toast.error("Nenhum tarifário foi criado. Verifique os erros acima.");
+        toast.error(
+          errors.length > 0
+            ? `Nenhuma tarifa criada. Verifique: ${errors.slice(0, 5).join("; ")}`
+            : "Nenhum tarifário foi criado.",
+        );
       }
     } catch (error: any) {
       console.error("Erro ao salvar tarifas:", error);
@@ -317,7 +439,8 @@ export const CreateRateDialog = ({
     (sum, catId) => sum + (categoryPlans[catId]?.length || 0),
     0
   );
-  const daysCount = differenceInDays(endDate, startDate) + 1;
+  const daysCount = applicableDates.length;
+  const periodDaysCount = differenceInDays(endDate, startDate) + 1;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -506,10 +629,32 @@ export const CreateRateDialog = ({
                   {format(endDate, "dd/MM/yyyy", { locale: ptBR })}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {daysCount} dia(s) - {totalCombinations} combinação(ões) × {daysCount} dia(s) ={" "}
-                  {totalCombinations * daysCount} tarifário(s) serão criados
+                  Período: {periodDaysCount} dia(s) no calendário · {daysCount} dia(s) selecionado(s) para
+                  aplicar · até {totalCombinations * daysCount} tarifário(s)
                 </p>
               </div>
+
+              <RateDaySelectionFields
+                startDate={startDate}
+                endDate={endDate}
+                dateMode={dateMode}
+                onDateModeChange={setDateMode}
+                selectedWeekdays={selectedWeekdays}
+                onToggleWeekday={toggleWeekday}
+                specificDates={specificDates}
+                onToggleSpecificDate={toggleSpecificDate}
+                onSelectAllSpecific={() =>
+                  setSpecificDates(new Set(eachDateStringInRange(startDate, endDate)))
+                }
+                onClearSpecific={() => {
+                  setSpecificDates(new Set());
+                  setSpecificDatePrices({});
+                }}
+                specificDatePrices={specificDatePrices}
+                onSpecificDatePriceChange={(d, v) =>
+                  setSpecificDatePrices((prev) => ({ ...prev, [d]: v }))
+                }
+              />
             </div>
           )}
 
@@ -527,12 +672,71 @@ export const CreateRateDialog = ({
                   </p>
                   <p>
                     <strong>Período:</strong> {format(startDate, "dd/MM/yyyy", { locale: ptBR })} até{" "}
-                    {format(endDate, "dd/MM/yyyy", { locale: ptBR })} ({daysCount} dia(s))
+                    {format(endDate, "dd/MM/yyyy", { locale: ptBR })} · {daysCount} dia(s) aplicável(eis)
                   </p>
                   <p>
                     <strong>Total de tarifários:</strong> {totalCombinations * daysCount}
                   </p>
                 </div>
+              </div>
+
+              <WeeklyPriceFields
+                enabled={useWeeklyPrices}
+                onEnabledChange={setUseWeeklyPrices}
+                weeklyValues={weeklyByDow}
+                onWeeklyChange={(dow, value) =>
+                  setWeeklyByDow((prev) => ({ ...prev, [dow]: value }))
+                }
+              />
+
+              <div className="space-y-2 border rounded-md p-3">
+                <Label className="text-sm font-medium">Exceções — datas com valores diferentes</Label>
+                <p className="text-xs text-muted-foreground">
+                  Substituem o valor geral ou do dia da semana apenas na data indicada.
+                </p>
+                <div className="flex flex-wrap gap-2 items-end">
+                  <input
+                    type="date"
+                    className="border rounded-md px-2 py-2 text-sm h-9 bg-background"
+                    value={exceptionDate}
+                    min={format(startDate, "yyyy-MM-dd")}
+                    max={format(endDate, "yyyy-MM-dd")}
+                    onChange={(e) => setExceptionDate(e.target.value)}
+                  />
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Valor R$"
+                    className="h-9 w-32"
+                    value={exceptionValue}
+                    onChange={(e) => setExceptionValue(e.target.value)}
+                  />
+                  <Button type="button" variant="outline" size="sm" onClick={addException}>
+                    Adicionar
+                  </Button>
+                </div>
+                {Object.keys(exceptions).length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {Object.entries(exceptions)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([d, v]) => (
+                        <span
+                          key={d}
+                          className="text-xs border rounded-full px-2 py-1 flex items-center gap-1"
+                        >
+                          {d.split("-").reverse().join("/")} · R$ {v.toFixed(2)}
+                          <button
+                            type="button"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() => removeException(d)}
+                            aria-label="Remover"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -634,6 +838,7 @@ export const CreateRateDialog = ({
                                         <Input
                                           type="text"
                                           inputMode="decimal"
+                                          disabled={useWeeklyPrices && dateMode !== "specific"}
                                           value={priceData.basePrice}
                                           onChange={(e) => {
                                             const value = e.target.value;
@@ -642,7 +847,7 @@ export const CreateRateDialog = ({
                                             const finalValue = parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : cleanValue;
                                             handlePriceChange(categoryId, planId, "basePrice", finalValue);
                                           }}
-                                          placeholder="0.00"
+                                          placeholder={useWeeklyPrices ? "Usar preços por dia da semana" : "0.00"}
                                           className="h-9"
                                         />
                                       </div>
@@ -694,7 +899,7 @@ export const CreateRateDialog = ({
                   })}
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Defina o preço para cada combinação de categoria e plano tarifário
+                  Valor geral por combinação (ou use preços por dia da semana / por data acima)
                 </p>
               </div>
             </div>

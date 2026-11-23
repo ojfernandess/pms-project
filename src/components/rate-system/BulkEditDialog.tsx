@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { useState, useEffect, useRef, useCallback, memo, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,13 @@ import { CalendarIcon } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RatePlan } from "@/hooks/useRateSystem";
 import { toast } from "sonner";
+import { RateDaySelectionFields } from "@/components/rate-system/RateDaySelectionFields";
+import {
+  eachDateStringInRange,
+  filterDatesBySelection,
+  validateRateDateSelection,
+  type RateDateSelectionMode,
+} from "@/lib/rateEditorDaySelection";
 
 interface BulkEditDialogProps {
   open: boolean;
@@ -30,6 +37,7 @@ interface BulkEditDialogProps {
     }>;
     startDate: Date;
     endDate: Date;
+    applicableDates: string[];
   }) => Promise<void>;
 }
 
@@ -51,6 +59,11 @@ export const BulkEditDialog = memo(({
   const [endDateOpen, setEndDateOpen] = useState(false);
   const [adjustmentType, setAdjustmentType] = useState<'percentage' | 'fixed' | 'replace'>('percentage');
   const [prices, setPrices] = useState<Record<string, { adjustmentType: 'percentage' | 'fixed' | 'replace'; adjustmentValue: string }>>({});
+  const [dateMode, setDateMode] = useState<RateDateSelectionMode>("all");
+  const [selectedWeekdays, setSelectedWeekdays] = useState<Set<number>>(
+    () => new Set([0, 1, 2, 3, 4, 5, 6]),
+  );
+  const [specificDates, setSpecificDates] = useState<Set<string>>(() => new Set());
   const prevOpenRef = useRef(false);
 
   // Resetar estado quando o dialog abrir
@@ -65,6 +78,9 @@ export const BulkEditDialog = memo(({
         setAdjustmentType('percentage');
         setStartDateOpen(false);
         setEndDateOpen(false);
+        setDateMode("all");
+        setSelectedWeekdays(new Set([0, 1, 2, 3, 4, 5, 6]));
+        setSpecificDates(new Set());
       }
       prevOpenRef.current = true;
     } else {
@@ -167,9 +183,39 @@ export const BulkEditDialog = memo(({
     setStep(2);
   };
 
+  const applicableDates = useMemo(() => {
+    const all = eachDateStringInRange(bulkStartDate, bulkEndDate);
+    return filterDatesBySelection(all, dateMode, selectedWeekdays, specificDates);
+  }, [bulkStartDate, bulkEndDate, dateMode, selectedWeekdays, specificDates]);
+
+  const toggleWeekday = useCallback((dow: number, checked: boolean) => {
+    setSelectedWeekdays((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(dow);
+      else next.delete(dow);
+      return next;
+    });
+  }, []);
+
+  const toggleSpecificDate = useCallback((dateStr: string) => {
+    setSpecificDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(dateStr)) next.delete(dateStr);
+      else next.add(dateStr);
+      return next;
+    });
+  }, []);
+
   const handleNextToValues = () => {
-    if (bulkStartDate > bulkEndDate) {
-      toast.error("A data inicial deve ser anterior à data final");
+    const err = validateRateDateSelection({
+      startDate: bulkStartDate,
+      endDate: bulkEndDate,
+      mode: dateMode,
+      selectedWeekdays,
+      specificDates,
+    });
+    if (err) {
+      toast.error(err);
       return;
     }
     setStep(3);
@@ -258,6 +304,7 @@ export const BulkEditDialog = memo(({
         categoryPlans: categoryPlansData,
       startDate: bulkStartDate,
       endDate: bulkEndDate,
+      applicableDates,
     });
     onOpenChange(false);
     } catch (error: any) {
@@ -272,7 +319,8 @@ export const BulkEditDialog = memo(({
     (sum, catId) => sum + (categoryPlans[catId]?.length || 0),
     0
   );
-  const daysCount = differenceInDays(bulkEndDate, bulkStartDate) + 1;
+  const daysCount = applicableDates.length;
+  const periodDaysCount = differenceInDays(bulkEndDate, bulkStartDate) + 1;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -475,10 +523,25 @@ export const BulkEditDialog = memo(({
                   {format(bulkEndDate, "dd/MM/yyyy", { locale: ptBR })}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {daysCount} dia(s) - {totalCombinations} combinação(ões) × {daysCount} dia(s) ={" "}
-                  {totalCombinations * daysCount} tarifário(s) serão atualizados
+                  Período: {periodDaysCount} dia(s) · {daysCount} dia(s) selecionado(s) · até{" "}
+                  {totalCombinations * daysCount} atualização(ões)
                 </p>
             </div>
+
+              <RateDaySelectionFields
+                startDate={bulkStartDate}
+                endDate={bulkEndDate}
+                dateMode={dateMode}
+                onDateModeChange={setDateMode}
+                selectedWeekdays={selectedWeekdays}
+                onToggleWeekday={toggleWeekday}
+                specificDates={specificDates}
+                onToggleSpecificDate={toggleSpecificDate}
+                onSelectAllSpecific={() =>
+                  setSpecificDates(new Set(eachDateStringInRange(bulkStartDate, bulkEndDate)))
+                }
+                onClearSpecific={() => setSpecificDates(new Set())}
+              />
             </div>
           )}
 
