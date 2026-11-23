@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -23,9 +24,8 @@ type RateDaySelectionFieldsProps = {
   onToggleSpecificDate: (dateStr: string) => void;
   onSelectAllSpecific: () => void;
   onClearSpecific: () => void;
-  /** Modo criar tarifário: preços por data selecionada */
-  specificDatePrices?: Record<string, string>;
-  onSpecificDatePriceChange?: (dateStr: string, value: string) => void;
+  /** no passo do período: não mostra grade de datas (vai para o passo de preços) */
+  specificUiPlacement?: "inline" | "deferred";
   disabled?: boolean;
 };
 
@@ -40,11 +40,11 @@ export function RateDaySelectionFields({
   onToggleSpecificDate,
   onSelectAllSpecific,
   onClearSpecific,
-  specificDatePrices,
-  onSpecificDatePriceChange,
+  specificUiPlacement = "inline",
   disabled,
 }: RateDaySelectionFieldsProps) {
   const rangeDates = eachDateStringInRange(startDate, endDate);
+  const showSpecificGrid = dateMode === "specific" && specificUiPlacement === "inline";
 
   return (
     <div className="space-y-4 border-t pt-4">
@@ -55,7 +55,7 @@ export function RateDaySelectionFields({
           onValueChange={(v) => onDateModeChange(v as RateDateSelectionMode)}
           disabled={disabled}
         >
-          <SelectTrigger>
+          <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -74,7 +74,7 @@ export function RateDaySelectionFields({
               <label
                 key={label}
                 className={cn(
-                  "flex items-center gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer",
+                  "flex items-center gap-2 rounded-md border px-2.5 py-2 text-sm cursor-pointer min-h-[40px]",
                   selectedWeekdays.has(dow) && "border-primary bg-primary/5",
                 )}
               >
@@ -90,19 +90,30 @@ export function RateDaySelectionFields({
         </div>
       )}
 
-      {dateMode === "specific" && (
+      {dateMode === "specific" && specificUiPlacement === "deferred" && (
+        <div className="rounded-md border border-dashed bg-muted/40 p-3 text-xs text-muted-foreground leading-relaxed">
+          Na próxima etapa você escolherá as datas e definirá os valores (único para todas ou individual por
+          data).
+        </div>
+      )}
+
+      {showSpecificGrid && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Label className="flex-1 min-w-[200px]">Escolha as datas no intervalo</Label>
-            <Button type="button" variant="outline" size="sm" onClick={onSelectAllSpecific} disabled={disabled}>
-              Selecionar todas
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={onClearSpecific} disabled={disabled}>
-              Limpar seleção
-            </Button>
-            <span className="text-xs text-muted-foreground">{specificDates.size} selecionada(s)</span>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <Label className="sm:flex-1">Escolha as datas no intervalo</Label>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={onSelectAllSpecific} disabled={disabled}>
+                Selecionar todas
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={onClearSpecific} disabled={disabled}>
+                Limpar seleção
+              </Button>
+              <span className="text-xs text-muted-foreground self-center px-1">
+                {specificDates.size} selecionada(s)
+              </span>
+            </div>
           </div>
-          <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 max-h-48 overflow-y-auto border rounded-md p-2">
+          <div className="grid grid-cols-3 xs:grid-cols-4 sm:grid-cols-7 gap-1.5 max-h-52 overflow-y-auto border rounded-md p-2">
             {rangeDates.map((dateStr) => {
               const selected = specificDates.has(dateStr);
               const dow = weekdayIndexFromDateStr(dateStr);
@@ -113,7 +124,7 @@ export function RateDaySelectionFields({
                   disabled={disabled}
                   onClick={() => onToggleSpecificDate(dateStr)}
                   className={cn(
-                    "rounded-md border px-1 py-2 text-center text-xs transition-colors",
+                    "rounded-md border px-1 py-2 text-center text-xs transition-colors min-h-[52px]",
                     selected ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted",
                   )}
                 >
@@ -123,34 +134,154 @@ export function RateDaySelectionFields({
               );
             })}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
-          {specificDatePrices && onSpecificDatePriceChange && specificDates.size > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">
-                Defina um valor diferente para cada data selecionada (opcional). Valor individual tem prioridade sobre o
-                geral. Datas não selecionadas não são alteradas.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto">
-                {[...specificDates].sort().map((dateStr) => {
-                  const dow = weekdayIndexFromDateStr(dateStr);
-                  return (
-                    <div key={dateStr} className="flex items-center gap-2 border rounded-md p-2 text-sm">
-                      <span className="shrink-0 text-xs text-muted-foreground min-w-[88px]">
-                        {format(parseISO(dateStr), "dd/MM/yyyy")} · {RATE_WEEKDAY_LABELS[dow]}
-                      </span>
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        className="h-8"
-                        placeholder="R$"
-                        value={specificDatePrices[dateStr] ?? ""}
-                        onChange={(e) => onSpecificDatePriceChange(dateStr, e.target.value)}
-                        disabled={disabled}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+type RateSpecificDatesPriceSectionProps = {
+  startDate: Date;
+  endDate: Date;
+  specificDates: Set<string>;
+  onToggleSpecificDate: (dateStr: string) => void;
+  onSelectAllSpecific: () => void;
+  onClearSpecific: () => void;
+  specificDatePrices: Record<string, string>;
+  onSpecificDatePriceChange: (dateStr: string, value: string) => void;
+  valueLabel?: string;
+  disabled?: boolean;
+};
+
+/** Passo de preços: datas + valor único ou individual (criar tarifário / lote). */
+export function RateSpecificDatesPriceSection({
+  startDate,
+  endDate,
+  specificDates,
+  onToggleSpecificDate,
+  onSelectAllSpecific,
+  onClearSpecific,
+  specificDatePrices,
+  onSpecificDatePriceChange,
+  valueLabel = "Valor (R$)",
+  disabled,
+}: RateSpecificDatesPriceSectionProps) {
+  const rangeDates = eachDateStringInRange(startDate, endDate);
+  const [uniformValue, setUniformValue] = useState("");
+  const [showIndividual, setShowIndividual] = useState(false);
+
+  const applyUniformToAll = () => {
+    const clean = uniformValue.trim().replace(",", ".");
+    if (!clean || Number.isNaN(Number(clean)) || Number(clean) <= 0) return;
+    for (const d of specificDates) {
+      onSpecificDatePriceChange(d, clean);
+    }
+    setShowIndividual(false);
+  };
+
+  return (
+    <div className="space-y-4 border rounded-lg p-3 sm:p-4 bg-muted/20">
+      <div>
+        <Label className="text-sm font-semibold">Datas e valores (somente datas específicas)</Label>
+        <p className="text-xs text-muted-foreground mt-1">
+          Selecione as datas e use um valor único para todas ou preencha cada data separadamente.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={onSelectAllSpecific} disabled={disabled}>
+            Selecionar todas
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={onClearSpecific} disabled={disabled}>
+            Limpar seleção
+          </Button>
+        </div>
+        <span className="text-xs text-muted-foreground">{specificDates.size} data(s) selecionada(s)</span>
+      </div>
+
+      <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-1.5 max-h-48 overflow-y-auto border rounded-md p-2 bg-background">
+        {rangeDates.map((dateStr) => {
+          const selected = specificDates.has(dateStr);
+          const dow = weekdayIndexFromDateStr(dateStr);
+          return (
+            <button
+              key={dateStr}
+              type="button"
+              disabled={disabled}
+              onClick={() => onToggleSpecificDate(dateStr)}
+              className={cn(
+                "rounded-md border px-1 py-2 text-center text-xs transition-colors",
+                selected ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted",
+              )}
+            >
+              <div className="font-medium">{format(parseISO(dateStr), "dd/MM")}</div>
+              <div className="text-[10px] opacity-80">{RATE_WEEKDAY_LABELS[dow]}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {specificDates.size > 0 && (
+        <div className="space-y-3 pt-2 border-t">
+          <Label className="text-xs font-medium text-muted-foreground">Valor para as datas selecionadas</Label>
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+            <div className="flex-1 min-w-0">
+              <Label className="text-xs sr-only">Valor único para todas</Label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                placeholder="Ex.: 320,00 — mesmo valor para todas as datas"
+                value={uniformValue}
+                onChange={(e) => setUniformValue(e.target.value)}
+                disabled={disabled}
+                className="h-10"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full sm:w-auto shrink-0"
+              disabled={disabled || specificDates.size === 0}
+              onClick={applyUniformToAll}
+            >
+              Aplicar a todas
+            </Button>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <Checkbox
+              checked={showIndividual}
+              onCheckedChange={(c) => setShowIndividual(c === true)}
+              disabled={disabled}
+            />
+            Preencher valor individualmente por data
+          </label>
+
+          {showIndividual && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto">
+              {[...specificDates].sort().map((dateStr) => {
+                const dow = weekdayIndexFromDateStr(dateStr);
+                return (
+                  <div
+                    key={dateStr}
+                    className="flex flex-col sm:flex-row sm:items-center gap-1.5 border rounded-md p-2 bg-background text-sm"
+                  >
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {format(parseISO(dateStr), "dd/MM/yyyy")} · {RATE_WEEKDAY_LABELS[dow]}
+                    </span>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      className="h-9 flex-1 min-w-0"
+                      placeholder={valueLabel}
+                      value={specificDatePrices[dateStr] ?? ""}
+                      onChange={(e) => onSpecificDatePriceChange(dateStr, e.target.value)}
+                      disabled={disabled}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -175,7 +306,7 @@ export function WeeklyPriceFields({
   disabled,
 }: WeeklyPriceFieldsProps) {
   return (
-    <div className="space-y-3 border rounded-md p-3">
+    <div className="space-y-3 border rounded-md p-3 sm:p-4">
       <Label className="text-sm font-medium">Preços diferentes por dia da semana (opcional)</Label>
       <label className="flex items-center gap-2 text-sm cursor-pointer">
         <Checkbox
@@ -186,7 +317,7 @@ export function WeeklyPriceFields({
         Ativar preços individuais por dia da semana
       </label>
       {enabled && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mt-2">
           {RATE_WEEKDAY_LABELS.map((label, dow) => (
             <div key={label}>
               <Label className="text-xs">{label}</Label>

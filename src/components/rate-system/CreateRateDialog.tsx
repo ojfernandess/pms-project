@@ -13,6 +13,7 @@ import { RatePlan } from "@/hooks/useRateSystem";
 import { toast } from "sonner";
 import {
   RateDaySelectionFields,
+  RateSpecificDatesPriceSection,
   WeeklyPriceFields,
 } from "@/components/rate-system/RateDaySelectionFields";
 import {
@@ -191,13 +192,16 @@ export const CreateRateDialog = ({
   };
 
   const handleNextToPrice = () => {
-    const err = validateRateDateSelection({
-      startDate,
-      endDate,
-      mode: dateMode,
-      selectedWeekdays,
-      specificDates,
-    });
+    const err = validateRateDateSelection(
+      {
+        startDate,
+        endDate,
+        mode: dateMode,
+        selectedWeekdays,
+        specificDates,
+      },
+      { allowEmptySpecific: dateMode === "specific" },
+    );
     if (err) {
       toast.error(err);
       return;
@@ -476,13 +480,16 @@ export const CreateRateDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[calc(100vw-1.25rem)] sm:w-full max-w-3xl max-h-[min(92vh,56rem)] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Criar Tarifários</DialogTitle>
           <DialogDescription>
             {step === 1 && "Selecione as categorias e os planos tarifários para cada uma"}
             {step === 2 && "Defina o período (data inicial e final)"}
-            {step === 3 && "Defina o preço que será aplicado"}
+            {step === 3 &&
+              (dateMode === "specific"
+                ? "Selecione as datas, defina os valores e os preços por categoria/plano"
+                : "Defina o preço que será aplicado")}
           </DialogDescription>
         </DialogHeader>
 
@@ -661,8 +668,10 @@ export const CreateRateDialog = ({
                   {format(endDate, "dd/MM/yyyy", { locale: ptBR })}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Período: {periodDaysCount} dia(s) no calendário · {daysCount} dia(s) selecionado(s) para
-                  aplicar · até {totalCombinations * daysCount} tarifário(s)
+                  Período: {periodDaysCount} dia(s) no calendário
+                  {dateMode !== "specific" &&
+                    ` · ${daysCount} dia(s) selecionado(s) · até ${totalCombinations * daysCount} tarifário(s)`}
+                  {dateMode === "specific" && " · datas e valores na próxima etapa"}
                 </p>
               </div>
 
@@ -682,10 +691,7 @@ export const CreateRateDialog = ({
                   setSpecificDates(new Set());
                   setSpecificDatePrices({});
                 }}
-                specificDatePrices={specificDatePrices}
-                onSpecificDatePriceChange={(d, v) =>
-                  setSpecificDatePrices((prev) => ({ ...prev, [d]: v }))
-                }
+                specificUiPlacement="deferred"
               />
             </div>
           )}
@@ -712,15 +718,38 @@ export const CreateRateDialog = ({
                 </div>
               </div>
 
-              <WeeklyPriceFields
-                enabled={useWeeklyPrices}
-                onEnabledChange={setUseWeeklyPrices}
-                weeklyValues={weeklyByDow}
-                onWeeklyChange={(dow, value) =>
-                  setWeeklyByDow((prev) => ({ ...prev, [dow]: value }))
-                }
-              />
+              {dateMode === "specific" && (
+                <RateSpecificDatesPriceSection
+                  startDate={startDate}
+                  endDate={endDate}
+                  specificDates={specificDates}
+                  onToggleSpecificDate={toggleSpecificDate}
+                  onSelectAllSpecific={() =>
+                    setSpecificDates(new Set(eachDateStringInRange(startDate, endDate)))
+                  }
+                  onClearSpecific={() => {
+                    setSpecificDates(new Set());
+                    setSpecificDatePrices({});
+                  }}
+                  specificDatePrices={specificDatePrices}
+                  onSpecificDatePriceChange={(d, v) =>
+                    setSpecificDatePrices((prev) => ({ ...prev, [d]: v }))
+                  }
+                />
+              )}
 
+              {dateMode !== "specific" && (
+                <WeeklyPriceFields
+                  enabled={useWeeklyPrices}
+                  onEnabledChange={setUseWeeklyPrices}
+                  weeklyValues={weeklyByDow}
+                  onWeeklyChange={(dow, value) =>
+                    setWeeklyByDow((prev) => ({ ...prev, [dow]: value }))
+                  }
+                />
+              )}
+
+              {dateMode !== "specific" && (
               <div className="space-y-2 border rounded-md p-3">
                 <Label className="text-sm font-medium">Exceções — datas com valores diferentes</Label>
                 <p className="text-xs text-muted-foreground">
@@ -770,6 +799,7 @@ export const CreateRateDialog = ({
                   </div>
                 )}
               </div>
+              )}
 
               <div>
                 <Label className="mb-3 block">Preços por Categoria e Plano Tarifário *</Label>
@@ -866,7 +896,11 @@ export const CreateRateDialog = ({
                                   ) : (
                                     <div className="space-y-2">
                                       <div>
-                                        <Label className="text-xs">Preço Base *</Label>
+                                        <Label className="text-xs">
+                                          {dateMode === "specific"
+                                            ? "Valor padrão (opcional — datas sem valor definido) *"
+                                            : "Preço Base *"}
+                                        </Label>
                                         <Input
                                           type="text"
                                           inputMode="decimal"
@@ -931,37 +965,39 @@ export const CreateRateDialog = ({
                   })}
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Valor geral por combinação (ou use preços por dia da semana / por data acima)
+                  {dateMode === "specific"
+                    ? "Use a seção de datas acima para valores por data; o campo padrão cobre datas sem valor individual."
+                    : "Valor geral por combinação (ou use preços por dia da semana acima)"}
                 </p>
               </div>
             </div>
           )}
         </div>
 
-        <div className="flex justify-between gap-3 mt-6">
-          <div>
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-2 sm:gap-3 mt-6 pt-2 border-t sticky bottom-0 bg-background">
+          <div className="w-full sm:w-auto">
             {step > 1 && (
-              <Button variant="outline" onClick={handleBack}>
+              <Button variant="outline" onClick={handleBack} className="w-full sm:w-auto">
                 Voltar
               </Button>
             )}
           </div>
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">
               Cancelar
             </Button>
             {step === 1 && (
-              <Button onClick={handleNextToPeriod} disabled={totalCombinations === 0}>
+              <Button onClick={handleNextToPeriod} disabled={totalCombinations === 0} className="w-full sm:w-auto">
                 Próximo
               </Button>
             )}
             {step === 2 && (
-              <Button onClick={handleNextToPrice}>
+              <Button onClick={handleNextToPrice} className="w-full sm:w-auto">
                 Próximo
               </Button>
             )}
             {step === 3 && (
-              <Button onClick={handleSave}>
+              <Button onClick={handleSave} className="w-full sm:w-auto">
                 Salvar ({totalCombinations * daysCount})
               </Button>
             )}

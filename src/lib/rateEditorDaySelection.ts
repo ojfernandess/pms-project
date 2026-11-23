@@ -40,13 +40,16 @@ export function filterDatesBySelection(
   return allDatesInRange.filter((d) => selectedWeekdays.has(weekdayIndexFromDateStr(d)));
 }
 
-export function validateRateDateSelection(params: {
-  startDate: Date;
-  endDate: Date;
-  mode: RateDateSelectionMode;
-  selectedWeekdays: Set<number>;
-  specificDates: Set<string>;
-}): string | null {
+export function validateRateDateSelection(
+  params: {
+    startDate: Date;
+    endDate: Date;
+    mode: RateDateSelectionMode;
+    selectedWeekdays: Set<number>;
+    specificDates: Set<string>;
+  },
+  options?: { allowEmptySpecific?: boolean },
+): string | null {
   const { startDate, endDate, mode, selectedWeekdays, specificDates } = params;
   if (startDate > endDate) return "A data inicial deve ser anterior ou igual à data final.";
   const span = differenceInDays(endDate, startDate) + 1;
@@ -58,6 +61,7 @@ export function validateRateDateSelection(params: {
     return "Marque ao menos um dia da semana.";
   }
   if (mode === "specific" && specificDates.size === 0) {
+    if (options?.allowEmptySpecific) return null;
     return "Selecione ao menos uma data específica.";
   }
   return null;

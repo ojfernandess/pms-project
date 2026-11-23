@@ -12,7 +12,10 @@ import { CalendarIcon } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RatePlan } from "@/hooks/useRateSystem";
 import { toast } from "sonner";
-import { RateDaySelectionFields } from "@/components/rate-system/RateDaySelectionFields";
+import {
+  RateDaySelectionFields,
+  RateSpecificDatesPriceSection,
+} from "@/components/rate-system/RateDaySelectionFields";
 import {
   eachDateStringInRange,
   filterDatesBySelection,
@@ -226,13 +229,16 @@ export const BulkEditDialog = memo(({
   }, []);
 
   const handleNextToValues = () => {
-    const err = validateRateDateSelection({
-      startDate: bulkStartDate,
-      endDate: bulkEndDate,
-      mode: dateMode,
-      selectedWeekdays,
-      specificDates,
-    });
+    const err = validateRateDateSelection(
+      {
+        startDate: bulkStartDate,
+        endDate: bulkEndDate,
+        mode: dateMode,
+        selectedWeekdays,
+        specificDates,
+      },
+      { allowEmptySpecific: dateMode === "specific" },
+    );
     if (err) {
       toast.error(err);
       return;
@@ -380,13 +386,16 @@ export const BulkEditDialog = memo(({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[calc(100vw-1.25rem)] sm:w-full max-w-3xl max-h-[min(92vh,56rem)] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Edição em Lote</DialogTitle>
           <DialogDescription>
             {step === 1 && "Selecione as categorias e os planos tarifários para cada uma"}
             {step === 2 && "Defina o período (data inicial e final)"}
-            {step === 3 && "Defina o tipo de ajuste e valor para cada combinação"}
+            {step === 3 &&
+              (dateMode === "specific"
+                ? "Selecione as datas, defina os valores e o ajuste por categoria/plano"
+                : "Defina o tipo de ajuste e valor para cada combinação")}
           </DialogDescription>
         </DialogHeader>
 
@@ -579,8 +588,10 @@ export const BulkEditDialog = memo(({
                   {format(bulkEndDate, "dd/MM/yyyy", { locale: ptBR })}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Período: {periodDaysCount} dia(s) · {daysCount} dia(s) selecionado(s) · até{" "}
-                  {totalCombinations * daysCount} atualização(ões)
+                  Período: {periodDaysCount} dia(s) no calendário
+                  {dateMode !== "specific" &&
+                    ` · ${daysCount} dia(s) selecionado(s) · até ${totalCombinations * daysCount} atualização(ões)`}
+                  {dateMode === "specific" && " · datas e valores na próxima etapa"}
                 </p>
             </div>
 
@@ -600,10 +611,7 @@ export const BulkEditDialog = memo(({
                   setSpecificDates(new Set());
                   setSpecificDatePrices({});
                 }}
-                specificDatePrices={specificDatePrices}
-                onSpecificDatePriceChange={(d, v) =>
-                  setSpecificDatePrices((prev) => ({ ...prev, [d]: v }))
-                }
+                specificUiPlacement="deferred"
               />
             </div>
           )}
@@ -629,6 +637,27 @@ export const BulkEditDialog = memo(({
                   </p>
             </div>
           </div>
+
+              {dateMode === "specific" && (
+                <RateSpecificDatesPriceSection
+                  startDate={bulkStartDate}
+                  endDate={bulkEndDate}
+                  specificDates={specificDates}
+                  onToggleSpecificDate={toggleSpecificDate}
+                  onSelectAllSpecific={() =>
+                    setSpecificDates(new Set(eachDateStringInRange(bulkStartDate, bulkEndDate)))
+                  }
+                  onClearSpecific={() => {
+                    setSpecificDates(new Set());
+                    setSpecificDatePrices({});
+                  }}
+                  specificDatePrices={specificDatePrices}
+                  onSpecificDatePriceChange={(d, v) =>
+                    setSpecificDatePrices((prev) => ({ ...prev, [d]: v }))
+                  }
+                  valueLabel="Valor a substituir (R$)"
+                />
+              )}
 
           <div>
                 <div className="flex items-center justify-between mb-2">
@@ -714,7 +743,11 @@ export const BulkEditDialog = memo(({
                                     </Select>
                                   </div>
                                   <div>
-                                    <Label className="text-xs">Valor *</Label>
+                                    <Label className="text-xs">
+                                      {dateMode === "specific"
+                                        ? "Ajuste padrão (opcional — datas sem valor definido) *"
+                                        : "Valor *"}
+                                    </Label>
             <Input
                                       type="text"
                                       inputMode="decimal"
@@ -740,37 +773,39 @@ export const BulkEditDialog = memo(({
                   })}
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Defina o tipo de ajuste e valor para cada combinação de categoria e plano tarifário
+                  {dateMode === "specific"
+                    ? "Use a seção de datas acima para valores por data; o ajuste padrão cobre datas sem valor individual."
+                    : "Defina o tipo de ajuste e valor para cada combinação de categoria e plano tarifário"}
                 </p>
               </div>
             </div>
           )}
         </div>
 
-        <div className="flex justify-between gap-3 mt-6">
-          <div>
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-2 sm:gap-3 mt-6 pt-2 border-t sticky bottom-0 bg-background">
+          <div className="w-full sm:w-auto">
             {step > 1 && (
-              <Button variant="outline" onClick={handleBack}>
+              <Button variant="outline" onClick={handleBack} className="w-full sm:w-auto">
                 Voltar
               </Button>
             )}
           </div>
-          <div className="flex gap-3">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">
             Cancelar
           </Button>
             {step === 1 && (
-              <Button onClick={handleNextToPeriod} disabled={totalCombinations === 0}>
+              <Button onClick={handleNextToPeriod} disabled={totalCombinations === 0} className="w-full sm:w-auto">
                 Próximo
               </Button>
             )}
             {step === 2 && (
-              <Button onClick={handleNextToValues}>
+              <Button onClick={handleNextToValues} className="w-full sm:w-auto">
                 Próximo
               </Button>
             )}
             {step === 3 && (
-          <Button onClick={handleSave}>
+          <Button onClick={handleSave} className="w-full sm:w-auto">
                 Salvar ({totalCombinations * daysCount})
           </Button>
             )}
