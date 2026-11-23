@@ -10,7 +10,10 @@ import { useEstablishments } from "@/hooks/useEstablishments";
 import { useEstablishment } from "@/contexts/EstablishmentContext";
 import { useUserLimits } from "@/hooks/useUserLimits";
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus, Building2, Hotel, ArrowRight, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { MyEstablishmentsHome } from "@/components/user-dashboard/MyEstablishmentsHome";
+import { useAccessibleEstablishments, type DashboardEstablishment } from "@/hooks/useAccessibleEstablishments";
+import { useUserEstablishmentPreferences } from "@/hooks/useUserEstablishmentPreferences";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Dialog,
@@ -18,7 +21,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
 const UserDashboard = () => {
@@ -28,9 +30,16 @@ const UserDashboard = () => {
   // Passar undefined para que o hook busque do usuário logado automaticamente
   const { userCompanies, isLoading: isLoadingCompanies, refetch: refetchUserCompanies } = useUserCompanies(undefined);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
-  const { establishments, isLoading: isLoadingEstablishments, createEstablishment } = useEstablishments(selectedCompanyId || undefined);
+  const { createEstablishment } = useEstablishments();
   const { userLimit } = useUserLimits(userId || undefined);
   const { setSelectedEstablishment } = useEstablishment();
+  const {
+    favoriteIds,
+    lastAccessedEstablishmentId,
+    lastAccessedAt,
+    recordAccess,
+    toggleFavorite,
+  } = useUserEstablishmentPreferences(userId);
   const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
   const [establishmentDialogOpen, setEstablishmentDialogOpen] = useState(false);
   const [companyFormData, setCompanyFormData] = useState({ name: "", cnpj: "", email: "" });
@@ -237,12 +246,25 @@ const UserDashboard = () => {
     }
   }, [isEmployee, employeeCompanyIds, userCompanies, isLoadingEmployeeData]);
 
-  // Filtrar estabelecimentos:
-  // - Se o usuário é funcionário: mostrar APENAS estabelecimentos onde ele é funcionário
-  // - Se o usuário NÃO é funcionário: mostrar todos os estabelecimentos (é proprietário)
-  const filteredEstablishments = isEmployee
-    ? establishments.filter((est: any) => employeeEstablishmentIds.has(est.id))
-    : establishments;
+  const companyIds = useMemo(() => companies.map((c: any) => c.id as string), [companies]);
+
+  const {
+    data: allEstablishments = [],
+    isLoading: isLoadingEstablishments,
+  } = useAccessibleEstablishments({
+    companyIds,
+    employeeEstablishmentIds,
+    isEmployee,
+    enabled: !isLoadingEmployeeData && companyIds.length > 0,
+  });
+
+  const lastAccessedEstablishment = useMemo(
+    () =>
+      lastAccessedEstablishmentId
+        ? allEstablishments.find((e) => e.id === lastAccessedEstablishmentId) || null
+        : null,
+    [allEstablishments, lastAccessedEstablishmentId],
+  );
 
   const handleCreateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -303,7 +325,9 @@ const UserDashboard = () => {
     
     // Verificar se o usuário pode criar estabelecimentos
     const maxEstablishments = userLimit?.max_establishments ?? 1; // Se não tiver limite, assume 1 (comportamento padrão antigo)
-    const currentEstablishmentsCount = establishments.length;
+    const currentEstablishmentsCount = allEstablishments.filter(
+      (e) => e.company_id === selectedCompanyId,
+    ).length;
     
     if (maxEstablishments === 0) {
       toast.error("Você não tem permissão para criar estabelecimentos. Funcionários não podem criar estabelecimentos.");
@@ -327,6 +351,7 @@ const UserDashboard = () => {
       
       // Selecionar o estabelecimento criado e navegar para o PMS
       setSelectedEstablishment(establishment);
+      if (userId) await recordAccess({ establishmentId: establishment.id });
       navigate(`/${establishment.numeric_id}/reservas`);
       toast.success("Estabelecimento criado com sucesso!");
     } catch (error) {
@@ -334,127 +359,64 @@ const UserDashboard = () => {
     }
   };
 
-  const handleSelectEstablishment = async (establishment: any) => {
+  const handleSelectEstablishment = async (establishment: DashboardEstablishment | any) => {
     setSelectedEstablishment(establishment);
+    if (userId) {
+      try {
+        await recordAccess({ establishmentId: establishment.id });
+      } catch {
+        /* tabela pode não existir em ambientes sem migration */
+      }
+    }
     await queryClient.invalidateQueries({ queryKey: ["establishments"] });
     navigate(`/${establishment.numeric_id}/reservas`, { replace: true });
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Minhas Empresas</h1>
-          <p className="text-muted-foreground">Gerencie suas empresas e estabelecimentos</p>
-        </div>
-        {(userLimit?.max_companies ?? 1) > 0 && (
-          <Button onClick={() => setCompanyDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Nova Empresa
-          </Button>
-        )}
-      </div>
+  const openCreateEstablishment = (companyId: string) => {
+    setSelectedCompanyId(companyId);
+    setEstablishmentFormData({ name: "", type: "hotel", manager_user_id: "__current_user__" });
+    setEstablishmentDialogOpen(true);
+  };
 
-      {isLoadingCompanies ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      ) : isLoadingEmployeeData && companies.length === 0 ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+  const pageLoading =
+    isLoadingCompanies || (isLoadingEmployeeData && companies.length === 0) || isLoadingEstablishments;
+
+  return (
+    <div className="min-h-0">
+      {pageLoading && companies.length === 0 ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       ) : companies.length === 0 ? (
-        <Card className="p-8 text-center">
-          <Building2 className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+        <Card className="p-10 text-center max-w-lg mx-auto mt-8">
           <p className="text-muted-foreground mb-4">Nenhuma empresa cadastrada</p>
           {(userLimit?.max_companies ?? 1) > 0 ? (
-            <Button onClick={() => setCompanyDialogOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Criar Primeira Empresa
-            </Button>
+            <Button onClick={() => setCompanyDialogOpen(true)}>Criar primeira empresa</Button>
           ) : (
             <p className="text-sm text-muted-foreground">Você não tem permissão para criar empresas</p>
           )}
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {companies.map((company: any) => (
-            <Card key={company.id} className="p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold">{company.name}</h3>
-                  {company.cnpj && (
-                    <p className="text-sm text-muted-foreground">CNPJ: {company.cnpj}</p>
-                  )}
-                </div>
-                <Badge variant={company.is_active ? "default" : "secondary"}>
-                  {company.is_active ? "Ativa" : "Inativa"}
-                </Badge>
-              </div>
-
-              <Button
-                variant="outline"
-                className="w-full mb-2"
-                onClick={() => setSelectedCompanyId(company.id)}
-              >
-                <Building2 className="h-4 w-4 mr-2" />
-                Ver Estabelecimentos
-              </Button>
-
-              {selectedCompanyId === company.id && (
-                <div className="mt-4 space-y-2">
-                  {(userLimit?.max_establishments ?? 1) > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full"
-                      onClick={() => {
-                        setEstablishmentFormData({ name: "", type: "hotel", manager_user_id: "__current_user__" });
-                        setEstablishmentDialogOpen(true);
-                      }}
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Novo Estabelecimento
-                    </Button>
-                  )}
-
-                  {isLoadingEstablishments ? (
-                    <div className="flex items-center justify-center py-4">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    </div>
-                  ) : filteredEstablishments.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-2">
-                      Nenhum estabelecimento disponível
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {filteredEstablishments.map((establishment: any) => (
-                        <Card
-                          key={establishment.id}
-                          className="p-3 cursor-pointer hover:bg-muted transition-colors"
-                          onClick={() => handleSelectEstablishment(establishment)}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Hotel className="h-4 w-4 text-muted-foreground" />
-                              <div>
-                                <p className="font-medium text-sm">{establishment.name}</p>
-                                <p className="text-xs text-muted-foreground capitalize">
-                                  {establishment.type}
-                                </p>
-                              </div>
-                            </div>
-                            <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                        </Card>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </Card>
-          ))}
-        </div>
+        <MyEstablishmentsHome
+          companies={companies as any[]}
+          allEstablishments={allEstablishments}
+          favoriteIds={favoriteIds}
+          lastAccessedEstablishment={lastAccessedEstablishment}
+          lastAccessedAt={lastAccessedAt}
+          canCreateCompany={(userLimit?.max_companies ?? 1) > 0}
+          canCreateEstablishment={(userLimit?.max_establishments ?? 1) > 0}
+          onCreateCompany={() => setCompanyDialogOpen(true)}
+          onCreateEstablishment={openCreateEstablishment}
+          onAccessEstablishment={handleSelectEstablishment}
+          onToggleFavorite={async (establishmentId, next) => {
+            try {
+              await toggleFavorite({ establishmentId, isFavorite: next });
+            } catch (err: any) {
+              toast.error(err?.message || "Não foi possível atualizar favorito");
+            }
+          }}
+          isLoading={pageLoading}
+        />
       )}
 
       <Dialog open={companyDialogOpen} onOpenChange={setCompanyDialogOpen}>
