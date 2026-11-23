@@ -19,6 +19,9 @@ import {
 import {
   eachDateStringInRange,
   filterDatesBySelection,
+  getCalendarSelectedSpecificDates,
+  getCreateApplicableDatesForPlan,
+  getUnselectedDatesInPeriod,
   parseOptionalMoney,
   pruneSpecificDatePricesInRange,
   pruneSpecificDatesInRange,
@@ -215,6 +218,43 @@ export const CreateRateDialog = ({
     return filterDatesBySelection(all, dateMode, selectedWeekdays, specificDates);
   }, [startDate, endDate, dateMode, selectedWeekdays, specificDates]);
 
+  const calendarMarkedDates = useMemo(() => {
+    if (dateMode !== "specific") return applicableDates;
+    return getCalendarSelectedSpecificDates(startDate, endDate, specificDates);
+  }, [dateMode, applicableDates, startDate, endDate, specificDates]);
+
+  const unselectedPeriodDates = useMemo(() => {
+    if (dateMode !== "specific") return [];
+    return getUnselectedDatesInPeriod(startDate, endDate, specificDates);
+  }, [dateMode, startDate, endDate, specificDates]);
+
+  const hasAnyPlanDefaultPrice = useMemo(() => {
+    if (dateMode !== "specific") return false;
+    return Object.keys(categoryPlans).some((categoryId) =>
+      (categoryPlans[categoryId] || []).some((planId) => {
+        const plan = ratePlans.find((p) => p.id === planId);
+        const isDerived =
+          !!plan?.base_plan_id_for_rate && plan.fluctuation_type != null && plan.fluctuation_value != null;
+        const key = isDerived
+          ? `${categoryId}-${plan!.base_plan_id_for_rate!}`
+          : `${categoryId}-${planId}`;
+        return parseOptionalMoney(prices[key]?.basePrice) != null;
+      }),
+    );
+  }, [dateMode, categoryPlans, ratePlans, prices]);
+
+  const estimatedSaveDaysCount = useMemo(() => {
+    if (dateMode !== "specific") return applicableDates.length;
+    if (hasAnyPlanDefaultPrice) return calendarMarkedDates.length + unselectedPeriodDates.length;
+    return calendarMarkedDates.length;
+  }, [
+    dateMode,
+    applicableDates.length,
+    hasAnyPlanDefaultPrice,
+    calendarMarkedDates.length,
+    unselectedPeriodDates.length,
+  ]);
+
   const toggleWeekday = (dow: number, checked: boolean) => {
     setSelectedWeekdays((prev) => {
       const next = new Set(prev);
@@ -371,6 +411,9 @@ export const CreateRateDialog = ({
             generalPrice,
             specificDatePrices,
             isDerivedPlan: isDerived,
+            startDate,
+            endDate,
+            specificDates,
           });
           if (planPriceErr) {
             const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
@@ -392,14 +435,24 @@ export const CreateRateDialog = ({
             childPrice?: number;
           }> = [];
 
-          for (const dateStr of applicableDates) {
+          const baseGeneralForDates = isDerived
+            ? parseOptionalMoney(prices[getPriceKey(categoryId, plan.base_plan_id_for_rate!)]?.basePrice)
+            : generalPrice;
+          const planApplicableDates = getCreateApplicableDatesForPlan(
+            startDate,
+            endDate,
+            dateMode,
+            selectedWeekdays,
+            specificDates,
+            isDerived ? baseGeneralForDates : generalPrice,
+          );
+
+          for (const dateStr of planApplicableDates) {
             let basePrice: number | null = null;
 
             if (plan?.base_plan_id_for_rate && plan.fluctuation_type && plan.fluctuation_value != null) {
               const basePlanId = plan.base_plan_id_for_rate;
-              const baseGeneralPrice = parseOptionalMoney(
-                prices[getPriceKey(categoryId, basePlanId)]?.basePrice,
-              );
+              const baseGeneralPrice = baseGeneralForDates;
               const basePlanPrice = resolveCreateBasePlanPriceForDerived(
                 categoryId,
                 basePlanId,
@@ -411,6 +464,7 @@ export const CreateRateDialog = ({
                   useWeeklyPrices,
                   weeklyByDow: weeklyNumeric,
                   specificDatePrices,
+                  specificDatesSelected: specificDates,
                   exceptions,
                 },
               );
@@ -429,6 +483,7 @@ export const CreateRateDialog = ({
                 useWeeklyPrices,
                 weeklyByDow: weeklyNumeric,
                 specificDatePrices,
+                specificDatesSelected: specificDates,
                 exceptions,
               });
             }
@@ -492,7 +547,7 @@ export const CreateRateDialog = ({
     (sum, catId) => sum + (categoryPlans[catId]?.length || 0),
     0
   );
-  const daysCount = applicableDates.length;
+  const daysCount = estimatedSaveDaysCount;
   const periodDaysCount = differenceInDays(endDate, startDate) + 1;
 
   return (
@@ -727,7 +782,14 @@ export const CreateRateDialog = ({
                   </p>
                   <p>
                     <strong>Período:</strong> {format(startDate, "dd/MM/yyyy", { locale: ptBR })} até{" "}
-                    {format(endDate, "dd/MM/yyyy", { locale: ptBR })} · {daysCount} dia(s) aplicável(eis)
+                    {format(endDate, "dd/MM/yyyy", { locale: ptBR })}
+                    {dateMode === "specific"
+                      ? ` · ${calendarMarkedDates.length} data(s) marcada(s)${
+                          hasAnyPlanDefaultPrice
+                            ? ` · até ${daysCount} dia(s) com valor padrão nos demais dias`
+                            : ""
+                        }`
+                      : ` · ${daysCount} dia(s) aplicável(eis)`}
                   </p>
                   <p>
                     <strong>Total de tarifários:</strong> {totalCombinations * daysCount}
@@ -915,7 +977,7 @@ export const CreateRateDialog = ({
                                       <div>
                                         <Label className="text-xs">
                                           {dateMode === "specific"
-                                            ? "Valor padrão (opcional — datas sem valor definido) *"
+                                            ? "Valor padrão (opcional)"
                                             : "Preço Base *"}
                                         </Label>
                                         <Input
@@ -930,7 +992,13 @@ export const CreateRateDialog = ({
                                             const finalValue = parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : cleanValue;
                                             handlePriceChange(categoryId, planId, "basePrice", finalValue);
                                           }}
-                                          placeholder={useWeeklyPrices ? "Usar preços por dia da semana" : "0.00"}
+                                          placeholder={
+                                            dateMode === "specific"
+                                              ? "Dias não marcados e datas sem valor individual"
+                                              : useWeeklyPrices
+                                                ? "Usar preços por dia da semana"
+                                                : "0.00"
+                                          }
                                           className="h-9"
                                         />
                                       </div>
@@ -983,7 +1051,7 @@ export const CreateRateDialog = ({
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   {dateMode === "specific"
-                    ? "Use a seção de datas acima para valores por data; o campo padrão cobre datas sem valor individual."
+                    ? "Datas marcadas acima: valor por data tem prioridade. Valor padrão é opcional para datas marcadas sem valor individual e para os dias do período que não estiverem marcados."
                     : "Valor geral por combinação (ou use preços por dia da semana acima)"}
                 </p>
               </div>

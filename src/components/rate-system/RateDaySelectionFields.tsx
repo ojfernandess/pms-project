@@ -184,7 +184,8 @@ export function RateSpecificDatesPriceSection({
       <div>
         <Label className="text-sm font-semibold">Datas e valores (somente datas específicas)</Label>
         <p className="text-xs text-muted-foreground mt-1">
-          Selecione as datas e use um valor único para todas ou preencha cada data separadamente.
+          Marque as datas com preço especial acima. Demais dias do período podem usar o valor padrão por
+          categoria/plano (opcional).
         </p>
       </div>
 

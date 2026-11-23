@@ -23,7 +23,11 @@ import { BulkEditDialog } from "./BulkEditDialog";
 import { RateMetricsSummary } from "./RateMetricsSummary";
 import { CreateRateDialog } from "./CreateRateDialog";
 import { useLazyCalendarRange, normalizeRateCalendarDateKey } from "@/lib/rateSystem";
-import { resolveBulkAdjustedPrice } from "@/lib/rateEditorDaySelection";
+import {
+  getCreateApplicableDatesForPlan,
+  hasBulkPlanDefaultAdjustment,
+  resolveBulkAdjustedPrice,
+} from "@/lib/rateEditorDaySelection";
 
 interface RateCalendarGridProps {
   ratePlans: RatePlan[];
@@ -1145,11 +1149,11 @@ export const RateCalendarGrid = ({
               child_price?: number;
             }> = [];
 
-            const dates = data.applicableDates;
+            const specificDatesSet = new Set(data.specificDates ?? []);
 
             // Buscar preços atuais do rate_calendar para calcular os novos valores
             const filteredRateCalendar = rateCalendar.filter(
-              r => dates.includes(r.date)
+              r => data.applicableDates.includes(r.date)
             );
 
             // Tarifa Base + Flutuação: aplicar somente ao criar tarifário em massa
@@ -1166,7 +1170,17 @@ export const RateCalendarGrid = ({
               const category = filteredCategories.find(c => c.id === item.categoryId);
               const plan = ratePlans.find(p => p.id === item.planId);
               const basePlanId = plan?.base_plan_id_for_rate;
-              
+              const planHasDefault = hasBulkPlanDefaultAdjustment(String(item.adjustmentValue));
+              const weekdays = new Set(data.selectedWeekdays ?? [0, 1, 2, 3, 4, 5, 6]);
+              const dates = getCreateApplicableDatesForPlan(
+                data.startDate,
+                data.endDate,
+                data.dateMode,
+                weekdays,
+                specificDatesSet,
+                planHasDefault ? 1 : null,
+              );
+
               for (const dateStr of dates) {
                 let currentPrice: number;
                 
@@ -1187,6 +1201,7 @@ export const RateCalendarGrid = ({
                   dateStr,
                   data.dateMode,
                   data.specificDatePrices,
+                  specificDatesSet,
                 );
 
                 const existingEntry = getRateEntry(item.planId, item.categoryId, dateStr);

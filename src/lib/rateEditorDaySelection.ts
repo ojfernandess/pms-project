@@ -108,6 +108,53 @@ export function allSelectedDatesHaveIndividualPrices(
   return dates.every((d) => parseOptionalMoney(specificDatePrices[d]) != null);
 }
 
+/** Datas marcadas no calendário (modo específico), dentro do período. */
+export function getCalendarSelectedSpecificDates(
+  startDate: Date,
+  endDate: Date,
+  specificDates: Set<string>,
+): string[] {
+  return eachDateStringInRange(startDate, endDate).filter((d) => specificDates.has(d));
+}
+
+/** Dias do período que não estão marcados no modo específico. */
+export function getUnselectedDatesInPeriod(
+  startDate: Date,
+  endDate: Date,
+  specificDates: Set<string>,
+): string[] {
+  return eachDateStringInRange(startDate, endDate).filter((d) => !specificDates.has(d));
+}
+
+/**
+ * Datas em que este plano receberá tarifa no criar/editar.
+ * Modo específico: datas marcadas + (opcional) demais dias do período se houver valor padrão do plano.
+ */
+export function getCreateApplicableDatesForPlan(
+  startDate: Date,
+  endDate: Date,
+  mode: RateDateSelectionMode,
+  selectedWeekdays: Set<number>,
+  specificDates: Set<string>,
+  planDefaultValue: number | null,
+): string[] {
+  const all = eachDateStringInRange(startDate, endDate);
+  if (mode !== "specific") {
+    return filterDatesBySelection(all, mode, selectedWeekdays, specificDates);
+  }
+  const marked = getCalendarSelectedSpecificDates(startDate, endDate, specificDates);
+  if (planDefaultValue == null || planDefaultValue <= 0) return marked;
+  const rest = getUnselectedDatesInPeriod(startDate, endDate, specificDates);
+  return [...marked, ...rest];
+}
+
+/** Indica se o plano tem ajuste padrão preenchido (lote), para incluir dias não marcados. */
+export function hasBulkPlanDefaultAdjustment(adjustmentValueStr: string | undefined): boolean {
+  const s = (adjustmentValueStr ?? "").replace(",", ".").trim();
+  if (!s) return false;
+  return !Number.isNaN(Number(s));
+}
+
 /**
  * Prioridade (mockup criar tarifário):
  * exceção → valor individual da data (modo específico) → preço por dia da semana → valor geral.
@@ -120,6 +167,7 @@ export function resolveCreateBasePriceForDate(
     useWeeklyPrices: boolean;
     weeklyByDow: Partial<Record<number, number>>;
     specificDatePrices: Record<string, string>;
+    specificDatesSelected?: Set<string>;
     exceptions: Record<string, number>;
   },
 ): number | null {
@@ -131,8 +179,11 @@ export function resolveCreateBasePriceForDate(
   }
 
   if (opts.mode === "specific") {
-    const individual = parseOptionalMoney(opts.specificDatePrices[dateStr]);
-    if (individual != null) return individual;
+    const isMarked = !opts.specificDatesSelected || opts.specificDatesSelected.has(dateStr);
+    if (isMarked) {
+      const individual = parseOptionalMoney(opts.specificDatePrices[dateStr]);
+      if (individual != null) return individual;
+    }
   }
 
   if (opts.useWeeklyPrices) {
@@ -159,6 +210,7 @@ export function resolveCreateBasePlanPriceForDerived(
     useWeeklyPrices: boolean;
     weeklyByDow: Partial<Record<number, number>>;
     specificDatePrices: Record<string, string>;
+    specificDatesSelected?: Set<string>;
     exceptions: Record<string, number>;
   },
 ): number | null {
@@ -172,6 +224,7 @@ export function resolveCreateBasePlanPriceForDerived(
     useWeeklyPrices: opts.useWeeklyPrices,
     weeklyByDow: opts.weeklyByDow,
     specificDatePrices: opts.specificDatePrices,
+    specificDatesSelected: opts.specificDatesSelected,
     exceptions: opts.exceptions,
   });
   if (resolved != null && resolved > 0) {
@@ -188,10 +241,14 @@ export function resolveBulkAdjustedPrice(
   dateStr: string,
   mode: RateDateSelectionMode,
   specificDatePrices: Record<string, string>,
+  specificDatesSelected?: Set<string>,
 ): number {
   if (mode === "specific") {
-    const perDate = parseOptionalMoney(specificDatePrices[dateStr]);
-    if (perDate != null) return perDate;
+    const isMarked = !specificDatesSelected || specificDatesSelected.has(dateStr);
+    if (isMarked) {
+      const perDate = parseOptionalMoney(specificDatePrices[dateStr]);
+      if (perDate != null) return perDate;
+    }
   }
 
   let newPrice = currentPrice;
@@ -212,12 +269,34 @@ export function validateCreatePlanPricing(params: {
   generalPrice: number | null;
   specificDatePrices: Record<string, string>;
   isDerivedPlan: boolean;
+  startDate?: Date;
+  endDate?: Date;
+  specificDates?: Set<string>;
 }): string | null {
-  const { mode, applicableDates, useWeeklyPrices, generalPrice, specificDatePrices, isDerivedPlan } =
-    params;
+  const {
+    mode,
+    applicableDates,
+    useWeeklyPrices,
+    generalPrice,
+    specificDatePrices,
+    isDerivedPlan,
+    startDate,
+    endDate,
+    specificDates,
+  } = params;
   if (isDerivedPlan) return null;
 
   if (useWeeklyPrices) return null;
+
+  if (generalPrice != null && generalPrice > 0) return null;
+
+  if (mode === "specific" && startDate && endDate && specificDates) {
+    const marked = getCalendarSelectedSpecificDates(startDate, endDate, specificDates);
+    if (marked.length > 0 && allSelectedDatesHaveIndividualPrices(marked, specificDatePrices)) {
+      return null;
+    }
+    return "Informe o valor padrão (opcional para dias não marcados e datas sem valor) ou preencha cada data marcada.";
+  }
 
   if (
     mode === "specific" &&
@@ -226,10 +305,8 @@ export function validateCreatePlanPricing(params: {
     return null;
   }
 
-  if (generalPrice != null && generalPrice > 0) return null;
-
   if (mode === "specific") {
-    return "Informe o valor geral da diária ou preencha um valor para cada data selecionada.";
+    return "Informe o valor padrão (opcional para dias não marcados e datas sem valor) ou preencha cada data marcada.";
   }
   return "Informe o valor da diária.";
 }

@@ -19,6 +19,10 @@ import {
 import {
   eachDateStringInRange,
   filterDatesBySelection,
+  getCalendarSelectedSpecificDates,
+  getCreateApplicableDatesForPlan,
+  getUnselectedDatesInPeriod,
+  hasBulkPlanDefaultAdjustment,
   allSelectedDatesHaveIndividualPrices,
   hasPerDateSpecificPrices,
   pruneSpecificDatePricesInRange,
@@ -46,7 +50,9 @@ interface BulkEditDialogProps {
     endDate: Date;
     applicableDates: string[];
     dateMode: RateDateSelectionMode;
+    specificDates: string[];
     specificDatePrices: Record<string, string>;
+    selectedWeekdays: number[];
   }) => Promise<void>;
 }
 
@@ -204,6 +210,16 @@ export const BulkEditDialog = memo(({
     return filterDatesBySelection(all, dateMode, selectedWeekdays, specificDates);
   }, [bulkStartDate, bulkEndDate, dateMode, selectedWeekdays, specificDates]);
 
+  const calendarMarkedDates = useMemo(() => {
+    if (dateMode !== "specific") return applicableDates;
+    return getCalendarSelectedSpecificDates(bulkStartDate, bulkEndDate, specificDates);
+  }, [dateMode, applicableDates, bulkStartDate, bulkEndDate, specificDates]);
+
+  const unselectedPeriodDates = useMemo(() => {
+    if (dateMode !== "specific") return [];
+    return getUnselectedDatesInPeriod(bulkStartDate, bulkEndDate, specificDates);
+  }, [dateMode, bulkStartDate, bulkEndDate, specificDates]);
+
   const toggleWeekday = useCallback((dow: number, checked: boolean) => {
     setSelectedWeekdays((prev) => {
       const next = new Set(prev);
@@ -296,7 +312,7 @@ export const BulkEditDialog = memo(({
 
     const allDatesHaveIndividual =
       dateMode === "specific" &&
-      allSelectedDatesHaveIndividualPrices(applicableDates, specificDatePrices);
+      allSelectedDatesHaveIndividualPrices(calendarMarkedDates, specificDatePrices);
 
     const hasAnyPerDate = dateMode === "specific" && hasPerDateSpecificPrices(specificDatePrices);
 
@@ -330,11 +346,13 @@ export const BulkEditDialog = memo(({
         const adjType = priceData?.adjustmentType || adjustmentType;
         const adjValueStr = priceData?.adjustmentValue?.replace(',', '.') || '';
         
-        const needsGlobalValue = !allDatesHaveIndividual;
-        if (
-          needsGlobalValue &&
-          (!adjValueStr || parseFloat(adjValueStr) === 0 || isNaN(parseFloat(adjValueStr)))
-        ) {
+        const needsGlobalValue =
+          dateMode !== "specific"
+            ? !adjValueStr || parseFloat(adjValueStr) === 0 || isNaN(parseFloat(adjValueStr))
+            : !allDatesHaveIndividual &&
+              !hasAnyPerDate &&
+              !hasBulkPlanDefaultAdjustment(adjValueStr);
+        if (needsGlobalValue) {
           const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
           const planName = ratePlans.find((p) => p.id === planId)?.name || planId;
           missingValues.push(`${categoryName} - ${planName}`);
@@ -366,7 +384,9 @@ export const BulkEditDialog = memo(({
       endDate: bulkEndDate,
       applicableDates,
       dateMode,
+      specificDates: [...specificDates],
       specificDatePrices,
+      selectedWeekdays: [...selectedWeekdays],
     });
     onOpenChange(false);
     } catch (error: any) {
@@ -381,7 +401,22 @@ export const BulkEditDialog = memo(({
     (sum, catId) => sum + (categoryPlans[catId]?.length || 0),
     0
   );
-  const daysCount = applicableDates.length;
+  const hasAnyPlanDefaultAdj = useMemo(() => {
+    if (dateMode !== "specific") return false;
+    return Object.keys(categoryPlans).some((categoryId) =>
+      (categoryPlans[categoryId] || []).some((planId) => {
+        const key = `${categoryId}-${planId}`;
+        const priceData = prices[key];
+        const adjValueStr = priceData?.adjustmentValue ?? "";
+        return hasBulkPlanDefaultAdjustment(adjValueStr);
+      }),
+    );
+  }, [dateMode, categoryPlans, prices]);
+
+  const daysCount =
+    dateMode === "specific" && hasAnyPlanDefaultAdj
+      ? calendarMarkedDates.length + unselectedPeriodDates.length
+      : applicableDates.length;
   const periodDaysCount = differenceInDays(bulkEndDate, bulkStartDate) + 1;
 
   return (
@@ -745,7 +780,7 @@ export const BulkEditDialog = memo(({
                                   <div>
                                     <Label className="text-xs">
                                       {dateMode === "specific"
-                                        ? "Ajuste padrão (opcional — datas sem valor definido) *"
+                                        ? "Ajuste padrão (opcional)"
                                         : "Valor *"}
                                     </Label>
             <Input
@@ -774,7 +809,7 @@ export const BulkEditDialog = memo(({
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   {dateMode === "specific"
-                    ? "Use a seção de datas acima para valores por data; o ajuste padrão cobre datas sem valor individual."
+                    ? "Datas marcadas: valores por data têm prioridade. Ajuste padrão é opcional para dias não marcados e datas marcadas sem valor individual."
                     : "Defina o tipo de ajuste e valor para cada combinação de categoria e plano tarifário"}
                 </p>
               </div>
