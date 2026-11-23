@@ -70,7 +70,44 @@ export function parseOptionalMoney(value: string | undefined): number | null {
   return Math.round(n * 100) / 100;
 }
 
-/** Prioridade: preço da data (modo específico) → exceção → dia da semana → valor geral */
+export function pruneSpecificDatesInRange(
+  specificDates: Set<string>,
+  start: Date,
+  end: Date,
+): Set<string> {
+  const allowed = new Set(eachDateStringInRange(start, end));
+  return new Set([...specificDates].filter((d) => allowed.has(d)));
+}
+
+export function pruneSpecificDatePricesInRange(
+  prices: Record<string, string>,
+  start: Date,
+  end: Date,
+): Record<string, string> {
+  const allowed = new Set(eachDateStringInRange(start, end));
+  const next: Record<string, string> = {};
+  for (const [d, v] of Object.entries(prices)) {
+    if (allowed.has(d)) next[d] = v;
+  }
+  return next;
+}
+
+export function hasPerDateSpecificPrices(specificDatePrices: Record<string, string>): boolean {
+  return Object.values(specificDatePrices).some((v) => parseOptionalMoney(v) != null);
+}
+
+export function allSelectedDatesHaveIndividualPrices(
+  dates: string[],
+  specificDatePrices: Record<string, string>,
+): boolean {
+  if (dates.length === 0) return false;
+  return dates.every((d) => parseOptionalMoney(specificDatePrices[d]) != null);
+}
+
+/**
+ * Prioridade (mockup criar tarifário):
+ * exceção → valor individual da data (modo específico) → preço por dia da semana → valor geral.
+ */
 export function resolveCreateBasePriceForDate(
   dateStr: string,
   opts: {
@@ -84,15 +121,14 @@ export function resolveCreateBasePriceForDate(
 ): number | null {
   const dow = weekdayIndexFromDateStr(dateStr);
 
-  if (opts.mode === "specific") {
-    const individual = parseOptionalMoney(opts.specificDatePrices[dateStr]);
-    if (individual != null) return individual;
-    if (opts.generalPrice != null && opts.generalPrice > 0) return opts.generalPrice;
-  }
-
   if (Object.prototype.hasOwnProperty.call(opts.exceptions, dateStr)) {
     const ex = opts.exceptions[dateStr];
     if (Number.isFinite(ex) && ex > 0) return ex;
+  }
+
+  if (opts.mode === "specific") {
+    const individual = parseOptionalMoney(opts.specificDatePrices[dateStr]);
+    if (individual != null) return individual;
   }
 
   if (opts.useWeeklyPrices) {
@@ -101,5 +137,72 @@ export function resolveCreateBasePriceForDate(
   }
 
   if (opts.generalPrice != null && opts.generalPrice > 0) return opts.generalPrice;
+  return null;
+}
+
+/** Edição em lote: valor por data (somente substituir) tem prioridade sobre o ajuste geral. */
+export function resolveBulkAdjustedPrice(
+  currentPrice: number,
+  adjustmentType: "percentage" | "fixed" | "replace",
+  adjustmentValue: number,
+  dateStr: string,
+  mode: RateDateSelectionMode,
+  specificDatePrices: Record<string, string>,
+): number {
+  if (mode === "specific") {
+    const perDate = parseOptionalMoney(specificDatePrices[dateStr]);
+    if (perDate != null) return perDate;
+  }
+
+  let newPrice = currentPrice;
+  if (adjustmentType === "percentage") {
+    newPrice = currentPrice * (1 + adjustmentValue / 100);
+  } else if (adjustmentType === "fixed") {
+    newPrice = currentPrice + adjustmentValue;
+  } else {
+    newPrice = adjustmentValue;
+  }
+  return Math.max(0, Math.round(newPrice * 100) / 100);
+}
+
+export function validateCreatePlanPricing(params: {
+  mode: RateDateSelectionMode;
+  applicableDates: string[];
+  useWeeklyPrices: boolean;
+  generalPrice: number | null;
+  specificDatePrices: Record<string, string>;
+  isDerivedPlan: boolean;
+}): string | null {
+  const { mode, applicableDates, useWeeklyPrices, generalPrice, specificDatePrices, isDerivedPlan } =
+    params;
+  if (isDerivedPlan) return null;
+
+  if (useWeeklyPrices) return null;
+
+  if (
+    mode === "specific" &&
+    allSelectedDatesHaveIndividualPrices(applicableDates, specificDatePrices)
+  ) {
+    return null;
+  }
+
+  if (generalPrice != null && generalPrice > 0) return null;
+
+  if (mode === "specific") {
+    return "Informe o valor geral da diária ou preencha um valor para cada data selecionada.";
+  }
+  return "Informe o valor da diária.";
+}
+
+export function validateBulkSpecificDatePrices(
+  mode: RateDateSelectionMode,
+  specificDatePrices: Record<string, string>,
+  adjustmentTypes: Array<"percentage" | "fixed" | "replace">,
+): string | null {
+  if (mode !== "specific" || !hasPerDateSpecificPrices(specificDatePrices)) return null;
+  const invalid = adjustmentTypes.some((t) => t !== "replace");
+  if (invalid) {
+    return "Para preços individuais por data, use o tipo Substituir valor (R$).";
+  }
   return null;
 }

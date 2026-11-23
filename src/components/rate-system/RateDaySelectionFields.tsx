@@ -127,8 +127,8 @@ export function RateDaySelectionFields({
           {specificDatePrices && onSpecificDatePriceChange && specificDates.size > 0 && (
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">
-                Defina um valor diferente para cada data selecionada (opcional). Se vazio, usa o valor geral do passo
-                seguinte.
+                Defina um valor diferente para cada data selecionada (opcional). Valor individual tem prioridade sobre o
+                geral. Datas não selecionadas não são alteradas.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto">
                 {[...specificDates].sort().map((dateStr) => {

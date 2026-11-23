@@ -19,7 +19,10 @@ import {
   eachDateStringInRange,
   filterDatesBySelection,
   parseOptionalMoney,
+  pruneSpecificDatePricesInRange,
+  pruneSpecificDatesInRange,
   resolveCreateBasePriceForDate,
+  validateCreatePlanPricing,
   validateRateDateSelection,
   type RateDateSelectionMode,
 } from "@/lib/rateEditorDaySelection";
@@ -95,6 +98,19 @@ export const CreateRateDialog = ({
       setExceptionValue("");
     }
   }, [open]);
+
+  useEffect(() => {
+    setSpecificDates((prev) => pruneSpecificDatesInRange(prev, startDate, endDate));
+    setSpecificDatePrices((prev) => pruneSpecificDatePricesInRange(prev, startDate, endDate));
+    setExceptions((prev) => {
+      const allowed = new Set(eachDateStringInRange(startDate, endDate));
+      const next: Record<string, number> = {};
+      for (const [d, v] of Object.entries(prev)) {
+        if (allowed.has(d)) next[d] = v;
+      }
+      return next;
+    });
+  }, [startDate, endDate]);
 
   const handleCategoryToggle = (categoryId: string, checked: boolean) => {
     if (checked) {
@@ -341,6 +357,22 @@ export const CreateRateDialog = ({
           const key = getPriceKey(categoryId, planId);
           const priceData = prices[key];
           const generalPrice = parseOptionalMoney(priceData?.basePrice);
+          const isDerived =
+            !!plan?.base_plan_id_for_rate && plan.fluctuation_type != null && plan.fluctuation_value != null;
+          const planPriceErr = validateCreatePlanPricing({
+            mode: dateMode,
+            applicableDates,
+            useWeeklyPrices,
+            generalPrice,
+            specificDatePrices,
+            isDerivedPlan: isDerived,
+          });
+          if (planPriceErr) {
+            const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
+            const planName = plan?.name || planId;
+            errors.push(`${categoryName} · ${planName}: ${planPriceErr}`);
+            continue;
+          }
           const adultPriceValue = priceData?.adultPrice
             ? parseFloat(priceData.adultPrice.replace(",", "."))
             : undefined;

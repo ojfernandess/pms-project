@@ -16,6 +16,10 @@ import { RateDaySelectionFields } from "@/components/rate-system/RateDaySelectio
 import {
   eachDateStringInRange,
   filterDatesBySelection,
+  allSelectedDatesHaveIndividualPrices,
+  hasPerDateSpecificPrices,
+  pruneSpecificDatePricesInRange,
+  pruneSpecificDatesInRange,
   validateRateDateSelection,
   type RateDateSelectionMode,
 } from "@/lib/rateEditorDaySelection";
@@ -38,6 +42,8 @@ interface BulkEditDialogProps {
     startDate: Date;
     endDate: Date;
     applicableDates: string[];
+    dateMode: RateDateSelectionMode;
+    specificDatePrices: Record<string, string>;
   }) => Promise<void>;
 }
 
@@ -64,6 +70,7 @@ export const BulkEditDialog = memo(({
     () => new Set([0, 1, 2, 3, 4, 5, 6]),
   );
   const [specificDates, setSpecificDates] = useState<Set<string>>(() => new Set());
+  const [specificDatePrices, setSpecificDatePrices] = useState<Record<string, string>>({});
   const prevOpenRef = useRef(false);
 
   // Resetar estado quando o dialog abrir
@@ -81,12 +88,18 @@ export const BulkEditDialog = memo(({
         setDateMode("all");
         setSelectedWeekdays(new Set([0, 1, 2, 3, 4, 5, 6]));
         setSpecificDates(new Set());
+        setSpecificDatePrices({});
       }
       prevOpenRef.current = true;
     } else {
       prevOpenRef.current = false;
     }
   }, [open, startDate, endDate]);
+
+  useEffect(() => {
+    setSpecificDates((prev) => pruneSpecificDatesInRange(prev, bulkStartDate, bulkEndDate));
+    setSpecificDatePrices((prev) => pruneSpecificDatePricesInRange(prev, bulkStartDate, bulkEndDate));
+  }, [bulkStartDate, bulkEndDate]);
 
   const handleCategoryToggle = useCallback((categoryId: string, checked: boolean) => {
     if (checked) {
@@ -200,8 +213,14 @@ export const BulkEditDialog = memo(({
   const toggleSpecificDate = useCallback((dateStr: string) => {
     setSpecificDates((prev) => {
       const next = new Set(prev);
-      if (next.has(dateStr)) next.delete(dateStr);
-      else next.add(dateStr);
+      if (next.has(dateStr)) {
+        next.delete(dateStr);
+        setSpecificDatePrices((p) => {
+          const copy = { ...p };
+          delete copy[dateStr];
+          return copy;
+        });
+      } else next.add(dateStr);
       return next;
     });
   }, []);
@@ -257,9 +276,35 @@ export const BulkEditDialog = memo(({
       return;
     }
 
-    if (bulkStartDate > bulkEndDate) {
-      toast.error("A data inicial deve ser anterior à data final");
+    const selectionErr = validateRateDateSelection({
+      startDate: bulkStartDate,
+      endDate: bulkEndDate,
+      mode: dateMode,
+      selectedWeekdays,
+      specificDates,
+    });
+    if (selectionErr) {
+      toast.error(selectionErr);
       return;
+    }
+
+    const allDatesHaveIndividual =
+      dateMode === "specific" &&
+      allSelectedDatesHaveIndividualPrices(applicableDates, specificDatePrices);
+
+    const hasAnyPerDate = dateMode === "specific" && hasPerDateSpecificPrices(specificDatePrices);
+
+    if (hasAnyPerDate) {
+      for (const categoryId of selectedCategories) {
+        for (const planId of categoryPlans[categoryId] || []) {
+          const key = getPriceKey(categoryId, planId);
+          const adjType = prices[key]?.adjustmentType || adjustmentType;
+          if (adjType !== "replace") {
+            toast.error("Para preços individuais por data, use o tipo Substituir valor (R$).");
+            return;
+          }
+        }
+      }
     }
 
     // Validar que todos os valores foram preenchidos
@@ -279,16 +324,25 @@ export const BulkEditDialog = memo(({
         const adjType = priceData?.adjustmentType || adjustmentType;
         const adjValueStr = priceData?.adjustmentValue?.replace(',', '.') || '';
         
-        if (!adjValueStr || parseFloat(adjValueStr) === 0 || isNaN(parseFloat(adjValueStr))) {
+        const needsGlobalValue = !allDatesHaveIndividual;
+        if (
+          needsGlobalValue &&
+          (!adjValueStr || parseFloat(adjValueStr) === 0 || isNaN(parseFloat(adjValueStr)))
+        ) {
           const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
           const planName = ratePlans.find((p) => p.id === planId)?.name || planId;
           missingValues.push(`${categoryName} - ${planName}`);
         } else {
+          const finalType = hasAnyPerDate ? "replace" : adjType;
+          const finalValue =
+            allDatesHaveIndividual && !adjValueStr
+              ? 0
+              : parseFloat(adjValueStr || "0");
           categoryPlansData.push({
             categoryId,
             planId,
-            adjustmentType: adjType,
-            adjustmentValue: parseFloat(adjValueStr),
+            adjustmentType: finalType,
+            adjustmentValue: finalValue,
           });
         }
       }
@@ -305,6 +359,8 @@ export const BulkEditDialog = memo(({
       startDate: bulkStartDate,
       endDate: bulkEndDate,
       applicableDates,
+      dateMode,
+      specificDatePrices,
     });
     onOpenChange(false);
     } catch (error: any) {
@@ -540,7 +596,14 @@ export const BulkEditDialog = memo(({
                 onSelectAllSpecific={() =>
                   setSpecificDates(new Set(eachDateStringInRange(bulkStartDate, bulkEndDate)))
                 }
-                onClearSpecific={() => setSpecificDates(new Set())}
+                onClearSpecific={() => {
+                  setSpecificDates(new Set());
+                  setSpecificDatePrices({});
+                }}
+                specificDatePrices={specificDatePrices}
+                onSpecificDatePriceChange={(d, v) =>
+                  setSpecificDatePrices((prev) => ({ ...prev, [d]: v }))
+                }
               />
             </div>
           )}

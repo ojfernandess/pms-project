@@ -23,6 +23,7 @@ import { BulkEditDialog } from "./BulkEditDialog";
 import { RateMetricsSummary } from "./RateMetricsSummary";
 import { CreateRateDialog } from "./CreateRateDialog";
 import { useLazyCalendarRange, normalizeRateCalendarDateKey } from "@/lib/rateSystem";
+import { resolveBulkAdjustedPrice } from "@/lib/rateEditorDaySelection";
 
 interface RateCalendarGridProps {
   ratePlans: RatePlan[];
@@ -1179,17 +1180,14 @@ export const RateCalendarGrid = ({
                   currentPrice = Number(existingEntry?.base_price ?? category?.base_price ?? 0) || 0;
                 }
                 
-                let newBasePrice: number;
-                if (item.adjustmentType === 'percentage') {
-                  newBasePrice = currentPrice * (1 + item.adjustmentValue / 100);
-                } else if (item.adjustmentType === 'fixed') {
-                  newBasePrice = currentPrice + item.adjustmentValue;
-                } else {
-                  newBasePrice = item.adjustmentValue;
-                }
-                
-                if (newBasePrice < 0) newBasePrice = 0;
-                newBasePrice = Math.round(newBasePrice * 100) / 100;
+                const newBasePrice = resolveBulkAdjustedPrice(
+                  currentPrice,
+                  item.adjustmentType,
+                  item.adjustmentValue,
+                  dateStr,
+                  data.dateMode,
+                  data.specificDatePrices,
+                );
 
                 const existingEntry = getRateEntry(item.planId, item.categoryId, dateStr);
 
