@@ -22,6 +22,7 @@ import {
   parseOptionalMoney,
   pruneSpecificDatePricesInRange,
   pruneSpecificDatesInRange,
+  resolveCreateBasePlanPriceForDerived,
   resolveCreateBasePriceForDate,
   validateCreatePlanPricing,
   validateRateDateSelection,
@@ -395,12 +396,28 @@ export const CreateRateDialog = ({
             let basePrice: number | null = null;
 
             if (plan?.base_plan_id_for_rate && plan.fluctuation_type && plan.fluctuation_value != null) {
-              const baseKey = `${categoryId}|${plan.base_plan_id_for_rate}|${dateStr}`;
-              const basePlanPrice = priceByDateAndPlan.get(baseKey);
+              const basePlanId = plan.base_plan_id_for_rate;
+              const baseGeneralPrice = parseOptionalMoney(
+                prices[getPriceKey(categoryId, basePlanId)]?.basePrice,
+              );
+              const basePlanPrice = resolveCreateBasePlanPriceForDerived(
+                categoryId,
+                basePlanId,
+                dateStr,
+                priceByDateAndPlan,
+                {
+                  mode: dateMode,
+                  baseGeneralPrice,
+                  useWeeklyPrices,
+                  weeklyByDow: weeklyNumeric,
+                  specificDatePrices,
+                  exceptions,
+                },
+              );
               if (basePlanPrice == null || basePlanPrice <= 0) {
                 const categoryName = categories.find((c) => c.id === categoryId)?.name || categoryId;
                 const basePlanName =
-                  ratePlans.find((p) => p.id === plan.base_plan_id_for_rate)?.name || plan.base_plan_id_for_rate;
+                  ratePlans.find((p) => p.id === basePlanId)?.name || basePlanId;
                 errors.push(`${categoryName} · ${plan.name}: preço do plano base (${basePlanName}) em ${dateStr}`);
                 continue;
               }

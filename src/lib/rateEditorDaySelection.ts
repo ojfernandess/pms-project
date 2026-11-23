@@ -144,6 +144,42 @@ export function resolveCreateBasePriceForDate(
   return null;
 }
 
+/**
+ * Preço do plano base em uma data (criar tarifário), para planos derivados.
+ * Usa o mapa do lote se o plano base já foi processado; senão datas específicas / geral / semanal.
+ */
+export function resolveCreateBasePlanPriceForDerived(
+  categoryId: string,
+  basePlanId: string,
+  dateStr: string,
+  priceByDateAndPlan: Map<string, number>,
+  opts: {
+    mode: RateDateSelectionMode;
+    baseGeneralPrice: number | null;
+    useWeeklyPrices: boolean;
+    weeklyByDow: Partial<Record<number, number>>;
+    specificDatePrices: Record<string, string>;
+    exceptions: Record<string, number>;
+  },
+): number | null {
+  const baseKey = `${categoryId}|${basePlanId}|${dateStr}`;
+  const cached = priceByDateAndPlan.get(baseKey);
+  if (cached != null && cached > 0) return cached;
+
+  const resolved = resolveCreateBasePriceForDate(dateStr, {
+    mode: opts.mode,
+    generalPrice: opts.baseGeneralPrice,
+    useWeeklyPrices: opts.useWeeklyPrices,
+    weeklyByDow: opts.weeklyByDow,
+    specificDatePrices: opts.specificDatePrices,
+    exceptions: opts.exceptions,
+  });
+  if (resolved != null && resolved > 0) {
+    priceByDateAndPlan.set(baseKey, resolved);
+  }
+  return resolved;
+}
+
 /** Edição em lote: valor por data (somente substituir) tem prioridade sobre o ajuste geral. */
 export function resolveBulkAdjustedPrice(
   currentPrice: number,
